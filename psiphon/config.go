@@ -891,6 +891,8 @@ type Config struct {
 	// TransformHostNameProbability is for testing purposes.
 	TransformHostNameProbability *float64 `json:",omitempty"`
 
+	PickUserAgentProbability *float64 `json:",omitempty"`
+
 	// FragmentorProbability and associated Fragmentor fields are for testing
 	// purposes.
 	FragmentorProbability          *float64 `json:",omitempty"`
@@ -913,6 +915,10 @@ type Config struct {
 	MeekRedialTLSProbability            *float64 `json:",omitempty"`
 	MeekAlternateCookieNameProbability  *float64 `json:",omitempty"`
 	MeekAlternateContentTypeProbability *float64 `json:",omitempty"`
+	MeekPayloadPaddingProbability       *float64 `json:",omitempty"`
+	MeekPayloadPaddingMinSize           *int     `json:",omitempty"`
+	MeekPayloadPaddingMaxSize           *int     `json:",omitempty"`
+	MeekPayloadPaddingOmitProbability   *float64 `json:",omitempty"`
 
 	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
 	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
@@ -1190,9 +1196,8 @@ type Config struct {
 	InproxyClientDisableWaitToShareSession                  *bool                                            `json:",omitempty"`
 	InproxyTunnelProtocolPreferProbability                  *float64                                         `json:",omitempty"`
 	InproxyTunnelProtocolForceSelectionCount                *int                                             `json:",omitempty"`
-
-	InproxySkipAwaitFullyConnected  bool `json:",omitempty"`
-	InproxyEnableWebRTCDebugLogging bool `json:",omitempty"`
+	InproxySkipAwaitFullyConnected                          bool                                             `json:",omitempty"`
+	InproxyEnableWebRTCDebugLogging                         bool                                             `json:",omitempty"`
 
 	NetworkIDCacheTTLMilliseconds *int `json:",omitempty"`
 
@@ -2233,6 +2238,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.TransformHostNameProbability] = *config.TransformHostNameProbability
 	}
 
+	if config.PickUserAgentProbability != nil {
+		applyParameters[parameters.PickUserAgentProbability] = *config.PickUserAgentProbability
+	}
+
 	if config.FragmentorProbability != nil {
 		applyParameters[parameters.FragmentorProbability] = *config.FragmentorProbability
 	}
@@ -2299,6 +2308,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.MeekAlternateContentTypeProbability != nil {
 		applyParameters[parameters.MeekAlternateContentTypeProbability] = *config.MeekAlternateContentTypeProbability
+	}
+
+	if config.MeekPayloadPaddingProbability != nil {
+		applyParameters[parameters.MeekPayloadPaddingProbability] = *config.MeekPayloadPaddingProbability
+	}
+
+	if config.MeekPayloadPaddingMinSize != nil {
+		applyParameters[parameters.MeekPayloadPaddingClientMinSize] = *config.MeekPayloadPaddingMinSize
+	}
+
+	if config.MeekPayloadPaddingMaxSize != nil {
+		applyParameters[parameters.MeekPayloadPaddingClientMaxSize] = *config.MeekPayloadPaddingMaxSize
+	}
+
+	if config.MeekPayloadPaddingOmitProbability != nil {
+		applyParameters[parameters.MeekPayloadPaddingClientOmitProbability] = *config.MeekPayloadPaddingOmitProbability
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {
@@ -3187,6 +3212,11 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, *config.TransformHostNameProbability)
 	}
 
+	if config.PickUserAgentProbability != nil {
+		hash.Write([]byte("PickUserAgentProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.PickUserAgentProbability)
+	}
+
 	if config.FragmentorProbability != nil {
 		hash.Write([]byte("FragmentorProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.FragmentorProbability)
@@ -3254,6 +3284,36 @@ func (config *Config) setDialParametersHash() {
 	if config.MeekRedialTLSProbability != nil {
 		hash.Write([]byte("MeekRedialTLSProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.MeekRedialTLSProbability)
+	}
+
+	if config.MeekAlternateCookieNameProbability != nil {
+		hash.Write([]byte("MeekAlternateCookieNameProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.MeekAlternateCookieNameProbability)
+	}
+
+	if config.MeekAlternateContentTypeProbability != nil {
+		hash.Write([]byte("MeekAlternateContentTypeProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.MeekAlternateContentTypeProbability)
+	}
+
+	if config.MeekPayloadPaddingProbability != nil {
+		hash.Write([]byte("MeekPayloadPaddingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.MeekPayloadPaddingProbability)
+	}
+
+	if config.MeekPayloadPaddingMinSize != nil {
+		hash.Write([]byte("MeekPayloadPaddingMinSize"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.MeekPayloadPaddingMinSize))
+	}
+
+	if config.MeekPayloadPaddingMaxSize != nil {
+		hash.Write([]byte("MeekPayloadPaddingMaxSize"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.MeekPayloadPaddingMaxSize))
+	}
+
+	if config.MeekPayloadPaddingOmitProbability != nil {
+		hash.Write([]byte("MeekPayloadPaddingOmitProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.MeekPayloadPaddingOmitProbability)
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {

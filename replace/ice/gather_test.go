@@ -841,7 +841,7 @@ func (m *universalUDPMuxMock) GetConnForURL(string, string, net.Addr) (net.Packe
 	return m.conn, nil
 }
 
-func (m *universalUDPMuxMock) GetXORMappedAddr(net.Addr, time.Duration) (*stun.XORMappedAddress, error) {
+func (m *universalUDPMuxMock) GetXORMappedAddr(context.Context, net.Addr, time.Duration) (*stun.XORMappedAddress, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.getXORMappedAddrUsedTimes++

@@ -68,6 +68,9 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	"dsl_relay_get_server_entries": {
 		baseParams: true,
 	},
+	"dsl_relay_get_osl_file_specs": {
+		baseParams: true,
+	},
 }
 
 // NewProtobufRoutedMessage returns a populated Router protobuf message.
@@ -293,6 +296,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 		msg := &pb.DslRelayGetServerEntries{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_DslRelayGetServerEntries{DslRelayGetServerEntries: msg}
+	case "dsl_relay_get_osl_file_specs":
+		msg := &pb.DslRelayGetOslFileSpecs{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_DslRelayGetOslFileSpecs{DslRelayGetOslFileSpecs: msg}
 	}
 
 	// Single append for all non-special cases.

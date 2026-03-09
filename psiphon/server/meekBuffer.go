@@ -93,7 +93,12 @@ func (response *CachedResponse) Available() int {
 // response data starting at or before the specified
 // position.
 func (response *CachedResponse) HasPosition(position int) bool {
-	return response.readAvailable > 0 && response.readPosition <= position
+	if response.readAvailable == 0 {
+		return false
+	}
+	start := response.readPosition
+	end := response.readPosition + response.readAvailable
+	return position >= start && position <= end
 }
 
 // CopyFromPosition writes the response data, starting at

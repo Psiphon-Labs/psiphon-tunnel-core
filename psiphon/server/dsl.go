@@ -83,8 +83,10 @@ func dslReloadRelayTactics(support *SupportServices) error {
 		p.Int(parameters.DSLRelayRetryCount))
 
 	dslRelay.SetCacheParameters(
-		p.Duration(parameters.DSLRelayCacheTTL),
-		p.Int(parameters.DSLRelayCacheMaxSize))
+		p.Duration(parameters.DSLRelayServerEntryCacheTTL),
+		p.Int(parameters.DSLRelayServerEntryCacheMaxSize),
+		p.Duration(parameters.DSLRelayOSLFileSpecCacheTTL),
+		p.Int(parameters.DSLRelayOSLFileSpecCacheMaxSize))
 
 	return nil
 }

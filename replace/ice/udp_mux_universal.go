@@ -4,6 +4,7 @@
 package ice
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
@@ -18,7 +19,7 @@ import (
 // Actual connection muxing is happening in the UDPMux.
 type UniversalUDPMux interface {
 	UDPMux
-	GetXORMappedAddr(stunAddr net.Addr, deadline time.Duration) (*stun.XORMappedAddress, error)
+	GetXORMappedAddr(ctx context.Context, stunAddr net.Addr, deadline time.Duration) (*stun.XORMappedAddress, error)
 	GetRelayedAddr(turnAddr net.Addr, deadline time.Duration) (*net.Addr, error)
 	GetConnForURL(ufrag string, url string, addr net.Addr) (net.PacketConn, error)
 }
@@ -171,7 +172,20 @@ func (m *UniversalUDPMuxDefault) handleXORMappedResponse(stunAddr *net.UDPAddr, 
 // Makes a STUN binding request to discover mapped address otherwise.
 // Blocks until the stun.XORMappedAddress has been discovered or deadline.
 // Method is safe for concurrent use.
-func (m *UniversalUDPMuxDefault) GetXORMappedAddr(serverAddr net.Addr, deadline time.Duration) (*stun.XORMappedAddress, error) {
+func (m *UniversalUDPMuxDefault) GetXORMappedAddr(ctx context.Context, serverAddr net.Addr, deadline time.Duration) (*stun.XORMappedAddress, error) {
+
+	// [Psiphon]
+	// Add context support so STUN doesn't block cancelling.
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	m.mu.Lock()
 	mappedAddr, ok := m.xorMappedMap[serverAddr.String()]
 	// If we already have a mapping for this STUN server (address already received)
@@ -197,6 +211,12 @@ func (m *UniversalUDPMuxDefault) GetXORMappedAddr(serverAddr net.Addr, deadline 
 		return nil, fmt.Errorf("%w: %s", errWriteSTUNMessage, err) //nolint:errorlint
 	}
 
+	// [Psiphon]
+	// Add context support so STUN doesn't block cancelling.
+
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+
 	// Block until response was handled by the connWorker routine and XORMappedAddress was updated
 	select {
 	case <-waitAddrReceived:
@@ -208,8 +228,10 @@ func (m *UniversalUDPMuxDefault) GetXORMappedAddr(serverAddr net.Addr, deadline 
 			return nil, errNoXorAddrMapping
 		}
 		return mappedAddr.addr, nil
-	case <-time.After(deadline):
+	case <-timer.C:
 		return nil, errXORMappedAddrTimeout
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
