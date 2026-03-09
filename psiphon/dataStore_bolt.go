@@ -44,6 +44,7 @@ type datastoreDB struct {
 	boltDB   *bolt.DB
 	filename string
 	isFailed int32
+	isReset  int32
 }
 
 type datastoreTx struct {
@@ -141,17 +142,27 @@ func tryDatastoreOpenDB(
 	// Monitor freelist stats in DataStoreMetrics in diagnostics and consider
 	// setting these options if necessary.
 
-	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	// To avoid excessive delays, we now omit the blocking SynchronousCheck
+	// call here on startup. Datastore corruption is handled by panic/fault
+	// recovery and setDatastoreFailed/resetFailedDatastore.
+	//
+	// As a tradeoff, corrupt pages will be detected only when visited and
+	// there is no comprehensive datastore integrity guarantee at startup.
+	// This is an improvement in some cases, such as when the client can
+	// connect without visiting a corrupt page; whereas a reset will result
+	// in loss of all discovered servers, replay dial parameters, OSL SLOKs,
+	// etc.
+	//
+	// Also, any panic from bolt now results in a datastore reset, but
+	// non-explicit/corruption panics in bolt are very unlikely, with none
+	// observed in production with bolt code that's been stable for years.
+	//
+	// bolt.Open will still return ErrInvalid or ErrChecksum in datastore
+	// corruption cases, so the reset-on-Open-failed logic remains active.
+	// Note that ErrInvalid/ErrChecksum surface as panics in View/Update,
+	// after Open.
 
-	// Run consistency checks on datastore and emit errors for diagnostics
-	// purposes. We assume this will complete quickly for typical size Psiphon
-	// datastores and wait for the check to complete before proceeding.
-	err = newDB.View(func(tx *bolt.Tx) error {
-		return tx.SynchronousCheck()
-	})
+	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -225,6 +236,33 @@ func (db *datastoreDB) setDatastoreFailed(r interface{}) {
 	NoticeWarning("%s: %s", errDatastoreFailed.Error(), errors.Tracef("panic: %v", r))
 }
 
+func (db *datastoreDB) resetFailedDatastore() {
+
+	if !db.isDatastoreFailed() {
+		return
+	}
+	if !atomic.CompareAndSwapInt32(&db.isReset, 0, 1) {
+		return
+	}
+
+	// Limitation: only this single attempt is made to close and delete the
+	// datastore in this process run. It's unlikely to fail. A subsequent run
+	// that hits the consistency check panic functions as a retry.
+
+	err := db.close()
+	if err != nil {
+		NoticeWarning(errors.Trace(err).Error())
+		return
+	}
+	err = os.Remove(db.filename)
+	if err != nil {
+		NoticeWarning(errors.Trace(err).Error())
+		return
+	}
+
+	NoticeWarning("reset failed datastore")
+}
+
 func (db *datastoreDB) close() error {
 
 	// Limitation: there is no panic recover in this case. We assume boltDB.Close
@@ -254,6 +292,18 @@ func (db *datastoreDB) getDataStoreMetrics() string {
 
 func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
 
+	// If the datastore failed during this transaction, attempt to close and
+	// then delete/reset the datastore so that it may be freshly recreated by
+	// the next Open. This is invoked here in view (and update) and not in
+	// setDatastoreFailed to avoid lock reentrancy when calling db.close.
+	//
+	// The higher level activeDatastoreDB and datastoreReferenceCount are not
+	// modified, so from that perspective the datastore is still open and
+	// operations will fail with the "datastore has failed" error.
+	defer db.resetFailedDatastore()
+
+	// In general, bolt code panics on failed datastore consistency checks.
+	//
 	// Any bolt function that performs mmap buffer accesses can raise SIGBUS due
 	// to underlying storage changes, such as a truncation of the datastore file
 	// or removal or network attached storage, etc.
@@ -289,6 +339,9 @@ func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
 }
 
 func (db *datastoreDB) update(fn func(tx *datastoreTx) error) (reterr error) {
+
+	// See resetFailedDatastore comment in datastoreDB.view.
+	defer db.resetFailedDatastore()
 
 	// Begin recovery preamble
 	if db.isDatastoreFailed() {
