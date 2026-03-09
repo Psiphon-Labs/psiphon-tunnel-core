@@ -11,5 +11,15 @@ message DslRelayGetServerEntries {
 
     // Fields 1-99 are reserved for field groupings.
 
-    repeated string server_entry_tags = 100;
+    reserved 100; // retired fields
+
+    optional int64 server_entry_tag_count = 101;
+}
+
+message DslRelayGetOslFileSpecs {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional int64 osl_id_count = 100;
 }

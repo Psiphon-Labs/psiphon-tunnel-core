@@ -435,7 +435,10 @@ func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*stun.UR
 						return
 					}
 
-					xorAddr, err := a.udpMuxSrflx.GetXORMappedAddr(serverAddr, stunGatherTimeout)
+					// [Psiphon]
+					// Pass in context so STUN doesn't block cancelling.
+
+					xorAddr, err := a.udpMuxSrflx.GetXORMappedAddr(ctx, serverAddr, stunGatherTimeout)
 					if err != nil {
 						a.log.Warnf("Failed get server reflexive address %s %s: %v", network, url, err)
 						return

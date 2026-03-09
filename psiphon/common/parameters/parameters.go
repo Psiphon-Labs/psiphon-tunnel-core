@@ -251,6 +251,7 @@ const (
 	ReplayTLSFragmentClientHello                       = "ReplayTLSFragmentClientHello"
 	ReplayInproxyWebRTC                                = "ReplayInproxyWebRTC"
 	ReplayInproxySTUN                                  = "ReplayInproxySTUN"
+	ReplayMeekPayloadPadding                           = "ReplayMeekPayloadPadding"
 	APIRequestUpstreamPaddingMinBytes                  = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                  = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes                = "APIRequestDownstreamPaddingMinBytes"
@@ -532,8 +533,10 @@ const (
 	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
 	DSLRelayRequestTimeout                             = "DSLRelayRequestTimeout"
 	DSLRelayRetryCount                                 = "DSLRelayRetryCount"
-	DSLRelayCacheTTL                                   = "DSLRelayCacheTTL"
-	DSLRelayCacheMaxSize                               = "DSLRelayCacheMaxSize"
+	DSLRelayServerEntryCacheTTL                        = "DSLRelayServerEntryCacheTTL"
+	DSLRelayServerEntryCacheMaxSize                    = "DSLRelayServerEntryCacheMaxSize"
+	DSLRelayOSLFileSpecCacheTTL                        = "DSLRelayOSLFileSpecCacheTTL"
+	DSLRelayOSLFileSpecCacheMaxSize                    = "DSLRelayOSLFileSpecCacheMaxSize"
 	EnableDSLFetcher                                   = "EnableDSLFetcher"
 	DSLFetcherTunneledRequestTimeout                   = "DSLFetcherTunneledRequestTimeout"
 	DSLFetcherTunneledRequestRetryCount                = "DSLFetcherTunneledRequestRetryCount"
@@ -562,6 +565,14 @@ const (
 	DSLPrioritizeDialPlaceholderTTL                    = "DSLPrioritizeDialPlaceholderTTL"
 	ServerEntryIteratorMaxMoveToFront                  = "ServerEntryIteratorMaxMoveToFront"
 	ServerEntryIteratorResetProbability                = "ServerEntryIteratorResetProbability"
+	MeekPayloadPaddingProbability                      = "MeekPayloadPaddingProbability"
+	MeekPayloadPaddingLimitTunnelProtocols             = "MeekPayloadPaddingLimitTunnelProtocols"
+	MeekPayloadPaddingClientOmitProbability            = "MeekPayloadPaddingClientOmitProbability"
+	MeekPayloadPaddingClientMinSize                    = "MeekPayloadPaddingClientMinSize"
+	MeekPayloadPaddingClientMaxSize                    = "MeekPayloadPaddingClientMaxSize"
+	MeekPayloadPaddingServerOmitProbability            = "MeekPayloadPaddingServerOmitProbability"
+	MeekPayloadPaddingServerMinSize                    = "MeekPayloadPaddingServerMinSize"
+	MeekPayloadPaddingServerMaxSize                    = "MeekPayloadPaddingServerMaxSize"
 
 	// Retired parameters
 
@@ -838,6 +849,7 @@ var defaultParameters = map[string]struct {
 	ReplayTLSFragmentClientHello:         {value: true},
 	ReplayInproxyWebRTC:                  {value: true},
 	ReplayInproxySTUN:                    {value: true},
+	ReplayMeekPayloadPadding:             {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -1172,8 +1184,10 @@ var defaultParameters = map[string]struct {
 	DSLRelayHttpIdleConnTimeout:                       {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	DSLRelayRequestTimeout:                            {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	DSLRelayRetryCount:                                {value: 1, minimum: 0, flags: serverSideOnly},
-	DSLRelayCacheTTL:                                  {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
-	DSLRelayCacheMaxSize:                              {value: 200000, minimum: 0, flags: serverSideOnly},
+	DSLRelayServerEntryCacheTTL:                       {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayServerEntryCacheMaxSize:                   {value: 250000, minimum: 0, flags: serverSideOnly},
+	DSLRelayOSLFileSpecCacheTTL:                       {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayOSLFileSpecCacheMaxSize:                   {value: 250000, minimum: 0, flags: serverSideOnly},
 	EnableDSLFetcher:                                  {value: false},
 	DSLFetcherTunneledRequestTimeout:                  {value: 5 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	DSLFetcherTunneledRequestRetryCount:               {value: 0, minimum: 0},
@@ -1203,6 +1217,15 @@ var defaultParameters = map[string]struct {
 
 	ServerEntryIteratorMaxMoveToFront:   {value: -1, minimum: -1},
 	ServerEntryIteratorResetProbability: {value: 1.0, minimum: 0.0},
+
+	MeekPayloadPaddingProbability:           {value: 0.0, minimum: 0.0},
+	MeekPayloadPaddingLimitTunnelProtocols:  {value: protocol.TunnelProtocols{}},
+	MeekPayloadPaddingClientOmitProbability: {value: 0.0, minimum: 0.0},
+	MeekPayloadPaddingClientMinSize:         {value: 0, minimum: 0},
+	MeekPayloadPaddingClientMaxSize:         {value: 65533, minimum: 0},
+	MeekPayloadPaddingServerOmitProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	MeekPayloadPaddingServerMinSize:         {value: 0, minimum: 0, flags: serverSideOnly},
+	MeekPayloadPaddingServerMaxSize:         {value: 65533, minimum: 0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

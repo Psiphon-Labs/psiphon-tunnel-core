@@ -50,5 +50,6 @@ message Psiphond {
     ca.psiphon.psiphond.AsnDestBytes asn_dest_bytes = 118;
     ca.psiphon.psiphond.DomainDestBytes domain_dest_bytes = 119;
     ca.psiphon.psiphond.DslRelayGetServerEntries dsl_relay_get_server_entries = 120;
+    ca.psiphon.psiphond.DslRelayGetOslFileSpecs dsl_relay_get_osl_file_specs = 121;
   }
 }

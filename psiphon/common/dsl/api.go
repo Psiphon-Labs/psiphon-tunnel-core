@@ -157,7 +157,7 @@ type GetOSLFileSpecsRequest struct {
 
 // GetOSLFileSpecsResponse includes the list of OSL FileSpecs requested by the
 // client. Each requested OSL ID has a corresponding entry in OSLFileSpecs.
-// When a requsted OSL is no longer active or available for distribution,
+// When a requested OSL is no longer active or available for distribution,
 // there is a nil/empty entry.
 //
 // Here, OSLFileSpec is a []byte, not an osl.FileSpec, as this value doesn't
