@@ -224,6 +224,7 @@ func (r *Relay) Reload() (bool, error) {
 		r.httpClient = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig:     r.tlsConfig,
+				ForceAttemptHTTP2:   true,
 				MaxConnsPerHost:     httpTransport.MaxConnsPerHost,
 				MaxIdleConns:        httpTransport.MaxIdleConns,
 				MaxIdleConnsPerHost: httpTransport.MaxIdleConnsPerHost,
@@ -281,6 +282,7 @@ func (r *Relay) SetRequestParameters(
 		r.httpClient = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig:     r.tlsConfig,
+				ForceAttemptHTTP2:   true,
 				MaxConnsPerHost:     maxHttpConns,
 				MaxIdleConns:        maxHttpIdleConns,
 				MaxIdleConnsPerHost: maxHttpIdleConns,
