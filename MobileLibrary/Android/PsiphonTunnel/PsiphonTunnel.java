@@ -319,6 +319,7 @@ public class PsiphonTunnel {
         private final ExecutorService callbackQueue = Executors.newSingleThreadExecutor();
 
         void shutdownAndAwaitTermination(ExecutorService pool) {
+            pool.shutdown();
             try {
                 // Wait a while for existing tasks to terminate
                 if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
