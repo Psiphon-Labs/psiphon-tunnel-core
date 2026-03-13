@@ -146,6 +146,10 @@ func convert(
 			return errors.Trace(err)
 		}
 
+		if len(result.Payloads) == 0 {
+			return errors.TraceNew("no payloads produced from input")
+		}
+
 		os.Stdout.Write(result.Payloads[0])
 		return nil
 	}
