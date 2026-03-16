@@ -135,20 +135,22 @@ func convert(
 				})
 		}
 
-		payloads, err := push.MakePushPayloads(
-			obfuscationKey,
-			minPadding,
-			maxPadding,
-			signaturePublicKey,
-			signaturePrivateKey,
-			ttl,
-			[][]*push.PrioritizedServerEntry{
-				prioritizedServerEntries})
+		maker, err := push.NewPushPayloadMaker(
+			obfuscationKey, signaturePublicKey, signaturePrivateKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		result, err := maker.MakePushPayloads(
+			minPadding, maxPadding, ttl, prioritizedServerEntries, 0)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		os.Stdout.Write(payloads[0])
+		if len(result.Payloads) == 0 {
+			return errors.TraceNew("no payloads produced from input")
+		}
+
+		os.Stdout.Write(result.Payloads[0])
 		return nil
 	}
 
