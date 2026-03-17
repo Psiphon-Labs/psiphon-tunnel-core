@@ -786,6 +786,11 @@ type Config struct {
 	// Network. Required for push payload imports.
 	PushPayloadSignaturePublicKey string `json:",omitempty"`
 
+	// EnableProxyProtocolHeaders is an optional parameter that is passed to
+	// the Psiphon server to explicitly opt-in or opt-out of HAProxy PROXY
+	// protocol headers added to port forwards, as configured on the server.
+	EnableProxyProtocolHeaders *bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
