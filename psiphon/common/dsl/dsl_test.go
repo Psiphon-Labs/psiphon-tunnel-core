@@ -321,10 +321,14 @@ func testDSLs(testConfig *testConfig) error {
 	datastoreHasServerEntryWithCheck := func(
 		tag ServerEntryTag,
 		version int,
-		prioritizeDial bool) bool {
+		prioritizeDial bool,
+		prioritizeReason string) bool {
 
-		_, expectedPrioritizeDial, err := backend.GetServerEntryProperties(tag.String())
-		if err != nil || prioritizeDial != expectedPrioritizeDial {
+		_, expectedPrioritizeDial, expectedPrioritizeReason, err :=
+			backend.GetServerEntryProperties(tag.String())
+		if err != nil ||
+			prioritizeDial != expectedPrioritizeDial ||
+			prioritizeReason != expectedPrioritizeReason {
 			unexpectedServerEntryPrioritizeDial.Store(1)
 		}
 		return dslClient.DatastoreHasServerEntry(tag, version)
@@ -333,13 +337,17 @@ func testDSLs(testConfig *testConfig) error {
 	datastoreStoreServerEntryWithCheck := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
-		prioritizeDial bool) error {
+		prioritizeDial bool,
+		prioritizeReason string) error {
 
 		serverEntryFields, _ := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
 		tag := serverEntryFields.GetTag()
 
-		expectedSource, expectedPrioritizeDial, err := backend.GetServerEntryProperties(tag)
-		if err != nil || prioritizeDial != expectedPrioritizeDial {
+		expectedSource, expectedPrioritizeDial, expectedPrioritizeReason, err :=
+			backend.GetServerEntryProperties(tag)
+		if err != nil ||
+			prioritizeDial != expectedPrioritizeDial ||
+			prioritizeReason != expectedPrioritizeReason {
 			unexpectedServerEntryPrioritizeDial.Store(1)
 		}
 		if err != nil || source != expectedSource {

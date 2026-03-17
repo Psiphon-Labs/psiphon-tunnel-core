@@ -2708,12 +2708,16 @@ func dslLookupServerEntry(
 // record already suffices to move the server entry to the front in a server
 // entry iterator shuffle.
 //
+// If any existing dial params is a DSLPendingPrioritizeDialTimestamp, that's
+// also left in place with the original prioritize reason.
+//
 // See MakeDialParameters for more details about the DSLPendingPrioritizeDial
 // scheme.
 func dslPrioritizeDialServerEntry(
 	tx *datastoreTx,
 	networkID string,
-	serverEntryID []byte) error {
+	serverEntryID []byte,
+	prioritizeReason string) error {
 
 	dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
 
@@ -2725,6 +2729,7 @@ func dslPrioritizeDialServerEntry(
 
 	dialParams := &DialParameters{
 		DSLPendingPrioritizeDialTimestamp: time.Now(),
+		DSLPrioritizedDialReason:          prioritizeReason,
 	}
 
 	record, err := json.Marshal(dialParams)
@@ -2747,6 +2752,7 @@ func DSLHasServerEntry(
 	tag dsl.ServerEntryTag,
 	version int,
 	prioritizeDial bool,
+	prioritizeReason string,
 	networkID string) bool {
 
 	hasServerEntry := false
@@ -2788,7 +2794,8 @@ func DSLHasServerEntry(
 			// DSLStoreServerEntry will apply the prioritization.
 
 			if hasServerEntry {
-				err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+				err := dslPrioritizeDialServerEntry(
+					tx, networkID, serverEntryID, prioritizeReason)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -2814,6 +2821,7 @@ func DSLStoreServerEntry(
 	packedServerEntryFields protocol.PackedServerEntryFields,
 	source string,
 	prioritizeDial bool,
+	prioritizeReason string,
 	networkID string) error {
 
 	serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
@@ -2840,7 +2848,7 @@ func DSLStoreServerEntry(
 	var additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error
 	if prioritizeDial {
 		additionalUpdates = func(tx *datastoreTx, serverEntryID []byte) error {
-			err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+			err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID, prioritizeReason)
 			if err != nil {
 				return errors.Trace(err)
 			}
