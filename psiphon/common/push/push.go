@@ -75,6 +75,7 @@ type PrioritizedServerEntry struct {
 	ServerEntryFields protocol.PackedServerEntryFields `cbor:"1,keyasint,omitempty"`
 	Source            string                           `cbor:"2,keyasint,omitempty"`
 	PrioritizeDial    bool                             `cbor:"3,keyasint,omitempty"`
+	PrioritizeReason  string                           `cbor:"4,keyasint,omitempty"`
 }
 
 // ServerEntryImporter is a callback that is invoked for each server entry in
@@ -82,7 +83,8 @@ type PrioritizedServerEntry struct {
 type ServerEntryImporter func(
 	packedServerEntryFields protocol.PackedServerEntryFields,
 	source string,
-	prioritizeDial bool) error
+	prioritizeDial bool,
+	prioritizeReason string) error
 
 // GenerateKeys generates a new obfuscation key and signature key pair for
 // push payloads.
@@ -204,7 +206,8 @@ func ImportPushPayload(
 		err := serverEntryImporter(
 			prioritizedServerEntry.ServerEntryFields,
 			prioritizedServerEntry.Source,
-			prioritizedServerEntry.PrioritizeDial)
+			prioritizedServerEntry.PrioritizeDial,
+			prioritizedServerEntry.PrioritizeReason)
 		if err != nil {
 			return imported, errors.Trace(err)
 		}

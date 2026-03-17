@@ -3602,8 +3602,14 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if fields["dsl_prioritized"] != expectDSLPrioritized {
+	if fields["dsl_prioritized"].(bool) != expectDSLPrioritized {
 		return fmt.Errorf("unexpected dsl_prioritized %v", fields["dsl_prioritized"])
+	}
+	if expectDSLPrioritized {
+		name = "dsl_prioritized_reason"
+		if fields[name] == nil || fields[name].(string) == "" {
+			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
+		}
 	}
 
 	if protocol.TunnelProtocolUsesMeek(clientTunnelProtocol) {
