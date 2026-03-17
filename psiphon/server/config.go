@@ -581,6 +581,25 @@ type Config struct {
 	// DSL relaying.
 	DSLRelayHostKeyFilename string `json:",omitempty"`
 
+	// ProxyProtocolHeaderMACKeys are MAC keys used to authenticate HAProxy
+	// PROXY protocol headers that are optionally added to configured port
+	// forwards. The destination addresses targeted for PROXY header
+	// injection are configured in the
+	// ProxyProtocolHeaderTargetDestinationAddresses tactics parameter.
+	//
+	// These PROXY protocol headers are intended as an authenticated
+	// alternative for Psiphon use cases which previously added PROXY
+	// headers on the client side.
+	//
+	// For the target destinations, any PROXY protocol headers sent by clients
+	// are detected and replaced. This scheme is compatible only with
+	// client-first network protocol port forwards.
+	//
+	// There is one MAC key per configured sponsor ID, and each key is a
+	// base64-encoded concatenation of the key ID and key value
+	// (see makeProxyProtocolHeader).
+	ProxyProtocolHeaderMACKeys map[string]string `json:",omitempty"`
+
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
 	peakUpstreamFailureRateMinimumSampleSize       int
@@ -595,6 +614,7 @@ type Config struct {
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
 	destinationBytesPeriod                         time.Duration
+	proxyProtocolHeaderMACKeys                     map[string][]byte
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -966,6 +986,27 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	config.destinationBytesPeriod = DEFAULT_DESTINATION_BYTES_PERIOD
 	if config.DestinationBytesPeriodSeconds != nil {
 		config.destinationBytesPeriod = time.Duration(*config.DestinationBytesPeriodSeconds) * time.Second
+	}
+
+	if len(config.ProxyProtocolHeaderMACKeys) > 0 {
+
+		// Client tunnel handlers will reference the proxyProtocolHeaderMACKeys
+		// slices directly and assumes this memory is not mutated.
+
+		config.proxyProtocolHeaderMACKeys = make(map[string][]byte)
+		for sponsorID, base64Value := range config.ProxyProtocolHeaderMACKeys {
+			if !isSponsorID(sponsorID) {
+				return nil, errors.TraceNew("invalid ProxyProtocolHeaderMACKeys sponsor ID")
+			}
+			value, err := base64.StdEncoding.DecodeString(base64Value)
+			if err != nil {
+				return nil, errors.Tracef("invalid ProxyProtocolHeaderMACKeys value: %v", err)
+			}
+			if len(value) != proxyProtocolHeaderKeyIDSize+proxyProtocolHeaderMACKeySize {
+				return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
+			}
+			config.proxyProtocolHeaderMACKeys[sponsorID] = value
+		}
 	}
 
 	return &config, nil

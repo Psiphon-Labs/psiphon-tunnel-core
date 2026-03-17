@@ -33,7 +33,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -69,6 +69,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
+	proxyproto "github.com/pires/go-proxyproto"
 	"golang.org/x/net/nettest"
 	"golang.org/x/net/proxy"
 	"google.golang.org/protobuf/proto"
@@ -79,6 +80,7 @@ import (
 var useProtobufLogging bool
 var testDataDirName string
 var mockWebServerURL, mockWebServerPort, mockWebServerExpectedResponse string
+var validateProxyProtocolHeader atomic.Value
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -114,6 +116,24 @@ func runMockWebServer() (string, string) {
 	if err != nil {
 		fmt.Printf("net.Listen failed: %s\n", err)
 		os.Exit(1)
+	}
+
+	// Add a listener layer to process optional PROXY protocol headers;
+	// related test cases will populate validateProxyProtocolHeader and check
+	// the header.
+	listener = &proxyproto.Listener{
+		Listener: listener,
+		ValidateHeader: func(header *proxyproto.Header) error {
+			v, ok := validateProxyProtocolHeader.Load().(func(header *proxyproto.Header) error)
+			if ok {
+				err := v(header)
+				if err != nil {
+					fmt.Printf("validateProxyProtocolHeader failed: %v\n", err.Error())
+				}
+				return errors.Trace(err)
+			}
+			return nil
+		},
 	}
 
 	listenAddress := listener.Addr().String()
@@ -784,41 +804,72 @@ func TestDomainRequest(t *testing.T) {
 		})
 }
 
+func TestProxyProtocolHeader(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:        "OSSH",
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			doProxyProtocolHeader: true,
+		})
+}
+
+func TestReplaceProxyProtocolHeader(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:               "OSSH",
+			requireAuthorization:         true,
+			doTunneledWebRequest:         true,
+			doTunneledNTPRequest:         true,
+			doDanglingTCPConn:            true,
+			doLogHostProvider:            true,
+			doLogProtobuf:                useProtobufLogging,
+			doProxyProtocolHeader:        true,
+			doReplaceProxyProtocolHeader: true,
+		})
+}
+
 type runServerConfig struct {
-	tunnelProtocol          string
-	clientTunnelProtocol    string
-	passthrough             bool
-	tlsProfile              string
-	doHotReload             bool
-	doDefaultSponsorID      bool
-	denyTrafficRules        bool
-	requireAuthorization    bool
-	omitAuthorization       bool
-	doTunneledWebRequest    bool
-	doTunneledDomainRequest bool
-	doTunneledNTPRequest    bool
-	applyPrefix             bool
-	forceFragmenting        bool
-	forceLivenessTest       bool
-	doPruneServerEntries    bool
-	checkPruneServerEntries bool
-	doDanglingTCPConn       bool
-	doPacketManipulation    bool
-	doBurstMonitor          bool
-	doSplitTunnel           bool
-	limitQUICVersions       bool
-	doASNDestBytes          bool
-	doChangeBytesConfig     bool
-	doLogHostProvider       bool
-	inspectFlows            bool
-	doSteeringIP            bool
-	doTargetBrokerSpecs     bool
-	useLegacyAPIEncoding    bool
-	doPersonalPairing       bool
-	doRestrictInproxy       bool
-	useInproxyMediaStreams  bool
-	doUncompressedTactics   bool
-	doLogProtobuf           bool
+	tunnelProtocol               string
+	clientTunnelProtocol         string
+	passthrough                  bool
+	tlsProfile                   string
+	doHotReload                  bool
+	doDefaultSponsorID           bool
+	denyTrafficRules             bool
+	requireAuthorization         bool
+	omitAuthorization            bool
+	doTunneledWebRequest         bool
+	doTunneledDomainRequest      bool
+	doTunneledNTPRequest         bool
+	applyPrefix                  bool
+	forceFragmenting             bool
+	forceLivenessTest            bool
+	doPruneServerEntries         bool
+	checkPruneServerEntries      bool
+	doDanglingTCPConn            bool
+	doPacketManipulation         bool
+	doBurstMonitor               bool
+	doSplitTunnel                bool
+	limitQUICVersions            bool
+	doASNDestBytes               bool
+	doChangeBytesConfig          bool
+	doLogHostProvider            bool
+	inspectFlows                 bool
+	doSteeringIP                 bool
+	doTargetBrokerSpecs          bool
+	useLegacyAPIEncoding         bool
+	doPersonalPairing            bool
+	doRestrictInproxy            bool
+	useInproxyMediaStreams       bool
+	doUncompressedTactics        bool
+	doLogProtobuf                bool
+	doProxyProtocolHeader        bool
+	doReplaceProxyProtocolHeader bool
 }
 
 var (
@@ -967,7 +1018,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.doBurstMonitor ||
 		runConfig.doASNDestBytes ||
 		runConfig.doTunneledDomainRequest ||
-		doMeekPayloadPadding
+		doMeekPayloadPadding ||
+		runConfig.doProxyProtocolHeader
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -1109,6 +1161,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
 			clientTunnelProtocol,
+			sponsorID,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -1119,7 +1172,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
 			runConfig.doRestrictInproxy,
-			generateConfigParams.ProviderID)
+			generateConfigParams.ProviderID,
+			runConfig.doProxyProtocolHeader)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1243,6 +1297,20 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["DSLRelayCACertificatesFilename"] = dslTestConfig.relayCACertificatesFilename
 		serverConfig["DSLRelayHostCertificateFilename"] = dslTestConfig.relayHostCertificateFilename
 		serverConfig["DSLRelayHostKeyFilename"] = dslTestConfig.relayHostKeyFilename
+	}
+
+	var proxyProtocolHeaderMACKey []byte
+	if runConfig.doProxyProtocolHeader {
+		if runConfig.doDefaultSponsorID {
+			t.Fatalf("invalid test configuration")
+		}
+		keyID := []byte{0x00, 0x00, 0x00, 0x01}
+		proxyProtocolHeaderMACKey = append(
+			keyID, prng.Bytes(proxyProtocolHeaderMACKeySize)...)
+		serverConfig["ProxyProtocolHeaderMACKeys"] = map[string]string{
+			sponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
+	} else if runConfig.doReplaceProxyProtocolHeader {
+		t.Fatalf("invalid test configuration")
 	}
 
 	// Uncomment to enable SIGUSR2 profile dumps
@@ -1541,6 +1609,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				tacticsRequestPrivateKey,
 				tacticsRequestObfuscatedKey,
 				clientTunnelProtocol,
+				sponsorID,
 				propagationChannelID,
 				livenessTestSize,
 				runConfig.doBurstMonitor,
@@ -1551,7 +1620,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				enableDSLFetcher,
 				inproxyTacticsParametersJSON,
 				runConfig.doRestrictInproxy,
-				generateConfigParams.ProviderID)
+				generateConfigParams.ProviderID,
+				runConfig.doProxyProtocolHeader)
 		}
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1780,6 +1850,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doMeekPayloadPadding {
 		payloadPaddingProbability := 1.0
 		clientConfig.MeekPayloadPaddingProbability = &payloadPaddingProbability
+	}
+
+	if runConfig.doProxyProtocolHeader {
+		enableProxyProtocolHeaders := true
+		clientConfig.EnableProxyProtocolHeaders = &enableProxyProtocolHeaders
 	}
 
 	err = clientConfig.Commit(false)
@@ -2146,6 +2221,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
 			clientTunnelProtocol,
+			sponsorID,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -2156,7 +2232,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
 			runConfig.doRestrictInproxy,
-			generateConfigParams.ProviderID)
+			generateConfigParams.ProviderID,
+			runConfig.doProxyProtocolHeader)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -2169,10 +2246,47 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doTunneledWebRequest {
 
+		// Check any configured PROXY protocol header, including verifying the
+		// MAC as well as inspecting the expected header address values. In
+		// the doReplaceProxyProtocolHeader case, this also checks that the
+		// replacement succeeds.
+
+		var validProxyProtocolHeader atomic.Bool
+		if runConfig.doProxyProtocolHeader {
+			validateProxyProtocolHeader.Store(func(header *proxyproto.Header) error {
+				wireHeader, _ := header.Format()
+				timestamp, sourceIP, destinationIP, destinationPort, err :=
+					verifyProxyProtocolHeader(
+						proxyProtocolHeaderMACKey[:proxyProtocolHeaderKeyIDSize],
+						proxyProtocolHeaderMACKey[proxyProtocolHeaderKeyIDSize:],
+						wireHeader)
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if time.Now().Sub(timestamp).Abs() > 5*time.Second ||
+					sourceIP.String() != "127.0.0.1" ||
+					destinationIP.String() != "127.0.0.1" ||
+					strconv.Itoa(destinationPort) != mockWebServerPort {
+
+					return errors.TraceNew("unexpected PROXY header value")
+				}
+				validProxyProtocolHeader.Store(true)
+				return nil
+			})
+		} else {
+			validateProxyProtocolHeader.Store(func(header *proxyproto.Header) error {
+				return errors.TraceNew("unexpected PROXY protocol header")
+			})
+		}
+
 		// Test: tunneled web site fetch
 
 		err = makeTunneledWebRequest(
-			t, localHTTPProxyPort, mockWebServerURL, true, mockWebServerExpectedResponse)
+			runConfig.doReplaceProxyProtocolHeader,
+			localHTTPProxyPort,
+			mockWebServerURL,
+			true,
+			mockWebServerExpectedResponse)
 
 		if err == nil {
 			if expectTrafficFailure {
@@ -2183,6 +2297,18 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				t.Fatalf("tunneled web request failed: %s", err)
 			}
 		}
+
+		if !expectTrafficFailure {
+			if runConfig.doProxyProtocolHeader {
+				if !validProxyProtocolHeader.Load() {
+					t.Fatalf("failed to verify PROXY protocol header")
+				}
+			} else {
+				if validProxyProtocolHeader.Load() {
+					t.Fatalf("unexpected PROXY protocol header")
+				}
+			}
+		}
 	}
 
 	if runConfig.doTunneledDomainRequest && !expectTrafficFailure {
@@ -2191,7 +2317,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// resolver and cache
 
 		err = makeTunneledWebRequest(
-			t, localHTTPProxyPort, "https://psiphon.ca", false, "")
+			false, localHTTPProxyPort, "https://psiphon.ca", false, "")
 		if err != nil {
 			t.Fatalf("tunneled web request failed: %s", err)
 		}
@@ -2201,7 +2327,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// dns_count reported in the server_load log.
 
 		err = makeTunneledWebRequest(
-			t, localHTTPProxyPort, "https://psiphon.ca", false, "")
+			false, localHTTPProxyPort, "https://psiphon.ca", false, "")
 		if err != nil {
 			t.Fatalf("tunneled web request failed: %s", err)
 		}
@@ -3777,7 +3903,7 @@ func checkExpectedDiscoveredServer(
 }
 
 func makeTunneledWebRequest(
-	t *testing.T,
+	doClientProxyProtocolHeader bool,
 	localHTTPProxyPort int,
 	requestURL string,
 	checkResponseBody bool,
@@ -3785,31 +3911,71 @@ func makeTunneledWebRequest(
 
 	roundTripTimeout := 30 * time.Second
 
-	proxyUrl, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", localHTTPProxyPort))
-	if err != nil {
-		return fmt.Errorf("error initializing proxied HTTP request: %s", err)
+	proxiedDialer := func(
+		ctx context.Context, network, addr string) (net.Conn, error) {
+
+		proxyUrl := fmt.Sprintf("http://127.0.0.1:%d", localHTTPProxyPort)
+		conn, err := psiphon.DialTCP(
+			ctx,
+			addr,
+			&psiphon.DialConfig{
+				UpstreamProxyURL: proxyUrl,
+				ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+					IP := net.ParseIP(hostname)
+					if IP == nil {
+						return nil, errors.TraceNew("not supported")
+					}
+					return []net.IP{IP}, nil
+				},
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if doClientProxyProtocolHeader {
+
+			// The client sends its own PROXY header, with invalid addresses
+			// that will fail validation if not replaced.
+			header := proxyproto.HeaderProxyFromAddrs(
+				2,
+				&net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 1},
+				&net.TCPAddr{IP: net.ParseIP("10.0.0.2"), Port: 2})
+			wireHeader, err := header.Format()
+			if err != nil {
+				conn.Close()
+				return nil, errors.Trace(err)
+			}
+
+			_, err = conn.Write(wireHeader)
+			if err != nil {
+				conn.Close()
+				return nil, errors.Trace(err)
+			}
+		}
+
+		return conn, nil
 	}
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyUrl),
+			DialContext: proxiedDialer,
 		},
 		Timeout: roundTripTimeout,
 	}
 
 	response, err := httpClient.Get(requestURL)
 	if err != nil {
-		return fmt.Errorf("error sending proxied HTTP request: %s", err)
+		return errors.Trace(err)
 	}
 
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return fmt.Errorf("error reading proxied HTTP response: %s", err)
+		return errors.Trace(err)
 	}
 	response.Body.Close()
 
 	if checkResponseBody && string(body) != expectedResponseBody {
-		return fmt.Errorf("unexpected proxied HTTP response")
+		return errors.Tracef("unexpected proxied HTTP response")
 	}
 
 	return nil
@@ -4337,6 +4503,7 @@ func paveTacticsConfigFile(
 	tacticsRequestPrivateKey string,
 	tacticsRequestObfuscatedKey string,
 	tunnelProtocol string,
+	sponsorID string,
 	propagationChannelID string,
 	livenessTestSize int,
 	doBurstMonitor bool,
@@ -4347,7 +4514,8 @@ func paveTacticsConfigFile(
 	enableDSLFetcher string,
 	inproxyParametersJSON string,
 	doRestrictAllInproxyProviderRegions bool,
-	providerID string) {
+	providerID string,
+	enableProxyProtocolHeaders bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -4361,6 +4529,7 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
           %s
           %s
           %s
@@ -4480,6 +4649,14 @@ func paveTacticsConfigFile(
 	`, providerID, testServerRegion)
 	}
 
+	proxyProtocolHeadersTargets := ""
+	if enableProxyProtocolHeaders {
+		proxyProtocolHeadersTargets = fmt.Sprintf(`
+		"ProxyProtocolHeaderTargetDestinationAddresses":
+		  {"%s" : ["127.0.0.1"]},
+		`, sponsorID)
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey,
@@ -4490,6 +4667,7 @@ func paveTacticsConfigFile(
 		osshPrefix,
 		inproxyParametersJSON,
 		restrictInproxyParameters,
+		proxyProtocolHeadersTargets,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,

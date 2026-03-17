@@ -33,6 +33,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
@@ -166,6 +167,7 @@ var handshakeRequestParams = append(
 		[]requestParamSpec{
 			{"missing_server_entry_signature", isBase64String, requestParamOptional},
 			{"missing_server_entry_provider_id", isBase64String, requestParamOptional},
+			{"enable_proxy_protocol_headers", isBooleanFlag, requestParamOptional | requestParamNotLogged},
 		},
 		baseAndDialParams...),
 	tacticsParams...)
@@ -349,6 +351,8 @@ func handshakeAPIRequestHandler(
 			inproxyProxyID:          inproxyProxyID,
 			inproxyMatchedPersonal:  inproxyMatchedPersonalCompartments,
 			inproxyRelayLogFields:   inproxyRelayLogFields,
+			proxyProtocolHeaderConfig: getProxyProtocolHeaderConfig(
+				support, sponsorID, params),
 		},
 		authorizations)
 	if err != nil {
@@ -479,6 +483,102 @@ func handshakeAPIRequestHandler(
 	}
 
 	return responsePayload, nil
+}
+
+func getProxyProtocolHeaderConfig(
+	support *SupportServices,
+	sponsorID string,
+	params common.APIParameters) *proxyProtocolHeaderConfig {
+
+	// Determine the HAProxy PROXY protocol header configuration for port
+	// forwards for this client. PROXY protocol headers require a configured
+	// MAC key as well as tactics-configured target destination addresses,
+	// all for client's sponsor ID.
+	//
+	// The ProxyProtocolHeaderDefaultEnableProbability tactics parameter
+	// controls whether a PROXY protocol header configuration is applied or
+	// not. This can be overridden by the client using the
+	// enable_proxy_protocol_headers handshake input.
+	//
+	// Limitations:
+	//
+	// - This configuration is wired up once per tunnel and not changed on hot
+	//   reload.
+	//
+	// - Any sponsor ID mismatch between Psiphon server config
+	//   (ProxyProtocolHeaderMACKeys) and tactics
+	//   (ProxyProtocolHeaderTargetDestinationAddresses) is not detected at
+	//   tactics validation time.
+	//
+	// - Assumes no GeoIP targeting for ProxyProtocolHeader tactics.
+	//
+	// - Currently assumes short target lists and does not use
+	//   stringLookupThreshold.
+
+	p, err := support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
+		return nil
+	}
+	if p.IsNil() {
+		return nil
+	}
+
+	// Assumes this shared config memory is not mutated.
+	macKey, ok := support.Config.proxyProtocolHeaderMACKeys[sponsorID]
+	if !ok {
+		return nil
+	}
+
+	enable := false
+	enableProxyProtocolHeaders, ok := getOptionalBoolStringRequestParam(
+		params, "enable_proxy_protocol_headers")
+	if ok {
+		// Explicitly enabled or disabled by client.
+		enable = enableProxyProtocolHeaders
+	} else {
+		enable = p.WeightedCoinFlip(
+			parameters.ProxyProtocolHeaderDefaultEnableProbability)
+	}
+	if !enable {
+		return nil
+	}
+
+	targets := p.KeyStrings(
+		parameters.ProxyProtocolHeaderTargetDestinationAddresses, sponsorID)
+	if len(targets) == 0 {
+		return nil
+	}
+
+	// TODO:
+	// - for lists that exceed stringLookupThreshold, use a lookup map.
+	// - normalize tactics values once per tactics load, not once per tunnel.
+
+	normalizedTargets := make([]string, 0, len(targets))
+	for _, target := range targets {
+		normalizedTargets = append(
+			normalizedTargets,
+			normalizeProxyProtocolTargetDestinationAddress(target))
+	}
+
+	return &proxyProtocolHeaderConfig{
+		macKey:                     macKey,
+		targetDestinationAddresses: normalizedTargets,
+	}
+}
+
+func normalizeProxyProtocolTargetDestinationAddress(target string) string {
+
+	// Normalize IP address representation.
+	ip := net.ParseIP(target)
+	if ip != nil {
+		return ip.String()
+	}
+
+	// Normalize domain case and remove any trailing .
+	target = strings.TrimSuffix(target, ".")
+	target = strings.ToLower(target)
+	return target
 }
 
 func doHandshakeInproxyBrokerRelay(
@@ -1744,6 +1844,20 @@ func getIntStringRequestParam(params common.APIParameters, name string) (int, er
 		return 0, errors.Trace(err)
 	}
 	return value, nil
+}
+
+func getOptionalBoolStringRequestParam(params common.APIParameters, name string) (bool, bool) {
+	if params[name] == nil {
+		return false, false
+	}
+	valueStr, ok := params[name].(string)
+	if !ok {
+		return false, false
+	}
+	if valueStr == "1" {
+		return true, true
+	}
+	return false, true
 }
 
 func getBoolStringRequestParam(params common.APIParameters, name string) (bool, error) {
