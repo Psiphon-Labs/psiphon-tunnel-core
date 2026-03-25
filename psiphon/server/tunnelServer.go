@@ -2093,22 +2093,28 @@ type handshakeStateInfo struct {
 }
 
 type handshakeState struct {
-	completed               bool
-	apiProtocol             string
-	apiParams               common.APIParameters
-	activeAuthorizationIDs  []string
-	authorizedAccessTypes   []string
-	authorizationsRevoked   bool
-	domainBytesChecksum     []byte
-	establishedTunnelsCount int
-	splitTunnelLookup       *splitTunnelLookup
-	deviceRegion            string
-	newTacticsTag           string
-	inproxyClientIP         string
-	inproxyClientGeoIPData  GeoIPData
-	inproxyProxyID          inproxy.ID
-	inproxyMatchedPersonal  bool
-	inproxyRelayLogFields   common.LogFields
+	completed                 bool
+	apiProtocol               string
+	apiParams                 common.APIParameters
+	activeAuthorizationIDs    []string
+	authorizedAccessTypes     []string
+	authorizationsRevoked     bool
+	domainBytesChecksum       []byte
+	establishedTunnelsCount   int
+	splitTunnelLookup         *splitTunnelLookup
+	deviceRegion              string
+	newTacticsTag             string
+	inproxyClientIP           string
+	inproxyClientGeoIPData    GeoIPData
+	inproxyProxyID            inproxy.ID
+	inproxyMatchedPersonal    bool
+	inproxyRelayLogFields     common.LogFields
+	proxyProtocolHeaderConfig *proxyProtocolHeaderConfig
+}
+
+type proxyProtocolHeaderConfig struct {
+	macKey                     []byte
+	targetDestinationAddresses []string
 }
 
 type protocolDestinationBytesMetrics struct {
@@ -4641,7 +4647,7 @@ func (sshClient *sshClient) newInproxyProxyQualityTracker() *inproxyProxyQuality
 	// GeoIP in reportProxyQuality.
 	//
 	// Note that the in-proxy broker also enforces InproxyEnableProxyQuality,
-	// and also assumes no GeoIP targetting.
+	// and also assumes no GeoIP targeting.
 
 	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
@@ -5258,6 +5264,17 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}()
 
+	// Check if the destination is a configured target for adding a PROXY
+	// protocol header. The target can be either a domain or IP address.
+	// Domains are the typical case; IP address targets are not matched after
+	// domain name resolution.
+
+	addProxyProtocolHeader :=
+		sshClient.handshakeState.proxyProtocolHeaderConfig != nil &&
+			common.Contains(
+				sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses,
+				normalizeProxyProtocolTargetDestinationAddress(hostToConnect))
+
 	// Validate the domain name and check the domain blocklist before dialing.
 	//
 	// The IP blocklist is checked in isPortForwardPermitted, which also provides
@@ -5533,6 +5550,43 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	if IsLogLevelDebug() {
 		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	}
+
+	if addProxyProtocolHeader {
+
+		// Add the PROXY protocol header with the original client IP, using a
+		// MAC to authenticate the header values. Any existing PROXY protocol
+		// header will be replaced with this new header.
+		//
+		// This PROXY protocol header is intended as an authenticated
+		// alternative for Psiphon use cases which previously added PROXY
+		// headers on the client side.
+		//
+		// Limitation: addOrReplaceProxyProtocolHeader attempts to first read
+		// any PROXY protocol sent by the client, and as a result is not
+		// compatible with server-first network protocols. See also the PROXY
+		// v1/v2 signature limitations in addOrReplaceProxyProtocolHeader.
+
+		wireHeader, err := makeProxyProtocolHeader(
+			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[:proxyProtocolHeaderKeyIDSize],
+			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[proxyProtocolHeaderKeyIDSize:],
+			net.ParseIP(sshClient.clientIP),
+			IP,
+			portToConnect)
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": err}).Error("make PROXY header failed")
+			return
+		}
+
+		bytesRead, err := addOrReplaceProxyProtocolHeader(
+			fwdChannel,
+			fwdConn,
+			wireHeader)
+		atomic.AddInt64(&bytesUp, bytesRead)
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": err}).Error("apply PROXY header failed")
+			return
+		}
 	}
 
 	// TODO: relay errors to fwdChannel.Stderr()?

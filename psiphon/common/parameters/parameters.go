@@ -573,6 +573,8 @@ const (
 	MeekPayloadPaddingServerOmitProbability            = "MeekPayloadPaddingServerOmitProbability"
 	MeekPayloadPaddingServerMinSize                    = "MeekPayloadPaddingServerMinSize"
 	MeekPayloadPaddingServerMaxSize                    = "MeekPayloadPaddingServerMaxSize"
+	ProxyProtocolHeaderTargetDestinationAddresses      = "ProxyProtocolHeaderTargetDestinationAddresses"
+	ProxyProtocolHeaderDefaultEnableProbability        = "ProxyProtocolHeaderDefaultEnableProbability"
 
 	// Retired parameters
 
@@ -1226,6 +1228,9 @@ var defaultParameters = map[string]struct {
 	MeekPayloadPaddingServerOmitProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	MeekPayloadPaddingServerMinSize:         {value: 0, minimum: 0, flags: serverSideOnly},
 	MeekPayloadPaddingServerMaxSize:         {value: 65533, minimum: 0, flags: serverSideOnly},
+
+	ProxyProtocolHeaderTargetDestinationAddresses: {value: KeyStrings{}, flags: serverSideOnly},
+	ProxyProtocolHeaderDefaultEnableProbability:   {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
