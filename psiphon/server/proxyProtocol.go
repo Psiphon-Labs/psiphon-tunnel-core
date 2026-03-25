@@ -294,7 +294,7 @@ func verifyProxyProtocolHeader(
 func addOrReplaceProxyProtocolHeader(
 	in io.Reader,
 	out io.Writer,
-	newHeader []byte) (bytesRead int64, retErr error) {
+	newHeader []byte) (bytesRead int64, replaced bool, retErr error) {
 
 	// Allocate only a small buffer, sufficient to read PROXY v1/v2 prefixes.
 
@@ -304,9 +304,15 @@ func addOrReplaceProxyProtocolHeader(
 
 	_, err := proxyproto.Read(bufferedReader)
 	bytesRead += countingReader.getBytesRead()
-	if err != nil && !std_errors.Is(err, proxyproto.ErrNoProxyProtocol) {
-		retErr = errors.Trace(err)
-		return
+	if err != nil {
+		if !std_errors.Is(err, proxyproto.ErrNoProxyProtocol) {
+			retErr = errors.Trace(err)
+			return
+		}
+		// No header was found, continue to add.
+	} else {
+		// A header was found and will be replaced.
+		replaced = true
 	}
 
 	// The new header is written only after reading input bytes. Potentially

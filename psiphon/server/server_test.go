@@ -2473,6 +2473,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	expectDSLPrioritized := doDSL
 	expectMeekPayloadPadding := doMeekPayloadPadding
+	expectAddedProxyProtocolHeader := runConfig.doProxyProtocolHeader && !runConfig.doReplaceProxyProtocolHeader
+	expectReplacedProxyProtocolHeader := runConfig.doProxyProtocolHeader && runConfig.doReplaceProxyProtocolHeader
 
 	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
@@ -2509,6 +2511,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectServerEntryCount,
 			expectDSLPrioritized,
 			expectMeekPayloadPadding,
+			expectAddedProxyProtocolHeader,
+			expectReplacedProxyProtocolHeader,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -3005,6 +3009,8 @@ func checkExpectedServerTunnelLogFields(
 	expectServerEntryCount int,
 	expectDSLPrioritized bool,
 	expectMeekPayloadPadding bool,
+	expectAddedProxyProtocolHeader bool,
+	expectReplacedProxyProtocolHeader bool,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -3740,6 +3746,30 @@ func checkExpectedServerTunnelLogFields(
 		name := "meek_payload_padding"
 		if fields[name] != nil {
 			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	if expectAddedProxyProtocolHeader || expectReplacedProxyProtocolHeader {
+		for _, name := range []string{
+			"proxy_protocol_header_added",
+			"proxy_protocol_header_replaced",
+			"proxy_protocol_header_failed",
+		} {
+			if fields[name] == nil {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+
+			if (fields["proxy_protocol_header_added"].(float64) == 0) != expectReplacedProxyProtocolHeader {
+				return fmt.Errorf("unexpected proxy_protocol_header_added %v", fields["proxy_protocol_header_added"])
+			}
+
+			if (fields["proxy_protocol_header_replaced"].(float64) == 0) != !expectReplacedProxyProtocolHeader {
+				return fmt.Errorf("unexpected proxy_protocol_header_replaced %v", fields["proxy_protocol_header_replaced"])
+			}
+
+			if fields["proxy_protocol_header_failed"].(float64) != 0 {
+				return fmt.Errorf("unexpected proxy_protocol_header_failed %v", fields["proxy_protocol_header_failed"])
+			}
 		}
 	}
 

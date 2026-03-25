@@ -1980,6 +1980,7 @@ type sshClient struct {
 	invalidServerEntryTags               int
 	sshProtocolBytesTracker              *sshProtocolBytesTracker
 	dslRequestCount                      int
+	proxyProtocolMetrics                 proxyProtocolMetrics
 }
 
 type trafficState struct {
@@ -2008,6 +2009,12 @@ type peakMetrics struct {
 	TCPPortForwardFailureRateSampleSize   *int64
 	DNSFailureRate                        *float64
 	DNSFailureRateSampleSize              *int64
+}
+
+type proxyProtocolMetrics struct {
+	added    atomic.Int64
+	replaced atomic.Int64
+	failed   atomic.Int64
 }
 
 // qualityMetrics records upstream TCP dial attempts and
@@ -3841,6 +3848,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["invalid_server_entry_tags"] = sshClient.invalidServerEntryTags
 	}
 
+	if sshClient.handshakeState.proxyProtocolHeaderConfig != nil {
+		logFields["proxy_protocol_header_added"] = sshClient.proxyProtocolMetrics.added.Load()
+		logFields["proxy_protocol_header_replaced"] = sshClient.proxyProtocolMetrics.replaced.Load()
+		logFields["proxy_protocol_header_failed"] = sshClient.proxyProtocolMetrics.failed.Load()
+	}
+
 	// Merge in additional metrics from the optional metrics source
 	for _, metrics := range additionalMetrics {
 		for name, value := range metrics {
@@ -5574,18 +5587,25 @@ func (sshClient *sshClient) handleTCPChannel(
 			IP,
 			portToConnect)
 		if err != nil {
+			sshClient.proxyProtocolMetrics.failed.Add(1)
 			log.WithTraceFields(LogFields{"error": err}).Error("make PROXY header failed")
 			return
 		}
 
-		bytesRead, err := addOrReplaceProxyProtocolHeader(
+		bytesRead, replaced, err := addOrReplaceProxyProtocolHeader(
 			fwdChannel,
 			fwdConn,
 			wireHeader)
 		atomic.AddInt64(&bytesUp, bytesRead)
 		if err != nil {
+			sshClient.proxyProtocolMetrics.failed.Add(1)
 			log.WithTraceFields(LogFields{"error": err}).Error("apply PROXY header failed")
 			return
+		}
+		if replaced {
+			sshClient.proxyProtocolMetrics.replaced.Add(1)
+		} else {
+			sshClient.proxyProtocolMetrics.added.Add(1)
 		}
 	}
 
