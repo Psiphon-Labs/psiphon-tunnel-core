@@ -4346,12 +4346,6 @@ func paveTrafficRulesFile(
 	requireAuthorization bool,
 	deny bool,
 	livenessTestSize int) {
-
-	// Test both default and fast lookups
-	if intLookupThreshold != 10 {
-		t.Fatalf("unexpected intLookupThreshold")
-	}
-
 	TCPPorts := fmt.Sprintf("443, %s", mockWebServerPort)
 	UDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
 

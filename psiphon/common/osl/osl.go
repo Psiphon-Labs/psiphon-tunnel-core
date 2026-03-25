@@ -171,6 +171,8 @@ type SeedSpec struct {
 	UpstreamSubnets []string
 	UpstreamASNs    []string
 	Targets         TrafficValues
+
+	upstreamASNLookup common.StringLookup
 }
 
 // TrafficValues defines a client traffic level that seeds a SLOK.
@@ -382,6 +384,9 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					ASNs[ASN] = struct{}{}
 				}
 			}
+
+			seedSpec.upstreamASNLookup = common.NewStringLookup(
+				seedSpec.UpstreamASNs)
 		}
 
 		if !isValidShamirSplit(len(scheme.SeedSpecs), scheme.SeedSpecThreshold) {
@@ -539,11 +544,7 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 						upstreamASN = lookupASN(upstreamIPAddress)
 						upstreamASNSet = true
 					}
-					// TODO: use a map for faster lookups when the number of
-					// string values to compare against exceeds a threshold
-					// where benchmarks show maps are faster than looping
-					// through a string slice.
-					matchesSeedSpec = common.Contains(seedSpec.UpstreamASNs, upstreamASN)
+					matchesSeedSpec = seedSpec.upstreamASNLookup.Contains(upstreamASN)
 				}
 			}
 

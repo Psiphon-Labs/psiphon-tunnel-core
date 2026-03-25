@@ -214,12 +214,12 @@ type TrafficRulesFilter struct {
 	MinClientVersion *int
 	MaxClientVersion *int
 
-	regionLookup                map[string]bool
-	ispLookup                   map[string]bool
-	asnLookup                   map[string]bool
-	cityLookup                  map[string]bool
-	activeAuthorizationIDLookup map[string]bool
-	providerIDLookup            map[string]bool
+	regionLookup                common.StringLookup
+	ispLookup                   common.StringLookup
+	asnLookup                   common.StringLookup
+	cityLookup                  common.StringLookup
+	activeAuthorizationIDLookup common.StringLookup
+	providerIDLookup            common.StringLookup
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -513,13 +513,6 @@ func (set *TrafficRulesSet) Validate() error {
 
 	return nil
 }
-
-const stringLookupThreshold = 5
-const intLookupThreshold = 10
-
-// initLookups creates map lookups for filters where the number of string/int
-// values to compare against exceeds a threshold where benchmarks show maps
-// are faster than looping through a string/int slice.
 func (set *TrafficRulesSet) initLookups() {
 
 	initTrafficRulesLookups := func(rules *TrafficRules) {
@@ -533,47 +526,12 @@ func (set *TrafficRulesSet) initLookups() {
 
 	initTrafficRulesFilterLookups := func(filter *TrafficRulesFilter) {
 
-		if len(filter.Regions) >= stringLookupThreshold {
-			filter.regionLookup = make(map[string]bool)
-			for _, region := range filter.Regions {
-				filter.regionLookup[region] = true
-			}
-		}
-
-		if len(filter.ISPs) >= stringLookupThreshold {
-			filter.ispLookup = make(map[string]bool)
-			for _, ISP := range filter.ISPs {
-				filter.ispLookup[ISP] = true
-			}
-		}
-
-		if len(filter.ASNs) >= stringLookupThreshold {
-			filter.asnLookup = make(map[string]bool)
-			for _, ASN := range filter.ASNs {
-				filter.asnLookup[ASN] = true
-			}
-		}
-
-		if len(filter.Cities) >= stringLookupThreshold {
-			filter.cityLookup = make(map[string]bool)
-			for _, city := range filter.Cities {
-				filter.cityLookup[city] = true
-			}
-		}
-
-		if len(filter.ActiveAuthorizationIDs) >= stringLookupThreshold {
-			filter.activeAuthorizationIDLookup = make(map[string]bool)
-			for _, ID := range filter.ActiveAuthorizationIDs {
-				filter.activeAuthorizationIDLookup[ID] = true
-			}
-		}
-
-		if len(filter.ProviderIDs) >= stringLookupThreshold {
-			filter.providerIDLookup = make(map[string]bool)
-			for _, ID := range filter.ProviderIDs {
-				filter.providerIDLookup[ID] = true
-			}
-		}
+		filter.regionLookup = common.NewStringLookup(filter.Regions)
+		filter.ispLookup = common.NewStringLookup(filter.ISPs)
+		filter.asnLookup = common.NewStringLookup(filter.ASNs)
+		filter.cityLookup = common.NewStringLookup(filter.Cities)
+		filter.activeAuthorizationIDLookup = common.NewStringLookup(filter.ActiveAuthorizationIDs)
+		filter.providerIDLookup = common.NewStringLookup(filter.ProviderIDs)
 	}
 
 	initTrafficRulesLookups(&set.DefaultRules)
@@ -717,50 +675,26 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		if len(filter.Regions) > 0 {
-			if filter.regionLookup != nil {
-				if !filter.regionLookup[geoIPData.Country] {
-					return false
-				}
-			} else {
-				if !common.Contains(filter.Regions, geoIPData.Country) {
-					return false
-				}
+			if !filter.regionLookup.Contains(geoIPData.Country) {
+				return false
 			}
 		}
 
 		if len(filter.ISPs) > 0 {
-			if filter.ispLookup != nil {
-				if !filter.ispLookup[geoIPData.ISP] {
-					return false
-				}
-			} else {
-				if !common.Contains(filter.ISPs, geoIPData.ISP) {
-					return false
-				}
+			if !filter.ispLookup.Contains(geoIPData.ISP) {
+				return false
 			}
 		}
 
 		if len(filter.ASNs) > 0 {
-			if filter.asnLookup != nil {
-				if !filter.asnLookup[geoIPData.ASN] {
-					return false
-				}
-			} else {
-				if !common.Contains(filter.ASNs, geoIPData.ASN) {
-					return false
-				}
+			if !filter.asnLookup.Contains(geoIPData.ASN) {
+				return false
 			}
 		}
 
 		if len(filter.Cities) > 0 {
-			if filter.cityLookup != nil {
-				if !filter.cityLookup[geoIPData.City] {
-					return false
-				}
-			} else {
-				if !common.Contains(filter.Cities, geoIPData.City) {
-					return false
-				}
+			if !filter.cityLookup.Contains(geoIPData.City) {
+				return false
 			}
 		}
 
@@ -805,23 +739,16 @@ func (set *TrafficRulesSet) GetTrafficRules(
 					return false
 				}
 
-				if filter.activeAuthorizationIDLookup != nil {
-					found := false
-					for _, ID := range state.activeAuthorizationIDs {
-						if filter.activeAuthorizationIDLookup[ID] {
-							found = true
-							break
-						}
-					}
-					if !found {
-						return false
-					}
-				} else {
-					if !common.ContainsAny(filter.ActiveAuthorizationIDs, state.activeAuthorizationIDs) {
-						return false
+				found := false
+				for _, ID := range state.activeAuthorizationIDs {
+					if filter.activeAuthorizationIDLookup.Contains(ID) {
+						found = true
+						break
 					}
 				}
-
+				if !found {
+					return false
+				}
 			}
 			if len(filter.AuthorizedAccessTypes) > 0 {
 				if !state.completed {
@@ -839,14 +766,8 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		}
 
 		if len(filter.ProviderIDs) > 0 {
-			if filter.providerIDLookup != nil {
-				if !filter.providerIDLookup[serverProviderID] {
-					return false
-				}
-			} else {
-				if !common.Contains(filter.ProviderIDs, serverProviderID) {
-					return false
-				}
+			if !filter.providerIDLookup.Contains(serverProviderID) {
+				return false
 			}
 		}
 

@@ -296,7 +296,7 @@ func handshakeAPIRequestHandler(
 	if splitTunnelOwnRegion {
 		ownRegion = clientGeoIPData.Country
 	}
-	var splitTunnelLookup *splitTunnelLookup
+	var splitTunnelLookup *common.StringLookup
 	if ownRegion != "" || len(splitTunnelOtherRegions) > 0 {
 		splitTunnelLookup, err = newSplitTunnelLookup(ownRegion, splitTunnelOtherRegions)
 		if err != nil {
@@ -511,9 +511,6 @@ func getProxyProtocolHeaderConfig(
 	//   tactics validation time.
 	//
 	// - Assumes no GeoIP targeting for ProxyProtocolHeader tactics.
-	//
-	// - Currently assumes short target lists and does not use
-	//   stringLookupThreshold.
 
 	p, err := support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
@@ -550,9 +547,7 @@ func getProxyProtocolHeaderConfig(
 		return nil
 	}
 
-	// TODO:
-	// - for lists that exceed stringLookupThreshold, use a lookup map.
-	// - normalize tactics values once per tactics load, not once per tunnel.
+	// TODO: normalize tactics values once per tactics load, not once per tunnel.
 
 	normalizedTargets := make([]string, 0, len(targets))
 	for _, target := range targets {
@@ -563,7 +558,7 @@ func getProxyProtocolHeaderConfig(
 
 	return &proxyProtocolHeaderConfig{
 		macKey:                     macKey,
-		targetDestinationAddresses: normalizedTargets,
+		targetDestinationAddresses: common.NewStringLookup(normalizedTargets),
 	}
 }
 

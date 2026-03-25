@@ -140,10 +140,6 @@ func TestTactics(t *testing.T) {
       ]
     }
     `
-	if stringLookupThreshold != 5 {
-		t.Fatalf("unexpected stringLookupThreshold")
-	}
-
 	encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey, err := GenerateKeys()
 	if err != nil {
 		t.Fatalf("GenerateKeys failed: %s", err)

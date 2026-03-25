@@ -1971,7 +1971,7 @@ type sshClient struct {
 	sendAlertRequests                    chan protocol.AlertRequest
 	sentAlertRequests                    map[string]bool
 	peakMetrics                          peakMetrics
-	destinationBytesMetrics              map[string]*protocolDestinationBytesMetrics
+	destinationBytesMetrics              *common.StringValueLookup[*protocolDestinationBytesMetrics]
 	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
 	dnsResolver                          *net.Resolver
 	dnsCache                             *lrucache.Cache
@@ -2108,7 +2108,7 @@ type handshakeState struct {
 	authorizationsRevoked     bool
 	domainBytesChecksum       []byte
 	establishedTunnelsCount   int
-	splitTunnelLookup         *splitTunnelLookup
+	splitTunnelLookup         *common.StringLookup
 	deviceRegion              string
 	newTacticsTag             string
 	inproxyClientIP           string
@@ -2121,7 +2121,7 @@ type handshakeState struct {
 
 type proxyProtocolHeaderConfig struct {
 	macKey                     []byte
-	targetDestinationAddresses []string
+	targetDestinationAddresses common.StringLookup
 }
 
 type protocolDestinationBytesMetrics struct {
@@ -2156,14 +2156,9 @@ func (d *destinationBytesMetrics) getBytesDown() int64 {
 	return atomic.LoadInt64(&d.bytesDown)
 }
 
-type splitTunnelLookup struct {
-	regions       []string
-	regionsLookup map[string]bool
-}
-
 func newSplitTunnelLookup(
 	ownRegion string,
-	otherRegions []string) (*splitTunnelLookup, error) {
+	otherRegions []string) (*common.StringLookup, error) {
 
 	length := len(otherRegions)
 	if ownRegion != "" {
@@ -2176,41 +2171,15 @@ func newSplitTunnelLookup(
 		return nil, errors.Tracef("too many regions: %d", length)
 	}
 
-	// Create map lookups for lists where the number of values to compare
-	// against exceeds a threshold where benchmarks show maps are faster than
-	// looping through a slice. Otherwise use a slice for lookups. In both
-	// cases, the input slice is no longer referenced.
-
-	if length >= stringLookupThreshold {
-		regionsLookup := make(map[string]bool)
-		if ownRegion != "" {
-			regionsLookup[ownRegion] = true
-		}
-		for _, region := range otherRegions {
-			regionsLookup[region] = true
-		}
-		return &splitTunnelLookup{
-			regionsLookup: regionsLookup,
-		}, nil
-	} else {
-		regions := []string{}
-		if ownRegion != "" && !common.Contains(otherRegions, ownRegion) {
-			regions = append(regions, ownRegion)
-		}
-		// TODO: check for other duplicate regions?
-		regions = append(regions, otherRegions...)
-		return &splitTunnelLookup{
-			regions: regions,
-		}, nil
+	regions := []string{}
+	if ownRegion != "" && !common.Contains(otherRegions, ownRegion) {
+		regions = append(regions, ownRegion)
 	}
-}
+	// TODO: check for other duplicate regions?
+	regions = append(regions, otherRegions...)
 
-func (lookup *splitTunnelLookup) lookup(region string) bool {
-	if lookup.regionsLookup != nil {
-		return lookup.regionsLookup[region]
-	} else {
-		return common.Contains(lookup.regions, region)
-	}
+	lookup := common.NewStringLookup(regions)
+	return &lookup, nil
 }
 
 type inproxyProxyQualityTracker struct {
@@ -3789,7 +3758,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 			for _, ASN := range destinationBytesMetricsASNs {
 
-				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics[ASN]
+				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics.Get(ASN)
 				if !ok {
 					continue
 				}
@@ -4588,13 +4557,22 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 		return
 	}
 
-	sshClient.destinationBytesMetrics = make(map[string]*protocolDestinationBytesMetrics)
-
+	filteredASNs := make([]string, 0, len(ASNs))
+	metrics := make([]*protocolDestinationBytesMetrics, 0, len(ASNs))
 	for _, ASN := range ASNs {
 		if ASN != "" {
-			sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
+			filteredASNs = append(filteredASNs, ASN)
+			metrics = append(metrics, &protocolDestinationBytesMetrics{})
 		}
 	}
+
+	lookup, err := common.NewStringValueLookup(filteredASNs, metrics)
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("invalid lookup")
+		return
+	}
+
+	sshClient.destinationBytesMetrics = &lookup
 }
 
 func (sshClient *sshClient) newDestinationBytesMetricsUpdater(
@@ -4609,10 +4587,7 @@ func (sshClient *sshClient) newDestinationBytesMetricsUpdater(
 
 	destinationASN := sshClient.sshServer.support.GeoIPService.LookupISPForIP(IPAddress).ASN
 
-	// Future enhancement: for 5 or fewer ASNs, iterate over a slice instead
-	// of using a map? See, for example, stringLookupThreshold in
-	// common/tactics.
-	metrics, ok := sshClient.destinationBytesMetrics[destinationASN]
+	metrics, ok := sshClient.destinationBytesMetrics.Get(destinationASN)
 	if !ok {
 		return nil
 	}
@@ -5284,8 +5259,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	addProxyProtocolHeader :=
 		sshClient.handshakeState.proxyProtocolHeaderConfig != nil &&
-			common.Contains(
-				sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses,
+			sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses.Contains(
 				normalizeProxyProtocolTargetDestinationAddress(hostToConnect))
 
 	// Validate the domain name and check the domain blocklist before dialing.
@@ -5452,7 +5426,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		clientGeoIPData := sshClient.getClientGeoIPData()
 
 		if clientGeoIPData.Country != GEOIP_UNKNOWN_VALUE &&
-			sshClient.handshakeState.splitTunnelLookup.lookup(
+			sshClient.handshakeState.splitTunnelLookup.Contains(
 				destinationGeoIPData.Country) {
 
 			// Since isPortForwardPermitted is not called in this case, explicitly call
