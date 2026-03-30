@@ -38,6 +38,186 @@ func TestPush(t *testing.T) {
 	}
 }
 
+func runTestPush() error {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	minPadding := 0
+	maxPadding := 65535
+
+	_, incorrectPublicKey, incorrectPrivateKey, err := GenerateKeys()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	serverEntries, err := makeTestPrioritizedServerEntries(
+		128,
+		func(_ int) int { return 0 })
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	expectPrioritizeDialReasons := make(map[string]string)
+	for _, serverEntry := range serverEntries {
+		if serverEntry.PrioritizeDial != (serverEntry.PrioritizeReason != "") {
+			return errors.TraceNew("unexpected test data")
+		}
+		expectPrioritizeDialReasons[serverEntry.Source] = serverEntry.PrioritizeReason
+	}
+
+	maker, err := NewPushPayloadMaker(obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	incorrectMaker, err := NewPushPayloadMaker(obfuscationKey, publicKey, incorrectPrivateKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Test: successful import
+
+	result, err := maker.MakePushPayloads(
+		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(result.Payloads) != 1 {
+		return errors.TraceNew("unexpected payload count")
+	}
+	if len(result.PayloadEntryCounts) != 1 || result.PayloadEntryCounts[0] != len(serverEntries) {
+		return errors.TraceNew("unexpected payload entry counts")
+	}
+
+	seenSources := make(map[string]int)
+	importer := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string,
+		prioritizeDial bool,
+		priotitizeReason string) error {
+
+		serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if !strings.HasPrefix(serverEntryFields["ipAddress"].(string), "192.0.2") {
+			return errors.TraceNew("unexpected server entry IP address")
+		}
+		expect, ok := expectPrioritizeDialReasons[source]
+		if !ok {
+			return errors.TraceNew("unexpected source")
+		}
+		if prioritizeDial != (expect != "") {
+			return errors.TraceNew("unexpected prioritize dial")
+		}
+		if priotitizeReason != expect {
+			return errors.TraceNew("unexpected prioritize reason")
+		}
+		seenSources[source] += 1
+		return nil
+	}
+
+	totalImported := 0
+	for _, payload := range result.Payloads {
+		n, err := ImportPushPayload(
+			obfuscationKey,
+			publicKey,
+			payload,
+			importer)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		totalImported += n
+	}
+
+	if totalImported != len(serverEntries) {
+		return errors.TraceNew("unexpected import count")
+	}
+	for source, count := range seenSources {
+		if count != 1 {
+			return errors.Tracef("source imported unexpected number of times: %s=%d", source, count)
+		}
+	}
+
+	// Test: expired
+
+	result, err = maker.MakePushPayloads(
+		minPadding, maxPadding, 1*time.Microsecond, serverEntries, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = ImportPushPayload(
+		obfuscationKey,
+		publicKey,
+		result.Payloads[0],
+		importer)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	// Test: invalid signature
+
+	result, err = incorrectMaker.MakePushPayloads(
+		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	_, err = ImportPushPayload(
+		obfuscationKey,
+		publicKey,
+		result.Payloads[0],
+		importer)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	// Test: wrong signature key
+
+	result, err = maker.MakePushPayloads(
+		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	_, err = ImportPushPayload(
+		obfuscationKey,
+		incorrectPublicKey,
+		result.Payloads[0],
+		importer)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	// Test: mutate obfuscation layer
+
+	result, err = maker.MakePushPayloads(
+		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	result.Payloads[0][0] = ^result.Payloads[0][0]
+
+	_, err = ImportPushPayload(
+		obfuscationKey,
+		publicKey,
+		result.Payloads[0],
+		importer)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	return nil
+}
+
 func TestMakePushPayloads_RF2_RespectsMaxSize(t *testing.T) {
 
 	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
@@ -391,179 +571,6 @@ func (m *PushPayloadMaker) measureObfuscatedPayloadSize(
 	return m.aead.NonceSize() + len(cborSignedPayload) + m.aead.Overhead(), nil
 }
 
-func runTestPush() error {
-
-	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	minPadding := 0
-	maxPadding := 65535
-
-	_, incorrectPublicKey, incorrectPrivateKey, err := GenerateKeys()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	serverEntries, err := makeTestPrioritizedServerEntries(128, func(_ int) int {
-		return 0
-	})
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	expectPrioritizeDial := make(map[string]bool)
-	for _, serverEntry := range serverEntries {
-		expectPrioritizeDial[serverEntry.Source] = serverEntry.PrioritizeDial
-	}
-
-	maker, err := NewPushPayloadMaker(obfuscationKey, publicKey, privateKey)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	incorrectMaker, err := NewPushPayloadMaker(obfuscationKey, publicKey, incorrectPrivateKey)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	// Test: successful import
-
-	result, err := maker.MakePushPayloads(
-		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if len(result.Payloads) != 1 {
-		return errors.TraceNew("unexpected payload count")
-	}
-	if len(result.PayloadEntryCounts) != 1 || result.PayloadEntryCounts[0] != len(serverEntries) {
-		return errors.TraceNew("unexpected payload entry counts")
-	}
-
-	seenSources := make(map[string]int)
-	importer := func(
-		packedServerEntryFields protocol.PackedServerEntryFields,
-		source string,
-		prioritizeDial bool) error {
-
-		serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		if !strings.HasPrefix(serverEntryFields["ipAddress"].(string), "192.0.2") {
-			return errors.TraceNew("unexpected server entry IP address")
-		}
-		expect, ok := expectPrioritizeDial[source]
-		if !ok {
-			return errors.TraceNew("unexpected source")
-		}
-		if prioritizeDial != expect {
-			return errors.TraceNew("unexpected prioritize dial")
-		}
-		seenSources[source] += 1
-		return nil
-	}
-
-	totalImported := 0
-	for _, payload := range result.Payloads {
-		n, err := ImportPushPayload(
-			obfuscationKey,
-			publicKey,
-			payload,
-			importer)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		totalImported += n
-	}
-
-	if totalImported != len(serverEntries) {
-		return errors.TraceNew("unexpected import count")
-	}
-	for source, count := range seenSources {
-		if count != 1 {
-			return errors.Tracef("source imported unexpected number of times: %s=%d", source, count)
-		}
-	}
-
-	// Test: expired
-
-	result, err = maker.MakePushPayloads(
-		minPadding, maxPadding, 1*time.Microsecond, serverEntries, 0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	time.Sleep(10 * time.Millisecond)
-
-	_, err = ImportPushPayload(
-		obfuscationKey,
-		publicKey,
-		result.Payloads[0],
-		importer)
-	if err == nil {
-		return errors.TraceNew("unexpected success")
-	}
-
-	// Test: invalid signature
-
-	result, err = incorrectMaker.MakePushPayloads(
-		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	_, err = ImportPushPayload(
-		obfuscationKey,
-		publicKey,
-		result.Payloads[0],
-		importer)
-	if err == nil {
-		return errors.TraceNew("unexpected success")
-	}
-
-	// Test: wrong signature key
-
-	result, err = maker.MakePushPayloads(
-		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	_, err = ImportPushPayload(
-		obfuscationKey,
-		incorrectPublicKey,
-		result.Payloads[0],
-		importer)
-	if err == nil {
-		return errors.TraceNew("unexpected success")
-	}
-
-	// Test: mutate obfuscation layer
-
-	result, err = maker.MakePushPayloads(
-		minPadding, maxPadding, 1*time.Hour, serverEntries, 0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	result.Payloads[0][0] = ^result.Payloads[0][0]
-
-	_, err = ImportPushPayload(
-		obfuscationKey,
-		publicKey,
-		result.Payloads[0],
-		importer)
-	if err == nil {
-		return errors.TraceNew("unexpected success")
-	}
-
-	return nil
-}
-
 func makeTestPrioritizedServerEntries(
 	count int,
 	sourceExtraBytes func(index int) int) ([]*PrioritizedServerEntry, error) {
@@ -614,11 +621,18 @@ func makeTestPrioritizedServerEntry(
 		source = source + strings.Repeat("s", sourceExtraBytes)
 	}
 
-	return &PrioritizedServerEntry{
+	prioritizedServerEntry := &PrioritizedServerEntry{
 		ServerEntryFields: packed,
 		Source:            source,
 		PrioritizeDial:    index < 32 || index >= 96,
-	}, nil
+	}
+
+	if prioritizedServerEntry.PrioritizeDial {
+		prioritizedServerEntry.PrioritizeReason =
+			fmt.Sprintf("prioritize-reason-%d", index)
+	}
+
+	return prioritizedServerEntry, nil
 }
 
 func importPayloadsAndCountSources(
@@ -630,7 +644,8 @@ func importPayloadsAndCountSources(
 	importer := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
-		_ bool) error {
+		_ bool,
+		_ string) error {
 
 		_, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
 		if err != nil {

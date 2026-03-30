@@ -348,16 +348,16 @@ type ProxyAnnounceResponse struct {
 	TacticsPayload              []byte                    `cbor:"2,keyasint,omitempty"`
 	Limited                     bool                      `cbor:"3,keyasint,omitempty"`
 	NoMatch                     bool                      `cbor:"4,keyasint,omitempty"`
-	MustUpgrade                 bool                      `cbor:"13,keyasint,omitempty"`
 	ConnectionID                ID                        `cbor:"5,keyasint,omitempty"`
 	SelectedProtocolVersion     int32                     `cbor:"6,keyasint,omitempty"`
 	ClientOfferSDP              WebRTCSessionDescription  `cbor:"7,keyasint,omitempty"`
 	ClientRootObfuscationSecret ObfuscationSecret         `cbor:"8,keyasint,omitempty"`
 	DoDTLSRandomization         bool                      `cbor:"9,keyasint,omitempty"`
-	UseMediaStreams             bool                      `cbor:"14,keyasint,omitempty"`
 	TrafficShapingParameters    *TrafficShapingParameters `cbor:"10,keyasint,omitempty"`
 	NetworkProtocol             NetworkProtocol           `cbor:"11,keyasint,omitempty"`
 	DestinationAddress          string                    `cbor:"12,keyasint,omitempty"`
+	MustUpgrade                 bool                      `cbor:"13,keyasint,omitempty"`
+	UseMediaStreams             bool                      `cbor:"14,keyasint,omitempty"`
 	ClientRegion                string                    `cbor:"15,keyasint,omitempty"`
 }
 
@@ -389,11 +389,11 @@ type ClientOfferRequest struct {
 	ICECandidateTypes            ICECandidateTypes         `cbor:"5,keyasint,omitempty"`
 	ClientRootObfuscationSecret  ObfuscationSecret         `cbor:"6,keyasint,omitempty"`
 	DoDTLSRandomization          bool                      `cbor:"7,keyasint,omitempty"`
-	UseMediaStreams              bool                      `cbor:"12,keyasint,omitempty"`
 	TrafficShapingParameters     *TrafficShapingParameters `cbor:"8,keyasint,omitempty"`
 	PackedDestinationServerEntry []byte                    `cbor:"9,keyasint,omitempty"`
 	NetworkProtocol              NetworkProtocol           `cbor:"10,keyasint,omitempty"`
 	DestinationAddress           string                    `cbor:"11,keyasint,omitempty"`
+	UseMediaStreams              bool                      `cbor:"12,keyasint,omitempty"`
 }
 
 // TrafficShapingParameters specifies data channel or media stream traffic

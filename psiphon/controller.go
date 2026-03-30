@@ -631,13 +631,15 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 	importer := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
-		prioritizeDial bool) error {
+		prioritizeDial bool,
+		prioritizeReason string) error {
 
 		err := DSLStoreServerEntry(
 			controller.config.ServerEntrySignaturePublicKey,
 			packedServerEntryFields,
 			protocol.PushServerEntrySource(source),
 			prioritizeDial,
+			prioritizeReason,
 			controller.config.GetNetworkID())
 		if err != nil {
 			return errors.Trace(err)
