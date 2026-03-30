@@ -245,6 +245,12 @@ type Config struct {
 	// appear in requests. This is used to defend against abuse.
 	MeekRequiredHeaders map[string]string `json:",omitempty"`
 
+	// MeekRequiredHeadersNonStrict enables the non-strict mode for meek
+	// required headers, allowing connections without the headers. In this
+	// mode, only the functionality that depends on required headers is
+	// disabled.
+	MeekRequiredHeadersNonStrict bool `json:",omitempty"`
+
 	// MeekServerCertificate specifies an optional certificate to use for meek
 	// servers, in place of the default, randomly generate certificate. When
 	// specified, the corresponding private key must be supplied in
