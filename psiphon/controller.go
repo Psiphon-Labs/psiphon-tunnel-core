@@ -3298,11 +3298,12 @@ func (controller *Controller) runInproxyProxy() {
 	// and formatting when debug logging is off.
 	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
 
-	var lastActivityNotice time.Time
-	var lastAnnouncing int32
-	var lastActivityConnectingClients, lastActivityConnectedClients int32
-	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal int32
-	var activityTotalBytesUp, activityTotalBytesDown int64
+	var lastActivityNotice atomic.Value
+	lastActivityNotice.Store(time.Time{})
+	var lastAnnouncing atomic.Int32
+	var lastActivityConnectingClients, lastActivityConnectedClients atomic.Int32
+	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal atomic.Int32
+	var activityTotalBytesUp, activityTotalBytesDown atomic.Int64
 	activityUpdater := func(
 		announcing int32,
 		connectingClients int32,
@@ -3324,20 +3325,26 @@ func (controller *Controller) runInproxyProxy() {
 
 		if controller.config.EmitInproxyProxyActivity &&
 			(bytesUp > 0 || bytesDown > 0 ||
-				announcing != lastAnnouncing ||
-				connectingClients != lastActivityConnectingClients ||
-				connectedClients != lastActivityConnectedClients) {
+				announcing != lastAnnouncing.Load() ||
+				connectingClients != lastActivityConnectingClients.Load() ||
+				connectedClients != lastActivityConnectedClients.Load()) {
 
 			NoticeInproxyProxyActivity(
-				announcing, connectingClients, connectedClients, bytesUp, bytesDown, personalRegionActivity, commonRegionActivity)
+				announcing,
+				connectingClients,
+				connectedClients,
+				bytesUp,
+				bytesDown,
+				personalRegionActivity,
+				commonRegionActivity)
 
-			lastAnnouncing = announcing
-			lastActivityConnectingClients = connectingClients
-			lastActivityConnectedClients = connectedClients
+			lastAnnouncing.Store(announcing)
+			lastActivityConnectingClients.Store(connectingClients)
+			lastActivityConnectedClients.Store(connectedClients)
 		}
 
-		activityTotalBytesUp += bytesUp
-		activityTotalBytesDown += bytesDown
+		activityTotalBytesUp.Add(bytesUp)
+		activityTotalBytesDown.Add(bytesDown)
 
 		// InproxyProxyTotalActivity periodically emits total bytes
 		// transferred since starting; in addition to the current number of
@@ -3348,17 +3355,19 @@ func (controller *Controller) runInproxyProxy() {
 		// InproxyProxyTotalActivity; the current announcing count is
 		// recorded as a snapshot.
 
-		if lastActivityNotice.Add(activityNoticePeriod).Before(time.Now()) ||
-			connectingClients != lastActivityConnectingClientsTotal ||
-			connectedClients != lastActivityConnectedClientsTotal {
+		lastNotice := lastActivityNotice.Load().(time.Time)
+		now := time.Now()
+		if lastNotice.Add(activityNoticePeriod).Before(now) ||
+			connectingClients != lastActivityConnectingClientsTotal.Load() ||
+			connectedClients != lastActivityConnectedClientsTotal.Load() {
 
 			NoticeInproxyProxyTotalActivity(
 				announcing, connectingClients, connectedClients,
-				activityTotalBytesUp, activityTotalBytesDown)
-			lastActivityNotice = time.Now()
+				activityTotalBytesUp.Load(), activityTotalBytesDown.Load())
+			lastActivityNotice.Store(now)
 
-			lastActivityConnectingClientsTotal = connectingClients
-			lastActivityConnectedClientsTotal = connectedClients
+			lastActivityConnectingClientsTotal.Store(connectingClients)
+			lastActivityConnectedClientsTotal.Store(connectedClients)
 		}
 	}
 
@@ -3398,8 +3407,11 @@ func (controller *Controller) runInproxyProxy() {
 
 	// Emit one last NoticeInproxyProxyTotalActivity with the final byte counts.
 	NoticeInproxyProxyTotalActivity(
-		lastAnnouncing, lastActivityConnectingClients, lastActivityConnectedClients,
-		activityTotalBytesUp, activityTotalBytesDown)
+		lastAnnouncing.Load(),
+		lastActivityConnectingClients.Load(),
+		lastActivityConnectedClients.Load(),
+		activityTotalBytesUp.Load(),
+		activityTotalBytesDown.Load())
 
 	NoticeInfo("inproxy proxy: stopped")
 }
