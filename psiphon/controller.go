@@ -581,8 +581,6 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 // background.
 func (controller *Controller) AppResumed() {
 
-	NoticeInfo("AppResumed")
-
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 

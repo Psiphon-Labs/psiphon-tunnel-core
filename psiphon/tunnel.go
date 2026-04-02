@@ -106,6 +106,7 @@ type Tunnel struct {
 	operateCtx                     context.Context
 	stopOperate                    context.CancelFunc
 	signalPortForwardFailure       chan struct{}
+	signalSSHRequestFailure        chan error
 	signalAppResumed               chan struct{}
 	totalPortForwardFailures       int
 	adjustedEstablishStartTime     time.Time
@@ -175,6 +176,7 @@ func ConnectTunnel(
 		// A buffer allows at least one signal to be sent even when the receiver is
 		// not listening. Senders should not block.
 		signalPortForwardFailure:   make(chan struct{}, 1),
+		signalSSHRequestFailure:    make(chan error, 1),
 		signalAppResumed:           make(chan struct{}, 1),
 		adjustedEstablishStartTime: adjustedEstablishStartTime,
 	}, nil
@@ -574,7 +576,12 @@ func (tunnel *Tunnel) SendAPIRequest(
 		name, true, requestPayload)
 
 	if err != nil {
-		return nil, errors.Trace(err)
+		err = errors.Trace(err)
+		select {
+		case tunnel.signalSSHRequestFailure <- err:
+		default:
+		}
+		return nil, err
 	}
 
 	if !ok {
@@ -1922,22 +1929,23 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}()
 
-	enqueueProbe := func(isAppResume bool) error {
+	enqueueProbe := func(isAppResumed bool) error {
 
 		inactive := tunnel.activityConn.GetReadInactiveDuration()
 
 		var inactiveThreshold, probeTimeout time.Duration
 		p := tunnel.getCustomParameters()
 
-		if isAppResume {
+		if isAppResumed {
 
-			// In the AppResume case, if the last tunnel read was sufficiently
+			// In the AppResumed case, if the last tunnel read was sufficiently
 			// long ago, skip the probe and initiate a full tunnel
 			// establishment. The server side will have closed any tunnel
 			// that's been idle for too long.
 			reconnectInactiveThreshold := p.Duration(
 				parameters.SSHKeepAliveResumeReconnectInactivePeriod)
 			if inactive >= reconnectInactiveThreshold {
+				NoticeInfo("AppResumed: trigger reconnect")
 				return errors.Tracef(
 					"read inactive threshold exceeded: %v >= %v",
 					inactive, reconnectInactiveThreshold)
@@ -1945,6 +1953,12 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 			inactiveThreshold = p.Duration(parameters.SSHKeepAliveResumeProbeInactivePeriod)
 			probeTimeout = p.Duration(parameters.SSHKeepAliveResumeProbeTimeout)
+
+			if inactive >= inactiveThreshold {
+				NoticeInfo("AppResumed: trigger SSH keep alive probe")
+			} else {
+				NoticeInfo("AppResumed: skip SSH keep alive probe")
+			}
 
 		} else {
 			inactiveThreshold = p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
@@ -2065,6 +2079,24 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				err = errors.TraceNew("underlying conn is closed")
 			} else {
 				err = enqueueProbe(true)
+			}
+
+		case requestErr := <-tunnel.signalSSHRequestFailure:
+
+			if tunnel.conn.IsClosed() {
+				err = errors.TraceNew("underlying conn is closed")
+			} else if std_errors.Is(requestErr, io.EOF) {
+
+				// ssh.Conn.SendRequest returns EOF only after the ssh.mux has
+				// shut down and closed its response channel, which implies
+				// the tunnel is closed or closing.
+				err = requestErr
+
+			} else {
+
+				// Trigger a probe to check if the SSH request failure is due
+				// to a dead tunnel.
+				err = enqueueProbe(false)
 			}
 
 		case err = <-sshKeepAliveError:
