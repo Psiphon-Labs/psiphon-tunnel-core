@@ -45,7 +45,6 @@ struct Proxy {
     }
 
     internal func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
 
         self.psiphonTunnel = PsiphonTunnel.newPsiphonTunnel(self)
 
@@ -57,33 +56,36 @@ struct Proxy {
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
-
         DispatchQueue.global(qos: .default).async {
-            // Start up the tunnel and begin connecting.
-            // This could be started elsewhere or earlier.
-            NSLog("Starting tunnel")
+
+            // Call psiphonTunnel.start(true) whenever the app becomes active.
+            // startIfNeeded=true avoids unnecessary restarts, while still recovering
+            // from some frozen local proxy states after backgrounding.
+            //
+            // Then notify Psiphon that the app resumed so tunnel liveness is
+            // re-evaluated in the case where Psiphon was already running.
+
+            NSLog("Starting tunnel if needed")
 
             guard let success = self.psiphonTunnel?.start(true), success else {
                 NSLog("psiphonTunnel.start returned false")
                 return
             }
 
-            // The Psiphon Library exposes reachability functions, which can be used for detecting internet status.
+            self.psiphonTunnel?.appResumed()
+
+            // The Psiphon Library exposes reachability functions, which can be used
+            // for detecting internet status.
+
             let reachability = Reachability.forInternetConnection()
             let networkStatus = reachability?.currentReachabilityStatus()
             NSLog("Internet is reachable? \(networkStatus != NotReachable)")
@@ -91,7 +93,6 @@ struct Proxy {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
 
         // Clean up the tunnel
         NSLog("Stopping tunnel")

@@ -111,6 +111,11 @@ func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
 	return time.Duration(conn.lastReadActivityTime.Load() - conn.monotonicStartTime)
 }
 
+// GetReadInactiveDuration returns the time elapsed since the last Read.
+func (conn *ActivityMonitoredConn) GetReadInactiveDuration() time.Duration {
+	return time.Duration(int64(monotime.Now()) - conn.lastReadActivityTime.Load())
+}
+
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if n > 0 {

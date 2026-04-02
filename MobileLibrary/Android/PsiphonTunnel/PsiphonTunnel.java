@@ -276,6 +276,11 @@ public class PsiphonTunnel {
         Psi.reconnectTunnel();
     }
 
+    // Notify Psiphon that the host app has resumed from background.
+    public synchronized void appResumed() {
+        Psi.appResumed();
+    }
+
     public void setClientPlatformAffixes(String prefix, String suffix) {
         mClientPlatformPrefix.set(prefix);
         mClientPlatformSuffix.set(suffix);

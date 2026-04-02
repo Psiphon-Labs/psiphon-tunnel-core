@@ -577,6 +577,20 @@ func (controller *Controller) TerminateNextActiveTunnel() {
 	}
 }
 
+// AppResumed notifies active tunnels that the host app has resumed from
+// background.
+func (controller *Controller) AppResumed() {
+
+	NoticeInfo("AppResumed")
+
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+
+	for _, tunnel := range controller.tunnels {
+		tunnel.AppResumed()
+	}
+}
+
 // ExportExchangePayload creates a payload for client-to-client server
 // connection info exchange. See the comment for psiphon.ExportExchangePayload
 // for more details.
