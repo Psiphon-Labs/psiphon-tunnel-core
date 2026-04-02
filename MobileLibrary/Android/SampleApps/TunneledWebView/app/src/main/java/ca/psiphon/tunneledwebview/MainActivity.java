@@ -35,8 +35,11 @@ import ca.psiphon.PsiphonTunnel;
 //
 // The flow is as follows:
 //
-// - The Psiphon tunnel is started in onResume(). PsiphonTunnel.start()
+// - The Psiphon tunnel is started in onCreate(). PsiphonTunnel.startTunneling()
 //   is an asynchronous call that returns immediately.
+//
+// - When the app resumes from background, PsiphonTunnel.appResumed() is
+//   called so Psiphon can re-evaluate tunnel liveness.
 //
 // - Once Psiphon has selected a local HTTP proxy listening port, the
 //   onListeningHttpProxyPort() callback is called. This app records the
@@ -90,18 +93,6 @@ public class MainActivity extends AppCompatActivity
         mLocalHttpProxyPort = new AtomicInteger(0);
 
         mPsiphonTunnel = PsiphonTunnel.newPsiphonTunnel(this);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-
-        // NOTE: for demonstration purposes, this sample app
-        // restarts Psiphon in onPause/onResume. Since it may take some
-        // time to connect, it's generally recommended to keep
-        // Psiphon running, so start/stop in onCreate/onDestroy or
-        // even consider running a background Service.
-
 
         try {
             mPsiphonTunnel.startTunneling("");
@@ -111,8 +102,15 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
+    protected void onResume() {
+        super.onResume();
+
+        mPsiphonTunnel.appResumed();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
 
         // NOTE: stop() can block for a few seconds, so it's generally
         // recommended to run PsiphonTunnel.start()/stop() in a background
