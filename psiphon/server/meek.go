@@ -1999,22 +1999,17 @@ func (server *MeekServer) inproxyReloadTactics() error {
 				return true
 			}
 		}
-		lookup := make(map[string]map[string]struct{})
+		lookup := make(map[string]common.StringLookup)
 		for key, items := range lists {
-			// TODO: use linear search for lists below stringLookupThreshold?
-			itemLookup := make(map[string]struct{})
-			for _, item := range items {
-				itemLookup[item] = struct{}{}
-			}
-			lookup[key] = itemLookup
+			lookup[key] = common.NewStringLookup(items)
 		}
 		return func(key, item string) bool {
-			itemLookup := lookup[key]
-			if itemLookup == nil {
+			itemLookup, ok := lookup[key]
+			if !ok {
 				// Allow when no list
 				return true
 			}
-			_, found := itemLookup[item]
+			found := itemLookup.Contains(item)
 			// Allow or disallow based on list type
 			return found == isAllowList
 		}

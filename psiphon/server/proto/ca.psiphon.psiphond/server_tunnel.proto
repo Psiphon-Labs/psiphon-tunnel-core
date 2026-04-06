@@ -99,4 +99,7 @@ message ServerTunnel {
     optional int64 invalid_server_entry_tags = 185;
     optional int64 ssh_protocol_bytes = 186;
     optional int64 ssh_protocol_bytes_overhead = 187;
+    optional int64 proxy_protocol_header_added = 188;
+    optional int64 proxy_protocol_header_replaced = 189;
+    optional int64 proxy_protocol_header_failed = 190;
 }

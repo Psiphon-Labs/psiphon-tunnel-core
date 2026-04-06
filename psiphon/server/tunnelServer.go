@@ -1971,7 +1971,7 @@ type sshClient struct {
 	sendAlertRequests                    chan protocol.AlertRequest
 	sentAlertRequests                    map[string]bool
 	peakMetrics                          peakMetrics
-	destinationBytesMetrics              map[string]*protocolDestinationBytesMetrics
+	destinationBytesMetrics              *common.StringValueLookup[*protocolDestinationBytesMetrics]
 	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
 	dnsResolver                          *net.Resolver
 	dnsCache                             *lrucache.Cache
@@ -1980,6 +1980,7 @@ type sshClient struct {
 	invalidServerEntryTags               int
 	sshProtocolBytesTracker              *sshProtocolBytesTracker
 	dslRequestCount                      int
+	proxyProtocolMetrics                 proxyProtocolMetrics
 }
 
 type trafficState struct {
@@ -2008,6 +2009,12 @@ type peakMetrics struct {
 	TCPPortForwardFailureRateSampleSize   *int64
 	DNSFailureRate                        *float64
 	DNSFailureRateSampleSize              *int64
+}
+
+type proxyProtocolMetrics struct {
+	added    atomic.Int64
+	replaced atomic.Int64
+	failed   atomic.Int64
 }
 
 // qualityMetrics records upstream TCP dial attempts and
@@ -2093,22 +2100,28 @@ type handshakeStateInfo struct {
 }
 
 type handshakeState struct {
-	completed               bool
-	apiProtocol             string
-	apiParams               common.APIParameters
-	activeAuthorizationIDs  []string
-	authorizedAccessTypes   []string
-	authorizationsRevoked   bool
-	domainBytesChecksum     []byte
-	establishedTunnelsCount int
-	splitTunnelLookup       *splitTunnelLookup
-	deviceRegion            string
-	newTacticsTag           string
-	inproxyClientIP         string
-	inproxyClientGeoIPData  GeoIPData
-	inproxyProxyID          inproxy.ID
-	inproxyMatchedPersonal  bool
-	inproxyRelayLogFields   common.LogFields
+	completed                 bool
+	apiProtocol               string
+	apiParams                 common.APIParameters
+	activeAuthorizationIDs    []string
+	authorizedAccessTypes     []string
+	authorizationsRevoked     bool
+	domainBytesChecksum       []byte
+	establishedTunnelsCount   int
+	splitTunnelLookup         *common.StringLookup
+	deviceRegion              string
+	newTacticsTag             string
+	inproxyClientIP           string
+	inproxyClientGeoIPData    GeoIPData
+	inproxyProxyID            inproxy.ID
+	inproxyMatchedPersonal    bool
+	inproxyRelayLogFields     common.LogFields
+	proxyProtocolHeaderConfig *proxyProtocolHeaderConfig
+}
+
+type proxyProtocolHeaderConfig struct {
+	macKey                     []byte
+	targetDestinationAddresses common.StringLookup
 }
 
 type protocolDestinationBytesMetrics struct {
@@ -2143,14 +2156,9 @@ func (d *destinationBytesMetrics) getBytesDown() int64 {
 	return atomic.LoadInt64(&d.bytesDown)
 }
 
-type splitTunnelLookup struct {
-	regions       []string
-	regionsLookup map[string]bool
-}
-
 func newSplitTunnelLookup(
 	ownRegion string,
-	otherRegions []string) (*splitTunnelLookup, error) {
+	otherRegions []string) (*common.StringLookup, error) {
 
 	length := len(otherRegions)
 	if ownRegion != "" {
@@ -2163,41 +2171,15 @@ func newSplitTunnelLookup(
 		return nil, errors.Tracef("too many regions: %d", length)
 	}
 
-	// Create map lookups for lists where the number of values to compare
-	// against exceeds a threshold where benchmarks show maps are faster than
-	// looping through a slice. Otherwise use a slice for lookups. In both
-	// cases, the input slice is no longer referenced.
-
-	if length >= stringLookupThreshold {
-		regionsLookup := make(map[string]bool)
-		if ownRegion != "" {
-			regionsLookup[ownRegion] = true
-		}
-		for _, region := range otherRegions {
-			regionsLookup[region] = true
-		}
-		return &splitTunnelLookup{
-			regionsLookup: regionsLookup,
-		}, nil
-	} else {
-		regions := []string{}
-		if ownRegion != "" && !common.Contains(otherRegions, ownRegion) {
-			regions = append(regions, ownRegion)
-		}
-		// TODO: check for other duplicate regions?
-		regions = append(regions, otherRegions...)
-		return &splitTunnelLookup{
-			regions: regions,
-		}, nil
+	regions := []string{}
+	if ownRegion != "" && !common.Contains(otherRegions, ownRegion) {
+		regions = append(regions, ownRegion)
 	}
-}
+	// TODO: check for other duplicate regions?
+	regions = append(regions, otherRegions...)
 
-func (lookup *splitTunnelLookup) lookup(region string) bool {
-	if lookup.regionsLookup != nil {
-		return lookup.regionsLookup[region]
-	} else {
-		return common.Contains(lookup.regions, region)
-	}
+	lookup := common.NewStringLookup(regions)
+	return &lookup, nil
 }
 
 type inproxyProxyQualityTracker struct {
@@ -3776,7 +3758,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 			for _, ASN := range destinationBytesMetricsASNs {
 
-				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics[ASN]
+				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics.Get(ASN)
 				if !ok {
 					continue
 				}
@@ -3833,6 +3815,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["request_check_server_entry_tags"] = sshClient.requestCheckServerEntryTags
 		logFields["checked_server_entry_tags"] = sshClient.checkedServerEntryTags
 		logFields["invalid_server_entry_tags"] = sshClient.invalidServerEntryTags
+	}
+
+	if sshClient.handshakeState.proxyProtocolHeaderConfig != nil {
+		logFields["proxy_protocol_header_added"] = sshClient.proxyProtocolMetrics.added.Load()
+		logFields["proxy_protocol_header_replaced"] = sshClient.proxyProtocolMetrics.replaced.Load()
+		logFields["proxy_protocol_header_failed"] = sshClient.proxyProtocolMetrics.failed.Load()
 	}
 
 	// Merge in additional metrics from the optional metrics source
@@ -4569,13 +4557,22 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 		return
 	}
 
-	sshClient.destinationBytesMetrics = make(map[string]*protocolDestinationBytesMetrics)
-
+	filteredASNs := make([]string, 0, len(ASNs))
+	metrics := make([]*protocolDestinationBytesMetrics, 0, len(ASNs))
 	for _, ASN := range ASNs {
 		if ASN != "" {
-			sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
+			filteredASNs = append(filteredASNs, ASN)
+			metrics = append(metrics, &protocolDestinationBytesMetrics{})
 		}
 	}
+
+	lookup, err := common.NewStringValueLookup(filteredASNs, metrics)
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("invalid lookup")
+		return
+	}
+
+	sshClient.destinationBytesMetrics = &lookup
 }
 
 func (sshClient *sshClient) newDestinationBytesMetricsUpdater(
@@ -4590,10 +4587,7 @@ func (sshClient *sshClient) newDestinationBytesMetricsUpdater(
 
 	destinationASN := sshClient.sshServer.support.GeoIPService.LookupISPForIP(IPAddress).ASN
 
-	// Future enhancement: for 5 or fewer ASNs, iterate over a slice instead
-	// of using a map? See, for example, stringLookupThreshold in
-	// common/tactics.
-	metrics, ok := sshClient.destinationBytesMetrics[destinationASN]
+	metrics, ok := sshClient.destinationBytesMetrics.Get(destinationASN)
 	if !ok {
 		return nil
 	}
@@ -4641,7 +4635,7 @@ func (sshClient *sshClient) newInproxyProxyQualityTracker() *inproxyProxyQuality
 	// GeoIP in reportProxyQuality.
 	//
 	// Note that the in-proxy broker also enforces InproxyEnableProxyQuality,
-	// and also assumes no GeoIP targetting.
+	// and also assumes no GeoIP targeting.
 
 	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
@@ -5258,6 +5252,16 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}()
 
+	// Check if the destination is a configured target for adding a PROXY
+	// protocol header. The target can be either a domain or IP address.
+	// Domains are the typical case; IP address targets are not matched after
+	// domain name resolution.
+
+	addProxyProtocolHeader :=
+		sshClient.handshakeState.proxyProtocolHeaderConfig != nil &&
+			sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses.Contains(
+				normalizeProxyProtocolTargetDestinationAddress(hostToConnect))
+
 	// Validate the domain name and check the domain blocklist before dialing.
 	//
 	// The IP blocklist is checked in isPortForwardPermitted, which also provides
@@ -5422,7 +5426,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		clientGeoIPData := sshClient.getClientGeoIPData()
 
 		if clientGeoIPData.Country != GEOIP_UNKNOWN_VALUE &&
-			sshClient.handshakeState.splitTunnelLookup.lookup(
+			sshClient.handshakeState.splitTunnelLookup.Contains(
 				destinationGeoIPData.Country) {
 
 			// Since isPortForwardPermitted is not called in this case, explicitly call
@@ -5533,6 +5537,50 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	if IsLogLevelDebug() {
 		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	}
+
+	if addProxyProtocolHeader {
+
+		// Add the PROXY protocol header with the original client IP, using a
+		// MAC to authenticate the header values. Any existing PROXY protocol
+		// header will be replaced with this new header.
+		//
+		// This PROXY protocol header is intended as an authenticated
+		// alternative for Psiphon use cases which previously added PROXY
+		// headers on the client side.
+		//
+		// Limitation: addOrReplaceProxyProtocolHeader attempts to first read
+		// any PROXY protocol sent by the client, and as a result is not
+		// compatible with server-first network protocols. See also the PROXY
+		// v1/v2 signature limitations in addOrReplaceProxyProtocolHeader.
+
+		wireHeader, err := makeProxyProtocolHeader(
+			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[:proxyProtocolHeaderKeyIDSize],
+			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[proxyProtocolHeaderKeyIDSize:],
+			net.ParseIP(sshClient.clientIP),
+			IP,
+			portToConnect)
+		if err != nil {
+			sshClient.proxyProtocolMetrics.failed.Add(1)
+			log.WithTraceFields(LogFields{"error": err}).Error("make PROXY header failed")
+			return
+		}
+
+		bytesRead, replaced, err := addOrReplaceProxyProtocolHeader(
+			fwdChannel,
+			fwdConn,
+			wireHeader)
+		atomic.AddInt64(&bytesUp, bytesRead)
+		if err != nil {
+			sshClient.proxyProtocolMetrics.failed.Add(1)
+			log.WithTraceFields(LogFields{"error": err}).Error("apply PROXY header failed")
+			return
+		}
+		if replaced {
+			sshClient.proxyProtocolMetrics.replaced.Add(1)
+		} else {
+			sshClient.proxyProtocolMetrics.added.Add(1)
+		}
 	}
 
 	// TODO: relay errors to fwdChannel.Stderr()?
