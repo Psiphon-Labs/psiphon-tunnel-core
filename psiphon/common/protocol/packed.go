@@ -846,12 +846,13 @@ func init() {
 		{172, "unique_candidate_estimate", intConverter},
 		{173, "candidates_moved_to_front", intConverter},
 		{174, "first_fronted_meek_candidate", intConverter},
+		{175, "dsl_prioritized_reason", nil},
 
 		// Specs: server.handshakeRequestParams
 
-		{175, "enable_proxy_protocol_headers", intConverter},
+		{176, "enable_proxy_protocol_headers", intConverter},
 
-		// Next key value = 176
+		// Next key value = 177
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
