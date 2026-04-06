@@ -134,7 +134,7 @@ func runTestProxyProtocolHeaderVerification() error {
 	wireHeader[16] ^= 0xff // Flip source IPv4 field bits
 
 	_, _, _, _, err =
-		verifyProxyProtocolHeader(keyID, incorrectKey, wireHeader)
+		verifyProxyProtocolHeader(keyID, key, wireHeader)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
