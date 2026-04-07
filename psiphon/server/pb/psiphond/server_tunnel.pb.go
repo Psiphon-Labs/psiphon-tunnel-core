@@ -108,6 +108,9 @@ type ServerTunnel struct {
 	InvalidServerEntryTags                        *int64                 `protobuf:"varint,185,opt,name=invalid_server_entry_tags,json=invalidServerEntryTags,proto3,oneof" json:"invalid_server_entry_tags,omitempty"`
 	SshProtocolBytes                              *int64                 `protobuf:"varint,186,opt,name=ssh_protocol_bytes,json=sshProtocolBytes,proto3,oneof" json:"ssh_protocol_bytes,omitempty"`
 	SshProtocolBytesOverhead                      *int64                 `protobuf:"varint,187,opt,name=ssh_protocol_bytes_overhead,json=sshProtocolBytesOverhead,proto3,oneof" json:"ssh_protocol_bytes_overhead,omitempty"`
+	ProxyProtocolHeaderAdded                      *int64                 `protobuf:"varint,188,opt,name=proxy_protocol_header_added,json=proxyProtocolHeaderAdded,proto3,oneof" json:"proxy_protocol_header_added,omitempty"`
+	ProxyProtocolHeaderReplaced                   *int64                 `protobuf:"varint,189,opt,name=proxy_protocol_header_replaced,json=proxyProtocolHeaderReplaced,proto3,oneof" json:"proxy_protocol_header_replaced,omitempty"`
+	ProxyProtocolHeaderFailed                     *int64                 `protobuf:"varint,190,opt,name=proxy_protocol_header_failed,json=proxyProtocolHeaderFailed,proto3,oneof" json:"proxy_protocol_header_failed,omitempty"`
 	unknownFields                                 protoimpl.UnknownFields
 	sizeCache                                     protoimpl.SizeCache
 }
@@ -730,11 +733,32 @@ func (x *ServerTunnel) GetSshProtocolBytesOverhead() int64 {
 	return 0
 }
 
+func (x *ServerTunnel) GetProxyProtocolHeaderAdded() int64 {
+	if x != nil && x.ProxyProtocolHeaderAdded != nil {
+		return *x.ProxyProtocolHeaderAdded
+	}
+	return 0
+}
+
+func (x *ServerTunnel) GetProxyProtocolHeaderReplaced() int64 {
+	if x != nil && x.ProxyProtocolHeaderReplaced != nil {
+		return *x.ProxyProtocolHeaderReplaced
+	}
+	return 0
+}
+
+func (x *ServerTunnel) GetProxyProtocolHeaderFailed() int64 {
+	if x != nil && x.ProxyProtocolHeaderFailed != nil {
+		return *x.ProxyProtocolHeaderFailed
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_server_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd0B\n" +
+	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8bE\n" +
 	"\fServerTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
@@ -825,7 +849,10 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x19checked_server_entry_tags\x18\xb8\x01 \x01(\x03HPR\x16checkedServerEntryTags\x88\x01\x01\x12?\n" +
 	"\x19invalid_server_entry_tags\x18\xb9\x01 \x01(\x03HQR\x16invalidServerEntryTags\x88\x01\x01\x122\n" +
 	"\x12ssh_protocol_bytes\x18\xba\x01 \x01(\x03HRR\x10sshProtocolBytes\x88\x01\x01\x12C\n" +
-	"\x1bssh_protocol_bytes_overhead\x18\xbb\x01 \x01(\x03HSR\x18sshProtocolBytesOverhead\x88\x01\x01B\x0e\n" +
+	"\x1bssh_protocol_bytes_overhead\x18\xbb\x01 \x01(\x03HSR\x18sshProtocolBytesOverhead\x88\x01\x01\x12C\n" +
+	"\x1bproxy_protocol_header_added\x18\xbc\x01 \x01(\x03HTR\x18proxyProtocolHeaderAdded\x88\x01\x01\x12I\n" +
+	"\x1eproxy_protocol_header_replaced\x18\xbd\x01 \x01(\x03HUR\x1bproxyProtocolHeaderReplaced\x88\x01\x01\x12E\n" +
+	"\x1cproxy_protocol_header_failed\x18\xbe\x01 \x01(\x03HVR\x19proxyProtocolHeaderFailed\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
 	"\x14_inproxy_dial_paramsB\x1f\n" +
@@ -909,7 +936,10 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x1a_checked_server_entry_tagsB\x1c\n" +
 	"\x1a_invalid_server_entry_tagsB\x15\n" +
 	"\x13_ssh_protocol_bytesB\x1e\n" +
-	"\x1c_ssh_protocol_bytes_overheadJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x1c_ssh_protocol_bytes_overheadB\x1e\n" +
+	"\x1c_proxy_protocol_header_addedB!\n" +
+	"\x1f_proxy_protocol_header_replacedB\x1f\n" +
+	"\x1d_proxy_protocol_header_failedJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_tunnel_proto_rawDescOnce sync.Once

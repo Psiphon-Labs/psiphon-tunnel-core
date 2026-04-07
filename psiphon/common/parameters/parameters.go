@@ -153,6 +153,9 @@ const (
 	SSHKeepAliveProbeInactivePeriod                    = "SSHKeepAliveProbeInactivePeriod"
 	SSHKeepAliveNetworkConnectivityPollingPeriod       = "SSHKeepAliveNetworkConnectivityPollingPeriod"
 	SSHKeepAliveResetOnFailureProbability              = "SSHKeepAliveResetOnFailureProbability"
+	SSHKeepAliveResumeProbeTimeout                     = "SSHKeepAliveResumeProbeTimeout"
+	SSHKeepAliveResumeProbeInactivePeriod              = "SSHKeepAliveResumeProbeInactivePeriod"
+	SSHKeepAliveResumeReconnectInactivePeriod          = "SSHKeepAliveResumeReconnectInactivePeriod"
 	HTTPProxyOriginServerTimeout                       = "HTTPProxyOriginServerTimeout"
 	HTTPProxyMaxIdleConnectionsPerHost                 = "HTTPProxyMaxIdleConnectionsPerHost"
 	FetchRemoteServerListTimeout                       = "FetchRemoteServerListTimeout"
@@ -573,6 +576,8 @@ const (
 	MeekPayloadPaddingServerOmitProbability            = "MeekPayloadPaddingServerOmitProbability"
 	MeekPayloadPaddingServerMinSize                    = "MeekPayloadPaddingServerMinSize"
 	MeekPayloadPaddingServerMaxSize                    = "MeekPayloadPaddingServerMaxSize"
+	ProxyProtocolHeaderTargetDestinationAddresses      = "ProxyProtocolHeaderTargetDestinationAddresses"
+	ProxyProtocolHeaderDefaultEnableProbability        = "ProxyProtocolHeaderDefaultEnableProbability"
 
 	// Retired parameters
 
@@ -718,6 +723,9 @@ var defaultParameters = map[string]struct {
 	SSHKeepAliveProbeInactivePeriod:              {value: 10 * time.Second, minimum: 1 * time.Second},
 	SSHKeepAliveNetworkConnectivityPollingPeriod: {value: 500 * time.Millisecond, minimum: 1 * time.Millisecond},
 	SSHKeepAliveResetOnFailureProbability:        {value: 0.0, minimum: 0.0},
+	SSHKeepAliveResumeProbeTimeout:               {value: 2500 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	SSHKeepAliveResumeProbeInactivePeriod:        {value: 1 * time.Second, minimum: 0 * time.Millisecond},
+	SSHKeepAliveResumeReconnectInactivePeriod:    {value: 2*time.Minute + 1*time.Second, minimum: 0 * time.Millisecond},
 
 	HTTPProxyOriginServerTimeout:       {value: 15 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	HTTPProxyMaxIdleConnectionsPerHost: {value: 50, minimum: 0},
@@ -1226,6 +1234,9 @@ var defaultParameters = map[string]struct {
 	MeekPayloadPaddingServerOmitProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	MeekPayloadPaddingServerMinSize:         {value: 0, minimum: 0, flags: serverSideOnly},
 	MeekPayloadPaddingServerMaxSize:         {value: 65533, minimum: 0, flags: serverSideOnly},
+
+	ProxyProtocolHeaderTargetDestinationAddresses: {value: KeyStrings{}, flags: serverSideOnly},
+	ProxyProtocolHeaderDefaultEnableProbability:   {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -57,11 +57,13 @@ type FetcherConfig struct {
 	DatastoreHasServerEntry   func(
 		tag ServerEntryTag,
 		version int,
-		prioritizeDial bool) bool
+		prioritizeDial bool,
+		prioritizeReason string) bool
 	DatastoreStoreServerEntry func(
 		serverEntryFields protocol.PackedServerEntryFields,
 		source string,
-		prioritizeDial bool) error
+		prioritizeDial bool,
+		prioritizeReason string) error
 
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
@@ -237,25 +239,27 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		}).Info("DSL: fetched server entries")
 	}()
 
-	// A subset of versionedTags containing both the tag and prioritize flag
-	// could be used here instead of two slices, but the memory impact of two
-	// slices should be less, considering the DoGarbageCollection can reclaim
-	// versionedTags, and we need a slice of tags (slice of getTags) to send
-	// in GetServerEntries.
+	// A subset of versionedTags containing both the tag and prioritize data
+	// could be used here instead of multiple slices, but the memory impact
+	// of parallel slices should be less, considering the DoGarbageCollection
+	// can reclaim versionedTags, and we need a slice of tags (slice of
+	// getTags) to send in GetServerEntries.
 	//
 	// As GetServerEntriesResponse will contain an entry (potentially nil) for
 	// every requested server entry tag, in requested order, each index in
-	// prioritizeDials corresponds both to the same index in getTags and the
-	// sourcedServerEntries returned from doGetServerEntriesRequest.
+	// prioritizeDials/Reasons corresponds both to the same index in getTags
+	// and the sourcedServerEntries returned from doGetServerEntriesRequest.
 
 	var getTags []ServerEntryTag
 	var prioritizeDials []bool
+	var prioritizeReasons []string
 	for _, v := range versionedTags {
 
 		hasServerEntry := f.config.DatastoreHasServerEntry(
 			v.Tag,
 			int(v.Version),
-			v.PrioritizeDial)
+			v.PrioritizeDial,
+			v.PrioritizeReason)
 
 		if hasServerEntry {
 			knownServerEntriesCount += 1
@@ -263,6 +267,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		}
 		getTags = append(getTags, v.Tag)
 		prioritizeDials = append(prioritizeDials, v.PrioritizeDial)
+		prioritizeReasons = append(prioritizeReasons, v.PrioritizeReason)
 	}
 
 	// Allow garbage collection.
@@ -296,7 +301,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 			err := f.config.DatastoreStoreServerEntry(
 				sourcedEntry.ServerEntryFields,
 				sourcedEntry.Source,
-				prioritizeDials[i])
+				prioritizeDials[i],
+				prioritizeReasons[i])
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -310,6 +316,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 		getTags = getTags[len(sourcedServerEntries):]
 		prioritizeDials = prioritizeDials[len(sourcedServerEntries):]
+		prioritizeReasons = prioritizeReasons[len(sourcedServerEntries):]
 
 		f.config.DoGarbageCollection()
 	}

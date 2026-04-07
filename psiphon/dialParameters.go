@@ -184,6 +184,7 @@ type DialParameters struct {
 
 	DSLPendingPrioritizeDialTimestamp time.Time `json:",omitempty"`
 	DSLPrioritizedDial                bool      `json:",omitempty"`
+	DSLPrioritizedDialReason          string    `json:",omitempty"`
 
 	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
@@ -312,6 +313,7 @@ func MakeDialParameters(
 	// server entry happens to have been used for a tunnel protocol. See
 	// fetchTactics.
 
+	dslPrioritizeDialReason := ""
 	dslPendingPrioritizeDial :=
 		dialParams != nil && !dialParams.DSLPendingPrioritizeDialTimestamp.IsZero()
 
@@ -333,6 +335,8 @@ func MakeDialParameters(
 				NoticeWarning("DeleteDialParameters failed: %s", err)
 			}
 		}
+
+		dslPrioritizeDialReason = dialParams.DSLPrioritizedDialReason
 
 		// Replace the placeholder with new dial parameters.
 		dialParams = nil
@@ -489,6 +493,11 @@ func MakeDialParameters(
 	// parameters are replayed.
 	dialParams.DSLPrioritizedDial =
 		dslPendingPrioritizeDial || (isReplay && dialParams.DSLPrioritizedDial)
+	if !dialParams.DSLPrioritizedDial {
+		dialParams.DSLPrioritizedDialReason = ""
+	} else if dslPendingPrioritizeDial {
+		dialParams.DSLPrioritizedDialReason = dslPrioritizeDialReason
+	}
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon

@@ -156,6 +156,16 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
 
+	// When specified, send the client's HAProxy PROXY protocol header opt-in
+	// or opt-out to the server.
+	if serverContext.tunnel.config.EnableProxyProtocolHeaders != nil {
+		enabled := "0"
+		if *serverContext.tunnel.config.EnableProxyProtocolHeaders {
+			enabled = "1"
+		}
+		params["enable_proxy_protocol_headers"] = enabled
+	}
+
 	doTactics := !serverContext.tunnel.config.DisableTactics
 
 	compressTactics := false
@@ -1294,6 +1304,9 @@ func getBaseAPIParameters(
 
 		if dialParams.DSLPrioritizedDial {
 			params["dsl_prioritized"] = "1"
+			if len(dialParams.DSLPrioritizedDialReason) > 0 {
+				params["dsl_prioritized_reason"] = dialParams.DSLPrioritizedDialReason
+			}
 		}
 
 		// dialParams.DialDuration is nanoseconds; report milliseconds

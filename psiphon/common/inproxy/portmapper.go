@@ -149,14 +149,17 @@ func init() {
 
 	buildInfo, ok := debug.ReadBuildInfo()
 
-	// In GOPATH builds, BuildInfo is not available; in `go test` runs,
-	// BuildInfo dependency information is not available. In these case, we
-	// skip the check and assume that contemporaneous go module build runs
-	// will catch a check failure.
+	// In GOPATH builds, BuildInfo is not available; in test binaries for
+	// (devel) modules, dependency information is not available and the
+	// binary path may not end with ".test". In these cases, skip the
+	// check and assume that contemporaneous go module build runs will
+	// catch a check failure.
 	if !ok ||
 		buildInfo.Main.Path == "" ||
 		buildInfo.Main.Path == "command-line-arguments" ||
-		strings.HasSuffix(buildInfo.Path, ".test") {
+		buildInfo.Main.Version == "(devel)" ||
+		strings.HasSuffix(buildInfo.Path, ".test") ||
+		len(buildInfo.Deps) == 0 {
 		return
 	}
 

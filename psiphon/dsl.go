@@ -239,25 +239,36 @@ func doDSLFetch(
 	hasServerEntry := func(
 		tag dsl.ServerEntryTag,
 		version int,
-		prioritizeDial bool) bool {
+		prioritizeDial bool,
+		prioritizeReason string) bool {
 
 		prioritizeDial = prioritizeDial &&
 			prng.FlipWeightedCoin(prioritizeDialExistingServerEntryProbability)
+
+		if !prioritizeDial {
+			prioritizeReason = ""
+		}
 
 		return DSLHasServerEntry(
 			tag,
 			version,
 			prioritizeDial,
+			prioritizeReason,
 			networkID)
 	}
 
 	storeServerEntry := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
-		prioritizeDial bool) error {
+		prioritizeDial bool,
+		prioritizeReason string) error {
 
 		prioritizeDial = prioritizeDial &&
 			prng.FlipWeightedCoin(prioritizeDialNewServerEntryProbability)
+
+		if !prioritizeDial {
+			prioritizeReason = ""
+		}
 
 		return errors.Trace(
 			DSLStoreServerEntry(
@@ -265,6 +276,7 @@ func doDSLFetch(
 				packedServerEntryFields,
 				source,
 				prioritizeDial,
+				prioritizeReason,
 				networkID))
 	}
 
