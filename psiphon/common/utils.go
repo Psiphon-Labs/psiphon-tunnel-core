@@ -168,7 +168,11 @@ func Compress(compression int32, data []byte) ([]byte, error) {
 	}
 	var compressedData bytes.Buffer
 	writer := zlibWriterPool.Get().(*zlib.Writer)
-	defer zlibWriterPool.Put(writer)
+	defer func() {
+		// Don't retain reference to output buffer.
+		writer.Reset(io.Discard)
+		zlibWriterPool.Put(writer)
+	}()
 	writer.Reset(&compressedData)
 	_, err := writer.Write(data)
 	if err != nil {
