@@ -39,8 +39,9 @@ const (
 	matcherOfferQueueMaxSize        = 5000000
 	matcherPendingAnswersTTL        = 30 * time.Second
 	matcherPendingAnswersMaxSize    = 5000000
-	matcherMaxPreferredNATProbe     = 100
-	matcherMaxProbe                 = 1000
+	matcherMaxPreferredNATProbe     = 10
+	matcherMaxProbe                 = 100
+	matcherYieldCount               = 32
 )
 
 // Matcher matches proxy announcements with client offers. Matcher also
@@ -103,6 +104,8 @@ type Matcher struct {
 	offerRateLimitQuantity   int
 	offerRateLimitInterval   time.Duration
 	offerMinimumDeadline     time.Duration
+
+	offerQueueLen atomic.Int64
 
 	matchSignal chan struct{}
 
@@ -682,17 +685,15 @@ func (m *Matcher) matchAllOffers() {
 	// Include lock acquisition time in MatchDuration metric.
 	startTime := time.Now()
 
-	m.announcementQueueMutex.Lock()
-	defer m.announcementQueueMutex.Unlock()
 	m.offerQueueMutex.Lock()
 	defer m.offerQueueMutex.Unlock()
+
+	m.announcementQueueMutex.Lock()
+	defer m.announcementQueueMutex.Unlock()
 
 	// Take each offer in turn, and select an announcement match. There is an
 	// implicit preference for older client offers, sooner to timeout, at the
 	// front of the queue.
-
-	// TODO: consider matching one offer, then releasing the locks to allow
-	// more announcements to be enqueued, then continuing to match.
 
 	nextOffer := m.offerQueue.Front()
 	offerIndex := -1
@@ -700,6 +701,13 @@ func (m *Matcher) matchAllOffers() {
 	for nextOffer != nil && m.announcementQueue.getLen() > 0 {
 
 		offerIndex += 1
+
+		// Periodicially yield the announcement queue lock to allow proxy
+		// announces a chance to enqueue.
+		if offerIndex > 0 && offerIndex%matcherYieldCount == 0 {
+			m.announcementQueueMutex.Unlock()
+			m.announcementQueueMutex.Lock()
+		}
 
 		// nextOffer.Next must be invoked before any removeOfferEntry since
 		// container/list.remove clears list.Element.next.
@@ -1005,16 +1013,11 @@ func (m *Matcher) applyLoadLimit(isAnnouncement bool) error {
 		return nil
 	}
 
-	// Acquire the queue locks only when in the load limit state, and in the
-	// same order as matchAllOffers.
-
-	m.announcementQueueMutex.Lock()
-	defer m.announcementQueueMutex.Unlock()
-	m.offerQueueMutex.Lock()
-	defer m.offerQueueMutex.Unlock()
+	// The lock-free queue length snapshots can be used for the following
+	// heuristic check, and avoid queue lock contention.
 
 	announcementLen := m.announcementQueue.getLen()
-	offerLen := m.offerQueue.Len()
+	offerLen := int(m.offerQueueLen.Load())
 
 	// When the load limit had been reached, and assuming the broker process
 	// is running only an in-proxy broker, it's likely, in practise, that
@@ -1256,6 +1259,7 @@ func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 	}
 
 	offerEntry.queueReference = m.offerQueue.PushBack(offerEntry)
+	m.offerQueueLen.Add(1)
 
 	m.offerQueueEntryCountByIP[offerEntry.limitIP] += 1
 
@@ -1281,6 +1285,7 @@ func (m *Matcher) removeOfferEntry(aborting bool, offerEntry *offerEntry) {
 	}
 
 	m.offerQueue.Remove(offerEntry.queueReference)
+	m.offerQueueLen.Add(-1)
 
 	offerEntry.queueReference = nil
 
@@ -1318,12 +1323,13 @@ func getRateLimitIP(strIP string) string {
 // announcementMultiQueue is a set of announcement queues, one per common or
 // personal compartment ID, providing efficient iteration over announcements
 // matching a specified list of compartment IDs. announcementMultiQueue and
-// its underlying data structures are not safe for concurrent access.
+// its underlying data structures are not safe for concurrent access, with the
+// exception of announcementMultiQueue.getLen.
 type announcementMultiQueue struct {
 	priorityCommonCompartmentQueues map[ID]*announcementCompartmentQueue
 	commonCompartmentQueues         map[ID]*announcementCompartmentQueue
 	personalCompartmentQueues       map[ID]*announcementCompartmentQueue
-	totalEntries                    int
+	totalEntries                    atomic.Int64
 	iterator                        *announcementMatchIterator
 }
 
@@ -1373,7 +1379,7 @@ func newAnnouncementMultiQueue() *announcementMultiQueue {
 }
 
 func (q *announcementMultiQueue) getLen() int {
-	return q.totalEntries
+	return int(q.totalEntries.Load())
 }
 
 func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) error {
@@ -1443,7 +1449,7 @@ func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) e
 		compartmentQueue.strictlyLimitedNATCount += 1
 	}
 
-	q.totalEntries += 1
+	q.totalEntries.Add(1)
 
 	announcementEntry.queueReference = announcementQueueReference{
 		multiQueue:       q,
@@ -1490,7 +1496,7 @@ func (r *announcementQueueReference) dequeue() bool {
 		delete(queues, r.compartmentQueue.compartmentID)
 	}
 
-	r.multiQueue.totalEntries -= 1
+	r.multiQueue.totalEntries.Add(-1)
 
 	// Mark as dequeued.
 	r.entry = nil
