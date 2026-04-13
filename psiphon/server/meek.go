@@ -1946,7 +1946,19 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		return errors.Trace(err)
 	}
 
-	err = server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
+	sponsorCommonCompartmentIDStrs :=
+		p.InproxyKeyCompartmentID(parameters.InproxySponsorCommonCompartmentID)
+	sponsorCommonCompartmentID := make(map[string]inproxy.ID)
+	for key, strID := range sponsorCommonCompartmentIDStrs {
+		ID, err := inproxy.IDFromString(strID)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		sponsorCommonCompartmentID[key] = ID
+	}
+
+	err = server.inproxyBroker.SetCommonCompartmentIDs(
+		commonCompartmentIDs, sponsorCommonCompartmentID)
 	if err != nil {
 		return errors.Trace(err)
 	}

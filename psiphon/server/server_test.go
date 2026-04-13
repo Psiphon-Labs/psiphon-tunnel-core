@@ -4687,6 +4687,11 @@ func paveTacticsConfigFile(
 		`, sponsorID)
 	}
 
+	if strings.Contains(inproxyParametersJSON, "%s") {
+		inproxyParametersJSON =
+			fmt.Sprintf(inproxyParametersJSON, sponsorID)
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey,
@@ -4933,6 +4938,28 @@ func generateInproxyTestConfig(
 			brokerFrontingProviderID)
 	}
 
+	allCommonCompartmentIDs := fmt.Sprintf(`["%s"]`, commonCompartmentIDStr)
+	sponsorCommonCompartmentIDs := "{}"
+	if prng.FlipCoin() {
+
+		// Exercise proxy sponsor ID/common compartment ID association. This
+		// configuration requires an addtional non-sponsor common compartment ID.
+
+		nonSponsorCommonCompartmentID, err := inproxy.MakeID()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		nonSponsorCommonCompartmentIDStr := nonSponsorCommonCompartmentID.String()
+
+		allCommonCompartmentIDs = fmt.Sprintf(`["%s", "%s"]`,
+			commonCompartmentIDStr,
+			nonSponsorCommonCompartmentIDStr)
+
+		// The sponsor ID is populated in paveTacticsConfigFile.
+		sponsorCommonCompartmentIDs =
+			fmt.Sprintf(`{"%%s": "%s"}`, commonCompartmentIDStr)
+	}
+
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
@@ -4945,7 +4972,8 @@ func generateInproxyTestConfig(
             "InproxyBrokerSpecs": %s,
             "InproxyProxyBrokerSpecs": %s,
             "InproxyClientBrokerSpecs": %s,
-            "InproxyAllCommonCompartmentIDs": ["%s"],
+            "InproxyAllCommonCompartmentIDs": %s,
+            "InproxySponsorCommonCompartmentID": %s,
             "InproxyCommonCompartmentIDs": ["%s"],
             "InproxyClientDiscoverNATProbability": 0.0,
             "InproxyDisableSTUN": true,
@@ -4977,7 +5005,8 @@ func generateInproxyTestConfig(
 		brokerSpecsJSON,
 		proxyBrokerSpecsJSON,
 		clientBrokerSpecsJSON,
-		commonCompartmentIDStr,
+		allCommonCompartmentIDs,
+		sponsorCommonCompartmentIDs,
 		commonCompartmentIDStr,
 		mediaStreamsProbability,
 		strings.ReplaceAll(brokerServerCertificate, "\n", "\\n"),
