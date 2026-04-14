@@ -1970,8 +1970,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL),
 		p.KeyDurations(parameters.InproxyFrontingProviderServerMaxRequestTimeouts))
 
-	nonlimitedProxyIDs, err := inproxy.IDsFromStrings(
-		p.Strings(parameters.InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs))
+	exemptProxyIDs, err := inproxy.IDsFromStrings(
+		p.Strings(parameters.InproxyBrokerMatcherAnnouncementExemptProxyIDs))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1979,7 +1979,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyBrokerMatcherAnnouncementLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherAnnouncementRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherAnnouncementRateLimitInterval),
-		nonlimitedProxyIDs,
+		exemptProxyIDs,
+		p.Strings(parameters.InproxyBrokerMatcherAnnouncementExemptSponsorIDs),
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),

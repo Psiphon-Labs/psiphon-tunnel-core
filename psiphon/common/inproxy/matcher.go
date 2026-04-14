@@ -22,6 +22,7 @@ import (
 	"container/list"
 	"context"
 	std_errors "errors"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -42,6 +43,10 @@ const (
 	matcherMaxPreferredNATProbe     = 10
 	matcherMaxProbe                 = 100
 	matcherYieldCount               = 32
+
+	matcherMaxRateLimitQuantity = 5000
+	matcherMaxRateLimitInterval = 1 * time.Minute
+	matcherMaxLimitEntryCount   = 5000
 )
 
 // Matcher matches proxy announcements with client offers. Matcher also
@@ -90,7 +95,8 @@ type Matcher struct {
 	announcementLimitEntryCount     int
 	announcementRateLimitQuantity   int
 	announcementRateLimitInterval   time.Duration
-	announcementNonlimitedProxyIDs  map[ID]struct{}
+	announcementExemptProxyIDs      map[ID]struct{}
+	announcementExemptSponsorIDs    common.StringLookup
 
 	// The offer queue is also implicitly sorted by offer age. Both an offer
 	// and announcement queue are required since either announcements or
@@ -119,10 +125,11 @@ type MatcherConfig struct {
 	Logger common.Logger
 
 	// Announcement queue limits.
-	AnnouncementLimitEntryCount    int
-	AnnouncementRateLimitQuantity  int
-	AnnouncementRateLimitInterval  time.Duration
-	AnnouncementNonlimitedProxyIDs []ID
+	AnnouncementLimitEntryCount   int
+	AnnouncementRateLimitQuantity int
+	AnnouncementRateLimitInterval time.Duration
+	AnnouncementExemptProxyIDs    []ID
+	AnnouncementExemptSponsorIDs  []string
 
 	// Offer queue limits.
 	OfferLimitEntryCount   int
@@ -196,6 +203,7 @@ func (p *MatchProperties) IsPreferredNATMatch(
 type MatchAnnouncement struct {
 	Properties   MatchProperties
 	ProxyID      ID
+	SponsorID    string
 	ProxyMetrics *ProxyMetrics
 	ConnectionID ID
 }
@@ -349,7 +357,8 @@ func NewMatcher(config *MatcherConfig) *Matcher {
 		config.AnnouncementLimitEntryCount,
 		config.AnnouncementRateLimitQuantity,
 		config.AnnouncementRateLimitInterval,
-		config.AnnouncementNonlimitedProxyIDs,
+		config.AnnouncementExemptProxyIDs,
+		config.AnnouncementExemptSponsorIDs,
 		config.OfferLimitEntryCount,
 		config.OfferRateLimitQuantity,
 		config.OfferRateLimitInterval,
@@ -359,30 +368,61 @@ func NewMatcher(config *MatcherConfig) *Matcher {
 }
 
 // SetLimits sets new queue limits, replacing the previous configuration.
-// Existing, cached rate limiters retain their existing rate limit state. New
-// entries will use the new quantity/interval configuration. In addition,
-// currently enqueued items may exceed any new, lower maximum entry count
-// until naturally dequeued.
+// Existing, cached rate limiters retain their existing rate limit state
+// (excepting exempt status changes). New entries will use the new
+// quantity/interval configuration. In addition, currently enqueued items may
+// exceed any new, lower maximum entry count until naturally dequeued.
+// Limit values are capped at sanity check levels.
 func (m *Matcher) SetLimits(
 	announcementLimitEntryCount int,
 	announcementRateLimitQuantity int,
 	announcementRateLimitInterval time.Duration,
-	announcementNonlimitedProxyIDs []ID,
+	announcementExemptProxyIDs []ID,
+	announcementExemptSponsorIDs []string,
 	offerLimitEntryCount int,
 	offerRateLimitQuantity int,
 	offerRateLimitInterval time.Duration,
 	offerMinimumDeadline time.Duration) {
 
-	nonlimitedProxyIDs := make(map[ID]struct{})
-	for _, proxyID := range announcementNonlimitedProxyIDs {
-		nonlimitedProxyIDs[proxyID] = struct{}{}
+	exemptProxyIDs := make(map[ID]struct{})
+	for _, proxyID := range announcementExemptProxyIDs {
+		exemptProxyIDs[proxyID] = struct{}{}
+	}
+
+	// Cap at sanity check levels. Explicit limit-disabled (zero value)
+	// configurations are still allowed.
+	//
+	// Limitation: rate limit comparison ignores burstiness.
+
+	if announcementLimitEntryCount > matcherMaxLimitEntryCount {
+		announcementLimitEntryCount = matcherMaxLimitEntryCount
+	}
+	if announcementRateLimitQuantity > 0 && announcementRateLimitInterval > 0 &&
+		(int64(announcementRateLimitQuantity) > math.MaxInt64/int64(matcherMaxRateLimitInterval) ||
+			// Equivalent to quantity/interval > sanityQuantity/sanityInterval
+			int64(announcementRateLimitQuantity)*int64(matcherMaxRateLimitInterval) >
+				int64(matcherMaxRateLimitQuantity)*int64(announcementRateLimitInterval)) {
+		announcementRateLimitQuantity = matcherMaxRateLimitQuantity
+		announcementRateLimitInterval = matcherMaxRateLimitInterval
+	}
+	if offerLimitEntryCount > matcherMaxLimitEntryCount {
+		offerLimitEntryCount = matcherMaxLimitEntryCount
+	}
+	if offerRateLimitQuantity > 0 && offerRateLimitInterval > 0 &&
+		(int64(offerRateLimitQuantity) > math.MaxInt64/int64(matcherMaxRateLimitInterval) ||
+			int64(offerRateLimitQuantity)*int64(matcherMaxRateLimitInterval) >
+				int64(matcherMaxRateLimitQuantity)*int64(offerRateLimitInterval)) {
+		offerRateLimitQuantity = matcherMaxRateLimitQuantity
+		offerRateLimitInterval = matcherMaxRateLimitInterval
 	}
 
 	m.announcementQueueMutex.Lock()
 	m.announcementLimitEntryCount = announcementLimitEntryCount
 	m.announcementRateLimitQuantity = announcementRateLimitQuantity
 	m.announcementRateLimitInterval = announcementRateLimitInterval
-	m.announcementNonlimitedProxyIDs = nonlimitedProxyIDs
+	m.announcementExemptProxyIDs = exemptProxyIDs
+	m.announcementExemptSponsorIDs = common.NewStringLookup(
+		announcementExemptSponsorIDs)
 	m.announcementQueueMutex.Unlock()
 
 	m.offerQueueMutex.Lock()
@@ -1088,7 +1128,10 @@ func (e MatcherLimitError) Error() string {
 
 // applyIPLimits checks per-proxy or per-client -- as determined by peer IP
 // address -- rate limits and queue entry limits.
-func (m *Matcher) applyIPLimits(isAnnouncement bool, limitIP string, proxyID ID) error {
+func (m *Matcher) applyIPLimits(
+	isAnnouncement bool,
+	isExempt bool,
+	limitIP string) error {
 
 	// Assumes m.announcementQueueMutex or m.offerQueueMutex is locked.
 
@@ -1100,16 +1143,31 @@ func (m *Matcher) applyIPLimits(isAnnouncement bool, limitIP string, proxyID ID)
 
 	if isAnnouncement {
 
-		// Skip limit checks for non-limited proxies.
-		if _, ok := m.announcementNonlimitedProxyIDs[proxyID]; ok {
-			return nil
-		}
-
 		entryCountByIP = m.announcementQueueEntryCountByIP
 		queueRateLimiters = m.announcementQueueRateLimiters
-		limitEntryCount = m.announcementLimitEntryCount
-		quantity = m.announcementRateLimitQuantity
-		interval = m.announcementRateLimitInterval
+
+		if isExempt {
+			// Use sanity limit checks for exempt proxies.
+			limitEntryCount = matcherMaxLimitEntryCount
+			quantity = matcherMaxRateLimitQuantity
+			interval = matcherMaxRateLimitInterval
+
+			// Allow limit-disabled configurations.
+			if m.announcementLimitEntryCount == 0 {
+				limitEntryCount = 0
+			}
+			if m.announcementRateLimitQuantity == 0 {
+				quantity = 0
+			}
+			if m.announcementRateLimitInterval == 0 {
+				interval = 0
+			}
+
+		} else {
+			limitEntryCount = m.announcementLimitEntryCount
+			quantity = m.announcementRateLimitQuantity
+			interval = m.announcementRateLimitInterval
+		}
 
 	} else {
 		entryCountByIP = m.offerQueueEntryCountByIP
@@ -1133,12 +1191,6 @@ func (m *Matcher) applyIPLimits(isAnnouncement bool, limitIP string, proxyID ID)
 	}
 
 	if limitEntryCount > 0 {
-
-		// Limitation: non-limited proxy ID entries are counted in
-		// entryCountByIP. If both a limited and non-limited proxy ingress
-		// from the same limitIP, then the non-limited entries will count
-		// against the limited proxy's limitEntryCount.
-
 		entryCount, ok := entryCountByIP[limitIP]
 		if ok && entryCount >= limitEntryCount {
 			return errors.Trace(
@@ -1159,11 +1211,26 @@ func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) err
 		return errors.TraceNew("queue full")
 	}
 
+	isExempt := false
+	if m.announcementExemptSponsorIDs.Contains(announcementEntry.announcement.SponsorID) {
+		isExempt = true
+	} else if _, ok := m.announcementExemptProxyIDs[announcementEntry.announcement.ProxyID]; ok {
+		isExempt = true
+	}
+
+	if isExempt {
+		// Ensure that any exempt and non-exempt proxy that share the same
+		// client IP, don't use the same limits.
+		announcementEntry.limitIP += "-exempt"
+	}
+
 	// Ensure no single peer IP can enqueue a large number of entries or
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := true
 	err := m.applyIPLimits(
-		isAnnouncement, announcementEntry.limitIP, announcementEntry.announcement.ProxyID)
+		isAnnouncement,
+		isExempt,
+		announcementEntry.limitIP)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1246,7 +1313,7 @@ func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := false
 	err := m.applyIPLimits(
-		isAnnouncement, offerEntry.limitIP, ID{})
+		isAnnouncement, false, offerEntry.limitIP)
 	if err != nil {
 		return errors.Trace(err)
 	}

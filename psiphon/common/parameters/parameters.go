@@ -429,7 +429,8 @@ const (
 	InproxyBrokerMatcherAnnouncementLimitEntryCount    = "InproxyBrokerMatcherAnnouncementLimitEntryCount"
 	InproxyBrokerMatcherAnnouncementRateLimitQuantity  = "InproxyBrokerMatcherAnnouncementRateLimitQuantity"
 	InproxyBrokerMatcherAnnouncementRateLimitInterval  = "InproxyBrokerMatcherAnnouncementRateLimitInterval"
-	InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs = "InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs"
+	InproxyBrokerMatcherAnnouncementExemptProxyIDs     = "InproxyBrokerMatcherAnnouncementExemptProxyIDs"
+	InproxyBrokerMatcherAnnouncementExemptSponsorIDs   = "InproxyBrokerMatcherAnnouncementExemptSponsorIDs"
 	InproxyBrokerMatcherOfferLimitEntryCount           = "InproxyBrokerMatcherOfferLimitEntryCount"
 	InproxyBrokerMatcherOfferRateLimitQuantity         = "InproxyBrokerMatcherOfferRateLimitQuantity"
 	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
@@ -1080,7 +1081,8 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherAnnouncementLimitEntryCount:    {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherAnnouncementRateLimitQuantity:  {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherAnnouncementRateLimitInterval:  {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
-	InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs: {value: []string{}, flags: serverSideOnly},
+	InproxyBrokerMatcherAnnouncementExemptProxyIDs:     {value: []string{}, flags: serverSideOnly},
+	InproxyBrokerMatcherAnnouncementExemptSponsorIDs:   {value: []string{}, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},

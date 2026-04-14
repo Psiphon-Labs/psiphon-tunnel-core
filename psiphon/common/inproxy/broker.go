@@ -238,10 +238,11 @@ type BrokerConfig struct {
 	PendingServerReportsTTL    time.Duration
 
 	// Announcement queue limit configuration.
-	MatcherAnnouncementLimitEntryCount    int
-	MatcherAnnouncementRateLimitQuantity  int
-	MatcherAnnouncementRateLimitInterval  time.Duration
-	MatcherAnnouncementNonlimitedProxyIDs []ID
+	MatcherAnnouncementLimitEntryCount   int
+	MatcherAnnouncementRateLimitQuantity int
+	MatcherAnnouncementRateLimitInterval time.Duration
+	MatcherAnnouncementExemptProxyIDs    []ID
+	MatcherAnnouncementExemptSponsorIDs  []string
 
 	// Offer queue limit configuration.
 	MatcherOfferLimitEntryCount   int
@@ -314,10 +315,11 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		matcher: NewMatcher(&MatcherConfig{
 			Logger: config.Logger,
 
-			AnnouncementLimitEntryCount:    config.MatcherAnnouncementLimitEntryCount,
-			AnnouncementRateLimitQuantity:  config.MatcherAnnouncementRateLimitQuantity,
-			AnnouncementRateLimitInterval:  config.MatcherAnnouncementRateLimitInterval,
-			AnnouncementNonlimitedProxyIDs: config.MatcherAnnouncementNonlimitedProxyIDs,
+			AnnouncementLimitEntryCount:   config.MatcherAnnouncementLimitEntryCount,
+			AnnouncementRateLimitQuantity: config.MatcherAnnouncementRateLimitQuantity,
+			AnnouncementRateLimitInterval: config.MatcherAnnouncementRateLimitInterval,
+			AnnouncementExemptProxyIDs:    config.MatcherAnnouncementExemptProxyIDs,
+			AnnouncementExemptSponsorIDs:  config.MatcherAnnouncementExemptSponsorIDs,
 
 			OfferLimitEntryCount:   config.MatcherOfferLimitEntryCount,
 			OfferRateLimitQuantity: config.MatcherOfferRateLimitQuantity,
@@ -423,7 +425,8 @@ func (b *Broker) SetLimits(
 	matcherAnnouncementLimitEntryCount int,
 	matcherAnnouncementRateLimitQuantity int,
 	matcherAnnouncementRateLimitInterval time.Duration,
-	matcherAnnouncementNonlimitedProxyIDs []ID,
+	matcherAnnouncementExemptProxyIDs []ID,
+	matcherAnnouncementExemptSponsorIDs []string,
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
 	matcherOfferRateLimitInterval time.Duration,
@@ -436,7 +439,8 @@ func (b *Broker) SetLimits(
 		matcherAnnouncementLimitEntryCount,
 		matcherAnnouncementRateLimitQuantity,
 		matcherAnnouncementRateLimitInterval,
-		matcherAnnouncementNonlimitedProxyIDs,
+		matcherAnnouncementExemptProxyIDs,
+		matcherAnnouncementExemptSponsorIDs,
 		matcherOfferLimitEntryCount,
 		matcherOfferRateLimitQuantity,
 		matcherOfferRateLimitInterval,
@@ -808,13 +812,14 @@ func (b *Broker) handleProxyAnnounce(
 	// keyed with the proxy ID, in an effort to keep proxies consistently
 	// assigned to the same compartment.
 
+	// sponsor_id is validated by b.config.APIParameterValidator.
+	sponsorID := ""
+	if param, ok := apiParams["sponsor_id"]; ok {
+		sponsorID, _ = param.(string)
+	}
+
 	var commonCompartmentIDs []ID
 	if !hasPersonalCompartmentIDs {
-		// sponsor_id is validated by b.config.APIParameterValidator.
-		sponsorID := ""
-		if param, ok := apiParams["sponsor_id"]; ok {
-			sponsorID, _ = param.(string)
-		}
 		compartmentID, err := b.selectCommonCompartmentID(proxyID, sponsorID)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -911,6 +916,7 @@ func (b *Broker) handleProxyAnnounce(
 				PortMappingTypes:       announceRequest.Metrics.PortMappingTypes,
 			},
 			ProxyID:      initiatorID,
+			SponsorID:    sponsorID,
 			ProxyMetrics: announceRequest.Metrics,
 			ConnectionID: connectionID,
 		})
