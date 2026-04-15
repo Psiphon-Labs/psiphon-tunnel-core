@@ -405,6 +405,11 @@ Returns the path where the rotated notices file will be created.
 - (BOOL)stopAndReconnectWithCurrentSessionID;
 
 /*!
+ Notify Psiphon that the host app has resumed from background.
+ */
+- (void)appResumed;
+
+/*!
  Stop the tunnel (regardless of its current connection state).
  */
 - (void)stop;

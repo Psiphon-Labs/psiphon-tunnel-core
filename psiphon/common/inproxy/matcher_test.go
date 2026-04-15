@@ -338,7 +338,7 @@ func runTestMatcher() error {
 	// Test: announcement rate limit
 
 	m.SetLimits(
-		0, rateLimitQuantity, rateLimitInterval, []ID{},
+		0, rateLimitQuantity, rateLimitInterval, []ID{}, []string{},
 		0, rateLimitQuantity, rateLimitInterval, 0)
 
 	time.Sleep(rateLimitInterval)
@@ -393,7 +393,7 @@ func runTestMatcher() error {
 	// Test: offer dropped due to minimum deadline
 
 	m.SetLimits(
-		0, rateLimitQuantity, rateLimitInterval, []ID{},
+		0, rateLimitQuantity, rateLimitInterval, []ID{}, []string{},
 		0, rateLimitQuantity, rateLimitInterval, minimumDeadline)
 
 	time.Sleep(rateLimitInterval)
@@ -409,7 +409,7 @@ func runTestMatcher() error {
 	}
 
 	m.SetLimits(
-		limitEntryCount, rateLimitQuantity, rateLimitInterval, []ID{},
+		limitEntryCount, rateLimitQuantity, rateLimitInterval, []ID{}, []string{},
 		limitEntryCount, rateLimitQuantity, rateLimitInterval, 0)
 
 	time.Sleep(rateLimitInterval)

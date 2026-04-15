@@ -275,6 +275,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [self start];
 }
 
+// See comment in header
+- (void)appResumed {
+    GoPsiAppResumed();
+}
+
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
  Assumes self.sessionID has been initialized -- i.e., assumes that

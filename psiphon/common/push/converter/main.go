@@ -47,6 +47,9 @@ func main() {
 	var prioritize bool
 	flag.BoolVar(&prioritize, "prioritize", false, "prioritize dials for all payload server entries")
 
+	var reason string
+	flag.StringVar(&reason, "reason", "", "prioritize reason for all payload server entries")
+
 	var minPadding int
 	flag.IntVar(&minPadding, "minPadding", 0, "min obfuscated payload padding")
 
@@ -88,7 +91,8 @@ func main() {
 		inputFile,
 		ttl,
 		source,
-		prioritize)
+		prioritize,
+		reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errors.Trace(err))
 		os.Exit(1)
@@ -106,7 +110,8 @@ func convert(
 	inputFile string,
 	ttl time.Duration,
 	source string,
-	prioritize bool) error {
+	prioritize bool,
+	reason string) error {
 
 	input, err := os.ReadFile(inputFile)
 	if err != nil {
@@ -132,23 +137,26 @@ func convert(
 					ServerEntryFields: packed,
 					Source:            source,
 					PrioritizeDial:    prioritize,
+					PrioritizeReason:  reason,
 				})
 		}
 
-		payloads, err := push.MakePushPayloads(
-			obfuscationKey,
-			minPadding,
-			maxPadding,
-			signaturePublicKey,
-			signaturePrivateKey,
-			ttl,
-			[][]*push.PrioritizedServerEntry{
-				prioritizedServerEntries})
+		maker, err := push.NewPushPayloadMaker(
+			obfuscationKey, signaturePublicKey, signaturePrivateKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		result, err := maker.MakePushPayloads(
+			minPadding, maxPadding, ttl, prioritizedServerEntries, 0)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		os.Stdout.Write(payloads[0])
+		if len(result.Payloads) == 0 {
+			return errors.TraceNew("no payloads produced from input")
+		}
+
+		os.Stdout.Write(result.Payloads[0])
 		return nil
 	}
 
@@ -156,7 +164,8 @@ func convert(
 	importer := func(
 		packed protocol.PackedServerEntryFields,
 		_ string,
-		_ bool) error {
+		_ bool,
+		_ string) error {
 
 		serverEntryFields, err := protocol.DecodePackedServerEntryFields(packed)
 		if err != nil {

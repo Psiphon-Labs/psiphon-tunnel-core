@@ -533,6 +533,11 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// may be used to identify a CDN edge. When this check fails,
 	// TerminateHTTPConnection is called instead of handleError, so any
 	// persistent connection is always closed.
+	//
+	// In MeekRequiredHeadersNonStrict mode, the request is allowed but
+	// functionality that depends on required headers is disabled.
+
+	missingRequiredHeaders := false
 
 	if len(server.support.Config.MeekRequiredHeaders) > 0 {
 		for header, value := range server.support.Config.MeekRequiredHeaders {
@@ -545,13 +550,16 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			// expected value length isn't a vulnerability as long as the
 			// secret is long enough and random.
 			if subtle.ConstantTimeCompare([]byte(requestValue), []byte(value)) != 1 {
-				log.WithTraceFields(LogFields{
-					"header": header,
-					"value":  requestValue,
-				}).Warning("invalid required meek header")
+				if !server.support.Config.MeekRequiredHeadersNonStrict {
+					log.WithTraceFields(LogFields{
+						"header": header,
+						"value":  requestValue,
+					}).Warning("invalid required meek header")
 
-				common.TerminateHTTPConnection(responseWriter, request)
-				return
+					common.TerminateHTTPConnection(responseWriter, request)
+					return
+				}
+				missingRequiredHeaders = true
 			}
 		}
 	}
@@ -636,7 +644,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		endPoint,
 		endPointClientIP,
 		endPointGeoIPData,
-		err := server.getSessionOrEndpoint(request, meekCookie)
+		err := server.getSessionOrEndpoint(request, meekCookie, missingRequiredHeaders)
 
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
@@ -645,6 +653,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		server.handleError(responseWriter, request)
 		return
 	}
+
+	// TODO: log missingRequiredHeaders in all cases
 
 	if endPoint != "" {
 
@@ -670,6 +680,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			err := server.inproxyBrokerHandler(
 				endPointClientIP,
 				common.GeoIPData(*endPointGeoIPData),
+				missingRequiredHeaders,
 				responseWriter,
 				request)
 			if err != nil {
@@ -964,7 +975,8 @@ func checkRangeHeader(request *http.Request) (int, bool) {
 // performs rate limiting and header handling for the in-proxy broker case.
 func (server *MeekServer) getSessionOrEndpoint(
 	request *http.Request,
-	meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, string, *GeoIPData, error) {
+	meekCookie *http.Cookie,
+	missingRequiredHeaders bool) (string, *meekSession, net.Conn, string, string, *GeoIPData, error) {
 
 	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
 
@@ -1009,7 +1021,14 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", "", nil, errors.TraceNew("invalid IP address")
 	}
 
-	if server.isFronted && len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+	// Both X-Forwarded-For/etc., and steering IP features are disabled if
+	// MeekRequiredHeaders is specified but the headers are missing. Any
+	// original client IP or steering IP header is only trusted if the peer
+	// provides MeekRequiredHeaders.
+
+	if server.isFronted &&
+		!missingRequiredHeaders &&
+		len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
 
 		// When there are multiple header names in MeekProxyForwardedForHeaders,
 		// the first valid match is preferred. MeekProxyForwardedForHeaders should be
@@ -1057,7 +1076,10 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// in order to be recorded here and relayed to the client.
 
 	var steeringIP string
-	if server.isFronted && server.support.Config.EnableSteeringIPs {
+	if server.isFronted &&
+		!missingRequiredHeaders &&
+		server.support.Config.EnableSteeringIPs {
+
 		steeringIP = request.Header.Get("X-Psiphon-Steering-Ip")
 		if steeringIP != "" {
 			IP := net.ParseIP(steeringIP)
@@ -1924,7 +1946,19 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		return errors.Trace(err)
 	}
 
-	err = server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
+	sponsorCommonCompartmentIDStrs :=
+		p.InproxyKeyCompartmentID(parameters.InproxySponsorCommonCompartmentID)
+	sponsorCommonCompartmentID := make(map[string]inproxy.ID)
+	for key, strID := range sponsorCommonCompartmentIDStrs {
+		ID, err := inproxy.IDFromString(strID)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		sponsorCommonCompartmentID[key] = ID
+	}
+
+	err = server.inproxyBroker.SetCommonCompartmentIDs(
+		commonCompartmentIDs, sponsorCommonCompartmentID)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1936,8 +1970,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL),
 		p.KeyDurations(parameters.InproxyFrontingProviderServerMaxRequestTimeouts))
 
-	nonlimitedProxyIDs, err := inproxy.IDsFromStrings(
-		p.Strings(parameters.InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs))
+	exemptProxyIDs, err := inproxy.IDsFromStrings(
+		p.Strings(parameters.InproxyBrokerMatcherAnnouncementExemptProxyIDs))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1945,7 +1979,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyBrokerMatcherAnnouncementLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherAnnouncementRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherAnnouncementRateLimitInterval),
-		nonlimitedProxyIDs,
+		exemptProxyIDs,
+		p.Strings(parameters.InproxyBrokerMatcherAnnouncementExemptSponsorIDs),
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
@@ -1977,22 +2012,17 @@ func (server *MeekServer) inproxyReloadTactics() error {
 				return true
 			}
 		}
-		lookup := make(map[string]map[string]struct{})
+		lookup := make(map[string]common.StringLookup)
 		for key, items := range lists {
-			// TODO: use linear search for lists below stringLookupThreshold?
-			itemLookup := make(map[string]struct{})
-			for _, item := range items {
-				itemLookup[item] = struct{}{}
-			}
-			lookup[key] = itemLookup
+			lookup[key] = common.NewStringLookup(items)
 		}
 		return func(key, item string) bool {
-			itemLookup := lookup[key]
-			if itemLookup == nil {
+			itemLookup, ok := lookup[key]
+			if !ok {
 				// Allow when no list
 				return true
 			}
-			_, found := itemLookup[item]
+			found := itemLookup.Contains(item)
 			// Allow or disallow based on list type
 			return found == isAllowList
 		}
@@ -2173,6 +2203,7 @@ func (server *MeekServer) inproxyBrokerRelayDSLRequest(
 func (server *MeekServer) inproxyBrokerHandler(
 	clientIP string,
 	geoIPData common.GeoIPData,
+	missingRequiredHeaders bool,
 	w http.ResponseWriter,
 	r *http.Request) (retErr error) {
 
@@ -2213,6 +2244,10 @@ func (server *MeekServer) inproxyBrokerHandler(
 
 	transportLogFields := common.LogFields{
 		"meek_server_http_version": r.Proto,
+	}
+
+	if missingRequiredHeaders {
+		transportLogFields["meek_missing_required_headers"] = missingRequiredHeaders
 	}
 
 	packet, err = server.inproxyBroker.HandleSessionPacket(

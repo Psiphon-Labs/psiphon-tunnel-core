@@ -786,6 +786,11 @@ type Config struct {
 	// Network. Required for push payload imports.
 	PushPayloadSignaturePublicKey string `json:",omitempty"`
 
+	// EnableProxyProtocolHeaders is an optional parameter that is passed to
+	// the Psiphon server to explicitly opt-in or opt-out of HAProxy PROXY
+	// protocol headers added to port forwards, as configured on the server.
+	EnableProxyProtocolHeaders *bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -936,6 +941,21 @@ type Config struct {
 	LivenessTestMaxUpstreamBytes   *int                         `json:",omitempty"`
 	LivenessTestMinDownstreamBytes *int                         `json:",omitempty"`
 	LivenessTestMaxDownstreamBytes *int                         `json:",omitempty"`
+
+	SSHKeepAliveSpeedTestSampleProbability                   *float64 `json:",omitempty"`
+	SSHKeepAlivePaddingMinBytes                              *int     `json:",omitempty"`
+	SSHKeepAlivePaddingMaxBytes                              *int     `json:",omitempty"`
+	SSHKeepAlivePeriodMinMilliseconds                        *int     `json:",omitempty"`
+	SSHKeepAlivePeriodMaxMilliseconds                        *int     `json:",omitempty"`
+	SSHKeepAlivePeriodicTimeoutMilliseconds                  *int     `json:",omitempty"`
+	SSHKeepAlivePeriodicInactivePeriodMilliseconds           *int     `json:",omitempty"`
+	SSHKeepAliveProbeTimeoutMilliseconds                     *int     `json:",omitempty"`
+	SSHKeepAliveProbeInactivePeriodMilliseconds              *int     `json:",omitempty"`
+	SSHKeepAliveNetworkConnectivityPollingPeriodMilliseconds *int     `json:",omitempty"`
+	SSHKeepAliveResetOnFailureProbability                    *float64 `json:",omitempty"`
+	SSHKeepAliveResumeProbeTimeoutMilliseconds               *int     `json:",omitempty"`
+	SSHKeepAliveResumeProbeInactivePeriodMilliseconds        *int     `json:",omitempty"`
+	SSHKeepAliveResumeReconnectInactivePeriodMilliseconds    *int     `json:",omitempty"`
 
 	// ReplayCandidateCount and other Replay fields are for testing purposes.
 	ReplayCandidateCount                      *int     `json:",omitempty"`
@@ -2356,6 +2376,62 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LivenessTestMaxDownstreamBytes != nil {
 		applyParameters[parameters.LivenessTestMaxDownstreamBytes] = *config.LivenessTestMaxDownstreamBytes
+	}
+
+	if config.SSHKeepAliveSpeedTestSampleProbability != nil {
+		applyParameters[parameters.SSHKeepAliveSpeedTestSampleProbability] = *config.SSHKeepAliveSpeedTestSampleProbability
+	}
+
+	if config.SSHKeepAlivePaddingMinBytes != nil {
+		applyParameters[parameters.SSHKeepAlivePaddingMinBytes] = *config.SSHKeepAlivePaddingMinBytes
+	}
+
+	if config.SSHKeepAlivePaddingMaxBytes != nil {
+		applyParameters[parameters.SSHKeepAlivePaddingMaxBytes] = *config.SSHKeepAlivePaddingMaxBytes
+	}
+
+	if config.SSHKeepAlivePeriodMinMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAlivePeriodMin] = fmt.Sprintf("%dms", *config.SSHKeepAlivePeriodMinMilliseconds)
+	}
+
+	if config.SSHKeepAlivePeriodMaxMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAlivePeriodMax] = fmt.Sprintf("%dms", *config.SSHKeepAlivePeriodMaxMilliseconds)
+	}
+
+	if config.SSHKeepAlivePeriodicTimeoutMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAlivePeriodicTimeout] = fmt.Sprintf("%dms", *config.SSHKeepAlivePeriodicTimeoutMilliseconds)
+	}
+
+	if config.SSHKeepAlivePeriodicInactivePeriodMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAlivePeriodicInactivePeriod] = fmt.Sprintf("%dms", *config.SSHKeepAlivePeriodicInactivePeriodMilliseconds)
+	}
+
+	if config.SSHKeepAliveProbeTimeoutMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveProbeTimeout] = fmt.Sprintf("%dms", *config.SSHKeepAliveProbeTimeoutMilliseconds)
+	}
+
+	if config.SSHKeepAliveProbeInactivePeriodMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveProbeInactivePeriod] = fmt.Sprintf("%dms", *config.SSHKeepAliveProbeInactivePeriodMilliseconds)
+	}
+
+	if config.SSHKeepAliveNetworkConnectivityPollingPeriodMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveNetworkConnectivityPollingPeriod] = fmt.Sprintf("%dms", *config.SSHKeepAliveNetworkConnectivityPollingPeriodMilliseconds)
+	}
+
+	if config.SSHKeepAliveResetOnFailureProbability != nil {
+		applyParameters[parameters.SSHKeepAliveResetOnFailureProbability] = *config.SSHKeepAliveResetOnFailureProbability
+	}
+
+	if config.SSHKeepAliveResumeProbeTimeoutMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveResumeProbeTimeout] = fmt.Sprintf("%dms", *config.SSHKeepAliveResumeProbeTimeoutMilliseconds)
+	}
+
+	if config.SSHKeepAliveResumeProbeInactivePeriodMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveResumeProbeInactivePeriod] = fmt.Sprintf("%dms", *config.SSHKeepAliveResumeProbeInactivePeriodMilliseconds)
+	}
+
+	if config.SSHKeepAliveResumeReconnectInactivePeriodMilliseconds != nil {
+		applyParameters[parameters.SSHKeepAliveResumeReconnectInactivePeriod] = fmt.Sprintf("%dms", *config.SSHKeepAliveResumeReconnectInactivePeriodMilliseconds)
 	}
 
 	if config.ReplayCandidateCount != nil {

@@ -300,10 +300,10 @@ type Filter struct {
 	// client speed test samples must satisfy.
 	SpeedTestRTTMilliseconds *Range
 
-	regionLookup map[string]bool
-	ispLookup    map[string]bool
-	asnLookup    map[string]bool
-	cityLookup   map[string]bool
+	regionLookup common.StringLookup
+	ispLookup    common.StringLookup
+	asnLookup    common.StringLookup
+	cityLookup   common.StringLookup
 }
 
 // Range is a filter field which specifies that the aggregation of
@@ -673,46 +673,23 @@ func (server *Server) Validate() error {
 	return nil
 }
 
-const stringLookupThreshold = 5
-
-// initLookups creates map lookups for filters where the number
-// of string values to compare against exceeds a threshold where
-// benchmarks show maps are faster than looping through a string
-// slice.
 func (server *Server) initLookups() {
 
 	server.filterGeoIPScope = 0
 	server.filterRegionScopes = make(map[string]int)
 
-	for _, filteredTactics := range server.FilteredTactics {
+	for i := range server.FilteredTactics {
 
-		if len(filteredTactics.Filter.Regions) >= stringLookupThreshold {
-			filteredTactics.Filter.regionLookup = make(map[string]bool)
-			for _, region := range filteredTactics.Filter.Regions {
-				filteredTactics.Filter.regionLookup[region] = true
-			}
-		}
+		filteredTactics := &server.FilteredTactics[i]
 
-		if len(filteredTactics.Filter.ISPs) >= stringLookupThreshold {
-			filteredTactics.Filter.ispLookup = make(map[string]bool)
-			for _, ISP := range filteredTactics.Filter.ISPs {
-				filteredTactics.Filter.ispLookup[ISP] = true
-			}
-		}
-
-		if len(filteredTactics.Filter.ASNs) >= stringLookupThreshold {
-			filteredTactics.Filter.asnLookup = make(map[string]bool)
-			for _, ASN := range filteredTactics.Filter.ASNs {
-				filteredTactics.Filter.asnLookup[ASN] = true
-			}
-		}
-
-		if len(filteredTactics.Filter.Cities) >= stringLookupThreshold {
-			filteredTactics.Filter.cityLookup = make(map[string]bool)
-			for _, city := range filteredTactics.Filter.Cities {
-				filteredTactics.Filter.cityLookup[city] = true
-			}
-		}
+		filteredTactics.Filter.regionLookup = common.NewStringLookup(
+			filteredTactics.Filter.Regions)
+		filteredTactics.Filter.ispLookup = common.NewStringLookup(
+			filteredTactics.Filter.ISPs)
+		filteredTactics.Filter.asnLookup = common.NewStringLookup(
+			filteredTactics.Filter.ASNs)
+		filteredTactics.Filter.cityLookup = common.NewStringLookup(
+			filteredTactics.Filter.Cities)
 
 		// Initialize the filter GeoIP scope fields used by GetFilterGeoIPScope.
 		//
@@ -954,50 +931,26 @@ func (server *Server) getTactics(
 		filterMatches[filterIndex] = false
 
 		if len(filteredTactics.Filter.Regions) > 0 {
-			if filteredTactics.Filter.regionLookup != nil {
-				if !filteredTactics.Filter.regionLookup[geoIPData.Country] {
-					continue
-				}
-			} else {
-				if !common.Contains(filteredTactics.Filter.Regions, geoIPData.Country) {
-					continue
-				}
+			if !filteredTactics.Filter.regionLookup.Contains(geoIPData.Country) {
+				continue
 			}
 		}
 
 		if len(filteredTactics.Filter.ISPs) > 0 {
-			if filteredTactics.Filter.ispLookup != nil {
-				if !filteredTactics.Filter.ispLookup[geoIPData.ISP] {
-					continue
-				}
-			} else {
-				if !common.Contains(filteredTactics.Filter.ISPs, geoIPData.ISP) {
-					continue
-				}
+			if !filteredTactics.Filter.ispLookup.Contains(geoIPData.ISP) {
+				continue
 			}
 		}
 
 		if len(filteredTactics.Filter.ASNs) > 0 {
-			if filteredTactics.Filter.asnLookup != nil {
-				if !filteredTactics.Filter.asnLookup[geoIPData.ASN] {
-					continue
-				}
-			} else {
-				if !common.Contains(filteredTactics.Filter.ASNs, geoIPData.ASN) {
-					continue
-				}
+			if !filteredTactics.Filter.asnLookup.Contains(geoIPData.ASN) {
+				continue
 			}
 		}
 
 		if len(filteredTactics.Filter.Cities) > 0 {
-			if filteredTactics.Filter.cityLookup != nil {
-				if !filteredTactics.Filter.cityLookup[geoIPData.City] {
-					continue
-				}
-			} else {
-				if !common.Contains(filteredTactics.Filter.Cities, geoIPData.City) {
-					continue
-				}
+			if !filteredTactics.Filter.cityLookup.Contains(geoIPData.City) {
+				continue
 			}
 		}
 

@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -148,6 +149,15 @@ const (
 	CompressionZlib = int32(1)
 )
 
+// Internally, compress/flate.NewWriterDict allocates memory on the order of
+// serveral hundred KB for dictionaries, tables, and other compression data
+// structures. Reduce allocations and GC churn with a reusable pool.
+var zlibWriterPool = sync.Pool{
+	New: func() any {
+		return zlib.NewWriter(nil)
+	},
+}
+
 // Compress compresses data with the specified algorithm.
 func Compress(compression int32, data []byte) ([]byte, error) {
 	if compression == CompressionNone {
@@ -157,7 +167,13 @@ func Compress(compression int32, data []byte) ([]byte, error) {
 		return nil, errors.TraceNew("unknown compression algorithm")
 	}
 	var compressedData bytes.Buffer
-	writer := zlib.NewWriter(&compressedData)
+	writer := zlibWriterPool.Get().(*zlib.Writer)
+	defer func() {
+		// Don't retain reference to output buffer.
+		writer.Reset(io.Discard)
+		zlibWriterPool.Put(writer)
+	}()
+	writer.Reset(&compressedData)
 	_, err := writer.Write(data)
 	if err != nil {
 		return nil, errors.Trace(err)

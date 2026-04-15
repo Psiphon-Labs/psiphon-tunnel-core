@@ -95,6 +95,25 @@ func (IDs InproxyCompartmentIDsValue) Validate(checkCompartmentIDList *[]string)
 	return nil
 }
 
+// InproxyKeyCompartmentID is a map from string keys to an in-proxy common
+// compartment ID.
+type InproxyKeyCompartmentID map[string]string
+
+// Validate checks that the in-proxy common compartment ID values are
+// well-formed.
+func (keyID InproxyKeyCompartmentID) Validate(checkCompartmentIDList *[]string) error {
+
+	for _, ID := range keyID {
+		if _, err := inproxy.IDFromString(ID); err != nil {
+			return errors.Tracef("invalid compartment ID: %w", err)
+		}
+		if checkCompartmentIDList != nil && !common.Contains(*checkCompartmentIDList, ID) {
+			return errors.TraceNew("unknown compartment ID")
+		}
+	}
+	return nil
+}
+
 // InproxyTrafficShapingParametersValue is type-compatible with
 // common/inproxy.TrafficShapingParameters.
 type InproxyTrafficShapingParametersValue struct {
