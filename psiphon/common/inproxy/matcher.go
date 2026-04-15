@@ -44,9 +44,9 @@ const (
 	matcherMaxProbe                 = 100
 	matcherYieldCount               = 32
 
-	matcherMaxRateLimitQuantity = 5000
+	matcherMaxRateLimitQuantity = 10000
 	matcherMaxRateLimitInterval = 1 * time.Minute
-	matcherMaxLimitEntryCount   = 5000
+	matcherMaxLimitEntryCount   = 10000
 )
 
 // Matcher matches proxy announcements with client offers. Matcher also
