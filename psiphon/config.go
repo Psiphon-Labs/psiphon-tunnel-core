@@ -666,7 +666,7 @@ type Config struct {
 	// connection on the default interface and the proxy/server connection on
 	// the designated interface.
 	//
-	// Only supported on Linux,  and cannot be used with DeviceBinder.
+	// Only supported on Linux, and cannot be used with DeviceBinder.
 	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy

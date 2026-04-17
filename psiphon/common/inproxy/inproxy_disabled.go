@@ -126,11 +126,13 @@ func GetQUICMaxPacketSizeAdjustment() int {
 }
 
 type webRTCSDPMetrics struct {
-	iceCandidateTypes     []ICECandidateType
-	hasIPv4               bool
-	hasIPv6               bool
-	hasPrivateIP          bool
-	filteredICECandidates []string
+	iceCandidateCount      int
+	iceCandidateTypes      []ICECandidateType
+	hasIPv4                bool
+	hasIPv6                bool
+	hasPrivateIP           bool
+	filteredICECandidates  []string
+	allowedGeoIPMismatches int
 }
 
 func newWebRTCConnForOffer(
@@ -155,6 +157,7 @@ func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
+	allowGeoIPMismatchCandidates bool,
 	expectedGeoIPData common.GeoIPData,
 	allowPrivateIPAddressCandidates bool,
 	filterPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {

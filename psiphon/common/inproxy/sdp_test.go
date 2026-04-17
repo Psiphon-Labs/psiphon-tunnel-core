@@ -53,6 +53,7 @@ func runTestProcessSDP() error {
 	hasPersonalCompartmentIDs := false
 	errorOnNoCandidates := true
 	disableIPv6Candidates := false
+	allowGeoIPMismatchCandidates := false
 	allowPrivateIPAddressCandidates := false
 	filterPrivateIPAddressCandidates := false
 
@@ -126,10 +127,13 @@ func runTestProcessSDP() error {
 		return errors.Trace(err)
 	}
 
+	prefilterCandidateCount := metrics.iceCandidateCount
+
 	filteredSDP, metrics, err := filterSDPAddresses(
 		preparedSDP,
 		errorOnNoCandidates,
 		lookupGeoIP,
+		allowGeoIPMismatchCandidates,
 		expectedGeoIP,
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
@@ -152,6 +156,48 @@ func runTestProcessSDP() error {
 		return errors.TraceNew("unexpected SDP length")
 	}
 
+	if prefilterCandidateCount == 0 ||
+		metrics.iceCandidateCount == prefilterCandidateCount ||
+		metrics.allowedGeoIPMismatches != 0 {
+		return errors.TraceNew("unexpected SDP metrics")
+	}
+
+	// Test allow mismatching GeoIP
+
+	preparedSDP, metrics, err = prepareSDPAddresses(
+		SDP,
+		errorOnNoCandidates,
+		net.JoinHostPort(testIP, "80"),
+		disableIPv6Candidates,
+		allowPrivateIPAddressCandidates)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	prefilterCandidateCount = metrics.iceCandidateCount
+
+	filteredSDP, metrics, err = filterSDPAddresses(
+		preparedSDP,
+		errorOnNoCandidates,
+		lookupGeoIP,
+		true,
+		expectedGeoIP,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(filteredSDP) != len(preparedSDP) {
+		return errors.TraceNew("unexpected SDP length")
+	}
+
+	if prefilterCandidateCount == 0 ||
+		metrics.iceCandidateCount != prefilterCandidateCount ||
+		metrics.allowedGeoIPMismatches == 0 {
+		return errors.TraceNew("unexpected SDP metrics")
+	}
+
 	// Test filter bogons
 
 	SetAllowBogonWebRTCConnections(false)
@@ -163,6 +209,7 @@ func runTestProcessSDP() error {
 		SDP,
 		errorOnNoCandidates,
 		nil,
+		allowGeoIPMismatchCandidates,
 		common.GeoIPData{},
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
@@ -216,6 +263,7 @@ func runTestProcessSDP() error {
 		SDP,
 		errorOnNoCandidates,
 		nil,
+		allowGeoIPMismatchCandidates,
 		common.GeoIPData{},
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
