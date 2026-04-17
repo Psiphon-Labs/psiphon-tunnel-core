@@ -86,6 +86,11 @@ func (c *chanList) dropAll() []*channel {
 // mux represents the state for the SSH connection protocol, which
 // multiplexes many channels onto a single packet transport.
 type mux struct {
+
+	// [Psiphon]
+	// Make config available to getChannelWindowSize.
+	config *Config
+
 	conn     packetConn
 	chanList chanList
 
@@ -113,8 +118,12 @@ func (m *mux) Wait() error {
 }
 
 // newMux returns a mux that runs over the given connection.
-func newMux(p packetConn) *mux {
+func newMux(p packetConn, config *Config) *mux {
 	m := &mux{
+
+		// [Psiphon]
+		config: config,
+
 		conn:             p,
 		incomingChannels: make(chan NewChannel, chanSize),
 		globalResponses:  make(chan interface{}, 1),
