@@ -14,13 +14,13 @@ import (
 
 // [Psiphon]
 // See comment in channel.go
-var testChannelWindowSize = getChannelWindowSize("")
+var testChannelWindowSize = 4 * channelMaxPacket
 
 func muxPair() (*mux, *mux) {
 	a, b := memPipe()
 
-	s := newMux(a)
-	c := newMux(b)
+	s := newMux(a, &Config{})
+	c := newMux(b, &Config{})
 
 	return s, c
 }
@@ -357,7 +357,7 @@ func TestMuxChannelRequest(t *testing.T) {
 
 func TestMuxUnknownChannelRequests(t *testing.T) {
 	clientPipe, serverPipe := memPipe()
-	client := newMux(clientPipe)
+	client := newMux(clientPipe, &Config{})
 	defer serverPipe.Close()
 	defer client.Close()
 
@@ -455,7 +455,7 @@ func TestMuxUnknownChannelRequests(t *testing.T) {
 
 func TestMuxClosedChannel(t *testing.T) {
 	clientPipe, serverPipe := memPipe()
-	client := newMux(clientPipe)
+	client := newMux(clientPipe, &Config{})
 	defer serverPipe.Close()
 	defer client.Close()
 

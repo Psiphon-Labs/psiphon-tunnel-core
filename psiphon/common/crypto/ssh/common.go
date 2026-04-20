@@ -307,6 +307,16 @@ type Config struct {
 	// PeerKEXPRNGSeed is used to predict KEX randomization and make
 	// adjustments to ensure negotiation succeeds.
 	PeerKEXPRNGSeed *prng.Seed
+
+	// ChannelWindowSize specifies the SSH channel window size, in terms of
+	// number of maximum sized 32K SSH packets. The valid range is 1-128.
+	// When 0, the default of 4 is used.
+	ChannelWindowSize int
+
+	// PacketTunnelChannelWindowSize specifies the packet tunnel mode SSH
+	// channel window size, in terms of number of maximum sized 32K SSH
+	// packets. The valid range is 1-128. When 0, the default of 16 is used.
+	PacketTunnelChannelWindowSize int
 }
 
 // SetDefaults sets sensible values for unset fields in config. This is

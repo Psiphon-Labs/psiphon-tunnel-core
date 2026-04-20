@@ -580,6 +580,8 @@ const (
 	MeekPayloadPaddingServerMaxSize                    = "MeekPayloadPaddingServerMaxSize"
 	ProxyProtocolHeaderTargetDestinationAddresses      = "ProxyProtocolHeaderTargetDestinationAddresses"
 	ProxyProtocolHeaderDefaultEnableProbability        = "ProxyProtocolHeaderDefaultEnableProbability"
+	SSHChannelWindowSize                               = "SSHChannelWindowSize"
+	SSHPacketTunnelChannelWindowSize                   = "SSHPacketTunnelChannelWindowSize"
 
 	// Retired parameters
 
@@ -1241,6 +1243,9 @@ var defaultParameters = map[string]struct {
 
 	ProxyProtocolHeaderTargetDestinationAddresses: {value: KeyStrings{}, flags: serverSideOnly},
 	ProxyProtocolHeaderDefaultEnableProbability:   {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+
+	SSHChannelWindowSize:             {value: 0, minimum: 0},
+	SSHPacketTunnelChannelWindowSize: {value: 0, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

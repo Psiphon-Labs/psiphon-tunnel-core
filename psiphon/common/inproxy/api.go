@@ -805,14 +805,22 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	// The client offer SDP may contain no ICE candidates.
 	errorOnNoCandidates := false
 
+	isPersonal := len(request.PersonalCompartmentIDs) > 0 &&
+		len(request.CommonCompartmentIDs) == 0
+
 	// The client offer SDP may include RFC 1918/4193 private IP addresses in
 	// personal pairing mode. filterSDPAddresses should not filter out
 	// private IP addresses based on the broker's local interfaces; this
 	// filtering occurs on the proxy that receives the SDP.
-	allowPrivateIPAddressCandidates :=
-		len(request.PersonalCompartmentIDs) > 0 &&
-			len(request.CommonCompartmentIDs) == 0
+	allowPrivateIPAddressCandidates := isPersonal
 	filterPrivateIPAddressCandidates := false
+
+	// In personal pairing mode, allow GeoIP mismatch between ICE candidates
+	// and the broker-observed peer address, geoIPData. The personal paired
+	// client is trusted to not misdirect the proxy to an arbitrary
+	// destination. This exception allows for broker tunneling that cannot
+	// relay the original client IP.
+	allowGeoIPMismatchCandidates := isPersonal
 
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
@@ -820,6 +828,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 		[]byte(request.ClientOfferSDP.SDP),
 		errorOnNoCandidates,
 		lookupGeoIP,
+		allowGeoIPMismatchCandidates,
 		geoIPData,
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
@@ -864,11 +873,13 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 
 	logFields["has_common_compartment_ids"] = hasCommonCompartmentIDs
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
+	logFields["ice_candidate_count"] = sdpMetrics.iceCandidateCount
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv4"] = sdpMetrics.hasIPv4
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+	logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
 	logFields["use_media_streams"] = request.UseMediaStreams
 
 	return filteredSDP, logFields, nil
@@ -931,12 +942,20 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 		allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
 		filterPrivateIPAddressCandidates := false
 
+		// In personal pairing mode, allow GeoIP mismatch between ICE
+		// candidates and the broker-observed peer address, geoIPData. The
+		// personal paired proxy is trusted to not misdirect the client to an
+		// arbitrary destination. This exception allows for modes such as
+		// InproxyProxySplitUpstreamInterfaceName.
+		allowGeoIPMismatchCandidates := proxyAnnouncementHasPersonalCompartmentIDs
+
 		// Proxy answer SDP candidate addresses must match the country and ASN of
 		// the proxy. Don't facilitate connections to arbitrary destinations.
 		filteredSDP, sdpMetrics, err = filterSDPAddresses(
 			[]byte(request.ProxyAnswerSDP.SDP),
 			errorOnNoCandidates,
 			lookupGeoIP,
+			allowGeoIPMismatchCandidates,
 			geoIPData,
 			allowPrivateIPAddressCandidates,
 			filterPrivateIPAddressCandidates)
@@ -961,10 +980,12 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["answer_error"] = request.AnswerError
 	if sdpMetrics != nil {
+		logFields["ice_candidate_count"] = sdpMetrics.iceCandidateCount
 		logFields["has_IPv4"] = sdpMetrics.hasIPv4
 		logFields["has_IPv6"] = sdpMetrics.hasIPv6
 		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+		logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
 	}
 
 	return filteredSDP, logFields, nil

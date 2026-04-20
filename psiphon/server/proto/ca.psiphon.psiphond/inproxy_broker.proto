@@ -56,4 +56,6 @@ message InproxyBroker {
     optional bool has_IPv4 = 142;
     optional int64 match_duration = 143;
     optional bool meek_missing_required_headers = 144;
+    optional int64 ice_candidate_count = 145;
+    optional int64 allowed_geoip_mismatches = 146;
 }

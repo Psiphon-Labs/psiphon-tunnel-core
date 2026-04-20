@@ -907,6 +907,7 @@ func newWebRTCConn(
 				[]byte(peerSDP.SDP),
 				errorOnNoCandidates,
 				nil,
+				false,
 				common.GeoIPData{},
 				allowPrivateIPAddressCandidates,
 				filterPrivateIPAddressCandidates)
@@ -1118,6 +1119,7 @@ func (conn *webRTCConn) SetRemoteSDP(
 			[]byte(peerSDP.SDP),
 			errorOnNoCandidates,
 			nil,
+			false,
 			common.GeoIPData{},
 			allowPrivateIPAddressCandidates,
 			filterPrivateIPAddressCandidates)
@@ -2749,10 +2751,11 @@ func prepareSDPAddresses(
 		errorOnNoCandidates,
 		portMappingExternalAddr,
 		disableIPv6Candidates,
-		allowPrivateIPAddressCandidates,
-		false,
 		nil,
-		common.GeoIPData{})
+		false,
+		common.GeoIPData{},
+		allowPrivateIPAddressCandidates,
+		false)
 	return modifiedSDP, metrics, errors.Trace(err)
 }
 
@@ -2764,6 +2767,7 @@ func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
+	allowGeoIPMismatchCandidates bool,
 	expectedGeoIPData common.GeoIPData,
 	allowPrivateIPAddressCandidates bool,
 	filterPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {
@@ -2773,20 +2777,23 @@ func filterSDPAddresses(
 		errorOnNoCandidates,
 		"",
 		false,
-		allowPrivateIPAddressCandidates,
-		filterPrivateIPAddressCandidates,
 		lookupGeoIP,
-		expectedGeoIPData)
+		allowGeoIPMismatchCandidates,
+		expectedGeoIPData,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
 	return filteredSDP, metrics, errors.Trace(err)
 }
 
 // webRTCSDPMetrics are network capability metrics values for an SDP.
 type webRTCSDPMetrics struct {
-	iceCandidateTypes     []ICECandidateType
-	hasIPv4               bool
-	hasIPv6               bool
-	hasPrivateIP          bool
-	filteredICECandidates []string
+	iceCandidateCount      int
+	iceCandidateTypes      []ICECandidateType
+	hasIPv4                bool
+	hasIPv6                bool
+	hasPrivateIP           bool
+	filteredICECandidates  []string
+	allowedGeoIPMismatches int
 }
 
 // processSDPAddresses is based on snowflake/common/util.StripLocalAddresses
@@ -2831,10 +2838,17 @@ func processSDPAddresses(
 	errorOnNoCandidates bool,
 	portMappingExternalAddr string,
 	disableIPv6Candidates bool,
-	allowPrivateIPAddressCandidates bool,
-	filterPrivateIPAddressCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
+	allowGeoIPMismatchCandidates bool,
+	expectedGeoIPData common.GeoIPData,
+	allowPrivateIPAddressCandidates bool,
+	filterPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {
+
+	if portMappingExternalAddr != "" && lookupGeoIP != nil {
+		// portMappingExternalAddr is used by prepareSDPAddresses and bypasses
+		// GeoIP checks. GeoIP checks are used by filterSDPAddresses.
+		return nil, nil, errors.TraceNew("unsupported")
+	}
 
 	var sessionDescription sdp.SessionDescription
 	err := sessionDescription.Unmarshal(encodedSDP)
@@ -2847,6 +2861,7 @@ func processSDPAddresses(
 	hasIPv6 := false
 	hasPrivateIP := false
 	filteredCandidateReasons := make(map[string]int)
+	allowedGeoIPMismatches := 0
 
 	var portMappingICECandidates []sdp.Attribute
 	if portMappingExternalAddr != "" {
@@ -2866,9 +2881,14 @@ func processSDPAddresses(
 		// Only IPv4 port mapping addresses are supported due to the
 		// NewCandidateHost limitation noted below. It is expected that port
 		// mappings will be IPv4, as NAT and IPv6 is not a typical combination.
+		//
+		// Skip the port mapping if the address doesn't appear to be a public,
+		// routable IP address. There is no allowPrivateIPAddressCandidates
+		// exception in this case, since the port mapping is not expected to
+		// be a common LAN address that could be used in personal pairing mode.
 
 		hostIP := net.ParseIP(host)
-		if hostIP != nil && hostIP.To4() != nil {
+		if hostIP != nil && hostIP.To4() != nil && !common.IsBogon(hostIP) {
 
 			for _, component := range []webrtc.ICEComponent{webrtc.ICEComponentRTP, webrtc.ICEComponentRTCP} {
 
@@ -3003,6 +3023,12 @@ func processSDPAddresses(
 				// SDPs containing unexpected GeoIP candidates, they are
 				// instead stripped out and the resulting filtered SDP is
 				// used.
+				//
+				// In personal pairing mode, mismatching GeoIP candidates are
+				// allowed and peers are trusted to not misdirect each other
+				// to arbitrary destinations. This enables modes such as
+				// InproxyProxySplitUpstreamInterfaceName and broker
+				// tunneling that cannot relay the original client IP.
 
 				if lookupGeoIP != nil {
 					candidateGeoIPData := lookupGeoIP(candidate.Address())
@@ -3017,18 +3043,22 @@ func processSDPAddresses(
 
 					if mismatch {
 
-						version := "IPv4"
-						if candidateIsIPv6 {
-							version = "IPv6"
+						if allowGeoIPMismatchCandidates {
+							allowedGeoIPMismatches += 1
+						} else {
+							version := "IPv4"
+							if candidateIsIPv6 {
+								version = "IPv6"
+							}
+							reason := fmt.Sprintf(
+								"unexpected GeoIP %s %s: %s/%s",
+								candidate.Type().String(),
+								version,
+								candidateGeoIPData.Country,
+								candidateGeoIPData.ASN)
+							filteredCandidateReasons[reason] += 1
+							continue
 						}
-						reason := fmt.Sprintf(
-							"unexpected GeoIP %s %s: %s/%s",
-							candidate.Type().String(),
-							version,
-							candidateGeoIPData.Country,
-							candidateGeoIPData.ASN)
-						filteredCandidateReasons[reason] += 1
-						continue
 					}
 				}
 
@@ -3073,9 +3103,11 @@ func processSDPAddresses(
 	}
 
 	metrics := &webRTCSDPMetrics{
-		hasIPv4:      hasIPv4,
-		hasIPv6:      hasIPv6,
-		hasPrivateIP: hasPrivateIP,
+		iceCandidateCount:      candidateCount,
+		hasIPv4:                hasIPv4,
+		hasIPv6:                hasIPv6,
+		hasPrivateIP:           hasPrivateIP,
+		allowedGeoIPMismatches: allowedGeoIPMismatches,
 	}
 	for candidateType := range candidateTypes {
 		metrics.iceCandidateTypes = append(metrics.iceCandidateTypes, candidateType)

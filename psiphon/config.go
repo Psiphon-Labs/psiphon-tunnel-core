@@ -666,7 +666,7 @@ type Config struct {
 	// connection on the default interface and the proxy/server connection on
 	// the designated interface.
 	//
-	// Only supported on Linux,  and cannot be used with DeviceBinder.
+	// Only supported on Linux, and cannot be used with DeviceBinder.
 	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy
@@ -790,6 +790,16 @@ type Config struct {
 	// the Psiphon server to explicitly opt-in or opt-out of HAProxy PROXY
 	// protocol headers added to port forwards, as configured on the server.
 	EnableProxyProtocolHeaders *bool `json:",omitempty"`
+
+	// SSHChannelWindowSize specifies the SSH channel window size, in terms of
+	// number of maximum sized 32K SSH packets. The valid range is 1-128.
+	// When 0, the default of 4 is used.
+	SSHChannelWindowSize *int `json:",omitempty"`
+
+	// SSHPacketTunnelChannelWindowSize specifies the packet tunnel mode SSH
+	// channel window size, in terms of number of maximum sized 32K SSH
+	// packets. The valid range is 1-128. When 0, the default of 16 is used.
+	SSHPacketTunnelChannelWindowSize *int `json:",omitempty"`
 
 	//
 	// The following parameters are deprecated.
@@ -3208,6 +3218,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.TunnelConnectTimeoutSeconds != nil {
 		applyParameters[parameters.TunnelConnectTimeout] = fmt.Sprintf("%ds", *config.TunnelConnectTimeoutSeconds)
+	}
+
+	if config.SSHChannelWindowSize != nil {
+		applyParameters[parameters.SSHChannelWindowSize] = *config.SSHChannelWindowSize
+	}
+
+	if config.SSHPacketTunnelChannelWindowSize != nil {
+		applyParameters[parameters.SSHPacketTunnelChannelWindowSize] = *config.SSHPacketTunnelChannelWindowSize
 	}
 
 	// When adding new config dial parameters that may override tactics, also

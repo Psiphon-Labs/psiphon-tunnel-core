@@ -30,7 +30,8 @@ const (
 
 // [Psiphon]
 //
-//   - Use a smaller initial/max channel window size.
+//   - Use a configurable, default smaller initial/max channel
+//     window size.
 //   - Testing with the full Psiphon stack shows that
 //     this smaller channel window size is more performant
 //     for low bandwidth connections while still adequate for
@@ -54,16 +55,29 @@ const (
 //     since all tunneled traffic flows through a single
 //     channel; we still select a size smaller than the stock
 //     channelWindowSize due to client memory constraints.
-func getChannelWindowSize(chanType string) int {
+func (m *mux) getChannelWindowSize(chanType string) int {
 
 	// From "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol".
 	// Copied here to avoid import cycle.
 	packetTunnelChannelType := "tun@psiphon.ca"
 
+	// Clamp channel window size parameters to a range of 1-128. Outside of
+	// the valid range, use the defaults.
+	//
+	// TODO: report a config error instead?
+
 	if chanType == packetTunnelChannelType {
-		return 16 * channelMaxPacket
+		size := m.config.PacketTunnelChannelWindowSize
+		if size <= 0 || size > 128 {
+			size = 16
+		}
+		return size * channelMaxPacket
 	}
-	return 4 * channelMaxPacket
+	size := m.config.ChannelWindowSize
+	if size <= 0 || size > 128 {
+		size = 4
+	}
+	return size * channelMaxPacket
 }
 
 // NewChannel represents an incoming request to a channel. It must either be
@@ -383,7 +397,7 @@ func (c *channel) adjustWindow(adj uint32) error {
 	// exceed the initial window setting, we don't worry about overflow.
 	c.myConsumed += adj
 	var sendAdj uint32
-	channelWindowSize := uint32(getChannelWindowSize(c.chanType))
+	channelWindowSize := uint32(c.mux.getChannelWindowSize(c.chanType))
 	if (channelWindowSize-c.myWindow > 3*c.maxIncomingPayload) ||
 		(c.myWindow < channelWindowSize/2) {
 		sendAdj = c.myConsumed
@@ -492,11 +506,11 @@ func (ch *channel) handlePacket(packet []byte) error {
 
 		// [Psiphon]
 		//
-		// - Use a smaller initial/max channel window size.
+		// - Use a configurable, default smaller initial/max channel window size.
 		// - See comments above channelWindowSize definition.
 
 		//ch.remoteWin.add(msg.MyWindow)
-		ch.remoteWin.add(min(msg.MyWindow, getChannelWindowSize(ch.chanType)))
+		ch.remoteWin.add(min(msg.MyWindow, ch.mux.getChannelWindowSize(ch.chanType)))
 
 		ch.msg <- msg
 	case *windowAdjustMsg:
@@ -521,7 +535,7 @@ func (ch *channel) handlePacket(packet []byte) error {
 func (m *mux) newChannel(chanType string, direction channelDirection, extraData []byte) *channel {
 	ch := &channel{
 		remoteWin:        window{Cond: newCond()},
-		myWindow:         uint32(getChannelWindowSize(chanType)),
+		myWindow:         uint32(m.getChannelWindowSize(chanType)),
 		pending:          newBuffer(),
 		extPending:       newBuffer(),
 		direction:        direction,
