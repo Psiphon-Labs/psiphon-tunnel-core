@@ -1842,6 +1842,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	if runConfig.doRestrictInproxy {
+		// Ensure a fast failure for the rejected handshake request.
+		requestTimeout := 1000
+		clientConfig.InproxyPsiphonAPIRequestTimeoutMilliseconds = &requestTimeout
+	}
+
 	if runConfig.doUncompressedTactics {
 		compressTactics := false
 		clientConfig.CompressTactics = &compressTactics
