@@ -72,10 +72,11 @@ type SignedPayload struct {
 // description and a dial prioritization indication. PrioritizeDial is
 // equivalent to DSL prioritized dials.
 type PrioritizedServerEntry struct {
-	ServerEntryFields protocol.PackedServerEntryFields `cbor:"1,keyasint,omitempty"`
-	Source            string                           `cbor:"2,keyasint,omitempty"`
-	PrioritizeDial    bool                             `cbor:"3,keyasint,omitempty"`
-	PrioritizeReason  string                           `cbor:"4,keyasint,omitempty"`
+	ServerEntryFields        protocol.PackedServerEntryFields `cbor:"1,keyasint,omitempty"`
+	Source                   string                           `cbor:"2,keyasint,omitempty"`
+	PrioritizeDial           bool                             `cbor:"3,keyasint,omitempty"`
+	PrioritizeReason         string                           `cbor:"4,keyasint,omitempty"`
+	PrioritizeTunnelProtocol string                           `cbor:"5,keyasint,omitempty"`
 }
 
 // ServerEntryImporter is a callback that is invoked for each server entry in
@@ -84,7 +85,8 @@ type ServerEntryImporter func(
 	packedServerEntryFields protocol.PackedServerEntryFields,
 	source string,
 	prioritizeDial bool,
-	prioritizeReason string) error
+	prioritizeReason string,
+	prioritizeTunnelProtocol string) error
 
 // GenerateKeys generates a new obfuscation key and signature key pair for
 // push payloads.
@@ -113,7 +115,7 @@ func GenerateKeys() (
 
 // ImportPushPayload imports the input push payload. The ServerEntryImporter
 // callback is invoked for each imported server entry and its associated
-// source and prioritizeDial data.
+// source and prioritize data.
 func ImportPushPayload(
 	payloadObfuscationKey string,
 	payloadSignaturePublicKey string,
@@ -207,7 +209,8 @@ func ImportPushPayload(
 			prioritizedServerEntry.ServerEntryFields,
 			prioritizedServerEntry.Source,
 			prioritizedServerEntry.PrioritizeDial,
-			prioritizedServerEntry.PrioritizeReason)
+			prioritizedServerEntry.PrioritizeReason,
+			prioritizedServerEntry.PrioritizeTunnelProtocol)
 		if err != nil {
 			return imported, errors.Trace(err)
 		}

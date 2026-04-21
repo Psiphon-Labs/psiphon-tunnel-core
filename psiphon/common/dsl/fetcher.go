@@ -58,12 +58,14 @@ type FetcherConfig struct {
 		tag ServerEntryTag,
 		version int,
 		prioritizeDial bool,
-		prioritizeReason string) bool
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) bool
 	DatastoreStoreServerEntry func(
 		serverEntryFields protocol.PackedServerEntryFields,
 		source string,
 		prioritizeDial bool,
-		prioritizeReason string) error
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) error
 
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
@@ -253,13 +255,15 @@ func (f *Fetcher) Run(ctx context.Context) error {
 	var getTags []ServerEntryTag
 	var prioritizeDials []bool
 	var prioritizeReasons []string
+	var prioritizeTunnelProtocols []string
 	for _, v := range versionedTags {
 
 		hasServerEntry := f.config.DatastoreHasServerEntry(
 			v.Tag,
 			int(v.Version),
 			v.PrioritizeDial,
-			v.PrioritizeReason)
+			v.PrioritizeReason,
+			v.PrioritizeTunnelProtocol)
 
 		if hasServerEntry {
 			knownServerEntriesCount += 1
@@ -268,6 +272,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		getTags = append(getTags, v.Tag)
 		prioritizeDials = append(prioritizeDials, v.PrioritizeDial)
 		prioritizeReasons = append(prioritizeReasons, v.PrioritizeReason)
+		prioritizeTunnelProtocols = append(
+			prioritizeTunnelProtocols, v.PrioritizeTunnelProtocol)
 	}
 
 	// Allow garbage collection.
@@ -302,7 +308,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 				sourcedEntry.ServerEntryFields,
 				sourcedEntry.Source,
 				prioritizeDials[i],
-				prioritizeReasons[i])
+				prioritizeReasons[i],
+				prioritizeTunnelProtocols[i])
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -317,6 +324,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		getTags = getTags[len(sourcedServerEntries):]
 		prioritizeDials = prioritizeDials[len(sourcedServerEntries):]
 		prioritizeReasons = prioritizeReasons[len(sourcedServerEntries):]
+		prioritizeTunnelProtocols =
+			prioritizeTunnelProtocols[len(sourcedServerEntries):]
 
 		f.config.DoGarbageCollection()
 	}

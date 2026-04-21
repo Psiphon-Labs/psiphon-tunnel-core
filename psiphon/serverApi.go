@@ -1307,6 +1307,9 @@ func getBaseAPIParameters(
 			if len(dialParams.DSLPrioritizedDialReason) > 0 {
 				params["dsl_prioritized_reason"] = dialParams.DSLPrioritizedDialReason
 			}
+			if dialParams.DSLPrioritizedTunnelProtocol != "" {
+				params["dsl_prioritized_tunnel_protocol"] = dialParams.DSLPrioritizedTunnelProtocol
+			}
 		}
 
 		// dialParams.DialDuration is nanoseconds; report milliseconds

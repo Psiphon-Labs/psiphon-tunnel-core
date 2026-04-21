@@ -85,10 +85,11 @@ func (tag ServerEntryTag) String() string {
 // server entry is expected to be effective for the client and the client
 // should prioritize the server in establishment scheduling.
 type VersionedServerEntryTag struct {
-	Tag              ServerEntryTag `cbor:"1,keyasint,omitempty"`
-	Version          int32          `cbor:"2,keyasint,omitempty"`
-	PrioritizeDial   bool           `cbor:"3,keyasint,omitempty"`
-	PrioritizeReason string         `cbor:"4,keyasint,omitempty"`
+	Tag                      ServerEntryTag `cbor:"1,keyasint,omitempty"`
+	Version                  int32          `cbor:"2,keyasint,omitempty"`
+	PrioritizeDial           bool           `cbor:"3,keyasint,omitempty"`
+	PrioritizeReason         string         `cbor:"4,keyasint,omitempty"`
+	PrioritizeTunnelProtocol string         `cbor:"5,keyasint,omitempty"`
 }
 
 // DiscoverServerEntriesResponse is the set of server entries revealed to the
