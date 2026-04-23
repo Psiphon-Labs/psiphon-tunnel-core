@@ -141,10 +141,13 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "test"),
 		)
 
-		// A timeout (deadline exceeded) is expected since the stub server
-		// just reads the prefix and doesn't perform a QUIC handshake. Any
-		// other dial error is a failure.
-		if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		// A timeout is expected since the stub server just reads the prefix
+		// and doesn't perform a QUIC handshake. Depending on scheduling, the
+		// dial may fail due to the outer context deadline or quic-go's
+		// handshake idle timeout.
+		if err == nil ||
+			(!strings.HasSuffix(err.Error(), "context deadline exceeded") &&
+				!IsIETFErrorIndicatingClosed(err)) {
 			return errors.Trace(err)
 		}
 
