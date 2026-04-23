@@ -92,10 +92,11 @@ func (b *backendTestShim) UnmarshalDiscoverServerEntriesRequest(
 
 func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 	versionedServerEntryTags []*struct {
-		Tag              []byte
-		Version          int32
-		PrioritizeDial   bool
-		PrioritizeReason string
+		Tag                      []byte
+		Version                  int32
+		PrioritizeDial           bool
+		PrioritizeReason         string
+		PrioritizeTunnelProtocol string
 	}) (
 
 	cborResponse []byte,
@@ -104,10 +105,11 @@ func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 	response := &DiscoverServerEntriesResponse{
 		VersionedServerEntryTags: convertSlice[
 			*struct {
-				Tag              []byte
-				Version          int32
-				PrioritizeDial   bool
-				PrioritizeReason string
+				Tag                      []byte
+				Version                  int32
+				PrioritizeDial           bool
+				PrioritizeReason         string
+				PrioritizeTunnelProtocol string
 			}, *VersionedServerEntryTag](versionedServerEntryTags),
 	}
 

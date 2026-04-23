@@ -226,7 +226,7 @@ func fetchTactics(
 			serverEntry.GetSupportedTacticsProtocols(), replayProtocol)
 	}
 
-	selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+	selectProtocol := func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 		tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
 		if len(tacticsProtocols) == 0 {
 			return "", false

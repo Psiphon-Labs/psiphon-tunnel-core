@@ -61,11 +61,16 @@ func runTestPush() error {
 	}
 
 	expectPrioritizeDialReasons := make(map[string]string)
+	expectPrioritizeTunnelProtocols := make(map[string]string)
 	for _, serverEntry := range serverEntries {
 		if serverEntry.PrioritizeDial != (serverEntry.PrioritizeReason != "") {
 			return errors.TraceNew("unexpected test data")
 		}
+		if serverEntry.PrioritizeDial != (serverEntry.PrioritizeTunnelProtocol != "") {
+			return errors.TraceNew("unexpected test data")
+		}
 		expectPrioritizeDialReasons[serverEntry.Source] = serverEntry.PrioritizeReason
+		expectPrioritizeTunnelProtocols[serverEntry.Source] = serverEntry.PrioritizeTunnelProtocol
 	}
 
 	maker, err := NewPushPayloadMaker(obfuscationKey, publicKey, privateKey)
@@ -98,7 +103,8 @@ func runTestPush() error {
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
 		prioritizeDial bool,
-		priotitizeReason string) error {
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) error {
 
 		serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
 		if err != nil {
@@ -107,15 +113,22 @@ func runTestPush() error {
 		if !strings.HasPrefix(serverEntryFields["ipAddress"].(string), "192.0.2") {
 			return errors.TraceNew("unexpected server entry IP address")
 		}
-		expect, ok := expectPrioritizeDialReasons[source]
+		expectReason, ok := expectPrioritizeDialReasons[source]
 		if !ok {
 			return errors.TraceNew("unexpected source")
 		}
-		if prioritizeDial != (expect != "") {
+		if prioritizeDial != (expectReason != "") {
 			return errors.TraceNew("unexpected prioritize dial")
 		}
-		if priotitizeReason != expect {
+		if prioritizeReason != expectReason {
 			return errors.TraceNew("unexpected prioritize reason")
+		}
+		expectProtocol, ok := expectPrioritizeTunnelProtocols[source]
+		if !ok {
+			return errors.TraceNew("unexpected source")
+		}
+		if prioritizeTunnelProtocol != expectProtocol {
+			return errors.TraceNew("unexpected prioritize tunnel protocol")
 		}
 		seenSources[source] += 1
 		return nil
@@ -630,6 +643,8 @@ func makeTestPrioritizedServerEntry(
 	if prioritizedServerEntry.PrioritizeDial {
 		prioritizedServerEntry.PrioritizeReason =
 			fmt.Sprintf("prioritize-reason-%d", index)
+		prioritizedServerEntry.PrioritizeTunnelProtocol =
+			protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH
 	}
 
 	return prioritizedServerEntry, nil
@@ -645,6 +660,7 @@ func importPayloadsAndCountSources(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
 		_ bool,
+		_ string,
 		_ string) error {
 
 		_, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)

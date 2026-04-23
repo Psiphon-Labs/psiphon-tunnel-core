@@ -1842,6 +1842,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	if runConfig.doRestrictInproxy {
+		// Ensure a fast failure for the rejected handshake request.
+		requestTimeout := 1000
+		clientConfig.InproxyPsiphonAPIRequestTimeoutMilliseconds = &requestTimeout
+	}
+
 	if runConfig.doUncompressedTactics {
 		compressTactics := false
 		clientConfig.CompressTactics = &compressTactics
@@ -2011,6 +2017,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := configureDSLTestServerEntries(
 			dslTestConfig,
 			string(encodedServerEntry),
+			clientTunnelProtocol,
 			serverEntrySignaturePublicKey,
 			serverEntrySignaturePrivateKey)
 		if err != nil {
@@ -2472,6 +2479,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		expectServerEntryCount = 2 * protocol.ServerEntryCountRoundingIncrement
 	}
 	expectDSLPrioritized := doDSL
+	expectDSLPrioritizedTunnelProtocol := ""
+	if doDSL {
+		expectDSLPrioritizedTunnelProtocol = clientTunnelProtocol
+	}
 	expectMeekPayloadPadding := doMeekPayloadPadding
 	expectAddedProxyProtocolHeader := runConfig.doProxyProtocolHeader && !runConfig.doReplaceProxyProtocolHeader
 	expectReplacedProxyProtocolHeader := runConfig.doProxyProtocolHeader && runConfig.doReplaceProxyProtocolHeader
@@ -2510,6 +2521,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectCheckServerEntryPruneCount,
 			expectServerEntryCount,
 			expectDSLPrioritized,
+			expectDSLPrioritizedTunnelProtocol,
 			expectMeekPayloadPadding,
 			expectAddedProxyProtocolHeader,
 			expectReplacedProxyProtocolHeader,
@@ -3008,6 +3020,7 @@ func checkExpectedServerTunnelLogFields(
 	expectCheckServerEntryPruneCount int,
 	expectServerEntryCount int,
 	expectDSLPrioritized bool,
+	expectDSLPrioritizedTunnelProtocol string,
 	expectMeekPayloadPadding bool,
 	expectAddedProxyProtocolHeader bool,
 	expectReplacedProxyProtocolHeader bool,
@@ -3742,6 +3755,15 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fields[name].(string) == "" {
 			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
 		}
+		name = "dsl_prioritized_tunnel_protocol"
+		if fields[name] == nil || fields[name].(string) != expectDSLPrioritizedTunnelProtocol {
+			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
+		}
+	} else {
+		name = "dsl_prioritized_tunnel_protocol"
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
 	}
 
 	if protocol.TunnelProtocolUsesMeek(clientTunnelProtocol) {
@@ -3885,6 +3907,9 @@ func checkExpectedDSLPendingPrioritizeDial(
 		dialParams.DSLPrioritizedDial {
 
 		return errors.TraceNew("unexpected server entry state")
+	}
+	if dialParams.DSLPrioritizedTunnelProtocol != protocol.TUNNEL_PROTOCOL_SSH {
+		return errors.TraceNew("unexpected dsl_prioritized_tunnel_protocol")
 	}
 
 	return nil
@@ -5293,7 +5318,7 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
-			func(serverEntry *protocol.ServerEntry) (string, bool) {
+			func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
 			},
 			serverEntry,
@@ -5656,6 +5681,7 @@ var tunneledDSLServerEntryIPAddress = "192.0.3.1"
 func configureDSLTestServerEntries(
 	dslTestConfig *dslTestConfig,
 	encodedServerEntry string,
+	tunnelProtocol string,
 	serverEntrySignaturePublicKey string,
 	serverEntrySignaturePrivateKey string) error {
 
@@ -5680,13 +5706,14 @@ func configureDSLTestServerEntries(
 
 	// Store the full tunnel protocol server entry in the mock DSL backend.
 
-	// TODO: also excersize prioritizeDial = false?
+	// TODO: also exercise prioritizeDial = false and prioritizeTunnelProtocol = ""?
 
 	isTunneled := false
 	prioritizeDial := true
 	dslTestConfig.backend.SetServerEntries(
 		isTunneled,
 		prioritizeDial,
+		tunnelProtocol,
 		[]string{encodedServerEntry})
 
 	// Add an EMBEDDED tactics-only server entry to the client's datastore.
@@ -5733,6 +5760,7 @@ func configureDSLTestServerEntries(
 	dslTestConfig.backend.SetServerEntries(
 		isTunneled,
 		prioritizeDial,
+		protocol.TUNNEL_PROTOCOL_SSH,
 		[]string{string(encodedServerEntryBytes)})
 
 	return nil

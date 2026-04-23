@@ -2717,7 +2717,8 @@ func dslPrioritizeDialServerEntry(
 	tx *datastoreTx,
 	networkID string,
 	serverEntryID []byte,
-	prioritizeReason string) error {
+	prioritizeReason string,
+	prioritizeTunnelProtocol string) error {
 
 	dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
 
@@ -2727,9 +2728,24 @@ func dslPrioritizeDialServerEntry(
 		return nil
 	}
 
+	// Older clients may not support the DSL prioritized tunnel protocol. In
+	// this case, keep the server entry prioritization but drop the
+	// prioritized tunnel protocol.
+	//
+	// TODO: futher check against the correspondong server entry's
+	// capabilities? For now assume that the DSL backend won't prioritize a
+	// tunnel protocol unsupported by the server entry.
+
+	if prioritizeTunnelProtocol != "" &&
+		!common.Contains(protocol.SupportedTunnelProtocols, prioritizeTunnelProtocol) {
+
+		prioritizeTunnelProtocol = ""
+	}
+
 	dialParams := &DialParameters{
 		DSLPendingPrioritizeDialTimestamp: time.Now(),
 		DSLPrioritizedDialReason:          prioritizeReason,
+		DSLPrioritizedTunnelProtocol:      prioritizeTunnelProtocol,
 	}
 
 	record, err := json.Marshal(dialParams)
@@ -2753,6 +2769,7 @@ func DSLHasServerEntry(
 	version int,
 	prioritizeDial bool,
 	prioritizeReason string,
+	prioritizeTunnelProtocol string,
 	networkID string) bool {
 
 	hasServerEntry := false
@@ -2795,7 +2812,7 @@ func DSLHasServerEntry(
 
 			if hasServerEntry {
 				err := dslPrioritizeDialServerEntry(
-					tx, networkID, serverEntryID, prioritizeReason)
+					tx, networkID, serverEntryID, prioritizeReason, prioritizeTunnelProtocol)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -2822,6 +2839,7 @@ func DSLStoreServerEntry(
 	source string,
 	prioritizeDial bool,
 	prioritizeReason string,
+	prioritizeTunnelProtocol string,
 	networkID string) error {
 
 	serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
@@ -2848,7 +2866,8 @@ func DSLStoreServerEntry(
 	var additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error
 	if prioritizeDial {
 		additionalUpdates = func(tx *datastoreTx, serverEntryID []byte) error {
-			err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID, prioritizeReason)
+			err := dslPrioritizeDialServerEntry(
+				tx, networkID, serverEntryID, prioritizeReason, prioritizeTunnelProtocol)
 			if err != nil {
 				return errors.Trace(err)
 			}

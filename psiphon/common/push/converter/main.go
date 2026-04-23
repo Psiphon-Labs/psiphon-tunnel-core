@@ -50,6 +50,13 @@ func main() {
 	var reason string
 	flag.StringVar(&reason, "reason", "", "prioritize reason for all payload server entries")
 
+	var tunnelProtocol string
+	flag.StringVar(
+		&tunnelProtocol,
+		"tunnelProtocol",
+		"",
+		"prioritize tunnel protocol for all payload server entries")
+
 	var minPadding int
 	flag.IntVar(&minPadding, "minPadding", 0, "min obfuscated payload padding")
 
@@ -92,7 +99,8 @@ func main() {
 		ttl,
 		source,
 		prioritize,
-		reason)
+		reason,
+		tunnelProtocol)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errors.Trace(err))
 		os.Exit(1)
@@ -111,7 +119,8 @@ func convert(
 	ttl time.Duration,
 	source string,
 	prioritize bool,
-	reason string) error {
+	reason string,
+	tunnelProtocol string) error {
 
 	input, err := os.ReadFile(inputFile)
 	if err != nil {
@@ -125,6 +134,10 @@ func convert(
 	serverEntryFields, err := decodeServerEntryList(string(input))
 	if err == nil {
 
+		if !prioritize && (reason != "" || tunnelProtocol != "") {
+			return errors.TraceNew("invalid prioritize configuration")
+		}
+
 		var prioritizedServerEntries []*push.PrioritizedServerEntry
 		for _, serverEntry := range serverEntryFields {
 			packed, err := protocol.EncodePackedServerEntryFields(serverEntry)
@@ -132,12 +145,23 @@ func convert(
 				return errors.Trace(err)
 			}
 
+			if tunnelProtocol != "" {
+				entry, err := serverEntry.GetServerEntry()
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if !entry.SupportsProtocol(tunnelProtocol) {
+					return errors.TraceNew("prioritized tunnel protocol not supported")
+				}
+			}
+
 			prioritizedServerEntries = append(prioritizedServerEntries,
 				&push.PrioritizedServerEntry{
-					ServerEntryFields: packed,
-					Source:            source,
-					PrioritizeDial:    prioritize,
-					PrioritizeReason:  reason,
+					ServerEntryFields:        packed,
+					Source:                   source,
+					PrioritizeDial:           prioritize,
+					PrioritizeReason:         reason,
+					PrioritizeTunnelProtocol: tunnelProtocol,
 				})
 		}
 
@@ -165,6 +189,7 @@ func convert(
 		packed protocol.PackedServerEntryFields,
 		_ string,
 		_ bool,
+		_ string,
 		_ string) error {
 
 		serverEntryFields, err := protocol.DecodePackedServerEntryFields(packed)
