@@ -188,10 +188,6 @@ func createConn(ctx context.Context, nextConn net.Conn, config *Config, isClient
 		localGetCertificate:         config.GetCertificate,
 		localGetClientCertificate:   config.GetClientCertificate,
 		insecureSkipHelloVerify:     config.InsecureSkipVerifyHello,
-
-		// [Psiphon]
-		// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
-		customClientHelloRandom: config.CustomClientHelloRandom,
 	}
 
 	// rfc5246#section-7.4.3
@@ -378,12 +374,14 @@ func (c *Conn) ConnectionState() State {
 
 // SelectedSRTPProtectionProfile returns the selected SRTPProtectionProfile
 func (c *Conn) SelectedSRTPProtectionProfile() (SRTPProtectionProfile, bool) {
-	profile := c.state.getSRTPProtectionProfile()
-	if profile == 0 {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	if c.state.srtpProtectionProfile == 0 {
 		return 0, false
 	}
 
-	return profile, true
+	return c.state.srtpProtectionProfile, true
 }
 
 func (c *Conn) writePackets(ctx context.Context, pkts []*packet) error {
@@ -839,9 +837,7 @@ func (c *Conn) handshake(ctx context.Context, cfg *handshakeConfig, initialFligh
 		}
 	}
 
-	// [Psiphon]
-	// Pass dial context into handshake goroutine for GetDTLSSeed.
-	ctxHs, cancel := context.WithCancel(ctx)
+	ctxHs, cancel := context.WithCancel(context.Background())
 	c.cancelHandshaker = cancel
 
 	firstErr := make(chan error, 1)
@@ -887,11 +883,7 @@ func (c *Conn) handshake(ctx context.Context, cfg *handshakeConfig, initialFligh
 					}
 				} else {
 					switch {
-					case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
-					case errors.Is(err, recordlayer.ErrInvalidPacketLength):
-						// Decode error must be silently discarded
-						// [RFC6347 Section-4.1.2.7]
-						continue
+					case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, io.EOF):
 					default:
 						if c.isHandshakeCompletedSuccessfully() {
 							// Keep read loop and pass the read error to Read()

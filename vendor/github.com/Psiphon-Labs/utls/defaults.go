@@ -5,7 +5,6 @@
 package tls
 
 import (
-	// "internal/godebug"  // [UTLS] unsupported
 	"slices"
 	_ "unsafe" // for linkname
 )
@@ -13,17 +12,18 @@ import (
 // Defaults are collected in this file to allow distributions to more easily patch
 // them to apply local policies.
 
-// var tlskyber = godebug.New("tlskyber")  // [UTLS] unsupported
+// var tlsmlkem = godebug.New("tlsmlkem") [uTLS]
 
+// defaultCurvePreferences is the default set of supported key exchanges, as
+// well as the preference order.
 func defaultCurvePreferences() []CurveID {
-
-	// [UTLS] unsupported
-	// if tlskyber.Value() == "0" {
+	// [uTLS section begins]
+	// if tlsmlkem.Value() == "0" {
 	// 	return []CurveID{X25519, CurveP256, CurveP384, CurveP521}
 	// }
+	// [uTLS section ends]
 
-	// For now, x25519Kyber768Draft00 must always be followed by X25519.
-	return []CurveID{x25519Kyber768Draft00, X25519, CurveP256, CurveP384, CurveP521}
+	return []CurveID{X25519MLKEM768, X25519, CurveP256, CurveP384, CurveP521}
 }
 
 // defaultSupportedSignatureAlgorithms contains the signature and hash algorithms that
@@ -45,19 +45,21 @@ var defaultSupportedSignatureAlgorithms = []SignatureScheme{
 	ECDSAWithSHA1,
 }
 
-// var tlsrsakex = godebug.New("tlsrsakex")  // [UTLS] unsupported
-// var tls3des = godebug.New("tls3des") // [UTLS] unsupported
+// [uTLS section begins]
+// var tlsrsakex = godebug.New("tlsrsakex")
+// var tls3des = godebug.New("tls3des")
+// [uTLS section ends]
 
 func defaultCipherSuites() []uint16 {
 	suites := slices.Clone(cipherSuitesPreferenceOrder)
 	return slices.DeleteFunc(suites, func(c uint16) bool {
-		// [UTLS SECTION BEGIN]
-		// Commented out unsupported godebug calls
-		// return disabledCipherSuites[c] ||
-		// 	tlsrsakex.Value() != "1" && rsaKexCiphers[c] ||
-		// 	tls3des.Value() != "1" && tdesCiphers[c]
-		return disabledCipherSuites[c] || rsaKexCiphers[c] || tdesCiphers[c]
-		// [UTLS SECTION END]
+		return disabledCipherSuites[c] ||
+			// [uTLS section begins]
+			// tlsrsakex.Value() != "1" && rsaKexCiphers[c] ||
+			// tls3des.Value() != "1" && tdesCiphers[c]
+			rsaKexCiphers[c] ||
+			tdesCiphers[c]
+		// [uTLS section ends]
 	})
 }
 
@@ -97,13 +99,18 @@ var defaultCipherSuitesTLS13NoAES = []uint16{
 	TLS_AES_256_GCM_SHA384,
 }
 
+// The FIPS-only policies below match BoringSSL's
+// ssl_compliance_policy_fips_202205, which is based on NIST SP 800-52r2.
+// https://cs.opensource.google/boringssl/boringssl/+/master:ssl/ssl_lib.cc;l=3289;drc=ea7a88fa
+
 var defaultSupportedVersionsFIPS = []uint16{
 	VersionTLS12,
+	VersionTLS13,
 }
 
 // defaultCurvePreferencesFIPS are the FIPS-allowed curves,
 // in preference order (most preferable first).
-var defaultCurvePreferencesFIPS = []CurveID{CurveP256, CurveP384, CurveP521}
+var defaultCurvePreferencesFIPS = []CurveID{CurveP256, CurveP384}
 
 // defaultSupportedSignatureAlgorithmsFIPS currently are a subset of
 // defaultSupportedSignatureAlgorithms without Ed25519 and SHA-1.
@@ -116,7 +123,6 @@ var defaultSupportedSignatureAlgorithmsFIPS = []SignatureScheme{
 	PKCS1WithSHA384,
 	ECDSAWithP384AndSHA384,
 	PKCS1WithSHA512,
-	ECDSAWithP521AndSHA512,
 }
 
 // defaultCipherSuitesFIPS are the FIPS-allowed cipher suites.
@@ -125,8 +131,6 @@ var defaultCipherSuitesFIPS = []uint16{
 	TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 	TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 	TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-	TLS_RSA_WITH_AES_128_GCM_SHA256,
-	TLS_RSA_WITH_AES_256_GCM_SHA384,
 }
 
 // defaultCipherSuitesTLS13FIPS are the FIPS-allowed cipher suites for TLS 1.3.

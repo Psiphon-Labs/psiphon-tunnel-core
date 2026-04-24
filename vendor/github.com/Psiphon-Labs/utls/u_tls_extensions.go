@@ -31,6 +31,8 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &SignatureAlgorithmsExtension{}
 	case extensionALPN:
 		return &ALPNExtension{}
+	case extensionStatusRequestV2:
+		return &StatusRequestV2Extension{}
 	case extensionSCT:
 		return &SCTExtension{}
 	case utlsExtensionPadding:
@@ -69,6 +71,8 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &NPNExtension{}
 	case utlsExtensionApplicationSettings:
 		return &ApplicationSettingsExtension{}
+	case utlsExtensionApplicationSettingsNew:
+		return &ApplicationSettingsExtensionNew{}
 	case fakeOldExtensionChannelID:
 		return &FakeChannelIDExtension{true}
 	case fakeExtensionChannelID:
@@ -195,7 +199,9 @@ func (e *SNIExtension) Write(b []byte) (int, error) {
 }
 
 func (e *SNIExtension) writeToUConn(uc *UConn) error {
-	uc.config.ServerName = e.ServerName
+	if uc.config.EncryptedClientHelloConfigList == nil { // with ech, e.ServerName is the outer public name and should not be copied
+		uc.config.ServerName = e.ServerName
+	}
 	hostName := hostnameInSNI(e.ServerName)
 	uc.HandshakeState.Hello.ServerName = hostName
 
@@ -466,6 +472,59 @@ func (e *SignatureAlgorithmsExtension) writeToUConn(uc *UConn) error {
 	return nil
 }
 
+// StatusRequestV2Extension implements status_request_v2 (17)
+type StatusRequestV2Extension struct {
+}
+
+func (e *StatusRequestV2Extension) writeToUConn(uc *UConn) error {
+	uc.HandshakeState.Hello.OcspStapling = true
+	return nil
+}
+
+func (e *StatusRequestV2Extension) Len() int {
+	return 13
+}
+
+func (e *StatusRequestV2Extension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+	// RFC 4366, section 3.6
+	b[0] = byte(extensionStatusRequestV2 >> 8)
+	b[1] = byte(extensionStatusRequestV2)
+	b[2] = 0
+	b[3] = 9
+	b[4] = 0
+	b[5] = 7
+	b[6] = 2 // OCSP type
+	b[7] = 0
+	b[8] = 4
+	// Two zero valued uint16s for the two lengths.
+	return e.Len(), io.EOF
+}
+
+// Write is a no-op for StatusRequestV2Extension. No data for this extension.
+func (e *StatusRequestV2Extension) Write(b []byte) (int, error) {
+	fullLen := len(b)
+	extData := cryptobyte.String(b)
+	// RFC 4366, Section 3.6
+	var statusType uint8
+	var ignored cryptobyte.String
+	if !extData.ReadUint16LengthPrefixed(&ignored) || !ignored.ReadUint8(&statusType) {
+		return fullLen, errors.New("unable to read status request v2 extension data")
+	}
+
+	if statusType != statusV2TypeOCSP {
+		return fullLen, errors.New("status request v2 extension statusType is not statusV2TypeOCSP(2)")
+	}
+
+	return fullLen, nil
+}
+
+func (e *StatusRequestV2Extension) UnmarshalJSON(_ []byte) error {
+	return nil // no-op
+}
+
 // SignatureAlgorithmsCertExtension implements signature_algorithms_cert (50)
 type SignatureAlgorithmsCertExtension struct {
 	SupportedSignatureAlgorithms []SignatureScheme
@@ -552,8 +611,12 @@ type ALPNExtension struct {
 }
 
 func (e *ALPNExtension) writeToUConn(uc *UConn) error {
-	uc.config.NextProtos = e.AlpnProtocols
-	uc.HandshakeState.Hello.AlpnProtocols = e.AlpnProtocols
+	// Do not overwrite NextProtos in config if Encrypted Client Hello is used.
+	// Config ALPN will be written to inner Hello
+	if uc.config.EncryptedClientHelloConfigList == nil {
+		uc.config.NextProtos = e.AlpnProtocols
+		uc.HandshakeState.Hello.AlpnProtocols = e.AlpnProtocols
+	}
 	return nil
 }
 
@@ -627,39 +690,39 @@ func (e *ALPNExtension) Write(b []byte) (int, error) {
 	return fullLen, nil
 }
 
-// ApplicationSettingsExtension represents the TLS ALPS extension.
+// applicationSettingsExtension represents the TLS ALPS extension.
 // At the time of this writing, this extension is currently a draft:
 // https://datatracker.ietf.org/doc/html/draft-vvv-tls-alps-01
-type ApplicationSettingsExtension struct {
-	SupportedProtocols []string
+type applicationSettingsExtension struct {
+	codePoint uint16
 }
 
-func (e *ApplicationSettingsExtension) writeToUConn(uc *UConn) error {
+func (e *applicationSettingsExtension) writeToUConn(uc *UConn) error {
 	return nil
 }
 
-func (e *ApplicationSettingsExtension) Len() int {
+func (e *applicationSettingsExtension) Len(supportedProtocols []string) int {
 	bLen := 2 + 2 + 2 // Type + Length + ALPS Extension length
-	for _, s := range e.SupportedProtocols {
+	for _, s := range supportedProtocols {
 		bLen += 1 + len(s) // Supported ALPN Length + actual length of protocol
 	}
 	return bLen
 }
 
-func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
-	if len(b) < e.Len() {
+func (e *applicationSettingsExtension) Read(b []byte, supportedProtocols []string) (int, error) {
+	if len(b) < e.Len(supportedProtocols) {
 		return 0, io.ErrShortBuffer
 	}
 
 	// Read Type.
-	b[0] = byte(utlsExtensionApplicationSettings >> 8)   // hex: 44 dec: 68
-	b[1] = byte(utlsExtensionApplicationSettings & 0xff) // hex: 69 dec: 105
+	b[0] = byte(e.codePoint >> 8)   // hex: 44 dec: 68
+	b[1] = byte(e.codePoint & 0xff) // hex: 69 dec: 105
 
 	lengths := b[2:] // get the remaining buffer without Type
 	b = b[6:]        // set the buffer to the buffer without Type, Length and ALPS Extension Length (so only the Supported ALPN list remains)
 
 	stringsLength := 0
-	for _, s := range e.SupportedProtocols {
+	for _, s := range supportedProtocols {
 		l := len(s)            // Supported ALPN Length
 		b[0] = byte(l)         // Supported ALPN Length in bytes hex: 02 dec: 2
 		copy(b[1:], s)         // copy the Supported ALPN as bytes to the buffer
@@ -673,7 +736,43 @@ func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
 	lengths[0] = byte(stringsLength >> 8) // Length hex:00 dec: 0
 	lengths[1] = byte(stringsLength)      // Length hex: 05 dec: 5
 
-	return e.Len(), io.EOF
+	return e.Len(supportedProtocols), io.EOF
+}
+
+// Write implementation copied from ALPNExtension.Write
+func (e *applicationSettingsExtension) Write(b []byte) ([]string, int, error) {
+	fullLen := len(b)
+	extData := cryptobyte.String(b)
+	// https://datatracker.ietf.org/doc/html/draft-vvv-tls-alps-01
+	var protoList cryptobyte.String
+	if !extData.ReadUint16LengthPrefixed(&protoList) || protoList.Empty() {
+		return nil, 0, errors.New("unable to read ALPN extension data")
+	}
+	alpnProtocols := []string{}
+	for !protoList.Empty() {
+		var proto cryptobyte.String
+		if !protoList.ReadUint8LengthPrefixed(&proto) || proto.Empty() {
+			return nil, 0, errors.New("unable to read ALPN extension data")
+		}
+		alpnProtocols = append(alpnProtocols, string(proto))
+
+	}
+	return alpnProtocols, fullLen, nil
+}
+
+// ApplicationSettingsExtension embeds applicationSettingsExtension to implement the TLS ALPS extension on codepoint 17513
+type ApplicationSettingsExtension struct {
+	applicationSettingsExtension
+	SupportedProtocols []string
+}
+
+func (e *ApplicationSettingsExtension) Len() int {
+	return e.applicationSettingsExtension.Len(e.SupportedProtocols)
+}
+
+func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
+	e.applicationSettingsExtension.codePoint = utlsExtensionApplicationSettings
+	return e.applicationSettingsExtension.Read(b, e.SupportedProtocols)
 }
 
 func (e *ApplicationSettingsExtension) UnmarshalJSON(b []byte) error {
@@ -691,24 +790,51 @@ func (e *ApplicationSettingsExtension) UnmarshalJSON(b []byte) error {
 
 // Write implementation copied from ALPNExtension.Write
 func (e *ApplicationSettingsExtension) Write(b []byte) (int, error) {
-	fullLen := len(b)
-	extData := cryptobyte.String(b)
-	// https://datatracker.ietf.org/doc/html/draft-vvv-tls-alps-01
-	var protoList cryptobyte.String
-	if !extData.ReadUint16LengthPrefixed(&protoList) || protoList.Empty() {
-		return 0, errors.New("unable to read ALPN extension data")
-	}
-	alpnProtocols := []string{}
-	for !protoList.Empty() {
-		var proto cryptobyte.String
-		if !protoList.ReadUint8LengthPrefixed(&proto) || proto.Empty() {
-			return 0, errors.New("unable to read ALPN extension data")
-		}
-		alpnProtocols = append(alpnProtocols, string(proto))
+	var (
+		fullLen int
+		err     error
+	)
+	e.SupportedProtocols, fullLen, err = e.applicationSettingsExtension.Write(b)
+	return fullLen, err
+}
 
+// ApplicationSettingsExtensionNew embeds applicationSettingsExtension to implement the TLS ALPS extension on codepoint 17613
+// More information can be found here: https://chromestatus.com/feature/5149147365900288
+type ApplicationSettingsExtensionNew struct {
+	applicationSettingsExtension
+	SupportedProtocols []string
+}
+
+func (e *ApplicationSettingsExtensionNew) Len() int {
+	return e.applicationSettingsExtension.Len(e.SupportedProtocols)
+}
+
+func (e *ApplicationSettingsExtensionNew) Read(b []byte) (int, error) {
+	e.applicationSettingsExtension.codePoint = utlsExtensionApplicationSettingsNew
+	return e.applicationSettingsExtension.Read(b, e.SupportedProtocols)
+}
+
+func (e *ApplicationSettingsExtensionNew) UnmarshalJSON(b []byte) error {
+	var applicationSettingsSupport struct {
+		SupportedProtocols []string `json:"supported_protocols"`
 	}
-	e.SupportedProtocols = alpnProtocols
-	return fullLen, nil
+
+	if err := json.Unmarshal(b, &applicationSettingsSupport); err != nil {
+		return err
+	}
+
+	e.SupportedProtocols = applicationSettingsSupport.SupportedProtocols
+	return nil
+}
+
+// Write implementation copied from ALPNExtension.Write
+func (e *ApplicationSettingsExtensionNew) Write(b []byte) (int, error) {
+	var (
+		fullLen int
+		err     error
+	)
+	e.SupportedProtocols, fullLen, err = e.applicationSettingsExtension.Write(b)
+	return fullLen, err
 }
 
 // SCTExtension implements signed_certificate_timestamp (18)
@@ -1287,7 +1413,7 @@ func (e *PSKKeyExchangeModesExtension) Write(b []byte) (int, error) {
 	// RFC 8446, Section 4.2.9
 	// TODO: PSK Modes have their own form of GREASE-ing which is not currently implemented
 	// the current functionality will NOT re-GREASE/re-randomize these values when using a fingerprinted spec
-	// https://github.com/refraction-networking/utls/pull/58#discussion_r522354105
+	// https://github.com/Psiphon-Labs/utls/pull/58#discussion_r522354105
 	// https://tools.ietf.org/html/draft-ietf-tls-grease-01#section-2
 	pskModes := []uint8{}
 	if !readUint8LengthPrefixed(&extData, &pskModes) {
@@ -1419,21 +1545,39 @@ func (e *CookieExtension) writeToUConn(uc *UConn) error {
 }
 
 func (e *CookieExtension) Len() int {
-	return 4 + len(e.Cookie)
+	// The total length of the Cookie extension is:
+	// 2 bytes for ExtensionType (extensionCookie)
+	// 2 bytes for OuterExtensionDataLength
+	// 2 bytes for InnerCookieLength (len(e.Cookie))
+	// N bytes for the Cookie data itself (e.Cookie)
+	// So, total = 6 + len(e.Cookie)
+	return 6 + len(e.Cookie)
 }
 
 func (e *CookieExtension) Read(b []byte) (int, error) {
+	cookieLen := len(e.Cookie)
+
 	if len(b) < e.Len() {
 		return 0, io.ErrShortBuffer
 	}
 
+	// Extension type
 	b[0] = byte(extensionCookie >> 8)
 	b[1] = byte(extensionCookie)
-	b[2] = byte(len(e.Cookie) >> 8)
-	b[3] = byte(len(e.Cookie))
-	if len(e.Cookie) > 0 {
-		copy(b[4:], e.Cookie)
-	}
+
+	// Copied from BoringSSL https://boringssl.googlesource.com/boringssl.git/%2B/chromium-stable/ssl/extensions.cc#2465
+	// Total extension_data length
+	extDataLen := 2 + cookieLen // 2 bytes for cookie length + cookie
+	b[2] = byte(extDataLen >> 8)
+	b[3] = byte(extDataLen)
+
+	// Cookie length
+	b[4] = byte(cookieLen >> 8)
+	b[5] = byte(cookieLen)
+
+	// Cookie value
+	copy(b[6:], e.Cookie)
+
 	return e.Len(), io.EOF
 }
 

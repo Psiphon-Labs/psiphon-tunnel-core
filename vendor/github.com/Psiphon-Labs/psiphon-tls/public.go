@@ -1,7 +1,8 @@
 package tls
 
-// [Psiphon]
-// ClientSessionState contains the state needed by clients to resume TLS sessions.
+// [Psiphon] MakeClientSessionState constructs a ClientSessionState from raw
+// components. This is used by consumers that need to create session state
+// directly, such as for obfuscated tickets or QUIC PSK injection.
 func MakeClientSessionState(
 	Ticket []byte,
 	Vers uint16,

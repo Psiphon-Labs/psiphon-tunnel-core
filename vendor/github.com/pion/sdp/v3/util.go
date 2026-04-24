@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,9 +26,10 @@ var (
 	errPayloadTypeNotFound = errors.New("payload type not found")
 	errCodecNotFound       = errors.New("codec not found")
 	errSyntaxError         = errors.New("SyntaxError")
+	errFieldMissing        = errors.New("field missing")
 )
 
-// ConnectionRole indicates which of the end points should initiate the connection establishment
+// ConnectionRole indicates which of the end points should initiate the connection establishment.
 type ConnectionRole int
 
 const (
@@ -37,7 +39,8 @@ const (
 	// ConnectionRolePassive indicates the endpoint will accept an incoming connection.
 	ConnectionRolePassive
 
-	// ConnectionRoleActpass indicates the endpoint is willing to accept an incoming connection or to initiate an outgoing connection.
+	// ConnectionRoleActpass indicates the endpoint is willing to accept an incoming connection or
+	// to initiate an outgoing connection.
 	ConnectionRoleActpass
 
 	// ConnectionRoleHoldconn indicates the endpoint does not want the connection to be established for the time being.
@@ -65,10 +68,11 @@ func newSessionID() (uint64, error) {
 	// quantity with the highest bit set to zero and the remaining 63-bits
 	// being cryptographically random.
 	id, err := randutil.CryptoUint64()
+
 	return id & (^(uint64(1) << 63)), err
 }
 
-// Codec represents a codec
+// Codec represents a codec.
 type Codec struct {
 	PayloadType        uint8
 	Name               string
@@ -83,14 +87,20 @@ const (
 )
 
 func (c Codec) String() string {
-	return fmt.Sprintf("%d %s/%d/%s (%s) [%s]", c.PayloadType, c.Name, c.ClockRate, c.EncodingParameters, c.Fmtp, strings.Join(c.RTCPFeedback, ", "))
+	return fmt.Sprintf(
+		"%d %s/%d/%s (%s) [%s]",
+		c.PayloadType,
+		c.Name,
+		c.ClockRate,
+		c.EncodingParameters,
+		c.Fmtp,
+		strings.Join(c.RTCPFeedback, ", "),
+	)
 }
 
 func (c *Codec) appendRTCPFeedback(rtcpFeedback string) {
-	for _, existingRTCPFeedback := range c.RTCPFeedback {
-		if existingRTCPFeedback == rtcpFeedback {
-			return
-		}
+	if slices.Contains(c.RTCPFeedback, rtcpFeedback) {
+		return
 	}
 
 	c.RTCPFeedback = append(c.RTCPFeedback, rtcpFeedback)
@@ -140,7 +150,7 @@ func parseFmtp(fmtp string) (Codec, error) {
 	parsingFailed := errExtractCodecFmtp
 
 	// a=fmtp:<format> <format specific parameters>
-	split := strings.Split(fmtp, " ")
+	split := strings.SplitN(fmtp, " ", 2)
 	if len(split) != 2 {
 		return codec, parsingFailed
 	}
@@ -189,6 +199,7 @@ func parseRtcpFb(rtcpFb string) (codec Codec, isWildcard bool, err error) {
 	}
 
 	codec.RTCPFeedback = append(codec.RTCPFeedback, split[1])
+
 	return codec, isWildcard, nil
 }
 
@@ -215,7 +226,7 @@ func mergeCodecs(codec Codec, codecs map[uint8]Codec) {
 	codecs[savedCodec.PayloadType] = savedCodec
 }
 
-func (s *SessionDescription) buildCodecMap() map[uint8]Codec {
+func (s *SessionDescription) buildCodecMap() map[uint8]Codec { //nolint:cyclop
 	codecs := map[uint8]Codec{
 		// static codecs that do not require a rtpmap
 		0: {
@@ -226,6 +237,11 @@ func (s *SessionDescription) buildCodecMap() map[uint8]Codec {
 		8: {
 			PayloadType: 8,
 			Name:        "PCMA",
+			ClockRate:   8000,
+		},
+		9: {
+			PayloadType: 9,
+			Name:        "G722",
 			ClockRate:   8000,
 		},
 	}
@@ -308,7 +324,7 @@ func codecsMatch(wanted, got Codec) bool {
 	return true
 }
 
-// GetCodecForPayloadType scans the SessionDescription for the given payload type and returns the codec
+// GetCodecForPayloadType scans the SessionDescription for the given payload type and returns the codec.
 func (s *SessionDescription) GetCodecForPayloadType(payloadType uint8) (Codec, error) {
 	codecs := s.buildCodecMap()
 
@@ -320,8 +336,22 @@ func (s *SessionDescription) GetCodecForPayloadType(payloadType uint8) (Codec, e
 	return codec, errPayloadTypeNotFound
 }
 
+func (s *SessionDescription) GetCodecsForPayloadTypes(payloadTypes []uint8) ([]Codec, error) {
+	codecs := s.buildCodecMap()
+
+	result := make([]Codec, 0, len(payloadTypes))
+	for _, payloadType := range payloadTypes {
+		codec, ok := codecs[payloadType]
+		if ok {
+			result = append(result, codec)
+		}
+	}
+
+	return result, nil
+}
+
 // GetPayloadTypeForCodec scans the SessionDescription for a codec that matches the provided codec
-// as closely as possible and returns its payload type
+// as closely as possible and returns its payload type.
 func (s *SessionDescription) GetPayloadTypeForCodec(wanted Codec) (uint8, error) {
 	codecs := s.buildCodecMap()
 

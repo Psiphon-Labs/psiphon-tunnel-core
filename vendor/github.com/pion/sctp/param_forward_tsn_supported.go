@@ -19,6 +19,7 @@ type paramForwardTSNSupported struct {
 func (f *paramForwardTSNSupported) marshal() ([]byte, error) {
 	f.typ = forwardTSNSupp
 	f.raw = []byte{}
+
 	return f.paramHeader.marshal()
 }
 
@@ -27,5 +28,6 @@ func (f *paramForwardTSNSupported) unmarshal(raw []byte) (param, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return f, nil
 }

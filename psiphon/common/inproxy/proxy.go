@@ -1147,6 +1147,12 @@ func (p *Proxy) proxyOneClient(
 	// included in SDPs.
 	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
 
+	// Limitation: the proxy's independently-selected DTLS fingerprint is not
+	// currently reported in the stats pipeline. Only the client-side choice
+	// flows to server logs via inproxy_webrtc_dtls_fingerprint.
+	//
+	// TODO: Revisit later to add a proxy-side metric.
+
 	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnForAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
@@ -1155,7 +1161,7 @@ func (p *Proxy) proxyOneClient(
 			ExcludeInterfaceName:        p.config.ExcludeInterfaceName,
 			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
-			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
+			DTLSFingerprint:             webRTCCoordinator.DTLSFingerprint(),
 			UseMediaStreams:             announceResponse.UseMediaStreams,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
 

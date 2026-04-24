@@ -21,7 +21,7 @@ type chunkCookieAck struct {
 	chunkHeader
 }
 
-// Cookie ack chunk errors
+// Cookie ack chunk errors.
 var (
 	ErrChunkTypeNotCookieAck = errors.New("ChunkType is not of type COOKIEACK")
 )
@@ -40,6 +40,7 @@ func (c *chunkCookieAck) unmarshal(raw []byte) error {
 
 func (c *chunkCookieAck) marshal() ([]byte, error) {
 	c.chunkHeader.typ = ctCookieAck
+
 	return c.chunkHeader.marshal()
 }
 
@@ -47,7 +48,7 @@ func (c *chunkCookieAck) check() (abort bool, err error) {
 	return false, nil
 }
 
-// String makes chunkCookieAck printable
+// String makes chunkCookieAck printable.
 func (c *chunkCookieAck) String() string {
 	return c.chunkHeader.String()
 }

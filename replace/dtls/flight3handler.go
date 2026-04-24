@@ -6,7 +6,6 @@ package dtls
 import (
 	"bytes"
 	"context"
-	"errors"
 
 	"github.com/pion/dtls/v2/internal/ciphersuite/types"
 	"github.com/pion/dtls/v2/pkg/crypto/elliptic"
@@ -57,7 +56,7 @@ func flight3Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 				if !found {
 					return 0, &alert.Alert{Level: alert.Fatal, Description: alert.IllegalParameter}, errClientNoMatchingSRTPProfile
 				}
-				state.setSRTPProtectionProfile(profile)
+				state.srtpProtectionProfile = profile
 			case *extension.UseExtendedMasterSecret:
 				if cfg.extendedMasterSecret != DisableExtendedMasterSecret {
 					state.extendedMasterSecret = true
@@ -72,7 +71,7 @@ func flight3Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 		if cfg.extendedMasterSecret == RequireExtendedMasterSecret && !state.extendedMasterSecret {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, errClientRequiredButNoServerEMS
 		}
-		if len(cfg.localSRTPProtectionProfiles) > 0 && state.getSRTPProtectionProfile() == 0 {
+		if len(cfg.localSRTPProtectionProfiles) > 0 && state.srtpProtectionProfile == 0 {
 			return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, errRequestedButNoSRTPExtension
 		}
 
@@ -228,13 +227,7 @@ func handleServerKeyExchange(_ flightConn, state *State, cfg *handshakeConfig, h
 	return nil, nil //nolint:nilnil
 }
 
-func flight3Generate(_ context.Context, _ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
-
-	// [Psiphon]
-	// With SetDTLSInsecureSkipHelloVerify set, this should never be called,
-	// so handshake randomization is not implemented here.
-	return nil, nil, errors.New("unexpected flight3Generate call")
-
+func flight3Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	extensions := []extension.Extension{
 		&extension.SupportedSignatureAlgorithms{
 			SignatureHashAlgorithms: cfg.localSignatureSchemes,

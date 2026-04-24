@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 // Package sequencenumber provides a sequence number unwrapper
@@ -9,7 +9,7 @@ const (
 	breakpoint               = 32768 // half of max uint16
 )
 
-// Unwrapper stores an unwrapped sequence number
+// Unwrapper stores an unwrapped sequence number.
 type Unwrapper struct {
 	init          bool
 	lastUnwrapped int64
@@ -19,18 +19,20 @@ func isNewer(value, previous uint16) bool {
 	if value-previous == breakpoint {
 		return value > previous
 	}
+
 	return value != previous && (value-previous) < breakpoint
 }
 
-// Unwrap unwraps the next sequencenumber
+// Unwrap unwraps the next sequencenumber.
 func (u *Unwrapper) Unwrap(i uint16) int64 {
 	if !u.init {
 		u.init = true
 		u.lastUnwrapped = int64(i)
+
 		return u.lastUnwrapped
 	}
 
-	lastWrapped := uint16(u.lastUnwrapped)
+	lastWrapped := uint16(u.lastUnwrapped) //nolint:gosec // G115
 	delta := int64(i - lastWrapped)
 	if isNewer(i, lastWrapped) {
 		if delta < 0 {
@@ -41,5 +43,6 @@ func (u *Unwrapper) Unwrap(i uint16) int64 {
 	}
 
 	u.lastUnwrapped += delta
+
 	return u.lastUnwrapped
 }
