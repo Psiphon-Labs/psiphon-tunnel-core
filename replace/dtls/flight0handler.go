@@ -60,7 +60,7 @@ func flight0Parse(_ context.Context, _ flightConn, state *State, cache *handshak
 			if !ok {
 				return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InsufficientSecurity}, errServerNoMatchingSRTPProfile
 			}
-			state.setSRTPProtectionProfile(profile)
+			state.srtpProtectionProfile = profile
 		case *extension.UseExtendedMasterSecret:
 			if cfg.extendedMasterSecret != DisableExtendedMasterSecret {
 				state.extendedMasterSecret = true
@@ -116,7 +116,7 @@ func handleHelloResume(sessionID []byte, state *State, cfg *handshakeConfig, nex
 	return next, nil, nil
 }
 
-func flight0Generate(_ context.Context, _ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight0Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	// Initialize
 	if !cfg.insecureSkipHelloVerify {
 		state.cookie = make([]byte, cookieLength)

@@ -457,7 +457,9 @@ const (
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyClientRelayedPacketRequestTimeout"
 	InproxyClientDSLRequestTimeout                     = "InproxyClientDSLRequestTimeout"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
-	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
+	InproxyLimitDTLSFingerprintsProbability            = "InproxyLimitDTLSFingerprintsProbability"
+	InproxyLimitDTLSFingerprints                       = "InproxyLimitDTLSFingerprints"
+	InproxyDTLSFingerprintSelectRandomizedProbability  = "InproxyDTLSFingerprintSelectRandomizedProbability"
 	InproxyWebRTCMediaStreamsProbability               = "InproxyWebRTCMediaStreamsProbability"
 	InproxyWebRTCDataChannelTrafficShapingProbability  = "InproxyWebRTCDataChannelTrafficShapingProbability"
 	InproxyWebRTCDataChannelTrafficShapingParameters   = "InproxyWebRTCDataChannelTrafficShapingParameters"
@@ -590,6 +592,7 @@ const (
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
 	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
 	DestinationBytesMetricsASN                = "DestinationBytesMetricsASN"
+	InproxyDTLSRandomizationProbability       = "InproxyDTLSRandomizationProbability"
 )
 
 const (
@@ -1112,6 +1115,9 @@ var defaultParameters = map[string]struct {
 	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
+	InproxyLimitDTLSFingerprintsProbability:            {value: 1.0, minimum: 0.0},
+	InproxyLimitDTLSFingerprints:                       {value: protocol.DTLSFingerprints{}},
+	InproxyDTLSFingerprintSelectRandomizedProbability:  {value: 0.25, minimum: 0.0},
 	InproxyWebRTCMediaStreamsProbability:               {value: 0.0, minimum: 0.0},
 	InproxyWebRTCDataChannelTrafficShapingProbability:  {value: 0.5, minimum: 0.0},
 	InproxyWebRTCDataChannelTrafficShapingParameters:   {value: InproxyTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
@@ -2223,6 +2229,33 @@ func (p ParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUI
 	value := protocol.LabeledQUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
+}
+
+// DTLSFingerprints returns a protocol.DTLSFingerprints parameter value,
+// applying a probability gate as with TLSProfiles and QUICVersions.
+func (p ParametersAccessor) DTLSFingerprints(name string) protocol.DTLSFingerprints {
+
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !prng.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.DTLSFingerprints)
+				if ok {
+					value := make(protocol.DTLSFingerprints, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.DTLSFingerprints{}
+	p.snapshot.getValue(name, &value)
+	return value
 }
 
 // TransferURLs returns a TransferURLs parameter value.
