@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -21,7 +21,7 @@ var (
 
 	//nolint: gochecknoglobals
 	unmarshalCachePool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return &unmarshalCache{}
 		},
 	}
@@ -107,34 +107,35 @@ var (
 // |   s14  | 14 |       |    |     |    |     |   |    | 12 |   |   |     |   |   |    |   |    |
 // |   s15  |    |    14 |    |     | 15 |     |   |    | 12 |   |   |     |   |   |    |   |    |
 // |   s16  |    |    14 |    |     |    |  15 |   |    | 12 |   |   |     |   |   |    |   |    |
-// +--------+----+-------+----+-----+----+-----+---+----+----+---+---+-----+---+---+----+---+----+
+// +--------+----+-------+----+-----+----+-----+---+----+----+---+---+-----+---+---+----+---+----+ .
 func (s *SessionDescription) UnmarshalString(value string) error {
 	var ok bool
-	l := new(lexer)
-	if l.cache, ok = unmarshalCachePool.Get().(*unmarshalCache); !ok {
+	lex := new(lexer)
+	if lex.cache, ok = unmarshalCachePool.Get().(*unmarshalCache); !ok {
 		return errSDPCacheInvalid
 	}
-	defer unmarshalCachePool.Put(l.cache)
+	defer unmarshalCachePool.Put(lex.cache)
 
-	l.cache.reset()
-	l.desc = s
-	l.value = value
+	lex.cache.reset()
+	lex.desc = s
+	lex.value = value
 
 	for state := s1; state != nil; {
 		var err error
-		state, err = state(l)
+		state, err = state(lex)
 		if err != nil {
 			return err
 		}
 	}
 
-	s.Attributes = l.cache.cloneSessionAttributes()
-	populateMediaAttributes(l.cache, l.desc)
+	s.Attributes = lex.cache.cloneSessionAttributes()
+	populateMediaAttributes(lex.cache, lex.desc)
+
 	return nil
 }
 
 // Unmarshal converts the value into a []byte and then calls UnmarshalString.
-// Callers should use the more performant UnmarshalString
+// Callers should use the more performant UnmarshalString.
 func (s *SessionDescription) Unmarshal(value []byte) error {
 	return s.UnmarshalString(string(value))
 }
@@ -144,6 +145,7 @@ func s1(l *lexer) (stateFn, error) {
 		if key == 'v' {
 			return unmarshalProtocolVersion
 		}
+
 		return nil
 	})
 }
@@ -153,6 +155,7 @@ func s2(l *lexer) (stateFn, error) {
 		if key == 'o' {
 			return unmarshalOrigin
 		}
+
 		return nil
 	})
 }
@@ -162,6 +165,7 @@ func s3(l *lexer) (stateFn, error) {
 		if key == 's' {
 			return unmarshalSessionName
 		}
+
 		return nil
 	})
 }
@@ -184,6 +188,7 @@ func s4(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -196,6 +201,7 @@ func s5(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -212,6 +218,7 @@ func s6(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -232,6 +239,7 @@ func s7(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -246,6 +254,7 @@ func s8(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -266,6 +275,7 @@ func s9(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -284,6 +294,7 @@ func s10(l *lexer) (stateFn, error) {
 		case 't':
 			return unmarshalTiming
 		}
+
 		return nil
 	})
 }
@@ -296,6 +307,7 @@ func s11(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -316,6 +328,7 @@ func s12(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -330,6 +343,7 @@ func s13(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -354,6 +368,7 @@ func s14(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -375,6 +390,7 @@ func s15(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -396,6 +412,7 @@ func s16(l *lexer) (stateFn, error) {
 		case 'm':
 			return unmarshalMediaDescription
 		}
+
 		return nil
 	})
 }
@@ -419,56 +436,101 @@ func unmarshalProtocolVersion(l *lexer) (stateFn, error) {
 	return s2, nil
 }
 
-func unmarshalOrigin(l *lexer) (stateFn, error) {
+func unmarshalOrigin(lex *lexer) (stateFn, error) {
 	var err error
 
-	l.desc.Origin.Username, err = l.readField()
+	lex.desc.Origin.Username, err = lex.readField()
 	if err != nil {
 		return nil, err
 	}
 
-	l.desc.Origin.SessionID, err = l.readUint64Field()
+	lex.desc.Origin.SessionID, err = lex.readUint64Field()
 	if err != nil {
 		return nil, err
 	}
 
-	l.desc.Origin.SessionVersion, err = l.readUint64Field()
+	lex.desc.Origin.SessionVersion, err = lex.readUint64Field()
 	if err != nil {
 		return nil, err
 	}
 
-	l.desc.Origin.NetworkType, err = l.readField()
+	lex.desc.Origin.NetworkType, err = lex.readField()
 	if err != nil {
 		return nil, err
 	}
 
 	// Set according to currently registered with IANA
 	// https://tools.ietf.org/html/rfc4566#section-8.2.6
-	if !anyOf(l.desc.Origin.NetworkType, "IN") {
-		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, l.desc.Origin.NetworkType)
+	if !anyOf(lex.desc.Origin.NetworkType, "IN") {
+		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, lex.desc.Origin.NetworkType)
 	}
 
-	l.desc.Origin.AddressType, err = l.readField()
+	// Handle potentially missing AddressType field
+	err = handleAddressType(lex)
 	if err != nil {
 		return nil, err
 	}
 
 	// Set according to currently registered with IANA
 	// https://tools.ietf.org/html/rfc4566#section-8.2.7
-	if !anyOf(l.desc.Origin.AddressType, "IP4", "IP6") {
-		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, l.desc.Origin.AddressType)
+	if !anyOf(lex.desc.Origin.AddressType, "IP4", "IP6") {
+		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, lex.desc.Origin.AddressType)
 	}
 
-	l.desc.Origin.UnicastAddress, err = l.readField()
+	// Handle potentially missing UnicastAddress field
+	err = handleUnicastAddress(lex)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := l.nextLine(); err != nil {
+	if err := lex.nextLine(); err != nil {
 		return nil, err
 	}
 
 	return s3, nil
+}
+
+// handleAddressType processes AddressType field with graceful handling for missing fields.
+func handleAddressType(lex *lexer) error {
+	addressType, err := lex.readRequiredField()
+	if err != nil {
+		if errors.Is(err, errFieldMissing) {
+			// Field missing - use defaults for camera compatibility
+			lex.desc.Origin.AddressType = "IP4"
+			lex.desc.Origin.UnicastAddress = "0.0.0.0"
+
+			return nil
+		}
+
+		return err
+	}
+
+	lex.desc.Origin.AddressType = addressType
+
+	return nil
+}
+
+// handleUnicastAddress processes UnicastAddress field with graceful handling for missing fields.
+func handleUnicastAddress(lex *lexer) error {
+	unicastAddress, err := lex.readRequiredField()
+	if err != nil {
+		if errors.Is(err, errFieldMissing) {
+			// Use appropriate default based on address type
+			if lex.desc.Origin.AddressType == "IP6" {
+				lex.desc.Origin.UnicastAddress = "::"
+			} else {
+				lex.desc.Origin.UnicastAddress = "0.0.0.0"
+			}
+
+			return nil
+		}
+
+		return err
+	}
+
+	lex.desc.Origin.UnicastAddress = unicastAddress
+
+	return nil
 }
 
 func unmarshalSessionName(l *lexer) (stateFn, error) {
@@ -478,6 +540,7 @@ func unmarshalSessionName(l *lexer) (stateFn, error) {
 	}
 
 	l.desc.SessionName = SessionName(value)
+
 	return s4, nil
 }
 
@@ -489,6 +552,7 @@ func unmarshalSessionInformation(l *lexer) (stateFn, error) {
 
 	sessionInformation := Information(value)
 	l.desc.SessionInformation = &sessionInformation
+
 	return s7, nil
 }
 
@@ -514,6 +578,7 @@ func unmarshalEmail(l *lexer) (stateFn, error) {
 
 	emailAddress := EmailAddress(value)
 	l.desc.EmailAddress = &emailAddress
+
 	return s6, nil
 }
 
@@ -525,6 +590,7 @@ func unmarshalPhone(l *lexer) (stateFn, error) {
 
 	phoneNumber := PhoneNumber(value)
 	l.desc.PhoneNumber = &phoneNumber
+
 	return s8, nil
 }
 
@@ -534,33 +600,34 @@ func unmarshalSessionConnectionInformation(l *lexer) (stateFn, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s5, nil
 }
 
 func (l *lexer) unmarshalConnectionInformation() (*ConnectionInformation, error) {
 	var err error
-	var c ConnectionInformation
+	var connInfo ConnectionInformation
 
-	c.NetworkType, err = l.readField()
+	connInfo.NetworkType, err = l.readField()
 	if err != nil {
 		return nil, err
 	}
 
 	// Set according to currently registered with IANA
 	// https://tools.ietf.org/html/rfc4566#section-8.2.6
-	if !anyOf(c.NetworkType, "IN") {
-		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, c.NetworkType)
+	if !anyOf(connInfo.NetworkType, "IN") {
+		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, connInfo.NetworkType)
 	}
 
-	c.AddressType, err = l.readField()
+	connInfo.AddressType, err = l.readField()
 	if err != nil {
 		return nil, err
 	}
 
 	// Set according to currently registered with IANA
 	// https://tools.ietf.org/html/rfc4566#section-8.2.7
-	if !anyOf(c.AddressType, "IP4", "IP6") {
-		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, c.AddressType)
+	if !anyOf(connInfo.AddressType, "IP4", "IP6") {
+		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, connInfo.AddressType)
 	}
 
 	address, err := l.readField()
@@ -569,15 +636,15 @@ func (l *lexer) unmarshalConnectionInformation() (*ConnectionInformation, error)
 	}
 
 	if address != "" {
-		c.Address = new(Address)
-		c.Address.Address = address
+		connInfo.Address = new(Address)
+		connInfo.Address.Address = address
 	}
 
 	if err := l.nextLine(); err != nil {
 		return nil, err
 	}
 
-	return &c, nil
+	return &connInfo, nil
 }
 
 func unmarshalSessionBandwidth(l *lexer) (stateFn, error) {
@@ -624,35 +691,36 @@ func unmarshalBandwidth(value string) (*Bandwidth, error) {
 	}, nil
 }
 
-func unmarshalTiming(l *lexer) (stateFn, error) {
+func unmarshalTiming(lex *lexer) (stateFn, error) {
 	var err error
 	var td TimeDescription
 
-	td.Timing.StartTime, err = l.readUint64Field()
+	td.Timing.StartTime, err = lex.readUint64Field()
 	if err != nil {
 		return nil, err
 	}
 
-	td.Timing.StopTime, err = l.readUint64Field()
+	td.Timing.StopTime, err = lex.readUint64Field()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := l.nextLine(); err != nil {
+	if err := lex.nextLine(); err != nil {
 		return nil, err
 	}
 
-	l.desc.TimeDescriptions = append(l.desc.TimeDescriptions, td)
+	lex.desc.TimeDescriptions = append(lex.desc.TimeDescriptions, td)
+
 	return s9, nil
 }
 
-func unmarshalRepeatTimes(l *lexer) (stateFn, error) {
+func unmarshalRepeatTimes(lex *lexer) (stateFn, error) {
 	var err error
 	var newRepeatTime RepeatTime
 
-	latestTimeDesc := &l.desc.TimeDescriptions[len(l.desc.TimeDescriptions)-1]
+	latestTimeDesc := &lex.desc.TimeDescriptions[len(lex.desc.TimeDescriptions)-1]
 
-	field, err := l.readField()
+	field, err := lex.readField()
 	if err != nil {
 		return nil, err
 	}
@@ -662,7 +730,7 @@ func unmarshalRepeatTimes(l *lexer) (stateFn, error) {
 		return nil, fmt.Errorf("%w `%v`", errSDPInvalidValue, field)
 	}
 
-	field, err = l.readField()
+	field, err = lex.readField()
 	if err != nil {
 		return nil, err
 	}
@@ -673,7 +741,7 @@ func unmarshalRepeatTimes(l *lexer) (stateFn, error) {
 	}
 
 	for {
-		field, err := l.readField()
+		field, err := lex.readField()
 		if err != nil {
 			return nil, err
 		}
@@ -687,15 +755,16 @@ func unmarshalRepeatTimes(l *lexer) (stateFn, error) {
 		newRepeatTime.Offsets = append(newRepeatTime.Offsets, offset)
 	}
 
-	if err := l.nextLine(); err != nil {
+	if err := lex.nextLine(); err != nil {
 		return nil, err
 	}
 
 	latestTimeDesc.RepeatTimes = append(latestTimeDesc.RepeatTimes, newRepeatTime)
+
 	return s9, nil
 }
 
-func unmarshalTimeZones(l *lexer) (stateFn, error) {
+func unmarshalTimeZones(lex *lexer) (stateFn, error) {
 	// These fields are transimitted in pairs
 	// z=<adjustment time> <offset> <adjustment time> <offset> ....
 	// so we are making sure that there are actually multiple of 2 total.
@@ -703,12 +772,12 @@ func unmarshalTimeZones(l *lexer) (stateFn, error) {
 		var err error
 		var timeZone TimeZone
 
-		timeZone.AdjustmentTime, err = l.readUint64Field()
+		timeZone.AdjustmentTime, err = lex.readUint64Field()
 		if err != nil {
 			return nil, err
 		}
 
-		offset, err := l.readField()
+		offset, err := lex.readField()
 		if err != nil {
 			return nil, err
 		}
@@ -722,10 +791,10 @@ func unmarshalTimeZones(l *lexer) (stateFn, error) {
 			return nil, err
 		}
 
-		l.desc.TimeZones = append(l.desc.TimeZones, timeZone)
+		lex.desc.TimeZones = append(lex.desc.TimeZones, timeZone)
 	}
 
-	if err := l.nextLine(); err != nil {
+	if err := lex.nextLine(); err != nil {
 		return nil, err
 	}
 
@@ -740,6 +809,7 @@ func unmarshalSessionEncryptionKey(l *lexer) (stateFn, error) {
 
 	encryptionKey := EncryptionKey(value)
 	l.desc.EncryptionKey = &encryptionKey
+
 	return s11, nil
 }
 
@@ -761,12 +831,12 @@ func unmarshalSessionAttribute(l *lexer) (stateFn, error) {
 	return s11, nil
 }
 
-func unmarshalMediaDescription(l *lexer) (stateFn, error) {
-	populateMediaAttributes(l.cache, l.desc)
+func unmarshalMediaDescription(lex *lexer) (stateFn, error) { //nolint:cyclop
+	populateMediaAttributes(lex.cache, lex.desc)
 	var newMediaDesc MediaDescription
 
 	// <media>
-	field, err := l.readField()
+	field, err := lex.readField()
 	if err != nil {
 		return nil, err
 	}
@@ -779,7 +849,7 @@ func unmarshalMediaDescription(l *lexer) (stateFn, error) {
 	newMediaDesc.MediaName.Media = field
 
 	// <port>
-	field, err = l.readField()
+	field, err = lex.readField()
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +869,7 @@ func unmarshalMediaDescription(l *lexer) (stateFn, error) {
 	}
 
 	// <proto>
-	field, err = l.readField()
+	field, err = lex.readField()
 	if err != nil {
 		return nil, err
 	}
@@ -808,7 +878,25 @@ func unmarshalMediaDescription(l *lexer) (stateFn, error) {
 	// https://tools.ietf.org/html/rfc4566#section-5.14
 	// https://tools.ietf.org/html/rfc4975#section-8.1
 	for _, proto := range strings.Split(field, "/") {
-		if !anyOf(proto, "UDP", "RTP", "AVP", "SAVP", "SAVPF", "TLS", "DTLS", "SCTP", "AVPF", "TCP", "MSRP", "BFCP", "UDT", "IX") {
+		if !anyOf(
+			proto,
+			"UDP",
+			"RTP",
+			"AVP",
+			"SAVP",
+			"SAVPF",
+			"TLS",
+			"DTLS",
+			"SCTP",
+			"AVPF",
+			"TCP",
+			"MSRP",
+			"BFCP",
+			"UDT",
+			"IX",
+			"MRCPv2",
+			"FEC",
+		) {
 			return nil, fmt.Errorf("%w `%v`", errSDPInvalidNumericValue, field)
 		}
 		newMediaDesc.MediaName.Protos = append(newMediaDesc.MediaName.Protos, proto)
@@ -816,7 +904,7 @@ func unmarshalMediaDescription(l *lexer) (stateFn, error) {
 
 	// <fmt>...
 	for {
-		field, err = l.readField()
+		field, err = lex.readField()
 		if err != nil {
 			return nil, err
 		}
@@ -826,11 +914,12 @@ func unmarshalMediaDescription(l *lexer) (stateFn, error) {
 		newMediaDesc.MediaName.Formats = append(newMediaDesc.MediaName.Formats, field)
 	}
 
-	if err := l.nextLine(); err != nil {
+	if err := lex.nextLine(); err != nil {
 		return nil, err
 	}
 
-	l.desc.MediaDescriptions = append(l.desc.MediaDescriptions, &newMediaDesc)
+	lex.desc.MediaDescriptions = append(lex.desc.MediaDescriptions, &newMediaDesc)
+
 	return s12, nil
 }
 
@@ -843,6 +932,7 @@ func unmarshalMediaTitle(l *lexer) (stateFn, error) {
 	latestMediaDesc := l.desc.MediaDescriptions[len(l.desc.MediaDescriptions)-1]
 	mediaTitle := Information(value)
 	latestMediaDesc.MediaTitle = &mediaTitle
+
 	return s16, nil
 }
 
@@ -853,6 +943,7 @@ func unmarshalMediaConnectionInformation(l *lexer) (stateFn, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s15, nil
 }
 
@@ -868,6 +959,7 @@ func unmarshalMediaBandwidth(l *lexer) (stateFn, error) {
 		return nil, fmt.Errorf("%w `b=%v`", errSDPInvalidSyntax, value)
 	}
 	latestMediaDesc.Bandwidth = append(latestMediaDesc.Bandwidth, *bandwidth)
+
 	return s15, nil
 }
 
@@ -880,6 +972,7 @@ func unmarshalMediaEncryptionKey(l *lexer) (stateFn, error) {
 	latestMediaDesc := l.desc.MediaDescriptions[len(l.desc.MediaDescriptions)-1]
 	encryptionKey := EncryptionKey(value)
 	latestMediaDesc.EncryptionKey = &encryptionKey
+
 	return s14, nil
 }
 
@@ -915,6 +1008,7 @@ func parseTimeUnits(value string) (num int64, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("%w `%v`", errSDPInvalidValue, value)
 	}
+
 	return num * k, nil
 }
 
@@ -938,10 +1032,10 @@ func timeShorthand(b byte) int64 {
 func parsePort(value string) (int, error) {
 	port, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("%w `%v`", errSDPInvalidPortValue, port)
+		return 0, fmt.Errorf("%w `%v`", errSDPInvalidPortValue, value)
 	}
 
-	if port < 0 || port > 65536 {
+	if port < 0 || port > 65535 {
 		return 0, fmt.Errorf("%w -- out of range `%v`", errSDPInvalidPortValue, port)
 	}
 

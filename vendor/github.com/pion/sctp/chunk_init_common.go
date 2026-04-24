@@ -57,7 +57,7 @@ const (
 	initOptionalVarHeaderLength = 4
 )
 
-// Init chunk errors
+// Init chunk errors.
 var (
 	ErrInitChunkParseParamTypeFailed = errors.New("failed to parse param type")
 	ErrInitAckMarshalParam           = errors.New("unable to marshal parameter for INIT/INITACK")
@@ -127,7 +127,7 @@ func (i *chunkInitCommon) marshal() ([]byte, error) {
 			return nil, fmt.Errorf("%w: %v", ErrInitAckMarshalParam, err) //nolint:errorlint
 		}
 
-		out = append(out, pp...)
+		out = append(out, pp...) //nolint:makezero // TODO: fix
 
 		// Chunks (including Type, Length, and Value fields) are padded out
 		// by the sender with all zero bytes to be a multiple of 4 bytes
@@ -144,7 +144,7 @@ func (i *chunkInitCommon) marshal() ([]byte, error) {
 	return out, nil
 }
 
-// String makes chunkInitCommon printable
+// String makes chunkInitCommon printable.
 func (i chunkInitCommon) String() string {
 	format := `initiateTag: %d
 	advertisedReceiverWindowCredit: %d
@@ -163,5 +163,17 @@ func (i chunkInitCommon) String() string {
 	for i, param := range i.params {
 		res += fmt.Sprintf("Param %d:\n %s", i, param)
 	}
+
 	return res
+}
+
+// allZero returns true if every byte is 0x00.
+func allZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+
+	return true
 }

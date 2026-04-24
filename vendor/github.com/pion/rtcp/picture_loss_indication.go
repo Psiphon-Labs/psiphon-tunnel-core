@@ -8,7 +8,8 @@ import (
 	"fmt"
 )
 
-// The PictureLossIndication packet informs the encoder about the loss of an undefined amount of coded video data belonging to one or more pictures
+// The PictureLossIndication packet informs the encoder about the loss of an undefined amount of
+// coded video data belonging to one or more pictures.
 type PictureLossIndication struct {
 	// SSRC of sender
 	SenderSSRC uint32
@@ -21,7 +22,7 @@ const (
 	pliLength = 2
 )
 
-// Marshal encodes the PictureLossIndication in binary
+// Marshal encodes the PictureLossIndication in binary.
 func (p PictureLossIndication) Marshal() ([]byte, error) {
 	/*
 	 * PLI does not require parameters.  Therefore, the length field MUST be
@@ -29,7 +30,7 @@ func (p PictureLossIndication) Marshal() ([]byte, error) {
 	 *
 	 * The semantics of this FB message is independent of the payload type.
 	 */
-	rawPacket := make([]byte, p.len())
+	rawPacket := make([]byte, p.MarshalSize())
 	packetBody := rawPacket[headerLength:]
 
 	binary.BigEndian.PutUint32(packetBody, p.SenderSSRC)
@@ -49,7 +50,7 @@ func (p PictureLossIndication) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the PictureLossIndication from binary
+// Unmarshal decodes the PictureLossIndication from binary.
 func (p *PictureLossIndication) Unmarshal(rawPacket []byte) error {
 	if len(rawPacket) < (headerLength + (ssrcLength * 2)) {
 		return errPacketTooShort
@@ -66,6 +67,7 @@ func (p *PictureLossIndication) Unmarshal(rawPacket []byte) error {
 
 	p.SenderSSRC = binary.BigEndian.Uint32(rawPacket[headerLength:])
 	p.MediaSSRC = binary.BigEndian.Uint32(rawPacket[headerLength+ssrcLength:])
+
 	return nil
 }
 
@@ -78,7 +80,8 @@ func (p *PictureLossIndication) Header() Header {
 	}
 }
 
-func (p *PictureLossIndication) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (p *PictureLossIndication) MarshalSize() int {
 	return headerLength + ssrcLength*2
 }
 

@@ -7,45 +7,11 @@ package tls
 import (
 	"crypto"
 	"crypto/ecdh"
+	"crypto/mlkem"
 	"crypto/x509"
 	"hash"
-
-	"github.com/Psiphon-Labs/utls/internal/mlkem768"
+	"time"
 )
-
-type PubKeySharePrivateKeys struct {
-	Ecdhe map[CurveID]*ecdh.PrivateKey
-	Kyber map[CurveID]*mlkem768.DecapsulationKey
-}
-
-func NewPubKeySharePrivateKeys() *PubKeySharePrivateKeys {
-	return &PubKeySharePrivateKeys{
-		Ecdhe: make(map[CurveID]*ecdh.PrivateKey),
-		Kyber: make(map[CurveID]*mlkem768.DecapsulationKey),
-	}
-}
-
-func (pk *PubKeySharePrivateKeys) toPrivate() *keySharePrivateKeys {
-	if pk == nil {
-		return nil
-	} else {
-		return &keySharePrivateKeys{
-			ecdhe: pk.Ecdhe,
-			kyber: pk.Kyber,
-		}
-	}
-}
-
-func (pk *keySharePrivateKeys) toPublic() *PubKeySharePrivateKeys {
-	if pk == nil {
-		return nil
-	} else {
-		return &PubKeySharePrivateKeys{
-			Ecdhe: pk.ecdhe,
-			Kyber: pk.kyber,
-		}
-	}
-}
 
 // ClientHandshakeState includes both TLS 1.3-only and TLS 1.2-only states,
 // only one of them will be used, depending on negotiated version.
@@ -71,9 +37,18 @@ type PubClientHandshakeState struct {
 
 // TLS 1.3 only
 type TLS13OnlyState struct {
-	Suite        *PubCipherSuiteTLS13
-	KeyShareKeys *PubKeySharePrivateKeys
+	// Deprecated: Use KeyShareKeys instead. KeyShareKeys will take precedence if both are set.
+	// Support may be removed in the future.
+	EcdheKey *ecdh.PrivateKey
+	// Deprecated: Use KeyShareKeys instead. This variable is no longer used.
+	// Will be removed in the future.
+	KeySharesParams *KeySharesParameters
+	// Deprecated: Use KeyShareKeys instead. This variable is no longer used.
+	// Will be removed in the future.
+	KEMKey *KemPrivateKey
 
+	KeyShareKeys  *KeySharePrivateKeys
+	Suite         *PubCipherSuiteTLS13
 	EarlySecret   []byte
 	BinderKey     []byte
 	CertReq       *CertificateRequestMsgTLS13
@@ -89,6 +64,24 @@ type TLS12OnlyState struct {
 	Suite        PubCipherSuite
 }
 
+func (chs *TLS13OnlyState) private13KeyShareKeys() *keySharePrivateKeys {
+	if chs.KeyShareKeys != nil {
+		return chs.KeyShareKeys.ToPrivate()
+	}
+
+	if chs.EcdheKey != nil {
+		return &keySharePrivateKeys{
+			ecdhe: chs.EcdheKey,
+		}
+	}
+
+	return nil
+}
+
+// func kyberGoToCircl(kyberKey *mlkem768.DecapsulationKey, ecdhKey *ecdh.PrivateKey) (kem.PrivateKey, error) {
+// 	return hybrid.Kyber768X25519().UnmarshalBinaryPrivateKey(append(ecdhKey.Bytes(), kyberKey.Bytes()...))
+// }
+
 func (chs *PubClientHandshakeState) toPrivate13() *clientHandshakeStateTLS13 {
 	if chs == nil {
 		return nil
@@ -97,18 +90,16 @@ func (chs *PubClientHandshakeState) toPrivate13() *clientHandshakeStateTLS13 {
 			c:            chs.C,
 			serverHello:  chs.ServerHello.getPrivatePtr(),
 			hello:        chs.Hello.getPrivatePtr(),
-			keyShareKeys: chs.State13.KeyShareKeys.toPrivate(),
+			keyShareKeys: chs.State13.private13KeyShareKeys(),
 
-			session:     chs.Session,
-			earlySecret: chs.State13.EarlySecret,
-			binderKey:   chs.State13.BinderKey,
+			session:   chs.Session,
+			binderKey: chs.State13.BinderKey,
 
 			certReq:       chs.State13.CertReq.toPrivate(),
 			usingPSK:      chs.State13.UsingPSK,
 			sentDummyCCS:  chs.State13.SentDummyCCS,
 			suite:         chs.State13.Suite.toPrivate(),
 			transcript:    chs.State13.Transcript,
-			masterSecret:  chs.MasterSecret,
 			trafficSecret: chs.State13.TrafficSecret,
 
 			uconn: chs.uconn,
@@ -121,8 +112,8 @@ func (chs13 *clientHandshakeStateTLS13) toPublic13() *PubClientHandshakeState {
 		return nil
 	} else {
 		tls13State := TLS13OnlyState{
-			KeyShareKeys:  chs13.keyShareKeys.toPublic(),
-			EarlySecret:   chs13.earlySecret,
+			KeyShareKeys:  chs13.keyShareKeys.ToPublic(),
+			EarlySecret:   chs13.earlySecret.Secret(),
 			BinderKey:     chs13.binderKey,
 			CertReq:       chs13.certReq.toPublic(),
 			UsingPSK:      chs13.usingPSK,
@@ -138,7 +129,7 @@ func (chs13 *clientHandshakeStateTLS13) toPublic13() *PubClientHandshakeState {
 
 			Session: chs13.session,
 
-			MasterSecret: chs13.masterSecret,
+			MasterSecret: chs13.masterSecret.Secret(),
 
 			State13: tls13State,
 
@@ -196,6 +187,10 @@ func (chs12 *clientHandshakeState) toPublic12() *PubClientHandshakeState {
 // }
 
 type CertificateRequestMsgTLS13 struct {
+	// Deprecated: crypto/tls no longer use this variable. This field won't be read or used by utls, but will still be populated.
+	// Support may be removed in the future.
+	Raw []byte
+
 	OcspStapling                     bool
 	Scts                             bool
 	SupportedSignatureAlgorithms     []SignatureScheme
@@ -207,7 +202,13 @@ func (crm *certificateRequestMsgTLS13) toPublic() *CertificateRequestMsgTLS13 {
 	if crm == nil {
 		return nil
 	} else {
+		rawBytes := []byte{}
+		if raw, err := crm.marshal(); err == nil {
+			rawBytes = raw
+		}
+
 		return &CertificateRequestMsgTLS13{
+			Raw:                              rawBytes,
 			OcspStapling:                     crm.ocspStapling,
 			Scts:                             crm.scts,
 			SupportedSignatureAlgorithms:     crm.supportedSignatureAlgorithms,
@@ -265,7 +266,7 @@ func (c *PubCipherSuiteTLS13) toPrivate() *cipherSuiteTLS13 {
 }
 
 type PubServerHelloMsg struct {
-	Original                     []byte
+	Raw                          []byte // renamed to serverHelloMsg.original in crypto/tls
 	Vers                         uint16
 	Random                       []byte
 	SessionId                    []byte
@@ -283,7 +284,7 @@ type PubServerHelloMsg struct {
 
 	// 1.3
 	SupportedVersion        uint16
-	ServerShare             keyShare
+	ServerShare             KeyShare
 	SelectedIdentityPresent bool
 	SelectedIdentity        uint16
 	Cookie                  []byte  // HelloRetryRequest extension
@@ -296,7 +297,7 @@ func (shm *PubServerHelloMsg) getPrivatePtr() *serverHelloMsg {
 		return nil
 	} else {
 		return &serverHelloMsg{
-			original:                     shm.Original,
+			original:                     shm.Raw,
 			vers:                         shm.Vers,
 			random:                       shm.Random,
 			sessionId:                    shm.SessionId,
@@ -312,7 +313,7 @@ func (shm *PubServerHelloMsg) getPrivatePtr() *serverHelloMsg {
 			secureRenegotiationSupported: shm.SecureRenegotiationSupported,
 			alpnProtocol:                 shm.AlpnProtocol,
 			supportedVersion:             shm.SupportedVersion,
-			serverShare:                  shm.ServerShare,
+			serverShare:                  shm.ServerShare.ToPrivate(),
 			selectedIdentityPresent:      shm.SelectedIdentityPresent,
 			selectedIdentity:             shm.SelectedIdentity,
 			cookie:                       shm.Cookie,
@@ -326,7 +327,7 @@ func (shm *serverHelloMsg) getPublicPtr() *PubServerHelloMsg {
 		return nil
 	} else {
 		return &PubServerHelloMsg{
-			Original:                     shm.original,
+			Raw:                          shm.original,
 			Vers:                         shm.vers,
 			Random:                       shm.random,
 			SessionId:                    shm.sessionId,
@@ -342,7 +343,7 @@ func (shm *serverHelloMsg) getPublicPtr() *PubServerHelloMsg {
 			SecureRenegotiationSupported: shm.secureRenegotiationSupported,
 			AlpnProtocol:                 shm.alpnProtocol,
 			SupportedVersion:             shm.supportedVersion,
-			ServerShare:                  shm.serverShare,
+			ServerShare:                  shm.serverShare.ToPublic(),
 			SelectedIdentityPresent:      shm.selectedIdentityPresent,
 			SelectedIdentity:             shm.selectedIdentity,
 			Cookie:                       shm.cookie,
@@ -351,8 +352,24 @@ func (shm *serverHelloMsg) getPublicPtr() *PubServerHelloMsg {
 	}
 }
 
+// UnmarshalServerHello allows external code to parse raw server hellos.
+// It returns nil on failure.
+func UnmarshalServerHello(data []byte) *PubServerHelloMsg {
+	m := &serverHelloMsg{}
+	if m.unmarshal(data) {
+		return m.getPublicPtr()
+	}
+	return nil
+}
+
+// Marshal allows external code to convert a ServerHello object back into
+// raw bytes.
+func (shm *PubServerHelloMsg) Marshal() ([]byte, error) {
+	return shm.getPrivatePtr().marshal()
+}
+
 type PubClientHelloMsg struct {
-	Original                     []byte
+	Raw                          []byte // renamed to clientHelloMsg.original in crypto/tls
 	Vers                         uint16
 	Random                       []byte
 	SessionId                    []byte
@@ -382,9 +399,9 @@ type PubClientHelloMsg struct {
 	PskIdentities                    []PskIdentity
 	PskBinders                       [][]byte
 	QuicTransportParameters          []byte
-	EncryptedClientHello             []byte
 
-	cachedPrivateHello *clientHelloMsg // todo: further optimize to reduce clientHelloMsg construction
+	cachedPrivateHello   *clientHelloMsg // todo: further optimize to reduce clientHelloMsg construction
+	encryptedClientHello []byte
 }
 
 func (chm *PubClientHelloMsg) getPrivatePtr() *clientHelloMsg {
@@ -392,7 +409,7 @@ func (chm *PubClientHelloMsg) getPrivatePtr() *clientHelloMsg {
 		return nil
 	} else {
 		private := &clientHelloMsg{
-			original:                         chm.Original,
+			original:                         chm.Raw,
 			vers:                             chm.Vers,
 			random:                           chm.Random,
 			sessionId:                        chm.SessionId,
@@ -420,7 +437,7 @@ func (chm *PubClientHelloMsg) getPrivatePtr() *clientHelloMsg {
 			pskIdentities:           PskIdentities(chm.PskIdentities).ToPrivate(),
 			pskBinders:              chm.PskBinders,
 			quicTransportParameters: chm.QuicTransportParameters,
-			encryptedClientHello:    chm.EncryptedClientHello,
+			encryptedClientHello:    chm.encryptedClientHello,
 
 			nextProtoNeg: chm.NextProtoNeg,
 		}
@@ -442,7 +459,7 @@ func (chm *clientHelloMsg) getPublicPtr() *PubClientHelloMsg {
 		return nil
 	} else {
 		return &PubClientHelloMsg{
-			Original:                     chm.original,
+			Raw:                          chm.original,
 			Vers:                         chm.vers,
 			Random:                       chm.random,
 			SessionId:                    chm.sessionId,
@@ -471,8 +488,8 @@ func (chm *clientHelloMsg) getPublicPtr() *PubClientHelloMsg {
 			PskIdentities:                    pskIdentities(chm.pskIdentities).ToPublic(),
 			PskBinders:                       chm.pskBinders,
 			QuicTransportParameters:          chm.quicTransportParameters,
-			EncryptedClientHello:             chm.encryptedClientHello,
 			cachedPrivateHello:               chm,
+			encryptedClientHello:             chm.encryptedClientHello,
 		}
 	}
 }
@@ -559,22 +576,48 @@ type FinishedHash struct {
 	Buffer []byte
 
 	Version uint16
-	Prf     func(result, secret, label, seed []byte)
+	Prfv2   prfFunc
+
+	// Deprecated: Use Prfv2 instead. Prfv2 will be used if both are set.
+	Prf prfFuncOld
+}
+
+type prfFuncOld func(result, secret, label, seed []byte)
+
+func prfFuncV1ToV2(v1 prfFuncOld) prfFunc {
+	return func(secret []byte, label string, seed []byte, keyLen int) []byte {
+		res := make([]byte, keyLen)
+		v1(res, secret, []byte(label), seed)
+		return res
+	}
+}
+
+func prfFuncV2ToV1(v2 prfFunc) prfFuncOld {
+	return func(result, secret, label, seed []byte) {
+		copy(result, v2(secret, string(label), seed, len(result)))
+	}
 }
 
 func (fh *FinishedHash) getPrivateObj() finishedHash {
 	if fh == nil {
 		return finishedHash{}
 	} else {
-		return finishedHash{
+		res := finishedHash{
 			client:    fh.Client,
 			server:    fh.Server,
 			clientMD5: fh.ClientMD5,
 			serverMD5: fh.ServerMD5,
 			buffer:    fh.Buffer,
 			version:   fh.Version,
-			prf:       fh.Prf,
 		}
+
+		if fh.Prfv2 != nil {
+			res.prf = fh.Prfv2
+		} else if fh.Prf != nil {
+			res.prf = prfFuncV1ToV2(fh.Prf)
+		}
+
+		return res
 	}
 }
 
@@ -582,14 +625,19 @@ func (fh *finishedHash) getPublicObj() FinishedHash {
 	if fh == nil {
 		return FinishedHash{}
 	} else {
-		return FinishedHash{
+		res := FinishedHash{
 			Client:    fh.client,
 			Server:    fh.server,
 			ClientMD5: fh.clientMD5,
 			ServerMD5: fh.serverMD5,
 			Buffer:    fh.buffer,
 			Version:   fh.version,
-			Prf:       fh.prf}
+		}
+
+		res.Prfv2 = fh.prf
+		res.Prf = prfFuncV2ToV1(fh.prf)
+
+		return res
 	}
 }
 
@@ -599,20 +647,43 @@ type KeyShare struct {
 	Data  []byte  `json:"key_exchange,omitempty"` // optional
 }
 
+const (
+	// Internal marker bytes used by ReuseHybridAndClassicalKeyShares.
+	// ApplyPreset consumes these and generates real keyshare bytes.
+	keyShareHybridReuseMarker    byte = 0xf1
+	keyShareClassicalReuseMarker byte = 0xf2
+)
+
+// ReuseHybridAndClassicalKeyShares marks a hybrid/classical keyshare pair so
+// ApplyPreset reuses the same classical key material for both entries.
+func ReuseHybridAndClassicalKeyShares(hybrid, classical KeyShare) []KeyShare {
+	hybrid.Data = []byte{keyShareHybridReuseMarker}
+	classical.Data = []byte{keyShareClassicalReuseMarker}
+	return []KeyShare{hybrid, classical}
+}
+
+func (ks KeyShare) ToPrivate() keyShare {
+	return keyShare{group: ks.Group, data: ks.Data}
+}
+
+func (ks keyShare) ToPublic() KeyShare {
+	return KeyShare{Group: ks.group, Data: ks.data}
+}
+
 type KeyShares []KeyShare
 type keyShares []keyShare
 
 func (kss keyShares) ToPublic() []KeyShare {
 	var KSS []KeyShare
 	for _, ks := range kss {
-		KSS = append(KSS, KeyShare{Data: ks.data, Group: ks.group})
+		KSS = append(KSS, ks.ToPublic())
 	}
 	return KSS
 }
 func (KSS KeyShares) ToPrivate() []keyShare {
 	var kss []keyShare
 	for _, KS := range KSS {
-		kss = append(kss, keyShare{data: KS.Data, group: KS.Group})
+		kss = append(kss, KS.ToPrivate())
 	}
 	return kss
 }
@@ -766,4 +837,123 @@ func (css *ClientSessionState) SetAgeAdd(ageAdd uint32) {
 		css.session = &SessionState{}
 	}
 	css.session.ageAdd = ageAdd
+}
+
+// TicketKey is the internal representation of a session ticket key.
+type TicketKey struct {
+	AesKey  [16]byte
+	HmacKey [16]byte
+	// created is the time at which this ticket key was created. See Config.ticketKeys.
+	Created time.Time
+}
+
+type TicketKeys []TicketKey
+type ticketKeys []ticketKey
+
+func TicketKeyFromBytes(b [32]byte) TicketKey {
+	// [uTLS]
+	// empty config is required
+	config := &Config{}
+	tk := config.ticketKeyFromBytes(b)
+	return tk.ToPublic()
+}
+
+func (tk ticketKey) ToPublic() TicketKey {
+	return TicketKey{
+		AesKey:  tk.aesKey,
+		HmacKey: tk.hmacKey,
+		Created: tk.created,
+	}
+}
+
+func (TK TicketKey) ToPrivate() ticketKey {
+	return ticketKey{
+		aesKey:  TK.AesKey,
+		hmacKey: TK.HmacKey,
+		created: TK.Created,
+	}
+}
+
+func (tks ticketKeys) ToPublic() []TicketKey {
+	var TKS []TicketKey
+	for _, ks := range tks {
+		TKS = append(TKS, ks.ToPublic())
+	}
+	return TKS
+}
+
+func (TKS TicketKeys) ToPrivate() []ticketKey {
+	var tks []ticketKey
+	for _, TK := range TKS {
+		tks = append(tks, TK.ToPrivate())
+	}
+	return tks
+}
+
+type kemPrivateKey struct {
+	secretKey any
+	curveID   CurveID
+}
+
+// Deprecated: Use KeySharePrivateKeys instead. This type is no longer used.
+// Will be removed in the future.
+type KemPrivateKey struct {
+	SecretKey any
+	CurveID   CurveID
+}
+
+func (kpk *KemPrivateKey) ToPrivate() *kemPrivateKey {
+	if kpk == nil {
+		return nil
+	} else {
+		return &kemPrivateKey{
+			secretKey: kpk.SecretKey,
+			curveID:   kpk.CurveID,
+		}
+	}
+}
+
+func (kpk *kemPrivateKey) ToPublic() *KemPrivateKey {
+	if kpk == nil {
+		return nil
+	} else {
+		return &KemPrivateKey{
+			SecretKey: kpk.secretKey,
+			CurveID:   kpk.curveID,
+		}
+	}
+}
+
+type KeySharePrivateKeys struct {
+	CurveID       CurveID
+	Ecdhe         *ecdh.PrivateKey
+	Mlkem         *mlkem.DecapsulationKey768
+	MlkemEcdhe    *ecdh.PrivateKey
+	EcdheFallback map[CurveID]*ecdh.PrivateKey // [uTLS] secondary key shares for non-preferred curves
+}
+
+func (ksp *KeySharePrivateKeys) ToPrivate() *keySharePrivateKeys {
+	if ksp == nil {
+		return nil
+	}
+	return &keySharePrivateKeys{
+		curveID:       ksp.CurveID,
+		ecdhe:         ksp.Ecdhe,
+		mlkem:         ksp.Mlkem,
+		mlkemEcdhe:    ksp.MlkemEcdhe,
+		ecdheFallback: ksp.EcdheFallback,
+	}
+}
+
+func (ksp *keySharePrivateKeys) ToPublic() *KeySharePrivateKeys {
+	if ksp == nil {
+		return nil
+	}
+	return &KeySharePrivateKeys{
+		CurveID:       ksp.curveID,
+		Ecdhe:         ksp.ecdhe,
+		Mlkem:         ksp.mlkem,
+		MlkemEcdhe:    ksp.mlkemEcdhe,
+		EcdheFallback: ksp.ecdheFallback,
+	}
 }

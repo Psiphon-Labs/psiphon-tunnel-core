@@ -27,7 +27,7 @@ type chunkInit struct {
 	chunkInitCommon
 }
 
-// Init chunk errors
+// Init chunk errors.
 var (
 	ErrChunkTypeNotTypeInit          = errors.New("ChunkType is not of type INIT")
 	ErrChunkValueNotLongEnough       = errors.New("chunk Value isn't long enough for mandatory parameters exp")
@@ -74,6 +74,7 @@ func (i *chunkInit) marshal() ([]byte, error) {
 
 	i.chunkHeader.typ = ctInit
 	i.chunkHeader.raw = initShared
+
 	return i.chunkHeader.marshal()
 }
 
@@ -136,7 +137,7 @@ func (i *chunkInit) check() (abort bool, err error) {
 	return false, nil
 }
 
-// String makes chunkInit printable
+// String makes chunkInit printable.
 func (i *chunkInit) String() string {
 	return fmt.Sprintf("%s\n%s", i.chunkHeader, i.chunkInitCommon)
 }

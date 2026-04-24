@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package report
@@ -13,36 +13,42 @@ import (
 	"github.com/pion/rtp"
 )
 
-// TickerFactory is a factory to create new tickers
+// TickerFactory is a factory to create new tickers.
 type TickerFactory func(d time.Duration) Ticker
 
-// SenderInterceptorFactory is a interceptor.Factory for a SenderInterceptor
+// SenderInterceptorFactory is a interceptor.Factory for a SenderInterceptor.
 type SenderInterceptorFactory struct {
 	opts []SenderOption
 }
 
-// NewInterceptor constructs a new SenderInterceptor
+// NewInterceptor constructs a new SenderInterceptor.
 func (s *SenderInterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
-	i := &SenderInterceptor{
+	senderInterceptor := &SenderInterceptor{
 		interval: 1 * time.Second,
 		now:      time.Now,
 		newTicker: func(d time.Duration) Ticker {
 			return &timeTicker{time.NewTicker(d)}
 		},
-		log:   logging.NewDefaultLoggerFactory().NewLogger("sender_interceptor"),
 		close: make(chan struct{}),
 	}
 
 	for _, opt := range s.opts {
-		if err := opt(i); err != nil {
+		if err := opt(senderInterceptor); err != nil {
 			return nil, err
 		}
 	}
 
-	return i, nil
+	if senderInterceptor.loggerFactory == nil {
+		senderInterceptor.loggerFactory = logging.NewDefaultLoggerFactory()
+	}
+	if senderInterceptor.log == nil {
+		senderInterceptor.log = senderInterceptor.loggerFactory.NewLogger("sender_interceptor")
+	}
+
+	return senderInterceptor, nil
 }
 
-// NewSenderInterceptor returns a new SenderInterceptorFactory
+// NewSenderInterceptor returns a new SenderInterceptorFactory.
 func NewSenderInterceptor(opts ...SenderOption) (*SenderInterceptorFactory, error) {
 	return &SenderInterceptorFactory{opts}, nil
 }
@@ -50,15 +56,16 @@ func NewSenderInterceptor(opts ...SenderOption) (*SenderInterceptorFactory, erro
 // SenderInterceptor interceptor generates sender reports.
 type SenderInterceptor struct {
 	interceptor.NoOp
-	interval  time.Duration
-	now       func() time.Time
-	newTicker TickerFactory
-	streams   sync.Map
-	log       logging.LeveledLogger
-	m         sync.Mutex
-	wg        sync.WaitGroup
-	close     chan struct{}
-	started   chan struct{}
+	interval      time.Duration
+	now           func() time.Time
+	newTicker     TickerFactory
+	streams       sync.Map
+	log           logging.LeveledLogger
+	loggerFactory logging.LoggerFactory
+	m             sync.Mutex
+	wg            sync.WaitGroup
+	close         chan struct{}
+	started       chan struct{}
 
 	useLatestPacket bool
 }
@@ -116,10 +123,12 @@ func (s *SenderInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 		select {
 		case <-ticker.Ch():
 			now := s.now()
-			s.streams.Range(func(key, value interface{}) bool {
+			s.streams.Range(func(_, value any) bool {
 				if stream, ok := value.(*senderStream); !ok {
 					s.log.Warnf("failed to cast SenderInterceptor stream")
-				} else if _, err := rtcpWriter.Write([]rtcp.Packet{stream.generateReport(now)}, interceptor.Attributes{}); err != nil {
+				} else if _, err := rtcpWriter.Write(
+					[]rtcp.Packet{stream.generateReport(now)}, interceptor.Attributes{},
+				); err != nil {
 					s.log.Warnf("failed sending: %+v", err)
 				}
 
@@ -134,7 +143,9 @@ func (s *SenderInterceptor) loop(rtcpWriter interceptor.RTCPWriter) {
 
 // BindLocalStream lets you modify any outgoing RTP packets. It is called once for per LocalStream. The returned method
 // will be called once per rtp packet.
-func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer interceptor.RTPWriter) interceptor.RTPWriter {
+func (s *SenderInterceptor) BindLocalStream(
+	info *interceptor.StreamInfo, writer interceptor.RTPWriter,
+) interceptor.RTPWriter {
 	stream := newSenderStream(info.SSRC, info.ClockRate, s.useLatestPacket)
 	s.streams.Store(info.SSRC, stream)
 
@@ -143,4 +154,9 @@ func (s *SenderInterceptor) BindLocalStream(info *interceptor.StreamInfo, writer
 
 		return writer.Write(header, payload, a)
 	})
+}
+
+// UnbindLocalStream is called when the Stream is removed. It can be used to clean up any data related to that track.
+func (s *SenderInterceptor) UnbindLocalStream(info *interceptor.StreamInfo) {
+	s.streams.Delete(info.SSRC)
 }

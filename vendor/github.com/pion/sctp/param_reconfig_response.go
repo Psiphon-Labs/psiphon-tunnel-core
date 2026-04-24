@@ -48,7 +48,7 @@ const (
 	reconfigResultInProgress                    reconfigResult = 6
 )
 
-// Reconfiguration response errors
+// Reconfiguration response errors.
 var (
 	ErrReconfigRespParamTooShort = errors.New("reconfig response parameter too short")
 )

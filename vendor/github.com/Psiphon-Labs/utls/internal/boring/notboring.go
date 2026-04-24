@@ -18,4 +18,3 @@ func NewGCMTLS13(_ cipher.Block) (cipher.AEAD, error) {
 func Unreachable() {
 	// do nothing
 }
-

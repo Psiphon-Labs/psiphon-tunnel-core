@@ -5,6 +5,7 @@ package ciphersuite
 
 import (
 	"crypto/aes"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 
@@ -64,9 +65,10 @@ func (c *CCM) Encrypt(pkt *recordlayer.RecordLayer, raw []byte) ([]byte, error) 
 	payload := raw[recordlayer.HeaderSize:]
 	raw = raw[:recordlayer.HeaderSize]
 
-	// [Psiphon]
-	// See comment in generateAEADNonce.
-	nonce := generateAEADNonce(c.localWriteIV, &pkt.Header)
+	nonce := append(append([]byte{}, c.localWriteIV[:4]...), make([]byte, 8)...)
+	if _, err := rand.Read(nonce[4:]); err != nil {
+		return nil, err
+	}
 
 	additionalData := generateAEADAdditionalData(&pkt.Header, len(payload))
 	encryptedPayload := c.localCCM.Seal(nil, nonce, payload, additionalData)

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Constants for SDP attributes used in JSEP
+// Constants for SDP attributes used in JSEP.
 const (
 	AttrKeyCandidate        = "candidate"
 	AttrKeyEndOfCandidates  = "end-of-candidates"
@@ -23,6 +23,7 @@ const (
 	AttrKeyConnectionSetup  = "setup"
 	AttrKeyMID              = "mid"
 	AttrKeyICELite          = "ice-lite"
+	AttrKeyICEOptions       = "ice-options"
 	AttrKeyRTCPMux          = "rtcp-mux"
 	AttrKeyRTCPRsize        = "rtcp-rsize"
 	AttrKeyInactive         = "inactive"
@@ -31,17 +32,20 @@ const (
 	AttrKeySendRecv         = "sendrecv"
 	AttrKeyExtMap           = "extmap"
 	AttrKeyExtMapAllowMixed = "extmap-allow-mixed"
+	AttrKeyCryptex          = "cryptex"
 )
 
-// Constants for semantic tokens used in JSEP
+// Constants for semantic tokens used in JSEP.
 const (
 	SemanticTokenLipSynchronization     = "LS"
 	SemanticTokenFlowIdentification     = "FID"
 	SemanticTokenForwardErrorCorrection = "FEC"
-	SemanticTokenWebRTCMediaStreams     = "WMS"
+	// https://datatracker.ietf.org/doc/html/rfc5956#section-4.1
+	SemanticTokenForwardErrorCorrectionFramework = "FEC-FR"
+	SemanticTokenWebRTCMediaStreams              = "WMS"
 )
 
-// Constants for extmap key
+// Constants for extmap key.
 const (
 	ExtMapValueTransportCC = 3
 )
@@ -67,12 +71,12 @@ func NewJSEPSessionDescription(identity bool) (*SessionDescription, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &SessionDescription{
+	descr := &SessionDescription{
 		Version: 0,
 		Origin: Origin{
 			Username:       "-",
 			SessionID:      sid,
-			SessionVersion: uint64(time.Now().Unix()),
+			SessionVersion: uint64(time.Now().Unix()), //nolint:gosec // G115
 			NetworkType:    "IN",
 			AddressType:    "IP4",
 			UnicastAddress: "0.0.0.0",
@@ -93,32 +97,65 @@ func NewJSEPSessionDescription(identity bool) (*SessionDescription, error) {
 	}
 
 	if identity {
-		d.WithPropertyAttribute(AttrKeyIdentity)
+		descr.WithPropertyAttribute(AttrKeyIdentity)
 	}
 
-	return d, nil
+	return descr, nil
 }
 
-// WithPropertyAttribute adds a property attribute 'a=key' to the session description
+// WithPropertyAttribute adds a property attribute 'a=key' to the session description.
 func (s *SessionDescription) WithPropertyAttribute(key string) *SessionDescription {
 	s.Attributes = append(s.Attributes, NewPropertyAttribute(key))
+
 	return s
 }
 
-// WithValueAttribute adds a value attribute 'a=key:value' to the session description
+// WithValueAttribute adds a value attribute 'a=key:value' to the session description.
 func (s *SessionDescription) WithValueAttribute(key, value string) *SessionDescription {
 	s.Attributes = append(s.Attributes, NewAttribute(key, value))
+
 	return s
 }
 
-// WithFingerprint adds a fingerprint to the session description
+// addOrUpdateICEOption adds or updates the ice-options attribute with the given value.
+func (s *SessionDescription) addOrUpdateICEOption(value string) *SessionDescription {
+	for i := range s.Attributes {
+		if s.Attributes[i].Key == AttrKeyICEOptions {
+			prefix := " "
+			if s.Attributes[i].Value == "" {
+				prefix = ""
+			}
+
+			s.Attributes[i].Value += prefix + value
+
+			return s
+		}
+	}
+
+	return s.WithValueAttribute(AttrKeyICEOptions, value)
+}
+
+// WithICETrickleAdvertised advertises ICE trickle support in the session description.
+// See https://datatracker.ietf.org/doc/html/rfc9429#section-5.2.1
+func (s *SessionDescription) WithICETrickleAdvertised() *SessionDescription {
+	return s.addOrUpdateICEOption("trickle")
+}
+
+// WithICERenomination advertises ICE renomination support in the session description.
+// See https://datatracker.ietf.org/doc/html/draft-thatcher-ice-renomination-01#section-3
+func (s *SessionDescription) WithICERenomination() *SessionDescription {
+	return s.addOrUpdateICEOption("renomination")
+}
+
+// WithFingerprint adds a fingerprint to the session description.
 func (s *SessionDescription) WithFingerprint(algorithm, value string) *SessionDescription {
 	return s.WithValueAttribute("fingerprint", algorithm+" "+value)
 }
 
-// WithMedia adds a media description to the session description
+// WithMedia adds a media description to the session description.
 func (s *SessionDescription) WithMedia(md *MediaDescription) *SessionDescription {
 	s.MediaDescriptions = append(s.MediaDescriptions, md)
+
 	return s
 }
 
@@ -141,32 +178,40 @@ func NewJSEPMediaDescription(codecType string, _ []string) *MediaDescription {
 	}
 }
 
-// WithPropertyAttribute adds a property attribute 'a=key' to the media description
+// WithPropertyAttribute adds a property attribute 'a=key' to the media description.
 func (d *MediaDescription) WithPropertyAttribute(key string) *MediaDescription {
 	d.Attributes = append(d.Attributes, NewPropertyAttribute(key))
+
 	return d
 }
 
-// WithValueAttribute adds a value attribute 'a=key:value' to the media description
+// WithValueAttribute adds a value attribute 'a=key:value' to the media description.
 func (d *MediaDescription) WithValueAttribute(key, value string) *MediaDescription {
 	d.Attributes = append(d.Attributes, NewAttribute(key, value))
+
 	return d
 }
 
-// WithFingerprint adds a fingerprint to the media description
+// WithFingerprint adds a fingerprint to the media description.
 func (d *MediaDescription) WithFingerprint(algorithm, value string) *MediaDescription {
 	return d.WithValueAttribute("fingerprint", algorithm+" "+value)
 }
 
-// WithICECredentials adds ICE credentials to the media description
+// WithICECredentials adds ICE credentials to the media description.
 func (d *MediaDescription) WithICECredentials(username, password string) *MediaDescription {
 	return d.
 		WithValueAttribute("ice-ufrag", username).
 		WithValueAttribute("ice-pwd", password)
 }
 
-// WithCodec adds codec information to the media description
-func (d *MediaDescription) WithCodec(payloadType uint8, name string, clockrate uint32, channels uint16, fmtp string) *MediaDescription {
+// WithCodec adds codec information to the media description.
+func (d *MediaDescription) WithCodec(
+	payloadType uint8,
+	name string,
+	clockrate uint32,
+	channels uint16,
+	fmtp string,
+) *MediaDescription {
 	d.MediaName.Formats = append(d.MediaName.Formats, strconv.Itoa(int(payloadType)))
 	rtpmap := fmt.Sprintf("%d %s/%d", payloadType, name, clockrate)
 	if channels > 0 {
@@ -176,10 +221,11 @@ func (d *MediaDescription) WithCodec(payloadType uint8, name string, clockrate u
 	if fmtp != "" {
 		d.WithValueAttribute("fmtp", fmt.Sprintf("%d %s", payloadType, fmtp))
 	}
+
 	return d
 }
 
-// WithMediaSource adds media source information to the media description
+// WithMediaSource adds media source information to the media description.
 func (d *MediaDescription) WithMediaSource(ssrc uint32, cname, streamLabel, label string) *MediaDescription {
 	return d.
 		WithValueAttribute("ssrc", fmt.Sprintf("%d cname:%s", ssrc, cname)). // Deprecated but not phased out?
@@ -188,23 +234,25 @@ func (d *MediaDescription) WithMediaSource(ssrc uint32, cname, streamLabel, labe
 		WithValueAttribute("ssrc", fmt.Sprintf("%d label:%s", ssrc, label))          // Deprecated but not phased out?
 }
 
-// WithCandidate adds an ICE candidate to the media description
-// Deprecated: use WithICECandidate instead
+// WithCandidate adds an ICE candidate to the media description.
+//
+// Deprecated: use WithICECandidate instead.
 func (d *MediaDescription) WithCandidate(value string) *MediaDescription {
 	return d.WithValueAttribute("candidate", value)
 }
 
-// WithExtMap adds an extmap to the media description
+// WithExtMap adds an extmap to the media description.
 func (d *MediaDescription) WithExtMap(e ExtMap) *MediaDescription {
 	return d.WithPropertyAttribute(e.Marshal())
 }
 
-// WithTransportCCExtMap adds an extmap to the media description
+// WithTransportCCExtMap adds an extmap to the media description.
 func (d *MediaDescription) WithTransportCCExtMap() *MediaDescription {
 	uri, _ := url.Parse(extMapURI()[ExtMapValueTransportCC])
 	e := ExtMap{
 		Value: ExtMapValueTransportCC,
 		URI:   uri,
 	}
+
 	return d.WithExtMap(e)
 }
