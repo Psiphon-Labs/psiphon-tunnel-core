@@ -61,6 +61,7 @@ func (t *testNetworkGetter) GetNetworkID() string {
 func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	t.Logf("Test %s...", tunnelProtocol)
+	ctx := context.Background()
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-dial-parameters-test")
 	if err != nil {
@@ -1098,7 +1099,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	for i := 0; i < 5; i++ {
 
-		hasAffinity, iterator, err := NewServerEntryIterator(clientConfig)
+		hasAffinity, iterator, err := NewServerEntryIterator(ctx, clientConfig)
 		if err != nil {
 			t.Fatalf("NewServerEntryIterator failed: %s", err)
 		}
@@ -1111,7 +1112,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 		for j := 0; j < 20; j++ {
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1127,14 +1128,14 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 			}
 		}
 
-		iterator.Reset()
+		iterator.Reset(ctx)
 
 		// Test: subsequent shuffles should not move the replay/DSL-prioritize candidates candidates
 
 		allMoveToFront := true
 		for j := 0; j < 20; j++ {
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1165,7 +1166,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 			t.Fatalf("SetParameters failed: %s", err)
 		}
 
-		hasAffinity, iterator, err = NewServerEntryIterator(clientConfig)
+		hasAffinity, iterator, err = NewServerEntryIterator(ctx, clientConfig)
 		if err != nil {
 			t.Fatalf("NewServerEntryIterator failed: %s", err)
 		}
@@ -1176,7 +1177,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 		for j := 0; j < 5; j++ {
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1195,7 +1196,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		allMoveToFront = true
 		for j := 5; j < 20; j++ {
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}

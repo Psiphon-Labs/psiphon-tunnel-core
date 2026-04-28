@@ -674,7 +674,8 @@ type ServerEntryIterator struct {
 // NewServerEntryIterator and any returned ServerEntryIterator are not
 // designed for concurrent use as not all related datastore operations are
 // performed in a single transaction.
-func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) {
+func NewServerEntryIterator(
+	ctx context.Context, config *Config) (bool, *ServerEntryIterator, error) {
 
 	// When configured, this target server entry is the only candidate
 	if config.TargetServerEntry != "" {
@@ -694,7 +695,7 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 		updateMoveToFrontMetrics: true,
 	}
 
-	err = iterator.reset(true)
+	err = iterator.reset(ctx, true)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -702,7 +703,8 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	return applyServerAffinity, iterator, nil
 }
 
-func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error) {
+func NewTacticsServerEntryIterator(
+	ctx context.Context, config *Config) (*ServerEntryIterator, error) {
 
 	// When configured, this target server entry is the only candidate
 	if config.TargetServerEntry != "" {
@@ -715,7 +717,7 @@ func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error)
 		isTacticsServerEntryIterator: true,
 	}
 
-	err := iterator.reset(true)
+	err := iterator.reset(ctx, true)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -723,7 +725,8 @@ func NewTacticsServerEntryIterator(config *Config) (*ServerEntryIterator, error)
 	return iterator, nil
 }
 
-func NewPruneServerEntryIterator(config *Config) (*ServerEntryIterator, error) {
+func NewPruneServerEntryIterator(
+	ctx context.Context, config *Config) (*ServerEntryIterator, error) {
 
 	// There is no TargetServerEntry case when pruning.
 
@@ -732,7 +735,7 @@ func NewPruneServerEntryIterator(config *Config) (*ServerEntryIterator, error) {
 		isPruneServerEntryIterator: true,
 	}
 
-	err := iterator.reset(true)
+	err := iterator.reset(ctx, true)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -796,7 +799,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		updateMoveToFrontMetrics:     !isTactics,
 	}
 
-	err = iterator.reset(true)
+	err = iterator.reset(context.Background(), true)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -808,11 +811,12 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 
 // Reset a NewServerEntryIterator to the start of its cycle. The next
 // call to Next will return the first server entry.
-func (iterator *ServerEntryIterator) Reset() error {
-	return iterator.reset(false)
+func (iterator *ServerEntryIterator) Reset(ctx context.Context) error {
+	return iterator.reset(ctx, false)
 }
 
-func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
+func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound bool) error {
+
 	iterator.Close()
 
 	if iterator.isTargetServerEntryIterator {
@@ -853,6 +857,9 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 	// So the underlying serverEntriesBucket could change after the serverEntryIDs
 	// list is built.
 
+	startTime := time.Now()
+	var moveToFrontDuration, entriesDuration time.Duration
+
 	var serverEntryIDs [][]byte
 	movedToFront := 0
 
@@ -882,45 +889,19 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 
 			affinityServerEntryID = bucket.get(datastoreAffinityServerEntryIDKey)
 			if affinityServerEntryID != nil {
-				serverEntryIDs = append(serverEntryIDs, append([]byte(nil), affinityServerEntryID...))
+				serverEntryIDs = append(
+					serverEntryIDs, append([]byte(nil), affinityServerEntryID...))
 				shuffleHead = 1
 			}
 		}
 
-		bucket = tx.bucket(datastoreServerEntriesBucket)
-		cursor := bucket.cursor()
-		for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
-			if affinityServerEntryID != nil {
-				if bytes.Equal(affinityServerEntryID, key) {
-					continue
-				}
-			}
-			serverEntryIDs = append(serverEntryIDs, append([]byte(nil), key...))
-		}
-		cursor.close()
-
-		// Provide the GetLastServerEntryCount implementation. This snapshot
-		// of the number of server entries in the datastore is used for
-		// metrics; a snapshot is recorded here to avoid the overhead of
-		// datastore scans or operations when the metric is logged.
-
-		datastoreLastServerEntryCount.Store(int64(len(serverEntryIDs)))
-
-		// Randomly shuffle the entire list of server IDs, excluding the
-		// server affinity candidate.
-
-		for i := len(serverEntryIDs) - 1; i > shuffleHead-1; i-- {
-			j := prng.Intn(i+1-shuffleHead) + shuffleHead
-			serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
-		}
-
-		// In the first round, or with some probability, move _potential_ replay
-		// candidates to the front of the list (excepting the server affinity slot,
-		// if any). This move is post-shuffle so the order is still randomized. To
+		// In the first round, or with some probability, move _potential_
+		// replay candidates to the front of the list (excepting the server
+		// affinity slot, if any). The move to front order is randomized. To
 		// save the memory overhead of unmarshaling all dial parameters, this
-		// operation just moves any server with a dial parameter record to the
-		// front. Whether the dial parameter remains valid for replay -- TTL,
-		// tactics/config unchanged, etc. --- is checked later.
+		// operation just moves any server with a dial parameter record to
+		// the front. Whether the dial parameter remains valid for replay --
+		// TTL, tactics/config unchanged, etc. --- is checked later.
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
 
@@ -929,7 +910,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		// of the list. See MakeDialParameters and doDSLFetch for more
 		// details about the DSLPendingPrioritizeDial scheme.
 		//
-		// Limitation: the move-to-front could be balanced beween
+		// Limitation: the move-to-front could be balanced between
 		// DSLPendingPrioritizeDial and regular replay cases, however that
 		// would require unmarshaling all dial parameters, which we are avoiding.
 
@@ -939,42 +920,134 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		maxMoveToFront := p.Int(parameters.ServerEntryIteratorMaxMoveToFront)
 		p.Close()
 
+		var movedToFrontLookup map[string]struct{}
+
 		if !iterator.isPruneServerEntryIterator &&
 			(isInitialRound || prng.FlipWeightedCoin(moveToFrontProbability)) &&
 			replayCandidateCount != 0 &&
 			maxMoveToFront != 0 {
 
+			moveToFrontStartTime := time.Now()
+
 			networkID := []byte(iterator.config.GetNetworkID())
 
+			serverEntriesBucket := tx.bucket(datastoreServerEntriesBucket)
 			dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
-			i := shuffleHead
-			j := len(serverEntryIDs) - 1
-			for {
-				if maxMoveToFront >= 0 && movedToFront >= maxMoveToFront {
-					break
+			moveToFrontServerEntryIDs := make([][]byte, 0)
+
+			// Performance tradeoff: this implementation works best when
+			// datastoreDialParametersBucket is sparse and significantly
+			// smaller than datastoreServerEntriesBucket. It will iterate
+			// over all keys, which means it processes records for all
+			// network IDs, not just the target network ID. This is still
+			// expected to be less work than a previous approach of iterating
+			// over all datastoreServerEntriesBucket and checking for a
+			// datastoreDialParametersBucket entry for every server entry and
+			// network ID.
+
+			cursor := dialParamsBucket.cursor()
+			for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
+				if ctx.Err() != nil {
+					cursor.close()
+					return errors.Trace(ctx.Err())
 				}
-				for ; i < j; i++ {
-					key := makeDialParametersKey(serverEntryIDs[i], networkID)
-					if dialParamsBucket.get(key) == nil {
-						break
+
+				// Assumes key format in makeDialParametersKey.
+				if !bytes.HasSuffix(key, networkID) {
+					continue
+				}
+				serverEntryID := key[:len(key)-len(networkID)]
+				if len(serverEntryID) == 0 ||
+					serverEntriesBucket.get(serverEntryID) == nil {
+					continue
+				}
+
+				if affinityServerEntryID != nil &&
+					bytes.Equal(affinityServerEntryID, serverEntryID) {
+					continue
+				}
+
+				moveToFrontServerEntryIDs = append(
+					moveToFrontServerEntryIDs, append([]byte(nil), serverEntryID...))
+			}
+			cursor.close()
+
+			for i := len(moveToFrontServerEntryIDs) - 1; i > 0; i-- {
+				j := prng.Intn(i + 1)
+				moveToFrontServerEntryIDs[i], moveToFrontServerEntryIDs[j] =
+					moveToFrontServerEntryIDs[j], moveToFrontServerEntryIDs[i]
+			}
+
+			if maxMoveToFront >= 0 &&
+				len(moveToFrontServerEntryIDs) > maxMoveToFront {
+				moveToFrontServerEntryIDs =
+					moveToFrontServerEntryIDs[:maxMoveToFront]
+			}
+
+			movedToFront = len(moveToFrontServerEntryIDs)
+
+			if movedToFront > 0 {
+
+				movedToFrontLookup = make(map[string]struct{}, len(moveToFrontServerEntryIDs))
+				for _, serverEntryID := range moveToFrontServerEntryIDs {
+					movedToFrontLookup[string(serverEntryID)] = struct{}{}
+				}
+
+				serverEntryIDs = append(serverEntryIDs, moveToFrontServerEntryIDs...)
+
+				shuffleHead += len(moveToFrontServerEntryIDs)
+			}
+
+			moveToFrontDuration = time.Since(moveToFrontStartTime)
+		}
+
+		entriesStartTime := time.Now()
+
+		movedToFrontRemaining := movedToFront
+
+		bucket = tx.bucket(datastoreServerEntriesBucket)
+		cursor := bucket.cursor()
+		for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
+			if ctx.Err() != nil {
+				cursor.close()
+				return errors.Trace(ctx.Err())
+			}
+			if affinityServerEntryID != nil &&
+				bytes.Equal(affinityServerEntryID, key) {
+				continue
+			}
+			if movedToFrontLookup != nil {
+				// Avoid []byte-to-string allocations when there is no lookup,
+				// or after all the matches have been hit.
+				if _, ok := movedToFrontLookup[string(key)]; ok {
+					movedToFrontRemaining -= 1
+					if movedToFrontRemaining == 0 {
+						movedToFrontLookup = nil
 					}
-				}
-				for ; i < j; j-- {
-					key := makeDialParametersKey(serverEntryIDs[j], networkID)
-					if dialParamsBucket.get(key) != nil {
-						break
-					}
-				}
-				if i < j {
-					serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
-					movedToFront += 1
-					i++
-					j--
-				} else {
-					break
+					continue
 				}
 			}
+			serverEntryIDs = append(serverEntryIDs, append([]byte(nil), key...))
 		}
+		cursor.close()
+
+		// Randomly shuffle the tail of the server ID list, excluding the
+		// server affinity candidate and any move-to-front candidates.
+
+		tailStart := shuffleHead
+		for i := len(serverEntryIDs) - 1; i > tailStart; i-- {
+			j := prng.Intn(i+1-tailStart) + tailStart
+			serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
+		}
+
+		entriesDuration = time.Since(entriesStartTime)
+
+		// Provide the GetLastServerEntryCount implementation. This snapshot
+		// of the number of server entries in the datastore is used for
+		// metrics; a snapshot is recorded here to avoid the overhead of
+		// datastore scans or operations when the metric is logged.
+
+		datastoreLastServerEntryCount.Store(int64(len(serverEntryIDs)))
 
 		return nil
 	})
@@ -984,6 +1057,14 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 
 	iterator.serverEntryIDs = serverEntryIDs
 	iterator.serverEntryIndex = 0
+
+	NoticeInfo(
+		"ServerEntryIterator.reset: entries %d, moved-to-front %d; durations: move-to-front %s, entries %s, total %s",
+		len(serverEntryIDs),
+		movedToFront,
+		moveToFrontDuration.String(),
+		entriesDuration.String(),
+		time.Since(startTime).String())
 
 	if iterator.updateMoveToFrontMetrics {
 
@@ -1004,7 +1085,7 @@ func (iterator *ServerEntryIterator) Close() {
 
 // Next returns the next server entry, by rank, for a ServerEntryIterator.
 // Returns nil with no error when there is no next item.
-func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
+func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.ServerEntry, error) {
 
 	var serverEntry *protocol.ServerEntry
 	var err error
@@ -1037,6 +1118,9 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 	// Loop until we have the next server entry that matches the iterator
 	// filter requirements.
 	for {
+		if ctx.Err() != nil {
+			return nil, errors.Trace(ctx.Err())
+		}
 		if iterator.serverEntryIndex >= len(iterator.serverEntryIDs) {
 			// There is no next item
 			return nil, nil
@@ -2036,6 +2120,10 @@ func UpdateCheckServerEntryTagsEndTime(config *Config, checkCount int, pruneCoun
 // due.
 func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 
+	// TODO: pass in controller.runCtx. For now, PruneServerEntryIterator
+	// skips move-to-front work and the following loop is time bounded.
+	ctx := context.Background()
+
 	if disableCheckServerEntryTags.Load() {
 		return nil, 0, nil
 	}
@@ -2055,7 +2143,7 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 	minimumAgeForPruning := p.Duration(parameters.ServerEntryMinimumAgeForPruning)
 	p.Close()
 
-	iterator, err := NewPruneServerEntryIterator(config)
+	iterator, err := NewPruneServerEntryIterator(ctx, config)
 	if err != nil {
 		return nil, 0, errors.Trace(err)
 	}
@@ -2066,7 +2154,7 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 
 	for {
 
-		serverEntry, err := iterator.Next()
+		serverEntry, err := iterator.Next(ctx)
 		if err != nil {
 			return nil, 0, errors.Trace(err)
 		}

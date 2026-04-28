@@ -3920,18 +3920,19 @@ func checkExpectedDiscoveredServer(
 	discoveryServers []*psinet.DiscoveryServer) error {
 
 	discoveredServers := make(map[string]*protocol.ServerEntry)
+	ctx := context.Background()
 
 	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
 	clientConfig.TargetServerEntry = ""
 
-	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	_, iterator, err := psiphon.NewServerEntryIterator(ctx, clientConfig)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	defer iterator.Close()
 
 	for {
-		serverEntry, err := iterator.Next()
+		serverEntry, err := iterator.Next(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -5459,7 +5460,9 @@ func scanServerEntries(
 		testCase *pruneServerEntryTestCase,
 		serverEntry *protocol.ServerEntry)) {
 
-	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	ctx := context.Background()
+
+	_, iterator, err := psiphon.NewServerEntryIterator(ctx, clientConfig)
 	if err != nil {
 		t.Fatalf("NewServerEntryIterator failed: %s", err)
 	}
@@ -5467,7 +5470,7 @@ func scanServerEntries(
 
 	for {
 
-		serverEntry, err := iterator.Next()
+		serverEntry, err := iterator.Next(ctx)
 		if err != nil {
 			t.Fatalf("ServerIterator.Next failed: %s", err)
 		}
