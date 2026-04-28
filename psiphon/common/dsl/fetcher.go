@@ -583,7 +583,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 			DiscoverCount:     int32(discoverCount),
 		}
 
-		var response *DiscoverServerEntriesResponse
+		var response DiscoverServerEntriesResponse
 		doRetry, err := f.doRelayedRequest(
 			ctx, requestTypeDiscoverServerEntries, request, &response)
 
@@ -628,7 +628,7 @@ func (f *Fetcher) doGetServerEntriesRequest(
 			ServerEntryTags:   tags,
 		}
 
-		var response *GetServerEntriesResponse
+		var response GetServerEntriesResponse
 		doRetry, err := f.doRelayedRequest(
 			ctx, requestTypeGetServerEntries, request, &response)
 
@@ -675,7 +675,7 @@ func (f *Fetcher) doGetActiveOSLsRequest(ctx context.Context) ([]OSLID, error) {
 			BaseAPIParameters: f.packedAPIParameters,
 		}
 
-		var response *GetActiveOSLsResponse
+		var response GetActiveOSLsResponse
 		doRetry, err := f.doRelayedRequest(
 			ctx, requestTypeGetActiveOSLs, request, &response)
 		if err == nil {
@@ -714,7 +714,7 @@ func (f *Fetcher) doGetOSLFileSpecsRequest(
 			OSLIDs:            IDs,
 		}
 
-		var response *GetOSLFileSpecsResponse
+		var response GetOSLFileSpecsResponse
 		doRetry, err := f.doRelayedRequest(
 			ctx, requestTypeGetOSLFileSpecs, request, &response)
 
@@ -805,7 +805,7 @@ func (f *Fetcher) doRelayedRequest(
 
 	// Remove the relay wrapping.
 
-	var relayedResponse *RelayedResponse
+	var relayedResponse RelayedResponse
 	err = cbor.Unmarshal(cborRelayedResponse, &relayedResponse)
 	if err != nil {
 		return false, errors.Trace(err)
@@ -859,7 +859,7 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 			continue
 		}
 
-		var state *fetcherOSLState
+		var state fetcherOSLState
 		err = cbor.Unmarshal(cborState, &state)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -878,13 +878,13 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 
 			if reassembleKeys {
 
-				var fileSpec *osl.OSLFileSpec
+				var fileSpec osl.OSLFileSpec
 				err = cbor.Unmarshal(state.FileSpec, &fileSpec)
 				if err != nil {
 					return nil, errors.Trace(err)
 				}
 
-				ok, key, err := osl.ReassembleOSLKey(fileSpec, f.config.DatastoreSLOKLookup)
+				ok, key, err := osl.ReassembleOSLKey(&fileSpec, f.config.DatastoreSLOKLookup)
 				if err != nil {
 					return nil, errors.Trace(err)
 				}
@@ -899,7 +899,7 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 					state.State = oslStateHasKey
 					state.Key = key
 					state.FileSpec = nil
-					err = f.storeOSLState(ID, state)
+					err = f.storeOSLState(ID, &state)
 					if err != nil {
 						return nil, errors.Trace(err)
 					}
@@ -916,7 +916,7 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 			f.config.DoGarbageCollection()
 		}
 
-		states = append(states, state)
+		states = append(states, &state)
 	}
 
 	return states, nil

@@ -1110,9 +1110,9 @@ func MarshalProxyAnnounceRequest(request *ProxyAnnounceRequest) ([]byte, error) 
 }
 
 func UnmarshalProxyAnnounceRequest(payload []byte) (*ProxyAnnounceRequest, error) {
-	var request *ProxyAnnounceRequest
+	var request ProxyAnnounceRequest
 	err := unmarshalRecord(recordTypeAPIProxyAnnounceRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalProxyAnnounceResponse(response *ProxyAnnounceResponse) ([]byte, error) {
@@ -1121,9 +1121,9 @@ func MarshalProxyAnnounceResponse(response *ProxyAnnounceResponse) ([]byte, erro
 }
 
 func UnmarshalProxyAnnounceResponse(payload []byte) (*ProxyAnnounceResponse, error) {
-	var response *ProxyAnnounceResponse
+	var response ProxyAnnounceResponse
 	err := unmarshalRecord(recordTypeAPIProxyAnnounceResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalProxyAnswerRequest(request *ProxyAnswerRequest) ([]byte, error) {
@@ -1132,9 +1132,9 @@ func MarshalProxyAnswerRequest(request *ProxyAnswerRequest) ([]byte, error) {
 }
 
 func UnmarshalProxyAnswerRequest(payload []byte) (*ProxyAnswerRequest, error) {
-	var request *ProxyAnswerRequest
+	var request ProxyAnswerRequest
 	err := unmarshalRecord(recordTypeAPIProxyAnswerRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalProxyAnswerResponse(response *ProxyAnswerResponse) ([]byte, error) {
@@ -1143,9 +1143,9 @@ func MarshalProxyAnswerResponse(response *ProxyAnswerResponse) ([]byte, error) {
 }
 
 func UnmarshalProxyAnswerResponse(payload []byte) (*ProxyAnswerResponse, error) {
-	var response *ProxyAnswerResponse
+	var response ProxyAnswerResponse
 	err := unmarshalRecord(recordTypeAPIProxyAnswerResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientOfferRequest(request *ClientOfferRequest) ([]byte, error) {
@@ -1154,9 +1154,9 @@ func MarshalClientOfferRequest(request *ClientOfferRequest) ([]byte, error) {
 }
 
 func UnmarshalClientOfferRequest(payload []byte) (*ClientOfferRequest, error) {
-	var request *ClientOfferRequest
+	var request ClientOfferRequest
 	err := unmarshalRecord(recordTypeAPIClientOfferRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientOfferResponse(response *ClientOfferResponse) ([]byte, error) {
@@ -1165,9 +1165,9 @@ func MarshalClientOfferResponse(response *ClientOfferResponse) ([]byte, error) {
 }
 
 func UnmarshalClientOfferResponse(payload []byte) (*ClientOfferResponse, error) {
-	var response *ClientOfferResponse
+	var response ClientOfferResponse
 	err := unmarshalRecord(recordTypeAPIClientOfferResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientRelayedPacketRequest(request *ClientRelayedPacketRequest) ([]byte, error) {
@@ -1176,9 +1176,9 @@ func MarshalClientRelayedPacketRequest(request *ClientRelayedPacketRequest) ([]b
 }
 
 func UnmarshalClientRelayedPacketRequest(payload []byte) (*ClientRelayedPacketRequest, error) {
-	var request *ClientRelayedPacketRequest
+	var request ClientRelayedPacketRequest
 	err := unmarshalRecord(recordTypeAPIClientRelayedPacketRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientRelayedPacketResponse(response *ClientRelayedPacketResponse) ([]byte, error) {
@@ -1187,9 +1187,9 @@ func MarshalClientRelayedPacketResponse(response *ClientRelayedPacketResponse) (
 }
 
 func UnmarshalClientRelayedPacketResponse(payload []byte) (*ClientRelayedPacketResponse, error) {
-	var response *ClientRelayedPacketResponse
+	var response ClientRelayedPacketResponse
 	err := unmarshalRecord(recordTypeAPIClientRelayedPacketResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalBrokerServerReport(request *BrokerServerReport) ([]byte, error) {
@@ -1198,9 +1198,9 @@ func MarshalBrokerServerReport(request *BrokerServerReport) ([]byte, error) {
 }
 
 func UnmarshalBrokerServerReport(payload []byte) (*BrokerServerReport, error) {
-	var request *BrokerServerReport
+	var request BrokerServerReport
 	err := unmarshalRecord(recordTypeAPIBrokerServerReport, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalServerProxyQualityRequest(request *ServerProxyQualityRequest) ([]byte, error) {
@@ -1209,9 +1209,9 @@ func MarshalServerProxyQualityRequest(request *ServerProxyQualityRequest) ([]byt
 }
 
 func UnmarshalServerProxyQualityRequest(payload []byte) (*ServerProxyQualityRequest, error) {
-	var request *ServerProxyQualityRequest
+	var request ServerProxyQualityRequest
 	err := unmarshalRecord(recordTypeAPIServerProxyQualityRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]byte, error) {
@@ -1220,9 +1220,9 @@ func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]
 }
 
 func UnmarshalServerProxyQualityResponse(payload []byte) (*ServerProxyQualityResponse, error) {
-	var response *ServerProxyQualityResponse
+	var response ServerProxyQualityResponse
 	err := unmarshalRecord(recordTypeAPIServerProxyQualityResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientDSLRequest(request *ClientDSLRequest) ([]byte, error) {
@@ -1231,9 +1231,9 @@ func MarshalClientDSLRequest(request *ClientDSLRequest) ([]byte, error) {
 }
 
 func UnmarshalClientDSLRequest(payload []byte) (*ClientDSLRequest, error) {
-	var request *ClientDSLRequest
+	var request ClientDSLRequest
 	err := unmarshalRecord(recordTypeAPIClientDSLRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientDSLResponse(response *ClientDSLResponse) ([]byte, error) {
@@ -1242,7 +1242,7 @@ func MarshalClientDSLResponse(response *ClientDSLResponse) ([]byte, error) {
 }
 
 func UnmarshalClientDSLResponse(payload []byte) (*ClientDSLResponse, error) {
-	var response *ClientDSLResponse
+	var response ClientDSLResponse
 	err := unmarshalRecord(recordTypeAPIClientDSLResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }

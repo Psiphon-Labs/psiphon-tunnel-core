@@ -2227,6 +2227,8 @@ func (controller *Controller) launchEstablishing() {
 	}
 	controller.setTunnelPoolSize(tunnelPoolSize)
 
+	disableServerEntriesReporter := p.Bool(parameters.DisableServerEntriesReporter)
+
 	p.Close()
 
 	// Trigger CandidateServers and AvailableEgressRegions notices. By default,
@@ -2263,12 +2265,14 @@ func (controller *Controller) launchEstablishing() {
 	// lists) with the original; the contents of these slices don't change
 	// past this point. The rate limiter should not be used by
 	// serverEntriesReporter, but is cleared just in case.
-	copyConstraints := *controller.protocolSelectionConstraints
-	copyConstraints.inproxyClientDialRateLimiter = nil
-	controller.signalServerEntriesReporter(
-		&serverEntriesReportRequest{
-			constraints: &copyConstraints,
-		})
+	if !disableServerEntriesReporter {
+		copyConstraints := *controller.protocolSelectionConstraints
+		copyConstraints.inproxyClientDialRateLimiter = nil
+		controller.signalServerEntriesReporter(
+			&serverEntriesReportRequest{
+				constraints: &copyConstraints,
+			})
+	}
 
 	if controller.protocolSelectionConstraints.hasInitialProtocols() ||
 		tunnelPoolSize > 1 {
@@ -2279,7 +2283,7 @@ func (controller *Controller) launchEstablishing() {
 		// requirements can't be met, the constraint and/or pool size are
 		// adjusted in order to avoid spinning unable to select any protocol
 		// or trying to establish more tunnels than is possible.
-		controller.doConstraintsScan()
+		controller.doConstraintsScan(controller.establishCtx)
 	}
 
 	controller.resetServerEntryIterationMetrics()
@@ -2336,7 +2340,7 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 	return workerPoolSize
 }
 
-func (controller *Controller) doConstraintsScan() {
+func (controller *Controller) doConstraintsScan(ctx context.Context) {
 
 	// Scan over server entries in order to check and adjust any initial
 	// tunnel protocol limit and tunnel pool size.
@@ -2382,8 +2386,13 @@ func (controller *Controller) doConstraintsScan() {
 		}
 
 		select {
+		case <-ctx.Done():
+			// Don't block establishment restart: cancel the scan.
+			scanCancelled = true
+			return false
 		case <-controller.runCtx.Done():
 			// Don't block controller shutdown: cancel the scan.
+			scanCancelled = true
 			return false
 		default:
 			return true
@@ -2540,8 +2549,12 @@ func (controller *Controller) establishCandidateGenerator() {
 	// from reported tunnel establishment duration.
 	var totalNetworkWaitDuration time.Duration
 
-	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
+	applyServerAffinity, iterator, err := NewServerEntryIterator(
+		controller.establishCtx, controller.config)
 	if err != nil {
+		if controller.isStopEstablishing() {
+			return
+		}
 		NoticeError("failed to iterate over candidates: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
@@ -2608,8 +2621,11 @@ loop:
 			roundNetworkWaitDuration += networkWaitDuration
 			totalNetworkWaitDuration += networkWaitDuration
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(controller.establishCtx)
 			if err != nil {
+				if controller.isStopEstablishing() {
+					break loop
+				}
 				NoticeError("failed to get next candidate: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
 				return
@@ -2803,8 +2819,11 @@ loop:
 		timer.Stop()
 
 		if resetIterator {
-			err := iterator.Reset()
+			err := iterator.Reset(controller.establishCtx)
 			if err != nil {
+				if controller.isStopEstablishing() {
+					break loop
+				}
 				NoticeError("failed to reset iterator: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
 				return
