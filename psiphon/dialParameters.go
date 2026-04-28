@@ -411,7 +411,7 @@ func MakeDialParameters(
 					p.Strings(parameters.ConjureSTUNServerAddresses),
 					dialParams.ConjureSTUNServerAddress)) ||
 			(dialParams.InproxySTUNDialParameters != nil &&
-				dialParams.InproxySTUNDialParameters.IsValidClientReplay(p)) ||
+				!dialParams.InproxySTUNDialParameters.IsValidClientReplay(p)) ||
 
 			// Legacy clients use ConjureAPIRegistrarURL with
 			// gotapdance.tapdance.APIRegistrar and new clients use
