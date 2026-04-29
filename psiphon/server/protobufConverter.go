@@ -191,7 +191,7 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 						Region:   &regionString,
 					}
 
-					if value, exists := protoStats["server_entry_tag"].(string); exists {
+					if value, exists := logFields["server_entry_tag"].(string); exists {
 						msg.ServerEntryTag = &value
 					}
 
@@ -668,7 +668,7 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 	case inproxy.ICECandidateTypes:
 		newSlice := make([]string, 0, len(sliceValue))
 		for _, elem := range sliceValue {
-			newSlice = append(newSlice, inproxy.PortMappingType(elem).String())
+			newSlice = append(newSlice, inproxy.ICECandidateType(elem).String())
 		}
 
 		field.Set(reflect.ValueOf(newSlice))
