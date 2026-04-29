@@ -67,10 +67,11 @@ type DSLBackendTestShim interface {
 
 	MarshalDiscoverServerEntriesResponse(
 		versionedServerEntryTags []*struct {
-			Tag              []byte
-			Version          int32
-			PrioritizeDial   bool
-			PrioritizeReason string
+			Tag                      []byte
+			Version                  int32
+			PrioritizeDial           bool
+			PrioritizeReason         string
+			PrioritizeTunnelProtocol string
 		}) (
 		cborResponse []byte,
 		retErr error)
@@ -125,10 +126,11 @@ type TestDSLBackend struct {
 }
 
 type dslSourcedServerEntry struct {
-	ServerEntryFields protocol.PackedServerEntryFields
-	Source            string
-	PrioritizeDial    bool
-	PrioritizeReason  string
+	ServerEntryFields        protocol.PackedServerEntryFields
+	Source                   string
+	PrioritizeDial           bool
+	PrioritizeReason         string
+	PrioritizeTunnelProtocol string
 }
 
 func NewTestDSLBackend(
@@ -216,6 +218,8 @@ func NewTestDSLBackend(
 			if sourcedServerEntry.PrioritizeDial {
 				sourcedServerEntry.PrioritizeReason =
 					fmt.Sprintf("prioritize-reason-%s", prng.HexString(8))
+				sourcedServerEntry.PrioritizeTunnelProtocol =
+					protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH
 			}
 
 			serverEntries[serverEntry.Tag] = sourcedServerEntry
@@ -385,22 +389,27 @@ func (b *TestDSLBackend) GetServerEntryCount(isTunneled bool) int {
 }
 
 func (b *TestDSLBackend) GetServerEntryProperties(
-	serverEntryTag string) (string, bool, string, error) {
+	serverEntryTag string) (string, bool, string, string, error) {
 
 	entry, ok := b.untunneledServerEntries[serverEntryTag]
 	if !ok {
 		entry, ok = b.tunneledServerEntries[serverEntryTag]
 		if !ok {
-			return "", false, "", errors.TraceNew("unknown server entry tag")
+			return "", false, "", "", errors.TraceNew("unknown server entry tag")
 		}
 	}
 
-	return entry.Source, entry.PrioritizeDial, entry.PrioritizeReason, nil
+	return entry.Source,
+		entry.PrioritizeDial,
+		entry.PrioritizeReason,
+		entry.PrioritizeTunnelProtocol,
+		nil
 }
 
 func (b *TestDSLBackend) SetServerEntries(
 	isTunneled bool,
 	prioritizeDial bool,
+	prioritizeTunnelProtocol string,
 	encodedServerEntries []string) error {
 
 	source := "DSL-untunneled"
@@ -428,6 +437,8 @@ func (b *TestDSLBackend) SetServerEntries(
 		if prioritizeDial {
 			sourcedServerEntry.PrioritizeReason =
 				fmt.Sprintf("prioritize-reason-%s", prng.HexString(8))
+			sourcedServerEntry.PrioritizeTunnelProtocol =
+				prioritizeTunnelProtocol
 		}
 		sourcedServerEntries[serverEntryFields.GetTag()] = sourcedServerEntry
 	}
@@ -486,10 +497,11 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 	}
 
 	var versionedServerEntryTags []*struct {
-		Tag              []byte
-		Version          int32
-		PrioritizeDial   bool
-		PrioritizeReason string
+		Tag                      []byte
+		Version                  int32
+		PrioritizeDial           bool
+		PrioritizeReason         string
+		PrioritizeTunnelProtocol string
 	}
 
 	if !missingOSLs {
@@ -510,14 +522,16 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 			versionedServerEntryTags = append(
 				versionedServerEntryTags,
 				&struct {
-					Tag              []byte
-					Version          int32
-					PrioritizeDial   bool
-					PrioritizeReason string
+					Tag                      []byte
+					Version                  int32
+					PrioritizeDial           bool
+					PrioritizeReason         string
+					PrioritizeTunnelProtocol string
 				}{serverEntryTag,
 					0,
 					sourcedServerEntry.PrioritizeDial,
 					sourcedServerEntry.PrioritizeReason,
+					sourcedServerEntry.PrioritizeTunnelProtocol,
 				})
 		}
 	}

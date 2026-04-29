@@ -79,12 +79,7 @@ func runTestDestBytes() error {
 	setLogCallback(logCallback)
 	defer setLogCallback(nil)
 
-	// Test can fail if the following addBytes/Sleep loop isn't synchronzied
-	// with the destBytesLogger timer.
-	//
-	// TODO: use time/synctest in Go 1.25+
-
-	const logPeriod = 500 * time.Millisecond
+	const logPeriod = 250 * time.Millisecond
 
 	destBytesLogger := newDestBytesLogger(&SupportServices{
 		Config: &Config{
@@ -152,8 +147,18 @@ func runTestDestBytes() error {
 			if i != 0 {
 				destCount = len(destDomains)
 			}
-			if len(logs) !=
-				destCount*len(clientRegions)*len(clientASNs)*len(clientPlatformPrefixes)*len(sponsorIDs) {
+
+			expectedBucketCount := destCount *
+				len(clientRegions) *
+				len(clientASNs) *
+				len(clientPlatformPrefixes) *
+				len(sponsorIDs)
+
+			if len(logs) < expectedBucketCount {
+
+				// Not a precise comparison: len(logs) can exceed this total
+				// if the destBytesLogger ticker happens to fire in the
+				// middle of an addBytes loop.
 
 				return errors.Tracef("unexpected log count: %d", len(logs))
 			}
@@ -224,13 +229,13 @@ func runTestDestBytes() error {
 				return errors.Trace(err)
 			}
 
-			if sumBytesTCP != int64(len(logs)*eventCount)*bytesTCP {
+			if sumBytesTCP != int64(expectedBucketCount*eventCount)*bytesTCP {
 				return errors.Tracef("unexpected TCP bytes: %d", sumBytesTCP)
 			}
-			if sumBytesUDP != int64(len(logs)*eventCount)*bytesUDP {
+			if sumBytesUDP != int64(expectedBucketCount*eventCount)*bytesUDP {
 				return errors.Tracef("unexpected UDP bytes: %d", sumBytesUDP)
 			}
-			if sumBytes != int64(len(logs)*eventCount)*(bytesTCP+bytesUDP) {
+			if sumBytes != int64(expectedBucketCount*eventCount)*(bytesTCP+bytesUDP) {
 				return errors.Tracef("unexpected bytes: %d", sumBytes)
 			}
 		}
@@ -241,7 +246,7 @@ func runTestDestBytes() error {
 		return nil
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 
 		addBytes()
 

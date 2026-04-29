@@ -714,6 +714,9 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		if dialParams.DSLPrioritizedDial && len(dialParams.DSLPrioritizedDialReason) > 0 {
 			args = append(args, "DSLPrioritizedReason", dialParams.DSLPrioritizedDialReason)
 		}
+		if dialParams.DSLPrioritizedDial && len(dialParams.DSLPrioritizedTunnelProtocol) > 0 {
+			args = append(args, "DSLPrioritizedTunnelProtocol", dialParams.DSLPrioritizedTunnelProtocol)
+		}
 
 	}
 

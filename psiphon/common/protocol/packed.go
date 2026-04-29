@@ -852,7 +852,11 @@ func init() {
 
 		{176, "enable_proxy_protocol_headers", intConverter},
 
-		// Next key value = 177
+		// Specs: server.baseDialParams
+
+		{177, "dsl_prioritized_tunnel_protocol", nil},
+
+		// Next key value = 178
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

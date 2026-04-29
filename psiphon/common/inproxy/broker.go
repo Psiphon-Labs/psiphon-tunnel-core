@@ -23,6 +23,7 @@ import (
 	"context"
 	std_errors "errors"
 	"fmt"
+	"maps"
 	"net"
 	"strconv"
 	"sync"
@@ -102,8 +103,9 @@ type Broker struct {
 	proxyQualityState       *ProxyQualityState
 	knownServerInitiatorIDs sync.Map
 
-	commonCompartmentsMutex sync.Mutex
-	commonCompartments      *consistent.Consistent
+	commonCompartmentsMutex   sync.Mutex
+	commonCompartments        *consistent.Consistent
+	sponsorCommonCompartments map[string]ID
 
 	proxyAnnounceTimeout       atomic.Int64
 	clientOfferTimeout         atomic.Int64
@@ -131,14 +133,26 @@ type BrokerConfig struct {
 	// tactics or embedded in OSLs. Clients must supply a valid compartment
 	// ID to match with a proxy.
 	//
-	// A BrokerConfig must supply at least one compartment ID, or
+	// A BrokerConfig must supply at least one common compartment ID, or
 	// SetCompartmentIDs must be called with at least one compartment ID
-	// before calling Start.
+	// before calling Start. When SponsorCommonCompartmentIDs is specified,
+	// there must be at least one compartment ID that's not assigned to a
+	// sponsor ID.
 	//
 	// When only one, single common compartment ID is configured, it can serve
 	// as an (obfuscation) secret that clients must obtain, via tactics, to
 	// enable in-proxy participation.
 	CommonCompartmentIDs []ID
+
+	// SponsorCommonCompartmentIDs may be used to configure a specific common
+	// compartment ID assignment for the given proxy sponsor IDs. When
+	// configured, proxies with a specified sponsor ID are always mapped to
+	// the corresponding compartment ID, and only those proxies are mapped to
+	// that compartment ID. All proxies with sponsor IDs not in
+	// SponsorCommonCompartmentIDs are mapped to the remaining common
+	// compartment IDs in CommonCompartmentIDs. Compartment IDs specified in
+	// SponsorCommonCompartmentIDs must appear in CommonCompartmentIDs.
+	SponsorCommonCompartmentIDs map[string]ID
 
 	// AllowProxy is a callback which can indicate whether a proxy with the
 	// given GeoIP data is allowed to match with common compartment ID
@@ -224,10 +238,11 @@ type BrokerConfig struct {
 	PendingServerReportsTTL    time.Duration
 
 	// Announcement queue limit configuration.
-	MatcherAnnouncementLimitEntryCount    int
-	MatcherAnnouncementRateLimitQuantity  int
-	MatcherAnnouncementRateLimitInterval  time.Duration
-	MatcherAnnouncementNonlimitedProxyIDs []ID
+	MatcherAnnouncementLimitEntryCount   int
+	MatcherAnnouncementRateLimitQuantity int
+	MatcherAnnouncementRateLimitInterval time.Duration
+	MatcherAnnouncementExemptProxyIDs    []ID
+	MatcherAnnouncementExemptSponsorIDs  []string
 
 	// Offer queue limit configuration.
 	MatcherOfferLimitEntryCount   int
@@ -300,10 +315,11 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		matcher: NewMatcher(&MatcherConfig{
 			Logger: config.Logger,
 
-			AnnouncementLimitEntryCount:    config.MatcherAnnouncementLimitEntryCount,
-			AnnouncementRateLimitQuantity:  config.MatcherAnnouncementRateLimitQuantity,
-			AnnouncementRateLimitInterval:  config.MatcherAnnouncementRateLimitInterval,
-			AnnouncementNonlimitedProxyIDs: config.MatcherAnnouncementNonlimitedProxyIDs,
+			AnnouncementLimitEntryCount:   config.MatcherAnnouncementLimitEntryCount,
+			AnnouncementRateLimitQuantity: config.MatcherAnnouncementRateLimitQuantity,
+			AnnouncementRateLimitInterval: config.MatcherAnnouncementRateLimitInterval,
+			AnnouncementExemptProxyIDs:    config.MatcherAnnouncementExemptProxyIDs,
+			AnnouncementExemptSponsorIDs:  config.MatcherAnnouncementExemptSponsorIDs,
 
 			OfferLimitEntryCount:   config.MatcherOfferLimitEntryCount,
 			OfferRateLimitQuantity: config.MatcherOfferRateLimitQuantity,
@@ -344,7 +360,9 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		})
 
 	if len(config.CommonCompartmentIDs) > 0 {
-		err = b.initializeCommonCompartmentIDHashing(config.CommonCompartmentIDs)
+		err = b.initializeCommonCompartmentIDHashing(
+			config.CommonCompartmentIDs,
+			config.SponsorCommonCompartmentIDs)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -368,7 +386,9 @@ func (b *Broker) Stop() {
 
 // SetCommonCompartmentIDs sets a new list of common compartment IDs,
 // replacing the previous configuration.
-func (b *Broker) SetCommonCompartmentIDs(commonCompartmentIDs []ID) error {
+func (b *Broker) SetCommonCompartmentIDs(
+	commonCompartmentIDs []ID,
+	sponsorCommonCompartmentIDs map[string]ID) error {
 
 	// TODO: initializeCommonCompartmentIDHashing is called regardless whether
 	// commonCompartmentIDs changes the previous configuration. To avoid the
@@ -376,7 +396,9 @@ func (b *Broker) SetCommonCompartmentIDs(commonCompartmentIDs []ID) error {
 	// initializeCommonCompartmentIDHashing, add a mechanism to first quickly
 	// check for changes?
 
-	return errors.Trace(b.initializeCommonCompartmentIDHashing(commonCompartmentIDs))
+	return errors.Trace(b.initializeCommonCompartmentIDHashing(
+		commonCompartmentIDs,
+		sponsorCommonCompartmentIDs))
 }
 
 // SetTimeouts sets new timeout values, replacing the previous configuration.
@@ -403,7 +425,8 @@ func (b *Broker) SetLimits(
 	matcherAnnouncementLimitEntryCount int,
 	matcherAnnouncementRateLimitQuantity int,
 	matcherAnnouncementRateLimitInterval time.Duration,
-	matcherAnnouncementNonlimitedProxyIDs []ID,
+	matcherAnnouncementExemptProxyIDs []ID,
+	matcherAnnouncementExemptSponsorIDs []string,
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
 	matcherOfferRateLimitInterval time.Duration,
@@ -416,7 +439,8 @@ func (b *Broker) SetLimits(
 		matcherAnnouncementLimitEntryCount,
 		matcherAnnouncementRateLimitQuantity,
 		matcherAnnouncementRateLimitInterval,
-		matcherAnnouncementNonlimitedProxyIDs,
+		matcherAnnouncementExemptProxyIDs,
+		matcherAnnouncementExemptSponsorIDs,
 		matcherOfferLimitEntryCount,
 		matcherOfferRateLimitQuantity,
 		matcherOfferRateLimitInterval,
@@ -788,9 +812,15 @@ func (b *Broker) handleProxyAnnounce(
 	// keyed with the proxy ID, in an effort to keep proxies consistently
 	// assigned to the same compartment.
 
+	// sponsor_id is validated by b.config.APIParameterValidator.
+	sponsorID := ""
+	if param, ok := apiParams["sponsor_id"]; ok {
+		sponsorID, _ = param.(string)
+	}
+
 	var commonCompartmentIDs []ID
 	if !hasPersonalCompartmentIDs {
-		compartmentID, err := b.selectCommonCompartmentID(proxyID)
+		compartmentID, err := b.selectCommonCompartmentID(proxyID, sponsorID)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -886,6 +916,7 @@ func (b *Broker) handleProxyAnnounce(
 				PortMappingTypes:       announceRequest.Metrics.PortMappingTypes,
 			},
 			ProxyID:      initiatorID,
+			SponsorID:    sponsorID,
 			ProxyMetrics: announceRequest.Metrics,
 			ConnectionID: connectionID,
 		})
@@ -2070,25 +2101,45 @@ func (b *Broker) isCommonCompartmentIDHashingInitialized() bool {
 }
 
 func (b *Broker) initializeCommonCompartmentIDHashing(
-	commonCompartmentIDs []ID) error {
+	allCommonCompartmentIDs []ID,
+	sponsorCommonCompartmentIDs map[string]ID) error {
 
 	b.commonCompartmentsMutex.Lock()
 	defer b.commonCompartmentsMutex.Unlock()
+
+	// The consistent package doesn't allow duplicate members.
+	allCompartmentIDs := make(map[ID]bool, len(allCommonCompartmentIDs))
+	for _, compartmentID := range allCommonCompartmentIDs {
+		if allCompartmentIDs[compartmentID] {
+			return errors.TraceNew("duplicate common compartment IDs")
+		}
+		allCompartmentIDs[compartmentID] = true
+	}
+
+	// Remove all sponsor ID-mapped common compartment IDs from the list of
+	// all common compartment IDs. Only the remaining list will be used for
+	// random assignment with consistent hashing.
+	sponsorCompartmentID := make(map[ID]bool)
+	for _, ID := range sponsorCommonCompartmentIDs {
+		if _, ok := allCompartmentIDs[ID]; !ok {
+			return errors.TraceNew("invalid sponsor common compartment ID")
+		}
+		sponsorCompartmentID[ID] = true
+	}
+	nonSponsorCommonCompartmentIDs := []ID{}
+	for _, ID := range allCommonCompartmentIDs {
+		if !sponsorCompartmentID[ID] {
+			nonSponsorCommonCompartmentIDs =
+				append(nonSponsorCommonCompartmentIDs, ID)
+		}
+	}
+	commonCompartmentIDs := nonSponsorCommonCompartmentIDs
 
 	// At least one common compartment ID is required. At a minimum, one ID
 	// will be used and distributed to clients via tactics, limiting matching
 	// to those clients targeted to receive that tactic parameters.
 	if len(commonCompartmentIDs) == 0 {
-		return errors.TraceNew("missing common compartment IDs")
-	}
-
-	// The consistent package doesn't allow duplicate members.
-	checkDup := make(map[ID]bool, len(commonCompartmentIDs))
-	for _, compartmentID := range commonCompartmentIDs {
-		if checkDup[compartmentID] {
-			return errors.TraceNew("duplicate common compartment IDs")
-		}
-		checkDup[compartmentID] = true
+		return errors.TraceNew("missing common compartment ID")
 	}
 
 	// Proxies without personal compartment IDs are randomly assigned to the
@@ -2118,6 +2169,8 @@ func (b *Broker) initializeCommonCompartmentIDHashing(
 			Hasher:            xxhasher{},
 		})
 
+	b.sponsorCommonCompartments = maps.Clone(sponsorCommonCompartmentIDs)
+
 	return nil
 }
 
@@ -2138,10 +2191,16 @@ func (m consistentMember) String() string {
 	return string(m)
 }
 
-func (b *Broker) selectCommonCompartmentID(proxyID ID) (ID, error) {
+func (b *Broker) selectCommonCompartmentID(proxyID ID, sponsorID string) (ID, error) {
 
 	b.commonCompartmentsMutex.Lock()
 	defer b.commonCompartmentsMutex.Unlock()
+
+	if sponsorID != "" {
+		if compartmentID, ok := b.sponsorCommonCompartments[sponsorID]; ok {
+			return compartmentID, nil
+		}
+	}
 
 	compartmentID, err := IDFromString(
 		b.commonCompartments.LocateKey(proxyID[:]).String())

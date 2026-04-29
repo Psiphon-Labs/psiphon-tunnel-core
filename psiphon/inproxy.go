@@ -2176,15 +2176,18 @@ func (dialParams *InproxySTUNDialParameters) Prepare() {
 // STUN server candidates for in-proxy clients.
 func (dialParams *InproxySTUNDialParameters) IsValidClientReplay(
 	p parameters.ParametersAccessor) bool {
-
 	return (dialParams.STUNServerAddress == "" ||
 		common.Contains(
-			p.Strings(parameters.InproxyClientSTUNServerAddresses),
+			p.Strings(
+				parameters.InproxyClientSTUNServerAddresses,
+				parameters.InproxySTUNServerAddresses),
 			dialParams.STUNServerAddress)) &&
 
 		(dialParams.STUNServerAddressRFC5780 == "" ||
 			common.Contains(
-				p.Strings(parameters.InproxyClientSTUNServerAddressesRFC5780),
+				p.Strings(
+					parameters.InproxyClientSTUNServerAddressesRFC5780,
+					parameters.InproxySTUNServerAddressesRFC5780),
 				dialParams.STUNServerAddressRFC5780))
 }
 

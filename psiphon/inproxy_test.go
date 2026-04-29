@@ -371,6 +371,46 @@ func runInproxySTUNDialParametersTest() error {
 
 	_ = replayDialParams.GetMetrics()
 
+	if !replayDialParams.IsValidClientReplay(p) {
+		return errors.TraceNew("unexpected invalid replay STUN dial parameters")
+	}
+
+	replayDialParams.STUNServerAddress = "invalid.example.org"
+	if replayDialParams.IsValidClientReplay(p) {
+		return errors.TraceNew("unexpected valid replay STUN server address")
+	}
+
+	replayDialParams.STUNServerAddress = stunServerAddresses[0]
+	replayDialParams.STUNServerAddressRFC5780 = "invalid-rfc5780.example.org"
+	if replayDialParams.IsValidClientReplay(p) {
+		return errors.TraceNew("unexpected valid replay RFC5780 STUN server address")
+	}
+
+	clientSTUNServerAddresses := []string{"client.example.org"}
+	clientSTUNServerAddressesRFC5780 := []string{"client-rfc5780.example.org"}
+	applyParameters := map[string]interface{}{
+		parameters.InproxyClientSTUNServerAddresses:        clientSTUNServerAddresses,
+		parameters.InproxyClientSTUNServerAddressesRFC5780: clientSTUNServerAddressesRFC5780,
+	}
+	err = config.SetParameters("", false, applyParameters)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	p = config.GetParameters().Get()
+	defer p.Close()
+
+	replayDialParams.STUNServerAddress = clientSTUNServerAddresses[0]
+	replayDialParams.STUNServerAddressRFC5780 = clientSTUNServerAddressesRFC5780[0]
+	if !replayDialParams.IsValidClientReplay(p) {
+		return errors.TraceNew("unexpected invalid client-specific replay STUN dial parameters")
+	}
+
+	replayDialParams.STUNServerAddress = stunServerAddresses[0]
+	if replayDialParams.IsValidClientReplay(p) {
+		return errors.TraceNew("unexpected valid global replay STUN server address when client list is set")
+	}
+
 	return nil
 }
 

@@ -240,13 +240,15 @@ func doDSLFetch(
 		tag dsl.ServerEntryTag,
 		version int,
 		prioritizeDial bool,
-		prioritizeReason string) bool {
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) bool {
 
 		prioritizeDial = prioritizeDial &&
 			prng.FlipWeightedCoin(prioritizeDialExistingServerEntryProbability)
 
 		if !prioritizeDial {
 			prioritizeReason = ""
+			prioritizeTunnelProtocol = ""
 		}
 
 		return DSLHasServerEntry(
@@ -254,6 +256,7 @@ func doDSLFetch(
 			version,
 			prioritizeDial,
 			prioritizeReason,
+			prioritizeTunnelProtocol,
 			networkID)
 	}
 
@@ -261,13 +264,15 @@ func doDSLFetch(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
 		prioritizeDial bool,
-		prioritizeReason string) error {
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) error {
 
 		prioritizeDial = prioritizeDial &&
 			prng.FlipWeightedCoin(prioritizeDialNewServerEntryProbability)
 
 		if !prioritizeDial {
 			prioritizeReason = ""
+			prioritizeTunnelProtocol = ""
 		}
 
 		return errors.Trace(
@@ -277,6 +282,7 @@ func doDSLFetch(
 				source,
 				prioritizeDial,
 				prioritizeReason,
+				prioritizeTunnelProtocol,
 				networkID))
 	}
 

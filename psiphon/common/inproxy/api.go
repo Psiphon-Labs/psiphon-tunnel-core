@@ -805,14 +805,22 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	// The client offer SDP may contain no ICE candidates.
 	errorOnNoCandidates := false
 
+	isPersonal := len(request.PersonalCompartmentIDs) > 0 &&
+		len(request.CommonCompartmentIDs) == 0
+
 	// The client offer SDP may include RFC 1918/4193 private IP addresses in
 	// personal pairing mode. filterSDPAddresses should not filter out
 	// private IP addresses based on the broker's local interfaces; this
 	// filtering occurs on the proxy that receives the SDP.
-	allowPrivateIPAddressCandidates :=
-		len(request.PersonalCompartmentIDs) > 0 &&
-			len(request.CommonCompartmentIDs) == 0
+	allowPrivateIPAddressCandidates := isPersonal
 	filterPrivateIPAddressCandidates := false
+
+	// In personal pairing mode, allow GeoIP mismatch between ICE candidates
+	// and the broker-observed peer address, geoIPData. The personal paired
+	// client is trusted to not misdirect the proxy to an arbitrary
+	// destination. This exception allows for broker tunneling that cannot
+	// relay the original client IP.
+	allowGeoIPMismatchCandidates := isPersonal
 
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
@@ -820,6 +828,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 		[]byte(request.ClientOfferSDP.SDP),
 		errorOnNoCandidates,
 		lookupGeoIP,
+		allowGeoIPMismatchCandidates,
 		geoIPData,
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
@@ -864,11 +873,13 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 
 	logFields["has_common_compartment_ids"] = hasCommonCompartmentIDs
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
+	logFields["ice_candidate_count"] = sdpMetrics.iceCandidateCount
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv4"] = sdpMetrics.hasIPv4
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+	logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
 	logFields["use_media_streams"] = request.UseMediaStreams
 
 	return filteredSDP, logFields, nil
@@ -931,12 +942,20 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 		allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
 		filterPrivateIPAddressCandidates := false
 
+		// In personal pairing mode, allow GeoIP mismatch between ICE
+		// candidates and the broker-observed peer address, geoIPData. The
+		// personal paired proxy is trusted to not misdirect the client to an
+		// arbitrary destination. This exception allows for modes such as
+		// InproxyProxySplitUpstreamInterfaceName.
+		allowGeoIPMismatchCandidates := proxyAnnouncementHasPersonalCompartmentIDs
+
 		// Proxy answer SDP candidate addresses must match the country and ASN of
 		// the proxy. Don't facilitate connections to arbitrary destinations.
 		filteredSDP, sdpMetrics, err = filterSDPAddresses(
 			[]byte(request.ProxyAnswerSDP.SDP),
 			errorOnNoCandidates,
 			lookupGeoIP,
+			allowGeoIPMismatchCandidates,
 			geoIPData,
 			allowPrivateIPAddressCandidates,
 			filterPrivateIPAddressCandidates)
@@ -961,10 +980,12 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["answer_error"] = request.AnswerError
 	if sdpMetrics != nil {
+		logFields["ice_candidate_count"] = sdpMetrics.iceCandidateCount
 		logFields["has_IPv4"] = sdpMetrics.hasIPv4
 		logFields["has_IPv6"] = sdpMetrics.hasIPv6
 		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+		logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
 	}
 
 	return filteredSDP, logFields, nil
@@ -1089,9 +1110,9 @@ func MarshalProxyAnnounceRequest(request *ProxyAnnounceRequest) ([]byte, error) 
 }
 
 func UnmarshalProxyAnnounceRequest(payload []byte) (*ProxyAnnounceRequest, error) {
-	var request *ProxyAnnounceRequest
+	var request ProxyAnnounceRequest
 	err := unmarshalRecord(recordTypeAPIProxyAnnounceRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalProxyAnnounceResponse(response *ProxyAnnounceResponse) ([]byte, error) {
@@ -1100,9 +1121,9 @@ func MarshalProxyAnnounceResponse(response *ProxyAnnounceResponse) ([]byte, erro
 }
 
 func UnmarshalProxyAnnounceResponse(payload []byte) (*ProxyAnnounceResponse, error) {
-	var response *ProxyAnnounceResponse
+	var response ProxyAnnounceResponse
 	err := unmarshalRecord(recordTypeAPIProxyAnnounceResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalProxyAnswerRequest(request *ProxyAnswerRequest) ([]byte, error) {
@@ -1111,9 +1132,9 @@ func MarshalProxyAnswerRequest(request *ProxyAnswerRequest) ([]byte, error) {
 }
 
 func UnmarshalProxyAnswerRequest(payload []byte) (*ProxyAnswerRequest, error) {
-	var request *ProxyAnswerRequest
+	var request ProxyAnswerRequest
 	err := unmarshalRecord(recordTypeAPIProxyAnswerRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalProxyAnswerResponse(response *ProxyAnswerResponse) ([]byte, error) {
@@ -1122,9 +1143,9 @@ func MarshalProxyAnswerResponse(response *ProxyAnswerResponse) ([]byte, error) {
 }
 
 func UnmarshalProxyAnswerResponse(payload []byte) (*ProxyAnswerResponse, error) {
-	var response *ProxyAnswerResponse
+	var response ProxyAnswerResponse
 	err := unmarshalRecord(recordTypeAPIProxyAnswerResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientOfferRequest(request *ClientOfferRequest) ([]byte, error) {
@@ -1133,9 +1154,9 @@ func MarshalClientOfferRequest(request *ClientOfferRequest) ([]byte, error) {
 }
 
 func UnmarshalClientOfferRequest(payload []byte) (*ClientOfferRequest, error) {
-	var request *ClientOfferRequest
+	var request ClientOfferRequest
 	err := unmarshalRecord(recordTypeAPIClientOfferRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientOfferResponse(response *ClientOfferResponse) ([]byte, error) {
@@ -1144,9 +1165,9 @@ func MarshalClientOfferResponse(response *ClientOfferResponse) ([]byte, error) {
 }
 
 func UnmarshalClientOfferResponse(payload []byte) (*ClientOfferResponse, error) {
-	var response *ClientOfferResponse
+	var response ClientOfferResponse
 	err := unmarshalRecord(recordTypeAPIClientOfferResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientRelayedPacketRequest(request *ClientRelayedPacketRequest) ([]byte, error) {
@@ -1155,9 +1176,9 @@ func MarshalClientRelayedPacketRequest(request *ClientRelayedPacketRequest) ([]b
 }
 
 func UnmarshalClientRelayedPacketRequest(payload []byte) (*ClientRelayedPacketRequest, error) {
-	var request *ClientRelayedPacketRequest
+	var request ClientRelayedPacketRequest
 	err := unmarshalRecord(recordTypeAPIClientRelayedPacketRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientRelayedPacketResponse(response *ClientRelayedPacketResponse) ([]byte, error) {
@@ -1166,9 +1187,9 @@ func MarshalClientRelayedPacketResponse(response *ClientRelayedPacketResponse) (
 }
 
 func UnmarshalClientRelayedPacketResponse(payload []byte) (*ClientRelayedPacketResponse, error) {
-	var response *ClientRelayedPacketResponse
+	var response ClientRelayedPacketResponse
 	err := unmarshalRecord(recordTypeAPIClientRelayedPacketResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalBrokerServerReport(request *BrokerServerReport) ([]byte, error) {
@@ -1177,9 +1198,9 @@ func MarshalBrokerServerReport(request *BrokerServerReport) ([]byte, error) {
 }
 
 func UnmarshalBrokerServerReport(payload []byte) (*BrokerServerReport, error) {
-	var request *BrokerServerReport
+	var request BrokerServerReport
 	err := unmarshalRecord(recordTypeAPIBrokerServerReport, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalServerProxyQualityRequest(request *ServerProxyQualityRequest) ([]byte, error) {
@@ -1188,9 +1209,9 @@ func MarshalServerProxyQualityRequest(request *ServerProxyQualityRequest) ([]byt
 }
 
 func UnmarshalServerProxyQualityRequest(payload []byte) (*ServerProxyQualityRequest, error) {
-	var request *ServerProxyQualityRequest
+	var request ServerProxyQualityRequest
 	err := unmarshalRecord(recordTypeAPIServerProxyQualityRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]byte, error) {
@@ -1199,9 +1220,9 @@ func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]
 }
 
 func UnmarshalServerProxyQualityResponse(payload []byte) (*ServerProxyQualityResponse, error) {
-	var response *ServerProxyQualityResponse
+	var response ServerProxyQualityResponse
 	err := unmarshalRecord(recordTypeAPIServerProxyQualityResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }
 
 func MarshalClientDSLRequest(request *ClientDSLRequest) ([]byte, error) {
@@ -1210,9 +1231,9 @@ func MarshalClientDSLRequest(request *ClientDSLRequest) ([]byte, error) {
 }
 
 func UnmarshalClientDSLRequest(payload []byte) (*ClientDSLRequest, error) {
-	var request *ClientDSLRequest
+	var request ClientDSLRequest
 	err := unmarshalRecord(recordTypeAPIClientDSLRequest, payload, &request)
-	return request, errors.Trace(err)
+	return &request, errors.Trace(err)
 }
 
 func MarshalClientDSLResponse(response *ClientDSLResponse) ([]byte, error) {
@@ -1221,7 +1242,7 @@ func MarshalClientDSLResponse(response *ClientDSLResponse) ([]byte, error) {
 }
 
 func UnmarshalClientDSLResponse(payload []byte) (*ClientDSLResponse, error) {
-	var response *ClientDSLResponse
+	var response ClientDSLResponse
 	err := unmarshalRecord(recordTypeAPIClientDSLResponse, payload, &response)
-	return response, errors.Trace(err)
+	return &response, errors.Trace(err)
 }

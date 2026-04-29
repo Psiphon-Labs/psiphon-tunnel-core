@@ -95,7 +95,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 			return
 		}
 
-		iterator, err := NewTacticsServerEntryIterator(config)
+		iterator, err := NewTacticsServerEntryIterator(ctx, config)
 		if err != nil {
 			NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 			return
@@ -111,7 +111,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 				return
 			}
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(ctx)
 			if err != nil {
 				NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 				return
@@ -126,7 +126,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 					return
 				}
 
-				err := iterator.Reset()
+				err := iterator.Reset(ctx)
 				if err != nil {
 					NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 					return
@@ -226,7 +226,7 @@ func fetchTactics(
 			serverEntry.GetSupportedTacticsProtocols(), replayProtocol)
 	}
 
-	selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+	selectProtocol := func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 		tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
 		if len(tacticsProtocols) == 0 {
 			return "", false

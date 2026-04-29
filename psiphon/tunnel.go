@@ -848,6 +848,8 @@ func dialTunnel(
 	conjureEnableIPv6Dials := p.Bool(parameters.ConjureEnableIPv6Dials)
 	conjureEnablePortRandomization := p.Bool(parameters.ConjureEnablePortRandomization)
 	conjureEnableRegistrationOverrides := p.Bool(parameters.ConjureEnableRegistrationOverrides)
+	sshChannelWindowSize := p.Int(parameters.SSHChannelWindowSize)
+	sshPacketTunnelChannelWindowSize := p.Int(parameters.SSHPacketTunnelChannelWindowSize)
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -1161,6 +1163,8 @@ func dialTunnel(
 	}
 
 	sshClientConfig.KEXPRNGSeed = dialParams.SSHKEXSeed
+	sshClientConfig.ChannelWindowSize = sshChannelWindowSize
+	sshClientConfig.PacketTunnelChannelWindowSize = sshPacketTunnelChannelWindowSize
 
 	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
 		if config.ObfuscatedSSHAlgorithms != nil {

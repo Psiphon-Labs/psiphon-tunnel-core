@@ -1369,6 +1369,7 @@ var baseDialParams = []requestParamSpec{
 	{"replay_ignored_change", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
 	{"dsl_prioritized", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
 	{"dsl_prioritized_reason", isAnyString, requestParamOptional},
+	{"dsl_prioritized_tunnel_protocol", isRelayProtocol, requestParamOptional},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},

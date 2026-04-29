@@ -97,4 +97,5 @@ message DialParams {
     optional int64 first_fronted_meek_candidate = 88;
     optional bool meek_payload_padding = 89;
     optional string dsl_prioritized_reason = 90;
+    optional string dsl_prioritized_tunnel_protocol = 91;
 }

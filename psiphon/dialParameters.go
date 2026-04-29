@@ -185,6 +185,7 @@ type DialParameters struct {
 	DSLPendingPrioritizeDialTimestamp time.Time `json:",omitempty"`
 	DSLPrioritizedDial                bool      `json:",omitempty"`
 	DSLPrioritizedDialReason          string    `json:",omitempty"`
+	DSLPrioritizedTunnelProtocol      string    `json:",omitempty"`
 
 	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
@@ -226,7 +227,9 @@ func MakeDialParameters(
 	tlsClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
-	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
+	selectProtocol func(
+		serverEntry *protocol.ServerEntry,
+		prioritizeTunnelProtocol string) (string, bool),
 	serverEntry *protocol.ServerEntry,
 	inproxyClientBrokerClientManager *InproxyBrokerClientManager,
 	inproxyClientNATStateManager *InproxyNATStateManager,
@@ -314,6 +317,7 @@ func MakeDialParameters(
 	// fetchTactics.
 
 	dslPrioritizeDialReason := ""
+	dslPrioritizeTunnelProtocol := ""
 	dslPendingPrioritizeDial :=
 		dialParams != nil && !dialParams.DSLPendingPrioritizeDialTimestamp.IsZero()
 
@@ -337,6 +341,7 @@ func MakeDialParameters(
 		}
 
 		dslPrioritizeDialReason = dialParams.DSLPrioritizedDialReason
+		dslPrioritizeTunnelProtocol = dialParams.DSLPrioritizedTunnelProtocol
 
 		// Replace the placeholder with new dial parameters.
 		dialParams = nil
@@ -406,7 +411,7 @@ func MakeDialParameters(
 					p.Strings(parameters.ConjureSTUNServerAddresses),
 					dialParams.ConjureSTUNServerAddress)) ||
 			(dialParams.InproxySTUNDialParameters != nil &&
-				dialParams.InproxySTUNDialParameters.IsValidClientReplay(p)) ||
+				!dialParams.InproxySTUNDialParameters.IsValidClientReplay(p)) ||
 
 			// Legacy clients use ConjureAPIRegistrarURL with
 			// gotapdance.tapdance.APIRegistrar and new clients use
@@ -495,8 +500,10 @@ func MakeDialParameters(
 		dslPendingPrioritizeDial || (isReplay && dialParams.DSLPrioritizedDial)
 	if !dialParams.DSLPrioritizedDial {
 		dialParams.DSLPrioritizedDialReason = ""
+		dialParams.DSLPrioritizedTunnelProtocol = ""
 	} else if dslPendingPrioritizeDial {
 		dialParams.DSLPrioritizedDialReason = dslPrioritizeDialReason
+		dialParams.DSLPrioritizedTunnelProtocol = dslPrioritizeTunnelProtocol
 	}
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
@@ -558,12 +565,17 @@ func MakeDialParameters(
 
 	if !isReplay && !isExchanged {
 
+		// selectProtocol may ignore dslPrioritizeTunnelProtocol in preferInproxy
+		// and InitialLimit and LimitTunnelProtocol cases. Note that
+		// dsl_prioritized_tunnel_protocol is intentionally still reported as-is
+		// in server_tunnel.
+
 		// TODO: should there be a pre-check of selectProtocol before incurring
 		// overhead of unmarshaling dial parameters? In may be that a server entry
 		// is fully incapable of satisfying the current protocol selection
 		// constraints.
 
-		selectedProtocol, ok := selectProtocol(serverEntry)
+		selectedProtocol, ok := selectProtocol(serverEntry, dslPrioritizeTunnelProtocol)
 		if !ok {
 			return nil, nil
 		}
