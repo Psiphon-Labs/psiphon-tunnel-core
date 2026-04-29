@@ -801,6 +801,12 @@ type Config struct {
 	// packets. The valid range is 1-128. When 0, the default of 16 is used.
 	SSHPacketTunnelChannelWindowSize *int `json:",omitempty"`
 
+	// DisableServerEntriesReporter disables the server entry scan that
+	// reports the AvailableEgressRegions notice, as well as CandidateServers
+	// diagnostics. When the egress region list is not required, disabling
+	// this expensive scan can improve datastore performance on slower devices.
+	DisableServerEntriesReporter *bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -3209,6 +3215,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	if config.ServerEntryIteratorMaxMoveToFront != nil {
+		applyParameters[parameters.ServerEntryIteratorMaxMoveToFront] = *config.ServerEntryIteratorMaxMoveToFront
+	}
+
+	if config.ServerEntryIteratorResetProbability != nil {
 		applyParameters[parameters.ServerEntryIteratorResetProbability] = *config.ServerEntryIteratorResetProbability
 	}
 
@@ -3226,6 +3236,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.SSHPacketTunnelChannelWindowSize != nil {
 		applyParameters[parameters.SSHPacketTunnelChannelWindowSize] = *config.SSHPacketTunnelChannelWindowSize
+	}
+
+	if config.DisableServerEntriesReporter != nil {
+		applyParameters[parameters.DisableServerEntriesReporter] = *config.DisableServerEntriesReporter
 	}
 
 	// When adding new config dial parameters that may override tactics, also

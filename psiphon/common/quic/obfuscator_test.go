@@ -25,8 +25,8 @@ package quic
 import (
 	"context"
 	"encoding/hex"
+	std_errors "errors"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/sync/errgroup"
 )
@@ -141,10 +142,19 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "test"),
 		)
 
-		// A timeout (deadline exceeded) is expected since the stub server
-		// just reads the prefix and doesn't perform a QUIC handshake. Any
-		// other dial error is a failure.
-		if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		// A timeout is expected since the stub server just reads the prefix
+		// and doesn't perform a QUIC handshake. Depending on scheduling, the
+		// dial may fail due to the outer context deadline, IETF quic-go's
+		// handshake idle timeout, or legacy gQUIC quic-go's handshake timeout.
+
+		if err == nil {
+			return errors.TraceNew("unexpected success")
+		}
+
+		var gQUICErr *qerr.QuicError
+		if !std_errors.Is(err, context.DeadlineExceeded) &&
+			!IsIETFErrorIndicatingClosed(err) &&
+			!(std_errors.As(err, &gQUICErr) && gQUICErr.ErrorCode == qerr.HandshakeTimeout) {
 			return errors.Trace(err)
 		}
 

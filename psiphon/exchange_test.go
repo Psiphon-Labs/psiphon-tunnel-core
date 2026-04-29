@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -184,7 +185,7 @@ func TestServerEntryExchange(t *testing.T) {
 				return true
 			}
 
-			selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+			selectProtocol := func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 				return tunnelProtocol, true
 			}
 
@@ -221,13 +222,15 @@ func TestServerEntryExchange(t *testing.T) {
 	checkFirstServerEntry := func(
 		fields protocol.ServerEntryFields, tunnelProtocol string, isExchanged bool) {
 
-		_, iterator, err := NewServerEntryIterator(config)
+		ctx := context.Background()
+
+		_, iterator, err := NewServerEntryIterator(ctx, config)
 		if err != nil {
 			t.Fatalf("NewServerEntryIterator failed: %s", err)
 		}
 		defer iterator.Close()
 
-		serverEntry, err := iterator.Next()
+		serverEntry, err := iterator.Next(ctx)
 		if err != nil {
 			t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 		}

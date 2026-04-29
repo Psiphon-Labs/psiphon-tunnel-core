@@ -393,7 +393,7 @@ func (r *Relay) HandleRequest(
 			len(cborRelayedRequest), MaxRelayPayloadSize)
 	}
 
-	var relayedRequest *RelayedRequest
+	var relayedRequest RelayedRequest
 	err := cbor.Unmarshal(cborRelayedRequest, &relayedRequest)
 	if err != nil {
 		return nil, errors.Trace(err)

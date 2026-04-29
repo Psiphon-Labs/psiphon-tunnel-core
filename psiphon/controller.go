@@ -644,7 +644,8 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
 		prioritizeDial bool,
-		prioritizeReason string) error {
+		prioritizeReason string,
+		prioritizeTunnelProtocol string) error {
 
 		err := DSLStoreServerEntry(
 			controller.config.ServerEntrySignaturePublicKey,
@@ -652,6 +653,7 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 			protocol.PushServerEntrySource(source),
 			prioritizeDial,
 			prioritizeReason,
+			prioritizeTunnelProtocol,
 			controller.config.GetNetworkID())
 		if err != nil {
 			return errors.Trace(err)
@@ -1797,6 +1799,7 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	connectTunnelCount int,
 	excludeIntensive bool,
 	preferInproxy bool,
+	prioritizeTunnelProtocol string,
 	serverEntry *protocol.ServerEntry) (string, time.Duration, bool) {
 
 	candidateProtocols := p.supportedProtocols(
@@ -1804,6 +1807,7 @@ func (p *protocolSelectionConstraints) selectProtocol(
 
 	// Prefer selecting an in-proxy tunnel protocol when indicated, but fall
 	// back to other protocols when no in-proxy protocol is supported.
+	// Takes precedence over any DSL prioritize tunnel protocol hint.
 
 	if preferInproxy && candidateProtocols.HasInproxyTunnelProtocols() {
 		NoticeInfo("in-proxy protocol preferred")
@@ -1814,13 +1818,24 @@ func (p *protocolSelectionConstraints) selectProtocol(
 		return "", 0, false
 	}
 
+	// Apply the DSL prioritize tunnel protocol hint if the protocol is in the
+	// candidateProtocols list that meets the current constraints. Otherwise,
+	// fall back to the randomized selection path.
+
+	selectedProtocol := ""
+	if prioritizeTunnelProtocol != "" &&
+		common.Contains(candidateProtocols, prioritizeTunnelProtocol) {
+		selectedProtocol = prioritizeTunnelProtocol
+	}
+
 	// Pick at random from the supported protocols. This ensures that we'll
 	// eventually try all possible protocols. Depending on network
 	// configuration, it may be the case that some protocol is only available
 	// through multi-capability servers, and a simpler ranked preference of
 	// protocols could lead to that protocol never being selected.
-
-	selectedProtocol := candidateProtocols[prng.Intn(len(candidateProtocols))]
+	if selectedProtocol == "" {
+		selectedProtocol = candidateProtocols[prng.Intn(len(candidateProtocols))]
+	}
 
 	if !protocol.TunnelProtocolUsesInproxy(selectedProtocol) ||
 		p.inproxyClientDialRateLimiter == nil {
@@ -2212,6 +2227,8 @@ func (controller *Controller) launchEstablishing() {
 	}
 	controller.setTunnelPoolSize(tunnelPoolSize)
 
+	disableServerEntriesReporter := p.Bool(parameters.DisableServerEntriesReporter)
+
 	p.Close()
 
 	// Trigger CandidateServers and AvailableEgressRegions notices. By default,
@@ -2248,12 +2265,14 @@ func (controller *Controller) launchEstablishing() {
 	// lists) with the original; the contents of these slices don't change
 	// past this point. The rate limiter should not be used by
 	// serverEntriesReporter, but is cleared just in case.
-	copyConstraints := *controller.protocolSelectionConstraints
-	copyConstraints.inproxyClientDialRateLimiter = nil
-	controller.signalServerEntriesReporter(
-		&serverEntriesReportRequest{
-			constraints: &copyConstraints,
-		})
+	if !disableServerEntriesReporter {
+		copyConstraints := *controller.protocolSelectionConstraints
+		copyConstraints.inproxyClientDialRateLimiter = nil
+		controller.signalServerEntriesReporter(
+			&serverEntriesReportRequest{
+				constraints: &copyConstraints,
+			})
+	}
 
 	if controller.protocolSelectionConstraints.hasInitialProtocols() ||
 		tunnelPoolSize > 1 {
@@ -2264,7 +2283,7 @@ func (controller *Controller) launchEstablishing() {
 		// requirements can't be met, the constraint and/or pool size are
 		// adjusted in order to avoid spinning unable to select any protocol
 		// or trying to establish more tunnels than is possible.
-		controller.doConstraintsScan()
+		controller.doConstraintsScan(controller.establishCtx)
 	}
 
 	controller.resetServerEntryIterationMetrics()
@@ -2321,7 +2340,7 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 	return workerPoolSize
 }
 
-func (controller *Controller) doConstraintsScan() {
+func (controller *Controller) doConstraintsScan(ctx context.Context) {
 
 	// Scan over server entries in order to check and adjust any initial
 	// tunnel protocol limit and tunnel pool size.
@@ -2367,8 +2386,13 @@ func (controller *Controller) doConstraintsScan() {
 		}
 
 		select {
+		case <-ctx.Done():
+			// Don't block establishment restart: cancel the scan.
+			scanCancelled = true
+			return false
 		case <-controller.runCtx.Done():
 			// Don't block controller shutdown: cancel the scan.
+			scanCancelled = true
 			return false
 		default:
 			return true
@@ -2525,8 +2549,12 @@ func (controller *Controller) establishCandidateGenerator() {
 	// from reported tunnel establishment duration.
 	var totalNetworkWaitDuration time.Duration
 
-	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
+	applyServerAffinity, iterator, err := NewServerEntryIterator(
+		controller.establishCtx, controller.config)
 	if err != nil {
+		if controller.isStopEstablishing() {
+			return
+		}
 		NoticeError("failed to iterate over candidates: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
@@ -2593,8 +2621,11 @@ loop:
 			roundNetworkWaitDuration += networkWaitDuration
 			totalNetworkWaitDuration += networkWaitDuration
 
-			serverEntry, err := iterator.Next()
+			serverEntry, err := iterator.Next(controller.establishCtx)
 			if err != nil {
+				if controller.isStopEstablishing() {
+					break loop
+				}
 				NoticeError("failed to get next candidate: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
 				return
@@ -2788,8 +2819,11 @@ loop:
 		timer.Stop()
 
 		if resetIterator {
-			err := iterator.Reset()
+			err := iterator.Reset(controller.establishCtx)
 			if err != nil {
+				if controller.isStopEstablishing() {
+					break loop
+				}
 				NoticeError("failed to reset iterator: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
 				return
@@ -2982,7 +3016,8 @@ loop:
 		var dialRateLimitDelay time.Duration
 
 		selectProtocol := func(
-			serverEntry *protocol.ServerEntry) (string, bool) {
+			serverEntry *protocol.ServerEntry,
+			prioritizeTunnelProtocol string) (string, bool) {
 
 			preferInproxy := inproxyForceSelection || prng.FlipWeightedCoin(inproxyPreferProbability)
 
@@ -2990,6 +3025,7 @@ loop:
 				controller.establishConnectTunnelCount,
 				excludeIntensive,
 				preferInproxy,
+				prioritizeTunnelProtocol,
 				serverEntry)
 
 			dialRateLimitDelay = rateLimitDelay
