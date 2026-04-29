@@ -1414,13 +1414,7 @@ func (server *MeekServer) rateLimit(
 		}
 	}
 
-	// With IPv6, individual users or sites are users commonly allocated a /64
-	// or /56, so rate limit by /56.
-	rateLimitIP := clientIP
-	IP := net.ParseIP(clientIP)
-	if IP != nil && IP.To4() == nil {
-		rateLimitIP = IP.Mask(net.CIDRMask(56, 128)).String()
-	}
+	rateLimitIP := common.GetRateLimitIP(clientIP)
 
 	// go-cache-lru is safe for concurrent access, but lacks an atomic
 	// compare-and-set type operations to check if an entry exists before

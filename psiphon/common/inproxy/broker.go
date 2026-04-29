@@ -1816,7 +1816,7 @@ func (b *Broker) handleClientDSL(
 	rateLimitParams := b.dslRequestRateLimitParams.Load().(*brokerRateLimitParams)
 	err := brokerRateLimit(
 		b.dslRequestRateLimiters,
-		clientIP,
+		common.GetRateLimitIP(clientIP),
 		rateLimitParams.quantity,
 		rateLimitParams.interval)
 	if err != nil {

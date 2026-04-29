@@ -46,9 +46,9 @@ const (
 	defaultRelayBufferSize          = 8192
 	rateLimiterReapHistoryFrequency = 300 * time.Second
 	rateLimiterMaxCacheEntries      = 1000000
-	defaultRateLimitQuantity        = 10000
+	defaultRateLimitQuantity        = 100000
 	defaultRateLimitInterval        = 1 * time.Minute
-	defaultMaxConcurrent            = 10000
+	defaultMaxConcurrent            = 50000
 )
 
 // ProxyConfig specifies the configuration of a light proxy.
@@ -485,16 +485,17 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// later enforcement also means the client is authenticated as having the
 	// obfuscation key, and a prober behind shared NAT can't consume limits.
 
-	err = proxy.applyRateLimit(clientIP)
+	limitIP := common.GetRateLimitIP(clientIP)
+	err = proxy.applyRateLimit(limitIP)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = proxy.takeMaxConcurrent(clientIP)
+	err = proxy.takeMaxConcurrent(limitIP)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer proxy.replaceMaxConcurrent(clientIP)
+	defer proxy.replaceMaxConcurrent(limitIP)
 
 	normalizedDestinationAddress, err = normalizeDestinationAddress(header.DestinationAddress)
 	if err != nil {
@@ -554,7 +555,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	return nil
 }
 
-func (proxy *Proxy) applyRateLimit(clientIP string) error {
+func (proxy *Proxy) applyRateLimit(limitIP string) error {
 
 	if proxy.rateLimitQuantity <= 0 || proxy.rateLimitInterval <= 0 {
 		return nil
@@ -565,13 +566,13 @@ func (proxy *Proxy) applyRateLimit(clientIP string) error {
 
 	var rateLimiter *rate.Limiter
 
-	entry, ok := proxy.rateLimiters.Get(clientIP)
+	entry, ok := proxy.rateLimiters.Get(limitIP)
 	if ok {
 		rateLimiter = entry.(*rate.Limiter)
 	} else {
 		limit := float64(proxy.rateLimitQuantity) / proxy.rateLimitInterval.Seconds()
 		rateLimiter = rate.NewLimiter(rate.Limit(limit), proxy.rateLimitQuantity)
-		proxy.rateLimiters.Set(clientIP, rateLimiter, proxy.rateLimitInterval)
+		proxy.rateLimiters.Set(limitIP, rateLimiter, proxy.rateLimitInterval)
 	}
 
 	if !rateLimiter.Allow() {
@@ -581,7 +582,7 @@ func (proxy *Proxy) applyRateLimit(clientIP string) error {
 	return nil
 }
 
-func (proxy *Proxy) takeMaxConcurrent(clientIP string) error {
+func (proxy *Proxy) takeMaxConcurrent(limitIP string) error {
 
 	if proxy.maxConcurrent <= 0 {
 		return nil
@@ -590,16 +591,16 @@ func (proxy *Proxy) takeMaxConcurrent(clientIP string) error {
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[clientIP]
+	count := proxy.concurrentConnections[limitIP]
 	if count >= proxy.maxConcurrent {
 		return errors.TraceNew("max concurrent exceeded")
 	}
-	proxy.concurrentConnections[clientIP] = count + 1
+	proxy.concurrentConnections[limitIP] = count + 1
 
 	return nil
 }
 
-func (proxy *Proxy) replaceMaxConcurrent(clientIP string) {
+func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 
 	if proxy.maxConcurrent <= 0 {
 		return
@@ -608,10 +609,10 @@ func (proxy *Proxy) replaceMaxConcurrent(clientIP string) {
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[clientIP] - 1
+	count := proxy.concurrentConnections[limitIP] - 1
 	if count <= 0 {
-		delete(proxy.concurrentConnections, clientIP)
+		delete(proxy.concurrentConnections, limitIP)
 	} else {
-		proxy.concurrentConnections[clientIP] = count
+		proxy.concurrentConnections[limitIP] = count
 	}
 }
