@@ -191,7 +191,7 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 						Region:   &regionString,
 					}
 
-					if value, exists := protoStats["server_entry_tag"].(string); exists {
+					if value, exists := logFields["server_entry_tag"].(string); exists {
 						msg.ServerEntryTag = &value
 					}
 
