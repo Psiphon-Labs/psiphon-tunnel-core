@@ -33,16 +33,58 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 ## explicit; go 1.9
 github.com/Psiphon-Labs/consistent
+# github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
+## explicit; go 1.24.0
+github.com/Psiphon-Labs/covert-dtls/pkg/fingerprints
+github.com/Psiphon-Labs/covert-dtls/pkg/mimicry
+github.com/Psiphon-Labs/covert-dtls/pkg/randomize
+github.com/Psiphon-Labs/covert-dtls/pkg/utils
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
-## explicit; go 1.23
+# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
+## explicit; go 1.24.0
+github.com/Psiphon-Labs/pion-ice/v4
+github.com/Psiphon-Labs/pion-ice/v4/internal/atomic
+github.com/Psiphon-Labs/pion-ice/v4/internal/fakenet
+github.com/Psiphon-Labs/pion-ice/v4/internal/netutil
+github.com/Psiphon-Labs/pion-ice/v4/internal/stun
+github.com/Psiphon-Labs/pion-ice/v4/internal/taskloop
+# github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
+## explicit; go 1.24.0
+github.com/Psiphon-Labs/pion-webrtc/v4
+github.com/Psiphon-Labs/pion-webrtc/v4/internal/fmtp
+github.com/Psiphon-Labs/pion-webrtc/v4/internal/mux
+github.com/Psiphon-Labs/pion-webrtc/v4/internal/util
+github.com/Psiphon-Labs/pion-webrtc/v4/pkg/media
+github.com/Psiphon-Labs/pion-webrtc/v4/pkg/rtcerr
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260423192305-a8d2d1375668
+## explicit; go 1.26
 github.com/Psiphon-Labs/psiphon-tls
-github.com/Psiphon-Labs/psiphon-tls/byteorder
 github.com/Psiphon-Labs/psiphon-tls/internal/boring
-github.com/Psiphon-Labs/psiphon-tls/internal/hpke
-github.com/Psiphon-Labs/psiphon-tls/internal/mlkem768
+github.com/Psiphon-Labs/psiphon-tls/internal/boring/sig
+github.com/Psiphon-Labs/psiphon-tls/internal/constanttime
+github.com/Psiphon-Labs/psiphon-tls/internal/entropy
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/aes
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/aes/gcm
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/alias
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/check
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/drbg
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/hkdf
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/hmac
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/sha256
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/sha3
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/sha512
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/subtle
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/tls12
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140/tls13
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140deps/byteorder
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140deps/cpu
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140deps/godebug
+github.com/Psiphon-Labs/psiphon-tls/internal/fips140tls
+github.com/Psiphon-Labs/psiphon-tls/internal/impl
+github.com/Psiphon-Labs/psiphon-tls/internal/sysrand
 # github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
 ## explicit; go 1.23
 github.com/Psiphon-Labs/quic-go
@@ -60,17 +102,20 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/utls v0.0.0-20260129182755-24497d415a8d
-## explicit; go 1.23
+# github.com/Psiphon-Labs/utls v1.1.1-0.20260423193914-69eb96d02588
+## explicit; go 1.24
 github.com/Psiphon-Labs/utls
-github.com/Psiphon-Labs/utls/byteorder
 github.com/Psiphon-Labs/utls/dicttls
 github.com/Psiphon-Labs/utls/internal/boring
+github.com/Psiphon-Labs/utls/internal/byteorder
+github.com/Psiphon-Labs/utls/internal/fips140tls
 github.com/Psiphon-Labs/utls/internal/helper
+github.com/Psiphon-Labs/utls/internal/hkdf
 github.com/Psiphon-Labs/utls/internal/hpke
-github.com/Psiphon-Labs/utls/internal/mlkem768
 github.com/Psiphon-Labs/utls/internal/quicvarint
 github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
+github.com/Psiphon-Labs/utls/internal/tls12
+github.com/Psiphon-Labs/utls/internal/tls13
 # github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa
 ## explicit; go 1.13
 github.com/alexbrainman/sspi
@@ -104,24 +149,6 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
-# github.com/cloudflare/circl v1.6.3
-## explicit; go 1.22.0
-github.com/cloudflare/circl/dh/x25519
-github.com/cloudflare/circl/dh/x448
-github.com/cloudflare/circl/hpke
-github.com/cloudflare/circl/internal/conv
-github.com/cloudflare/circl/internal/sha3
-github.com/cloudflare/circl/kem
-github.com/cloudflare/circl/kem/kyber/kyber768
-github.com/cloudflare/circl/kem/mlkem/mlkem768
-github.com/cloudflare/circl/kem/xwing
-github.com/cloudflare/circl/math/fp25519
-github.com/cloudflare/circl/math/fp448
-github.com/cloudflare/circl/pke/kyber/internal/common
-github.com/cloudflare/circl/pke/kyber/internal/common/params
-github.com/cloudflare/circl/pke/kyber/kyber768
-github.com/cloudflare/circl/pke/kyber/kyber768/internal
-github.com/cloudflare/circl/simd/keccakf1600
 # github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 ## explicit
 github.com/cognusion/go-cache-lru
@@ -308,8 +335,8 @@ github.com/patrickmn/go-cache
 # github.com/pelletier/go-toml v1.9.5
 ## explicit; go 1.12
 github.com/pelletier/go-toml
-# github.com/pion/datachannel v1.5.5
-## explicit; go 1.13
+# github.com/pion/datachannel v1.6.0
+## explicit; go 1.21
 github.com/pion/datachannel
 # github.com/pion/dtls/v2 v2.2.7 => ./replace/dtls
 ## explicit; go 1.13
@@ -322,7 +349,6 @@ github.com/pion/dtls/v2/pkg/crypto/ccm
 github.com/pion/dtls/v2/pkg/crypto/ciphersuite
 github.com/pion/dtls/v2/pkg/crypto/clientcertificate
 github.com/pion/dtls/v2/pkg/crypto/elliptic
-github.com/pion/dtls/v2/pkg/crypto/fingerprint
 github.com/pion/dtls/v2/pkg/crypto/hash
 github.com/pion/dtls/v2/pkg/crypto/prf
 github.com/pion/dtls/v2/pkg/crypto/signature
@@ -332,51 +358,79 @@ github.com/pion/dtls/v2/pkg/protocol/alert
 github.com/pion/dtls/v2/pkg/protocol/extension
 github.com/pion/dtls/v2/pkg/protocol/handshake
 github.com/pion/dtls/v2/pkg/protocol/recordlayer
-# github.com/pion/ice/v2 v2.3.24 => ./replace/ice
-## explicit; go 1.13
-github.com/pion/ice/v2
-github.com/pion/ice/v2/internal/atomic
-github.com/pion/ice/v2/internal/fakenet
-github.com/pion/ice/v2/internal/stun
-# github.com/pion/interceptor v0.1.25
-## explicit; go 1.15
+# github.com/pion/dtls/v3 v3.1.2
+## explicit; go 1.24.0
+github.com/pion/dtls/v3
+github.com/pion/dtls/v3/internal/ciphersuite
+github.com/pion/dtls/v3/internal/ciphersuite/types
+github.com/pion/dtls/v3/internal/closer
+github.com/pion/dtls/v3/internal/net
+github.com/pion/dtls/v3/internal/net/udp
+github.com/pion/dtls/v3/internal/util
+github.com/pion/dtls/v3/pkg/crypto/ccm
+github.com/pion/dtls/v3/pkg/crypto/ciphersuite
+github.com/pion/dtls/v3/pkg/crypto/clientcertificate
+github.com/pion/dtls/v3/pkg/crypto/elliptic
+github.com/pion/dtls/v3/pkg/crypto/fingerprint
+github.com/pion/dtls/v3/pkg/crypto/hash
+github.com/pion/dtls/v3/pkg/crypto/prf
+github.com/pion/dtls/v3/pkg/crypto/signature
+github.com/pion/dtls/v3/pkg/crypto/signaturehash
+github.com/pion/dtls/v3/pkg/net
+github.com/pion/dtls/v3/pkg/protocol
+github.com/pion/dtls/v3/pkg/protocol/alert
+github.com/pion/dtls/v3/pkg/protocol/extension
+github.com/pion/dtls/v3/pkg/protocol/handshake
+github.com/pion/dtls/v3/pkg/protocol/recordlayer
+# github.com/pion/interceptor v0.1.44
+## explicit; go 1.21.0
 github.com/pion/interceptor
 github.com/pion/interceptor/internal/ntp
+github.com/pion/interceptor/internal/rtpbuffer
 github.com/pion/interceptor/internal/sequencenumber
+github.com/pion/interceptor/pkg/flexfec
+github.com/pion/interceptor/pkg/flexfec/util
 github.com/pion/interceptor/pkg/nack
 github.com/pion/interceptor/pkg/report
+github.com/pion/interceptor/pkg/rfc8888
+github.com/pion/interceptor/pkg/stats
 github.com/pion/interceptor/pkg/twcc
-# github.com/pion/logging v0.2.2
-## explicit; go 1.12
+# github.com/pion/logging v0.2.4
+## explicit; go 1.20
 github.com/pion/logging
-# github.com/pion/mdns v0.0.12
-## explicit; go 1.19
-github.com/pion/mdns
+# github.com/pion/mdns/v2 v2.1.0
+## explicit; go 1.21
+github.com/pion/mdns/v2
 # github.com/pion/randutil v0.1.0
 ## explicit; go 1.14
 github.com/pion/randutil
-# github.com/pion/rtcp v1.2.12
-## explicit; go 1.13
+# github.com/pion/rtcp v1.2.16
+## explicit; go 1.21
 github.com/pion/rtcp
-# github.com/pion/rtp v1.8.5
-## explicit; go 1.19
+# github.com/pion/rtp v1.10.1
+## explicit; go 1.21
 github.com/pion/rtp
 github.com/pion/rtp/codecs
 github.com/pion/rtp/codecs/av1/obu
-# github.com/pion/sctp v1.8.16
-## explicit; go 1.19
+github.com/pion/rtp/codecs/vp9
+# github.com/pion/sctp v1.9.2
+## explicit; go 1.21
 github.com/pion/sctp
-# github.com/pion/sdp/v3 v3.0.9
-## explicit; go 1.13
+# github.com/pion/sdp/v3 v3.0.18
+## explicit; go 1.24
 github.com/pion/sdp/v3
-# github.com/pion/srtp/v2 v2.0.18
-## explicit; go 1.14
-github.com/pion/srtp/v2
+# github.com/pion/srtp/v3 v3.0.10
+## explicit; go 1.21
+github.com/pion/srtp/v3
 # github.com/pion/stun v0.6.1
 ## explicit; go 1.12
 github.com/pion/stun
 github.com/pion/stun/internal/hmac
-# github.com/pion/transport/v2 v2.2.4
+# github.com/pion/stun/v3 v3.1.1
+## explicit; go 1.21
+github.com/pion/stun/v3
+github.com/pion/stun/v3/internal/hmac
+# github.com/pion/transport/v2 v2.2.3
 ## explicit; go 1.12
 github.com/pion/transport/v2
 github.com/pion/transport/v2/connctx
@@ -386,23 +440,24 @@ github.com/pion/transport/v2/replaydetector
 github.com/pion/transport/v2/stdnet
 github.com/pion/transport/v2/udp
 github.com/pion/transport/v2/utils/xor
-github.com/pion/transport/v2/vnet
-# github.com/pion/turn/v2 v2.1.3
-## explicit; go 1.13
-github.com/pion/turn/v2
-github.com/pion/turn/v2/internal/allocation
-github.com/pion/turn/v2/internal/client
-github.com/pion/turn/v2/internal/ipnet
-github.com/pion/turn/v2/internal/proto
-github.com/pion/turn/v2/internal/server
-# github.com/pion/webrtc/v3 v3.2.40 => ./replace/webrtc
-## explicit; go 1.17
-github.com/pion/webrtc/v3
-github.com/pion/webrtc/v3/internal/fmtp
-github.com/pion/webrtc/v3/internal/mux
-github.com/pion/webrtc/v3/internal/util
-github.com/pion/webrtc/v3/pkg/media
-github.com/pion/webrtc/v3/pkg/rtcerr
+# github.com/pion/transport/v4 v4.0.1
+## explicit; go 1.21
+github.com/pion/transport/v4
+github.com/pion/transport/v4/deadline
+github.com/pion/transport/v4/netctx
+github.com/pion/transport/v4/packetio
+github.com/pion/transport/v4/replaydetector
+github.com/pion/transport/v4/stdnet
+github.com/pion/transport/v4/utils/xor
+github.com/pion/transport/v4/vnet
+# github.com/pion/turn/v4 v4.1.4
+## explicit; go 1.21
+github.com/pion/turn/v4
+github.com/pion/turn/v4/internal/allocation
+github.com/pion/turn/v4/internal/client
+github.com/pion/turn/v4/internal/ipnet
+github.com/pion/turn/v4/internal/proto
+github.com/pion/turn/v4/internal/server
 # github.com/pires/go-proxyproto v0.11.0
 ## explicit; go 1.24
 github.com/pires/go-proxyproto
@@ -485,7 +540,7 @@ github.com/shoenig/go-m1cpu
 # github.com/sirupsen/logrus v1.9.3
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/stretchr/testify v1.10.0
+# github.com/stretchr/testify v1.11.1
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/assert/yaml
@@ -552,8 +607,8 @@ go4.org/mem
 # go4.org/netipx v0.0.0-20230824141953-6213f710f925
 ## explicit; go 1.18
 go4.org/netipx
-# golang.org/x/crypto v0.39.0
-## explicit; go 1.23.0
+# golang.org/x/crypto v0.48.0
+## explicit; go 1.24.0
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
 golang.org/x/crypto/blowfish
@@ -572,13 +627,13 @@ golang.org/x/crypto/sha3
 # golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e
 ## explicit; go 1.20
 golang.org/x/exp/rand
-# golang.org/x/mod v0.25.0
-## explicit; go 1.23.0
+# golang.org/x/mod v0.32.0
+## explicit; go 1.24.0
 golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.41.0
-## explicit; go 1.23.0
+# golang.org/x/net v0.50.0
+## explicit; go 1.24.0
 golang.org/x/net/bpf
 golang.org/x/net/dns/dnsmessage
 golang.org/x/net/http/httpguts
@@ -587,6 +642,7 @@ golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/httpcommon
+golang.org/x/net/internal/httpsfv
 golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
 golang.org/x/net/internal/socks
@@ -597,11 +653,11 @@ golang.org/x/net/nettest
 golang.org/x/net/proxy
 golang.org/x/net/route
 golang.org/x/net/trace
-# golang.org/x/sync v0.15.0
-## explicit; go 1.23.0
+# golang.org/x/sync v0.19.0
+## explicit; go 1.24.0
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.34.0
-## explicit; go 1.23.0
+# golang.org/x/sys v0.42.0
+## explicit; go 1.25.0
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
@@ -609,21 +665,22 @@ golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.32.0
-## explicit; go 1.23.0
+# golang.org/x/term v0.40.0
+## explicit; go 1.24.0
 golang.org/x/term
-# golang.org/x/text v0.26.0
-## explicit; go 1.23.0
+# golang.org/x/text v0.34.0
+## explicit; go 1.24.0
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/time v0.5.0
+# golang.org/x/time v0.10.0
 ## explicit; go 1.18
 golang.org/x/time/rate
-# golang.org/x/tools v0.33.0
-## explicit; go 1.23.0
+# golang.org/x/tools v0.41.0
+## explicit; go 1.24.0
 golang.org/x/tools/go/ast/astutil
+golang.org/x/tools/go/ast/edge
 golang.org/x/tools/go/ast/inspector
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/packages
@@ -631,7 +688,6 @@ golang.org/x/tools/go/types/objectpath
 golang.org/x/tools/go/types/typeutil
 golang.org/x/tools/imports
 golang.org/x/tools/internal/aliases
-golang.org/x/tools/internal/astutil/edge
 golang.org/x/tools/internal/event
 golang.org/x/tools/internal/event/core
 golang.org/x/tools/internal/event/keys
@@ -741,5 +797,3 @@ tailscale.com/version/distro
 tailscale.com/wgengine/winnet
 # gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
 # github.com/pion/dtls/v2 => ./replace/dtls
-# github.com/pion/ice/v2 => ./replace/ice
-# github.com/pion/webrtc/v3 => ./replace/webrtc

@@ -18,7 +18,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/Psiphon-Labs/utls/byteorder"
+	"github.com/Psiphon-Labs/utls/internal/byteorder"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
@@ -41,7 +41,7 @@ type serverHandshakeState struct {
 
 // serverHandshake performs a TLS handshake as a server.
 func (c *Conn) serverHandshake(ctx context.Context) error {
-	clientHello, err := c.readClientHello(ctx)
+	clientHello, ech, err := c.readClientHello(ctx)
 	if err != nil {
 		return err
 	}
@@ -51,6 +51,7 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 			c:           c,
 			ctx:         ctx,
 			clientHello: clientHello,
+			echContext:  ech,
 		}
 		return hs.handshake()
 	}
@@ -77,6 +78,7 @@ func (hs *serverHandshakeState) handshake() error {
 	}
 	if hs.sessionState != nil {
 		// The client has included a session ticket and so we do an abbreviated handshake.
+		c.didResume = true
 		if err := hs.doResumeHandshake(); err != nil {
 			return err
 		}
@@ -131,17 +133,27 @@ func (hs *serverHandshakeState) handshake() error {
 }
 
 // readClientHello reads a ClientHello message and selects the protocol version.
-func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
+func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, *echServerContext, error) {
 	// clientHelloMsg is included in the transcript, but we haven't initialized
 	// it yet. The respective handshake functions will record it themselves.
 	msg, err := c.readHandshake(nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	clientHello, ok := msg.(*clientHelloMsg)
 	if !ok {
 		c.sendAlert(alertUnexpectedMessage)
-		return nil, unexpectedMessageError(clientHello, msg)
+		return nil, nil, unexpectedMessageError(clientHello, msg)
+	}
+
+	// ECH processing has to be done before we do any other negotiation based on
+	// the contents of the client hello, since we may swap it out completely.
+	var ech *echServerContext
+	if len(clientHello.encryptedClientHello) != 0 {
+		clientHello, ech, err = c.processECHClientHello(clientHello)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var configForClient *Config
@@ -150,7 +162,7 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 		chi := clientHelloInfo(ctx, c, clientHello)
 		if configForClient, err = c.config.GetConfigForClient(chi); err != nil {
 			c.sendAlert(alertInternalError)
-			return nil, err
+			return nil, nil, err
 		} else if configForClient != nil {
 			c.config = configForClient
 		}
@@ -164,13 +176,25 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 	c.vers, ok = c.config.mutualVersion(roleServer, clientVersions)
 	if !ok {
 		c.sendAlert(alertProtocolVersion)
-		return nil, fmt.Errorf("tls: client offered only unsupported versions: %x", clientVersions)
+		return nil, nil, fmt.Errorf("tls: client offered only unsupported versions: %x", clientVersions)
 	}
 	c.haveVers = true
 	c.in.version = c.vers
 	c.out.version = c.vers
 
-	// [UTLS SECTION BEGING]
+	// This check reflects some odd specification implied behavior. Client-facing servers
+	// are supposed to reject hellos with outer ECH and inner ECH that offers 1.2, but
+	// backend servers are allowed to accept hellos with inner ECH that offer 1.2, since
+	// they cannot expect client-facing servers to behave properly. Since we act as both
+	// a client-facing and backend server, we only enforce 1.3 being negotiated if we
+	// saw a hello with outer ECH first. The spec probably should've made this an error,
+	// but it didn't, and this matches the boringssl behavior.
+	if c.vers != VersionTLS13 && (ech != nil && !ech.inner) {
+		c.sendAlert(alertIllegalParameter)
+		return nil, nil, errors.New("tls: Encrypted Client Hello cannot be used pre-TLS 1.3")
+	}
+
+	// [UTLS SECTION BEGIN]
 	// Disable unsupported godebug package
 	// if c.config.MinVersion == 0 && c.vers < VersionTLS12 {
 	// 	tls10server.Value() // ensure godebug is initialized
@@ -178,7 +202,7 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 	// }
 	// [UTLS SECTION END]
 
-	return clientHello, nil
+	return clientHello, ech, nil
 }
 
 func (hs *serverHandshakeState) processClientHello() error {
@@ -378,12 +402,11 @@ func (hs *serverHandshakeState) pickCipherSuite() error {
 
 	// [UTLS SECTION BEGIN]
 	// Disable unsupported godebug package
-	// if c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
+	// if c.config.CipherSuites == nil && !fips140tls.Required() && rsaKexCiphers[hs.suite.id] {
 	// 	tlsrsakex.Value() // ensure godebug is initialized
 	// 	tlsrsakex.IncNonDefault()
 	// }
-	//
-	// if c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
+	// if c.config.CipherSuites == nil && !fips140tls.Required() && tdesCiphers[hs.suite.id] {
 	// 	tls3des.Value() // ensure godebug is initialized
 	// 	tls3des.IncNonDefault()
 	// }
@@ -601,7 +624,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 	}
 	if skx != nil {
 		if len(skx.key) >= 3 && skx.key[0] == 3 /* named curve */ {
-			c.curveID = CurveID(byteorder.BeUint16(skx.key[1:]))
+			c.curveID = CurveID(byteorder.BEUint16(skx.key[1:]))
 		}
 		if _, err := hs.c.writeHandshakeRecord(skx, &hs.finishedHash); err != nil {
 			return err
@@ -689,7 +712,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	preMasterSecret, err := keyAgreement.processClientKeyExchange(c.config, hs.cert, ckx, c.vers)
 	if err != nil {
-		c.sendAlert(alertHandshakeFailure)
+		c.sendAlert(alertIllegalParameter)
 		return err
 	}
 	if hs.hello.extendedMasterSecret {
@@ -821,6 +844,9 @@ func (hs *serverHandshakeState) readFinished(out []byte) error {
 }
 
 func (hs *serverHandshakeState) sendSessionTicket() error {
+	// ticketSupported is set in a resumption handshake if the
+	// ticket from the client was encrypted with an old session
+	// ticket key and thus a refreshed ticket should be sent.
 	if !hs.hello.ticketSupported {
 		return nil
 	}
@@ -931,7 +957,11 @@ func (c *Conn) processCertsFromClient(certificate Certificate) error {
 			return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err}
 		}
 
-		c.verifiedChains = chains
+		c.verifiedChains, err = fipsAllowedChains(chains)
+		if err != nil {
+			c.sendAlert(alertBadCertificate)
+			return &CertificateVerificationError{UnverifiedCertificates: certs, Err: err}
+		}
 	}
 
 	c.peerCertificates = certs
@@ -971,6 +1001,7 @@ func clientHelloInfo(ctx context.Context, c *Conn, clientHello *clientHelloMsg) 
 		SignatureSchemes:  clientHello.supportedSignatureAlgorithms,
 		SupportedProtos:   clientHello.alpnProtocols,
 		SupportedVersions: supportedVersions,
+		Extensions:        clientHello.extensions,
 		Conn:              c.conn,
 		config:            c.config,
 		ctx:               ctx,

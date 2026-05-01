@@ -773,6 +773,49 @@ func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
 	return l
 }
 
+// DTLS fingerprint constants. The mapping from these names to covert-dtls
+// fingerprint data is in inproxy/webrtc.go.
+
+const (
+	DTLS_FINGERPRINT_RANDOMIZED  = "DTLS-Randomized"
+	DTLS_FINGERPRINT_CHROME_138  = "DTLS-Chrome-138"
+	DTLS_FINGERPRINT_FIREFOX_148 = "DTLS-Firefox-148"
+)
+
+var SupportedDTLSFingerprints = DTLSFingerprints{
+	DTLS_FINGERPRINT_CHROME_138,
+	DTLS_FINGERPRINT_FIREFOX_148,
+	DTLS_FINGERPRINT_RANDOMIZED,
+}
+
+var legacyDTLSFingerprints = DTLSFingerprints{}
+
+func DTLSFingerprintIsRandomized(dtlsFingerprint string) bool {
+	return dtlsFingerprint == DTLS_FINGERPRINT_RANDOMIZED
+}
+
+type DTLSFingerprints []string
+
+func (fingerprints DTLSFingerprints) Validate() error {
+	for _, f := range fingerprints {
+		if !common.Contains(SupportedDTLSFingerprints, f) &&
+			!common.Contains(legacyDTLSFingerprints, f) {
+			return errors.Tracef("invalid DTLS fingerprint: %s", f)
+		}
+	}
+	return nil
+}
+
+func (fingerprints DTLSFingerprints) PruneInvalid() DTLSFingerprints {
+	q := make(DTLSFingerprints, 0)
+	for _, f := range fingerprints {
+		if common.Contains(SupportedDTLSFingerprints, f) {
+			q = append(q, f)
+		}
+	}
+	return q
+}
+
 const (
 	CONJURE_TRANSPORT_MIN_OSSH    = "Min-OSSH"
 	CONJURE_TRANSPORT_PREFIX_OSSH = "Prefix-OSSH"

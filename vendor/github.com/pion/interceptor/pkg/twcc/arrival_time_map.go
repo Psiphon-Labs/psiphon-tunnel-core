@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package twcc
@@ -12,6 +12,8 @@ const (
 // of the arrival times of packets. It is used by the TWCC interceptor to build feedback
 // packets.
 // See https://source.chromium.org/chromium/chromium/src/+/refs/heads/main:third_party/webrtc/modules/remote_bitrate_estimator/packet_arrival_map.h;drc=b5cd13bb6d5d157a5fbe3628b2dd1c1e106203c6
+//
+//nolint:lll
 type packetArrivalTimeMap struct {
 	// arrivalTimes is a circular buffer, where the packet with sequence number sn is stored
 	// in slot sn % len(arrivalTimes)
@@ -31,12 +33,14 @@ func (m *packetArrivalTimeMap) AddPacket(sequenceNumber int64, arrivalTime int64
 		m.beginSequenceNumber = sequenceNumber
 		m.endSequenceNumber = sequenceNumber + 1
 		m.arrivalTimes[m.index(sequenceNumber)] = arrivalTime
+
 		return
 	}
 
 	if sequenceNumber >= m.beginSequenceNumber && sequenceNumber < m.endSequenceNumber {
 		// The packet is within the buffer, no need to resize.
 		m.arrivalTimes[m.index(sequenceNumber)] = arrivalTime
+
 		return
 	}
 
@@ -53,6 +57,7 @@ func (m *packetArrivalTimeMap) AddPacket(sequenceNumber int64, arrivalTime int64
 		m.arrivalTimes[m.index(sequenceNumber)] = arrivalTime
 		m.setNotReceived(sequenceNumber+1, m.beginSequenceNumber)
 		m.beginSequenceNumber = sequenceNumber
+
 		return
 	}
 
@@ -64,6 +69,7 @@ func (m *packetArrivalTimeMap) AddPacket(sequenceNumber int64, arrivalTime int64
 		m.beginSequenceNumber = sequenceNumber
 		m.endSequenceNumber = newEndSequenceNumber
 		m.arrivalTimes[m.index(sequenceNumber)] = arrivalTime
+
 		return
 	}
 
@@ -98,13 +104,16 @@ func (m *packetArrivalTimeMap) EndSequenceNumber() int64 {
 }
 
 // FindNextAtOrAfter returns the sequence number and timestamp of the first received packet that has a sequence number
-// greator or equal to sequenceNumber.
-func (m *packetArrivalTimeMap) FindNextAtOrAfter(sequenceNumber int64) (foundSequenceNumber int64, arrivalTime int64, ok bool) {
-	for sequenceNumber = m.Clamp(sequenceNumber); sequenceNumber < m.endSequenceNumber; sequenceNumber++ {
-		if t := m.get(sequenceNumber); t >= 0 {
-			return sequenceNumber, t, true
+// greater or equal to sequenceNumber.
+func (m *packetArrivalTimeMap) FindNextAtOrAfter(sequenceNumber int64) (
+	int64, int64, bool,
+) {
+	for seq := m.Clamp(sequenceNumber); seq < m.endSequenceNumber; seq++ {
+		if arrivalTime := m.get(seq); arrivalTime >= 0 {
+			return seq, arrivalTime, true
 		}
 	}
+
 	return -1, -1, false
 }
 
@@ -116,6 +125,7 @@ func (m *packetArrivalTimeMap) EraseTo(sequenceNumber int64) {
 	if sequenceNumber >= m.endSequenceNumber {
 		// Erase all.
 		m.beginSequenceNumber = m.endSequenceNumber
+
 		return
 	}
 	// Remove some
@@ -126,7 +136,7 @@ func (m *packetArrivalTimeMap) EraseTo(sequenceNumber int64) {
 // RemoveOldPackets removes packets from the beginning of the map as long as they are before
 // sequenceNumber and with an age older than arrivalTimeLimit.
 func (m *packetArrivalTimeMap) RemoveOldPackets(sequenceNumber int64, arrivalTimeLimit int64) {
-	checkTo := min64(sequenceNumber, m.endSequenceNumber)
+	checkTo := min(sequenceNumber, m.endSequenceNumber)
 	for m.beginSequenceNumber < checkTo && m.get(m.beginSequenceNumber) <= arrivalTimeLimit {
 		m.beginSequenceNumber++
 	}
@@ -138,7 +148,7 @@ func (m *packetArrivalTimeMap) HasReceived(sequenceNumber int64) bool {
 	return m.get(sequenceNumber) >= 0
 }
 
-// Clamp returns sequenceNumber clamped to [beginSequenceNumber, endSequenceNumber]
+// Clamp returns sequenceNumber clamped to [beginSequenceNumber, endSequenceNumber].
 func (m *packetArrivalTimeMap) Clamp(sequenceNumber int64) int64 {
 	if sequenceNumber < m.beginSequenceNumber {
 		return m.beginSequenceNumber
@@ -146,6 +156,7 @@ func (m *packetArrivalTimeMap) Clamp(sequenceNumber int64) int64 {
 	if m.endSequenceNumber < sequenceNumber {
 		return m.endSequenceNumber
 	}
+
 	return sequenceNumber
 }
 
@@ -153,6 +164,7 @@ func (m *packetArrivalTimeMap) get(sequenceNumber int64) int64 {
 	if sequenceNumber < m.beginSequenceNumber || sequenceNumber >= m.endSequenceNumber {
 		return -1
 	}
+
 	return m.arrivalTimes[m.index(sequenceNumber)]
 }
 

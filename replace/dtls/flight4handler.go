@@ -18,9 +18,6 @@ import (
 	"github.com/pion/dtls/v2/pkg/protocol/extension"
 	"github.com/pion/dtls/v2/pkg/protocol/handshake"
 	"github.com/pion/dtls/v2/pkg/protocol/recordlayer"
-
-	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func flight4Parse(ctx context.Context, c flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) (flightVal, *alert.Alert, error) { //nolint:gocognit
@@ -221,7 +218,7 @@ func flight4Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 	return flight6, nil, nil
 }
 
-func flight4Generate(ctx context.Context, c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight4Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	extensions := []extension.Extension{&extension.RenegotiationInfo{
 		RenegotiatedConnection: 0,
 	}}
@@ -231,9 +228,9 @@ func flight4Generate(ctx context.Context, c flightConn, state *State, _ *handsha
 			Supported: true,
 		})
 	}
-	if state.getSRTPProtectionProfile() != 0 {
+	if state.srtpProtectionProfile != 0 {
 		extensions = append(extensions, &extension.UseSRTP{
-			ProtectionProfiles: []SRTPProtectionProfile{state.getSRTPProtectionProfile()},
+			ProtectionProfiles: []SRTPProtectionProfile{state.srtpProtectionProfile},
 		})
 	}
 	if state.cipherSuite.AuthenticationType() == CipherSuiteAuthenticationTypeCertificate {
@@ -263,19 +260,6 @@ func flight4Generate(ctx context.Context, c flightConn, state *State, _ *handsha
 		}
 	}
 
-	// [Psiphon]
-	// Randomize ServerHello
-	seed, err := inproxy_dtls.GetDTLSSeed(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	if seed != nil {
-		PRNG := prng.NewPRNGWithSeed(seed)
-		PRNG.Shuffle(len(extensions), func(i, j int) {
-			extensions[i], extensions[j] = extensions[j], extensions[i]
-		})
-	}
-
 	pkts = append(pkts, &packet{
 		record: &recordlayer.RecordLayer{
 			Header: recordlayer.Header{
@@ -299,10 +283,6 @@ func flight4Generate(ctx context.Context, c flightConn, state *State, _ *handsha
 		certificate, err := cfg.getCertificate(&ClientHelloInfo{
 			ServerName:   state.serverName,
 			CipherSuites: []ciphersuite.ID{state.cipherSuite.ID()},
-
-			// [Psiphon]
-			// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
-			RandomBytes: state.remoteRandom.RandomBytes,
 		})
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, err

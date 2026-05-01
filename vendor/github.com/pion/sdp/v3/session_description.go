@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -69,13 +69,14 @@ type SessionDescription struct {
 	MediaDescriptions []*MediaDescription
 }
 
-// Attribute returns the value of an attribute and if it exists
+// Attribute returns the value of an attribute and if it exists.
 func (s *SessionDescription) Attribute(key string) (string, bool) {
 	for _, a := range s.Attributes {
 		if a.Key == key {
 			return a.Value, true
 		}
 	}
+
 	return "", false
 }
 
@@ -116,6 +117,7 @@ func (o Origin) marshalInto(b []byte) []byte {
 	b = append(strconv.AppendUint(b, o.SessionVersion, 10), ' ')
 	b = append(append(b, o.NetworkType...), ' ')
 	b = append(append(b, o.AddressType...), ' ')
+
 	return append(b, o.UnicastAddress...)
 }
 
@@ -193,6 +195,7 @@ func (z TimeZone) String() string {
 func (z TimeZone) marshalInto(b []byte) []byte {
 	b = strconv.AppendUint(b, z.AdjustmentTime, 10)
 	b = append(b, ' ')
+
 	return strconv.AppendInt(b, z.Offset, 10)
 }
 

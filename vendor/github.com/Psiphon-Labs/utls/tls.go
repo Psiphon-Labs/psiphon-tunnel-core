@@ -243,7 +243,7 @@ func LoadX509KeyPair(certFile, keyFile string) (Certificate, error) {
 	return X509KeyPair(certPEMBlock, keyPEMBlock)
 }
 
-// var x509keypairleaf = godebug.New("x509keypairleaf")  // [UTLS] unsupproted
+// var x509keypairleaf = godebug.New("x509keypairleaf") [uTLS]
 
 // X509KeyPair parses a public/private key pair from a pair of
 // PEM encoded data. On successful return, Certificate.Leaf will be populated.
@@ -305,14 +305,13 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 		return fail(err)
 	}
 
-	// [UTLS SECTION BEGIN]
-	// Removed unsupported godebug package
+	// [uTLS section begins]
 	// if x509keypairleaf.Value() != "0" {
 	// 	cert.Leaf = x509Cert
 	// } else {
 	// 	x509keypairleaf.IncNonDefault()
 	// }
-	// [UTLS SECTION END]
+	// [uTLS section ends]
 
 	cert.PrivateKey, err = parsePrivateKey(keyDERBlock.Bytes)
 	if err != nil {

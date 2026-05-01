@@ -69,26 +69,6 @@ type PreSharedKeyCommon struct {
 //     > - Implementations should gather and provide the final pre-shared key (PSK) related data.
 //
 //     > - This data will be incorporated into both the clientHello and HandshakeState, ensuring that the PSK-related information is properly set and ready for the handshake process.
-//
-// HelloRetryRequest Phase (server selects a different curve supported but not selected by the client):
-//
-//   - [UpdateOnHRR() called]:
-//
-//     > - Implementations should update the extension's state accordingly and save the first Client Hello's hash.
-//
-//     > - The binders should be recalculated based on the updated state LATER when PatchBuiltHello() and/or GetPreSharedKeyCommon() is called.
-//
-//   - [PatchBuiltHello() called]:
-//
-//     > - The client hello is already marshaled in the "hello.Raw" format.
-//
-//     > - Implementations are expected to update the binders within the marshaled client hello.
-//
-//   - [GetPreSharedKeyCommon() called]:
-//
-//     > - Implementations should gather and provide the final pre-shared key (PSK) related data.
-//
-//     > - This data will be incorporated into both the clientHello and HandshakeState, ensuring that the PSK-related information is properly set and ready for the handshake process.
 type PreSharedKeyExtension interface {
 	// TLSExtension must be implemented by all PreSharedKeyExtension implementations.
 	TLSExtension
@@ -109,9 +89,10 @@ type PreSharedKeyExtension interface {
 	// Its purpose is to update the binders of PSK (Pre-Shared Key) identities.
 	PatchBuiltHello(hello *PubClientHelloMsg) error
 
-	// UpdateOnHRR is called when the server sends a HelloRetryRequest.
-	// Implementations should update the extension's state accordingly
-	// and recalculate the binders.
+	// [Psiphon] UpdateOnHRR is called when a HelloRetryRequest is received and PSK identities
+	// need to be reprocessed. It updates the session, cipher suite, obfuscated ticket
+	// age, and stores the previous ClientHello hash for correct transcript reconstruction
+	// in PatchBuiltHello.
 	UpdateOnHRR(prevClientHelloHash []byte, hs *clientHandshakeStateTLS13, timeNow time.Time) error
 
 	mustEmbedUnimplementedPreSharedKeyExtension() // this works like a type guard
@@ -125,7 +106,7 @@ func (*UnimplementedPreSharedKeyExtension) IsInitialized() bool {
 	panic("tls: IsInitialized is not implemented for the PreSharedKeyExtension")
 }
 
-func (*UnimplementedPreSharedKeyExtension) InitializeByUtls(*SessionState, []byte, []byte, []PskIdentity) {
+func (*UnimplementedPreSharedKeyExtension) InitializeByUtls(session *SessionState, earlySecret []byte, binderKey []byte, identities []PskIdentity) {
 	panic("tls: Initialize is not implemented for the PreSharedKeyExtension")
 }
 
@@ -145,11 +126,11 @@ func (*UnimplementedPreSharedKeyExtension) GetPreSharedKeyCommon() PreSharedKeyC
 	panic("tls: GetPreSharedKeyCommon is not implemented for the PreSharedKeyExtension")
 }
 
-func (*UnimplementedPreSharedKeyExtension) PatchBuiltHello(*PubClientHelloMsg) error {
+func (*UnimplementedPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) error {
 	panic("tls: ReadWithRawHello is not implemented for the PreSharedKeyExtension")
 }
 
-func (*UnimplementedPreSharedKeyExtension) SetOmitEmptyPsk(bool) {
+func (*UnimplementedPreSharedKeyExtension) SetOmitEmptyPsk(val bool) {
 	panic("tls: SetOmitEmptyPsk is not implemented for the PreSharedKeyExtension")
 }
 
@@ -164,11 +145,11 @@ type UtlsPreSharedKeyExtension struct {
 	PreSharedKeyCommon
 	cipherSuite  *cipherSuiteTLS13
 	cachedLength *int
+	// Deprecated: Set OmitEmptyPsk in Config instead.
+	OmitEmptyPsk bool
 
-	omitEmptyPsk bool
-
-	// used only for HRR-based recalculation of binders purpose
-	prevClientHelloHash []byte // used for HRR-based recalculation of binders
+	// [Psiphon] Used only for HRR-based recalculation of binders.
+	prevClientHelloHash []byte
 	serverHello         *serverHelloMsg
 }
 
@@ -285,11 +266,11 @@ func readPskIntoBytes(b []byte, identities []PskIdentity, binders [][]byte) (int
 }
 
 func (e *UtlsPreSharedKeyExtension) SetOmitEmptyPsk(val bool) {
-	e.omitEmptyPsk = val
+	e.OmitEmptyPsk = val
 }
 
 func (e *UtlsPreSharedKeyExtension) Read(b []byte) (int, error) {
-	if !e.omitEmptyPsk && e.Len() == 0 {
+	if !e.OmitEmptyPsk && e.Len() == 0 {
 		return 0, ErrEmptyPsk
 	}
 	return readPskIntoBytes(b, e.Identities, e.Binders)
@@ -299,15 +280,14 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 	if e.Len() == 0 {
 		return nil
 	}
-
 	private := hello.getCachedPrivatePtr()
 	if private == nil {
 		private = hello.getPrivatePtr()
 	}
-	private.original = hello.Original
+	private.original = hello.Raw
 	private.pskBinders = e.Binders // set the placeholder to the private Hello
 
-	// derived from loadSession() and processHelloRetryRequest() begin //
+	//--- mirror loadSession() and processHelloRetryRequest() begin ---//
 	transcript := e.cipherSuite.hash.New()
 
 	if len(e.prevClientHelloHash) > 0 { // HRR will set this field
@@ -328,7 +308,6 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 	if err := private.updateBinders(pskBinders); err != nil {
 		return err
 	}
-	// derived end //
 
 	// copied from handshake_messages.go in 1.22
 	lenWithoutBinders := len(helloBytes)
@@ -344,6 +323,7 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 		return errors.New("tls: internal error: failed to update binders")
 	}
 
+	//--- mirror loadSession() end ---//
 	e.Binders = pskBinders
 
 	// no need to care about other PSK related fields, they will be handled separately
@@ -366,8 +346,7 @@ func (e *UtlsPreSharedKeyExtension) UpdateOnHRR(prevClientHelloHash []byte, hs *
 		ticketAge := timeNow.Sub(time.Unix(int64(hs.session.createdAt), 0))
 		e.Identities[0].ObfuscatedTicketAge = uint32(ticketAge/time.Millisecond) + hs.session.ageAdd
 
-		// e.Binders = nil
-		e.cachedLength = nil // clear the cached length
+		e.cachedLength = nil // clear the cached length so re-serialization recalculates
 
 		e.prevClientHelloHash = prevClientHelloHash
 		e.serverHello = hs.serverHello
@@ -379,7 +358,7 @@ func (e *UtlsPreSharedKeyExtension) Write(b []byte) (int, error) {
 	return len(b), nil // ignore the data
 }
 
-func (e *UtlsPreSharedKeyExtension) UnmarshalJSON([]byte) error {
+func (e *UtlsPreSharedKeyExtension) UnmarshalJSON(_ []byte) error {
 	return nil // ignore the data
 }
 
@@ -402,7 +381,7 @@ func (e *FakePreSharedKeyExtension) IsInitialized() bool {
 	return e.Identities != nil && e.Binders != nil
 }
 
-func (e *FakePreSharedKeyExtension) InitializeByUtls(*SessionState, []byte, []byte, []PskIdentity) {
+func (e *FakePreSharedKeyExtension) InitializeByUtls(session *SessionState, earlySecret []byte, binderKey []byte, identities []PskIdentity) {
 	panic("InitializeByUtls failed: don't let utls initialize FakePreSharedKeyExtension; provide your own identities and binders or use UtlsPreSharedKeyExtension")
 }
 
@@ -454,6 +433,10 @@ var validHashLen = mapSlice(cipherSuitesTLS13, func(c *cipherSuiteTLS13) int {
 
 func (*FakePreSharedKeyExtension) PatchBuiltHello(*PubClientHelloMsg) error {
 	return nil // no need to patch the hello since we don't need to update binders
+}
+
+func (*FakePreSharedKeyExtension) UpdateOnHRR([]byte, *clientHandshakeStateTLS13, time.Time) error {
+	return nil // no need to update on HRR since we don't recalculate binders
 }
 
 func (e *FakePreSharedKeyExtension) Write(b []byte) (n int, err error) {
@@ -542,19 +525,13 @@ func (e *FakePreSharedKeyExtension) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (e *FakePreSharedKeyExtension) UpdateOnHRR([]byte, *clientHandshakeStateTLS13, time.Time) error {
-	return nil
-}
-
 // type guard
 var (
 	_ PreSharedKeyExtension = (*UtlsPreSharedKeyExtension)(nil)
 	_ TLSExtensionJSON      = (*UtlsPreSharedKeyExtension)(nil)
-	_ TLSExtensionWriter    = (*UtlsPreSharedKeyExtension)(nil)
 	_ PreSharedKeyExtension = (*FakePreSharedKeyExtension)(nil)
 	_ TLSExtensionJSON      = (*FakePreSharedKeyExtension)(nil)
 	_ TLSExtensionWriter    = (*FakePreSharedKeyExtension)(nil)
-	_ PreSharedKeyExtension = (*UnimplementedPreSharedKeyExtension)(nil)
 )
 
 // type ExternalPreSharedKeyExtension struct{} // TODO: wait for whoever cares about external PSK to implement it

@@ -34,22 +34,72 @@ in Section 3.2.1, i.e.:
 Variable Parameters                  Status     Type Value
 -------------------------------------------------------------
 Heartbeat Info                       Mandatory   1
+.
 */
 type chunkHeartbeatAck struct {
 	chunkHeader
 	params []param
 }
 
-// Heartbeat ack chunk errors
+// Heartbeat ack chunk errors.
 var (
+	// Deprecated: this error is no longer used but is kept for compatibility.
 	ErrUnimplemented                = errors.New("unimplemented")
+	ErrChunkTypeNotHeartbeatAck     = errors.New("chunk type is not of type HEARTBEAT ACK")
 	ErrHeartbeatAckParams           = errors.New("heartbeat Ack must have one param")
 	ErrHeartbeatAckNotHeartbeatInfo = errors.New("heartbeat Ack must have one param, and it should be a HeartbeatInfo")
 	ErrHeartbeatAckMarshalParam     = errors.New("unable to marshal parameter for Heartbeat Ack")
 )
 
-func (h *chunkHeartbeatAck) unmarshal([]byte) error {
-	return ErrUnimplemented
+func (h *chunkHeartbeatAck) unmarshal(raw []byte) error { //nolint:cyclop
+	if err := h.chunkHeader.unmarshal(raw); err != nil {
+		return err
+	}
+
+	if h.typ != ctHeartbeatAck {
+		return fmt.Errorf("%w %s", ErrChunkTypeNotHeartbeatAck, h.typ.String())
+	}
+
+	// allow for an empty heartbeat: no RTT info -> ActiveHeartbeat just won't update SRTT.
+	if len(h.raw) == 0 {
+		h.params = nil
+
+		return nil
+	}
+
+	if len(h.raw) < initOptionalVarHeaderLength {
+		return fmt.Errorf("%w: %d", ErrHeartbeatAckParams, len(h.raw))
+	}
+
+	pType, err := parseParamType(h.raw)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrHeartbeatAckParams, err) //nolint:errorlint
+	}
+	if pType != heartbeatInfo {
+		return fmt.Errorf("%w: instead have %s", ErrHeartbeatAckNotHeartbeatInfo, pType.String())
+	}
+
+	var pHeader paramHeader
+	if e := pHeader.unmarshal(h.raw); e != nil {
+		return fmt.Errorf("%w: %v", ErrHeartbeatAckParams, e) //nolint:errorlint
+	}
+	plen := pHeader.length()
+	if plen < initOptionalVarHeaderLength || plen > len(h.raw) {
+		return fmt.Errorf("%w: %d", ErrHeartbeatAckParams, plen)
+	}
+
+	p, err := buildParam(pType, h.raw[:plen])
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrHeartbeatAckMarshalParam, err) //nolint:errorlint
+	}
+	h.params = []param{p}
+
+	// Any trailing bytes beyond the single param must be zero.
+	if rem := h.raw[plen:]; len(rem) > 0 && !allZero(rem) {
+		return ErrHeartbeatExtraNonZero
+	}
+
+	return nil
 }
 
 func (h *chunkHeartbeatAck) marshal() ([]byte, error) {

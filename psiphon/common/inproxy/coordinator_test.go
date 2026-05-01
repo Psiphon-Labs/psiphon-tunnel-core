@@ -214,7 +214,6 @@ type testWebRTCDialCoordinator struct {
 	networkID                       string
 	networkType                     NetworkType
 	clientRootObfuscationSecret     ObfuscationSecret
-	doDTLSRandomization             bool
 	useMediaStreams                 bool
 	trafficShapingParameters        *TrafficShapingParameters
 	stunServerAddress               string
@@ -258,10 +257,8 @@ func (t *testWebRTCDialCoordinator) ClientRootObfuscationSecret() ObfuscationSec
 	return t.clientRootObfuscationSecret
 }
 
-func (t *testWebRTCDialCoordinator) DoDTLSRandomization() bool {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.doDTLSRandomization
+func (t *testWebRTCDialCoordinator) DTLSFingerprint() string {
+	return ""
 }
 
 func (t *testWebRTCDialCoordinator) UseMediaStreams() bool {

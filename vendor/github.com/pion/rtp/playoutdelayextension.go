@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package rtp
@@ -6,6 +6,7 @@ package rtp
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 )
 
 const (
@@ -22,29 +23,52 @@ var errPlayoutDelayInvalidValue = errors.New("invalid playout delay value")
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |  ID   | len=2 |       MIN delay       |       MAX delay       |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type PlayoutDelayExtension struct {
-	minDelay, maxDelay uint16
+	MinDelay, MaxDelay uint16
 }
 
-// Marshal serializes the members to buffer
+// MarshalSize returns the size of the PlayoutDelayExtension once marshaled.
+func (p PlayoutDelayExtension) MarshalSize() int {
+	return playoutDelayExtensionSize
+}
+
+// MarshalTo marshals the extension to the given buffer.
+// Returns io.ErrShortBuffer if buf is too small.
+func (p PlayoutDelayExtension) MarshalTo(buf []byte) (int, error) {
+	if p.MinDelay > playoutDelayMaxValue || p.MaxDelay > playoutDelayMaxValue {
+		return 0, errPlayoutDelayInvalidValue
+	}
+	if len(buf) < playoutDelayExtensionSize {
+		return 0, io.ErrShortBuffer
+	}
+	buf[0] = byte(p.MinDelay >> 4)
+	buf[1] = byte(p.MinDelay<<4) | byte(p.MaxDelay>>8)
+	buf[2] = byte(p.MaxDelay)
+
+	return playoutDelayExtensionSize, nil
+}
+
+// Marshal serializes the members to buffer.
 func (p PlayoutDelayExtension) Marshal() ([]byte, error) {
-	if p.minDelay > playoutDelayMaxValue || p.maxDelay > playoutDelayMaxValue {
+	if p.MinDelay > playoutDelayMaxValue || p.MaxDelay > playoutDelayMaxValue {
 		return nil, errPlayoutDelayInvalidValue
 	}
 
 	return []byte{
-		byte(p.minDelay >> 4),
-		byte(p.minDelay<<4) | byte(p.maxDelay>>8),
-		byte(p.maxDelay),
+		byte(p.MinDelay >> 4),
+		byte(p.MinDelay<<4) | byte(p.MaxDelay>>8),
+		byte(p.MaxDelay),
 	}, nil
 }
 
-// Unmarshal parses the passed byte slice and stores the result in the members
+// Unmarshal parses the passed byte slice and stores the result in the members.
 func (p *PlayoutDelayExtension) Unmarshal(rawData []byte) error {
 	if len(rawData) < playoutDelayExtensionSize {
 		return errTooSmall
 	}
-	p.minDelay = binary.BigEndian.Uint16(rawData[0:2]) >> 4
-	p.maxDelay = binary.BigEndian.Uint16(rawData[1:3]) & 0x0FFF
+	p.MinDelay = binary.BigEndian.Uint16(rawData[0:2]) >> 4
+	p.MaxDelay = binary.BigEndian.Uint16(rawData[1:3]) & 0x0FFF
+
 	return nil
 }

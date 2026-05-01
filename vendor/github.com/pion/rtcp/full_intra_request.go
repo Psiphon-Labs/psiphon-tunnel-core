@@ -30,7 +30,7 @@ const (
 
 var _ Packet = (*FullIntraRequest)(nil)
 
-// Marshal encodes the FullIntraRequest
+// Marshal encodes the FullIntraRequest.
 func (p FullIntraRequest) Marshal() ([]byte, error) {
 	rawPacket := make([]byte, firOffset+(len(p.FIR)*8))
 	binary.BigEndian.PutUint32(rawPacket, p.SenderSSRC)
@@ -48,38 +48,39 @@ func (p FullIntraRequest) Marshal() ([]byte, error) {
 	return append(hData, rawPacket...), nil
 }
 
-// Unmarshal decodes the TransportLayerNack
+// Unmarshal decodes the TransportLayerNack.
 func (p *FullIntraRequest) Unmarshal(rawPacket []byte) error {
 	if len(rawPacket) < (headerLength + ssrcLength) {
 		return errPacketTooShort
 	}
 
-	var h Header
-	if err := h.Unmarshal(rawPacket); err != nil {
+	var header Header
+	if err := header.Unmarshal(rawPacket); err != nil {
 		return err
 	}
 
-	if len(rawPacket) < (headerLength + int(4*h.Length)) {
+	if len(rawPacket) < (headerLength + int(4*header.Length)) {
 		return errPacketTooShort
 	}
 
-	if h.Type != TypePayloadSpecificFeedback || h.Count != FormatFIR {
+	if header.Type != TypePayloadSpecificFeedback || header.Count != FormatFIR {
 		return errWrongType
 	}
 
 	// The FCI field MUST contain one or more FIR entries
-	if 4*h.Length-firOffset <= 0 || (4*h.Length)%8 != 0 {
+	if 4*header.Length-firOffset <= 0 || (4*header.Length)%8 != 0 {
 		return errBadLength
 	}
 
 	p.SenderSSRC = binary.BigEndian.Uint32(rawPacket[headerLength:])
 	p.MediaSSRC = binary.BigEndian.Uint32(rawPacket[headerLength+ssrcLength:])
-	for i := headerLength + firOffset; i < (headerLength + int(h.Length*4)); i += 8 {
+	for i := headerLength + firOffset; i < (headerLength + int(header.Length*4)); i += 8 {
 		p.FIR = append(p.FIR, FIREntry{
 			binary.BigEndian.Uint32(rawPacket[i:]),
 			rawPacket[i+4],
 		})
 	}
+
 	return nil
 }
 
@@ -88,11 +89,12 @@ func (p *FullIntraRequest) Header() Header {
 	return Header{
 		Count:  FormatFIR,
 		Type:   TypePayloadSpecificFeedback,
-		Length: uint16((p.len() / 4) - 1),
+		Length: uint16((p.MarshalSize() / 4) - 1), //nolint:gosec // G115
 	}
 }
 
-func (p *FullIntraRequest) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (p *FullIntraRequest) MarshalSize() int {
 	return headerLength + firOffset + len(p.FIR)*8
 }
 
@@ -102,6 +104,7 @@ func (p *FullIntraRequest) String() string {
 	for _, e := range p.FIR {
 		out += fmt.Sprintf(" (%x %v)", e.SSRC, e.SequenceNumber)
 	}
+
 	return out
 }
 
@@ -111,5 +114,6 @@ func (p *FullIntraRequest) DestinationSSRC() []uint32 {
 	for _, entry := range p.FIR {
 		ssrcs = append(ssrcs, entry.SSRC)
 	}
+
 	return ssrcs
 }

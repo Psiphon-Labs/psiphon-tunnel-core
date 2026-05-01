@@ -18,7 +18,7 @@ type ackTimerObserver interface {
 	onAckTimeout()
 }
 
-type ackTimerState int
+type ackTimerState uint8
 
 const (
 	ackTimerStopped ackTimerState = iota
@@ -26,12 +26,13 @@ const (
 	ackTimerClosed
 )
 
-// ackTimer provides the retnransmission timer conforms with RFC 4960 Sec 6.3.1
+// ackTimer provides the retnransmission timer conforms with RFC 4960 Sec 6.3.1.
 type ackTimer struct {
-	observer ackTimerObserver
-	mutex    sync.RWMutex
-	state    ackTimerState
 	timer    *time.Timer
+	observer ackTimerObserver
+	mutex    sync.Mutex
+	state    ackTimerState
+	pending  uint8
 }
 
 // newAckTimer creates a new acknowledgement timer used to enable delayed ack.
@@ -39,12 +40,13 @@ func newAckTimer(observer ackTimerObserver) *ackTimer {
 	t := &ackTimer{observer: observer}
 	t.timer = time.AfterFunc(math.MaxInt64, t.timeout)
 	t.timer.Stop()
+
 	return t
 }
 
 func (t *ackTimer) timeout() {
 	t.mutex.Lock()
-	if t.state == ackTimerStarted {
+	if t.pending--; t.pending == 0 && t.state == ackTimerStarted {
 		t.state = ackTimerStopped
 		defer t.observer.onAckTimeout()
 	}
@@ -62,39 +64,43 @@ func (t *ackTimer) start() bool {
 	}
 
 	t.state = ackTimerStarted
+	t.pending++
 	t.timer.Reset(ackInterval)
+
 	return true
 }
 
 // stops the timer. this is similar to stop() but subsequent start() call
-// will fail (the timer is no longer usable)
+// will fail (the timer is no longer usable).
 func (t *ackTimer) stop() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
 	if t.state == ackTimerStarted {
-		t.timer.Stop()
+		if t.timer.Stop() {
+			t.pending--
+		}
 		t.state = ackTimerStopped
 	}
 }
 
 // closes the timer. this is similar to stop() but subsequent start() call
-// will fail (the timer is no longer usable)
+// will fail (the timer is no longer usable).
 func (t *ackTimer) close() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	if t.state == ackTimerStarted {
-		t.timer.Stop()
+	if t.state == ackTimerStarted && t.timer.Stop() {
+		t.pending--
 	}
 	t.state = ackTimerClosed
 }
 
 // isRunning tests if the timer is running.
-// Debug purpose only
+// Debug purpose only.
 func (t *ackTimer) isRunning() bool {
-	t.mutex.RLock()
-	defer t.mutex.RUnlock()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 
 	return t.state == ackTimerStarted
 }

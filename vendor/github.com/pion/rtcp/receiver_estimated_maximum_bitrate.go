@@ -42,9 +42,8 @@ func (p ReceiverEstimatedMaximumBitrate) Marshal() (buf []byte, err error) {
 	return buf, nil
 }
 
-// MarshalSize returns the size of the packet when marshaled.
-// This can be used in conjunction with `MarshalTo` to avoid allocations.
-func (p ReceiverEstimatedMaximumBitrate) MarshalSize() (n int) {
+// MarshalSize returns the size of the packet once marshaled.
+func (p ReceiverEstimatedMaximumBitrate) MarshalSize() int {
 	return 20 + 4*len(p.SSRCs)
 }
 
@@ -79,7 +78,7 @@ func (p ReceiverEstimatedMaximumBitrate) MarshalTo(buf []byte) (n int, err error
 	buf[1] = 206
 
 	// Length of this packet in 32-bit words minus one.
-	length := uint16((p.MarshalSize() / 4) - 1)
+	length := uint16((p.MarshalSize() / 4) - 1) //nolint:gosec // G115
 	binary.BigEndian.PutUint16(buf[2:4], length)
 
 	binary.BigEndian.PutUint32(buf[4:8], p.SenderSSRC)
@@ -134,6 +133,8 @@ func (p ReceiverEstimatedMaximumBitrate) MarshalTo(buf []byte) (n int, err error
 }
 
 // Unmarshal reads a REMB packet from the given byte slice.
+//
+//nolint:cyclop
 func (p *ReceiverEstimatedMaximumBitrate) Unmarshal(buf []byte) (err error) {
 	const mantissamax = 0x7FFFFF
 	/*
@@ -256,7 +257,7 @@ func (p *ReceiverEstimatedMaximumBitrate) Header() Header {
 	return Header{
 		Count:  FormatREMB,
 		Type:   TypePayloadSpecificFeedback,
-		Length: uint16((p.MarshalSize() / 4) - 1),
+		Length: uint16((p.MarshalSize() / 4) - 1), //nolint:gosec // G115
 	}
 }
 

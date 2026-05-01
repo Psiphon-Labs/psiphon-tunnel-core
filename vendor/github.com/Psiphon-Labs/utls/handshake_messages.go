@@ -88,21 +88,30 @@ type clientHelloMsg struct {
 	extendedMasterSecret             bool
 	alpnProtocols                    []string
 	scts                             bool
-	supportedVersions                []uint16
-	cookie                           []byte
-	keyShares                        []keyShare
-	earlyData                        bool
-	pskModes                         []uint8
-	pskIdentities                    []pskIdentity
-	pskBinders                       [][]byte
-	quicTransportParameters          []byte
-	encryptedClientHello             []byte
+	// ems                              bool // [uTLS] actually implemented due to its prevalence // removed since crypto/tls implements it
+	supportedVersions       []uint16
+	cookie                  []byte
+	keyShares               []keyShare
+	earlyData               bool
+	pskModes                []uint8
+	pskIdentities           []pskIdentity
+	pskBinders              [][]byte
+	quicTransportParameters []byte
+	encryptedClientHello    []byte
+	// extensions are only populated on the server-side of a handshake
+	extensions []uint16
 
-	// [UTLS]
+	// [uTLS]
 	nextProtoNeg bool
 }
 
 func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
+	// [uTLS SECTION BEGIN]
+	return m.marshalMsgReorderOuterExts(echInner, nil)
+}
+
+func (m *clientHelloMsg) marshalMsgReorderOuterExts(echInner bool, outerExts []uint16) ([]byte, error) {
+	// [uTLS SECTION END]
 	var exts cryptobyte.Builder
 	if len(m.serverName) > 0 {
 		// RFC 6066, Section 3
@@ -233,10 +242,11 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 		}
 	}
 	if len(m.alpnProtocols) > 0 {
-		// RFC 7301, Section 3.1
-		if echInner {
+		// ALPN extension copy is skipped because in ECH inner, the ALPN might be different
+		if echInner && false {
 			echOuterExts = append(echOuterExts, extensionALPN)
 		} else {
+			// RFC 7301, Section 3.1
 			exts.AddUint16(extensionALPN)
 			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 				exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
@@ -251,7 +261,7 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 	}
 	if len(m.supportedVersions) > 0 {
 		// RFC 8446, Section 4.2.1
-		if echInner {
+		if echInner && outerExts == nil { // uTLS
 			echOuterExts = append(echOuterExts, extensionSupportedVersions)
 		} else {
 			exts.AddUint16(extensionSupportedVersions)
@@ -308,6 +318,21 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 			})
 		}
 	}
+	// [uTLS SECTION BEGIN]
+	// reorder OuterExtensions according to their order in the spec
+	if echInner && outerExts != nil {
+		echOuterExtsReordered := slices.Collect(func(yield func(uint16) bool) {
+			for _, ext := range outerExts {
+				if slices.Contains(echOuterExts, ext) {
+					if !yield(ext) {
+						return
+					}
+				}
+			}
+		})
+		echOuterExts = echOuterExtsReordered
+	}
+	// [uTLS SECTION END]
 	if len(echOuterExts) > 0 && echInner {
 		exts.AddUint16(extensionECHOuterExtensions)
 		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
@@ -374,11 +399,12 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 }
 
 func (m *clientHelloMsg) marshal() ([]byte, error) {
-	// [UTLS SECTION BEGIN]
+	// [uTLS SECTION START]
 	if m.original != nil {
 		return m.original, nil
 	}
-	// [UTLS SECTION END]
+	// [uTLS SECTION END]
+
 	return m.marshalMsg(false)
 }
 
@@ -475,6 +501,7 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 			return false
 		}
 		seenExts[extension] = true
+		m.extensions = append(m.extensions, extension)
 
 		switch extension {
 		case extensionServerName:
@@ -667,6 +694,10 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 				}
 				m.pskBinders = append(m.pskBinders, binder)
 			}
+		case extensionEncryptedClientHello:
+			if !extData.ReadBytes(&m.encryptedClientHello, len(extData)) {
+				return false
+			}
 		default:
 			// Ignore unknown extensions.
 			continue
@@ -743,7 +774,7 @@ type serverHelloMsg struct {
 	cookie        []byte
 	selectedGroup CurveID
 
-	// [UTLS]
+	// [uTLS]
 	nextProtoNeg bool
 	nextProtos   []string
 }
@@ -914,6 +945,13 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 			m.ocspStapling = true
 		case extensionSessionTicket:
 			m.ticketSupported = true
+		// [UTLS] crypto/tls finally supports EMS! Now we don't do anything special here.
+		// case utlsExtensionExtendedMasterSecret:
+		// 	// No sanity check for this extension: pretending not to know it.
+		// 	// if length > 0 {
+		// 	// 	return false
+		// 	// }
+		// 	m.ems = true
 		case extensionRenegotiationInfo:
 			if !readUint8LengthPrefixed(&extData, &m.secureRenegotiation) {
 				return false
@@ -1011,8 +1049,7 @@ type encryptedExtensionsMsg struct {
 	earlyData               bool
 	echRetryConfigs         []byte
 
-	// [UTLS]
-	utls utlsEncryptedExtensionsMsgExtraFields
+	utls utlsEncryptedExtensionsMsgExtraFields // [uTLS]
 }
 
 func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
@@ -1098,14 +1135,11 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 				return false
 			}
 		default:
-
-			// [UTLS SECTION BEGIN]
-			// TOOD! check understanding here
+			// [UTLS SECTION START]
 			if !m.utlsUnmarshal(extension, extData) {
-				return false
+				return false // return false when ERROR
 			}
 			// [UTLS SECTION END]
-
 			// Ignore unknown extensions.
 			continue
 		}
@@ -1243,6 +1277,7 @@ func (m *newSessionTicketMsgTLS13) unmarshal(data []byte) bool {
 }
 
 type certificateRequestMsgTLS13 struct {
+	original                         []byte // [uTLS]
 	ocspStapling                     bool
 	scts                             bool
 	supportedSignatureAlgorithms     []SignatureScheme
@@ -1311,7 +1346,7 @@ func (m *certificateRequestMsgTLS13) marshal() ([]byte, error) {
 }
 
 func (m *certificateRequestMsgTLS13) unmarshal(data []byte) bool {
-	*m = certificateRequestMsgTLS13{}
+	*m = certificateRequestMsgTLS13{original: data} // [uTLS]
 	s := cryptobyte.String(data)
 
 	var context, extensions cryptobyte.String
@@ -1385,6 +1420,13 @@ func (m *certificateRequestMsgTLS13) unmarshal(data []byte) bool {
 
 	return true
 }
+
+// [UTLS SECTION BEGINS]
+func (m *certificateRequestMsgTLS13) originalBytes() []byte {
+	return m.original
+}
+
+// [UTLS SECTION ENDS]
 
 type certificateMsg struct {
 	certificates [][]byte

@@ -20,6 +20,7 @@ type ISessionTicketExtension interface {
 // SessionTicketExtension implements session_ticket (35)
 type SessionTicketExtension struct {
 	Session     *SessionState
+	Ticket      []byte
 	Initialized bool
 }
 
@@ -31,11 +32,7 @@ func (e *SessionTicketExtension) writeToUConn(uc *UConn) error {
 }
 
 func (e *SessionTicketExtension) Len() int {
-	length := 4
-	if e.Session != nil {
-		length += len(e.Session.ticket)
-	}
-	return length
+	return 4 + len(e.Ticket)
 }
 
 func (e *SessionTicketExtension) Read(b []byte) (int, error) {
@@ -50,7 +47,7 @@ func (e *SessionTicketExtension) Read(b []byte) (int, error) {
 	b[2] = byte(extBodyLen >> 8)
 	b[3] = byte(extBodyLen)
 	if extBodyLen > 0 {
-		copy(b[4:], e.Session.ticket)
+		copy(b[4:], e.Ticket)
 	}
 	return e.Len(), io.EOF
 }
@@ -63,7 +60,7 @@ func (e *SessionTicketExtension) InitializeByUtls(session *SessionState, ticket 
 	uAssert(!e.Initialized, "tls: InitializeByUtls failed: the SessionTicketExtension is initialized")
 	uAssert(session.version == VersionTLS12 && session != nil && ticket != nil, "tls: InitializeByUtls failed: the session is not a tls 1.2 session")
 	e.Session = session
-	e.Session.ticket = ticket
+	e.Ticket = ticket
 	e.Initialized = true
 }
 
@@ -81,5 +78,5 @@ func (e *SessionTicketExtension) GetSession() *SessionState {
 }
 
 func (e *SessionTicketExtension) GetTicket() []byte {
-	return e.Session.ticket
+	return e.Ticket
 }
