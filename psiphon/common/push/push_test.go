@@ -456,6 +456,12 @@ func TestMakePushPayloads_MetadataIntegrity(t *testing.T) {
 	if len(result.Payloads) != len(result.PayloadEntryCounts) {
 		t.Fatalf("payload/entry-count mismatch: %d vs %d", len(result.Payloads), len(result.PayloadEntryCounts))
 	}
+	if len(result.Payloads) != len(result.PayloadEntryIndexes) {
+		t.Fatalf("payload/entry-index mismatch: %d vs %d", len(result.Payloads), len(result.PayloadEntryIndexes))
+	}
+	if len(result.EntryEncodedSizes) != len(entries) {
+		t.Fatalf("entry encoded size count: got %d want %d", len(result.EntryEncodedSizes), len(entries))
+	}
 
 	totalPayloadEntries := 0
 	for _, payloadEntryCount := range result.PayloadEntryCounts {
@@ -475,6 +481,157 @@ func TestMakePushPayloads_MetadataIntegrity(t *testing.T) {
 			t.Fatalf("duplicate skipped index: %d", skippedIndex)
 		}
 		seenSkippedIndexes[skippedIndex] = true
+	}
+}
+
+func TestMakePushPayloads_EntryMetadata(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(18, func(i int) int {
+		return (i % 6) * 80
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oversizeEntry, err := makeTestPrioritizedServerEntry(2000000, 300000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversizeIndex := len(entries)
+	entries = append(entries, oversizeEntry)
+
+	maker, err := NewPushPayloadMaker(obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := maker.MakePushPayloads(
+		0, 0, 1*time.Hour, entries, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Payloads) != len(result.PayloadEntryCounts) {
+		t.Fatalf("payload/entry-count mismatch: %d vs %d", len(result.Payloads), len(result.PayloadEntryCounts))
+	}
+	if len(result.Payloads) != len(result.PayloadEntryIndexes) {
+		t.Fatalf("payload/entry-index mismatch: %d vs %d", len(result.Payloads), len(result.PayloadEntryIndexes))
+	}
+	if len(result.EntryEncodedSizes) != len(entries) {
+		t.Fatalf("entry encoded size count: got %d want %d", len(result.EntryEncodedSizes), len(entries))
+	}
+	for i, size := range result.EntryEncodedSizes {
+		if size <= 0 {
+			t.Fatalf("entry encoded size[%d]=%d, want positive", i, size)
+		}
+	}
+
+	if len(result.SkippedIndexes) != 1 || result.SkippedIndexes[0] != oversizeIndex {
+		t.Fatalf("unexpected skipped indexes: %v, want [%d]", result.SkippedIndexes, oversizeIndex)
+	}
+
+	seenIndexes := make(map[int]bool, len(entries))
+	for payloadIndex, payload := range result.Payloads {
+		entryIndexes := result.PayloadEntryIndexes[payloadIndex]
+		if len(entryIndexes) != result.PayloadEntryCounts[payloadIndex] {
+			t.Fatalf("payload %d entry indexes/count mismatch: %d vs %d",
+				payloadIndex, len(entryIndexes), result.PayloadEntryCounts[payloadIndex])
+		}
+
+		cursor := 0
+		imported, err := ImportPushPayload(
+			obfuscationKey,
+			publicKey,
+			payload,
+			func(
+				_ protocol.PackedServerEntryFields,
+				source string,
+				_ bool,
+				_ string,
+				_ string) error {
+
+				if cursor >= len(entryIndexes) {
+					return errors.TraceNew("payload imported more entries than metadata reported")
+				}
+				entryIndex := entryIndexes[cursor]
+				if entryIndex < 0 || entryIndex >= len(entries) {
+					return errors.Tracef("invalid payload entry index: %d", entryIndex)
+				}
+				if source != entries[entryIndex].Source {
+					return errors.Tracef("metadata source mismatch: got %q want %q", source, entries[entryIndex].Source)
+				}
+				if seenIndexes[entryIndex] {
+					return errors.Tracef("duplicate payload entry index: %d", entryIndex)
+				}
+				seenIndexes[entryIndex] = true
+				cursor += 1
+				return nil
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if imported != len(entryIndexes) || cursor != len(entryIndexes) {
+			t.Fatalf("payload %d import count/index mismatch: imported=%d cursor=%d indexes=%d",
+				payloadIndex, imported, cursor, len(entryIndexes))
+		}
+	}
+
+	if seenIndexes[oversizeIndex] {
+		t.Fatalf("oversize entry index %d appeared in payload metadata", oversizeIndex)
+	}
+	if len(seenIndexes)+len(result.SkippedIndexes) != len(entries) {
+		t.Fatalf("metadata does not account for all entries: seen=%d skipped=%d total=%d",
+			len(seenIndexes), len(result.SkippedIndexes), len(entries))
+	}
+}
+
+func TestMakePushPayloads_EntryMetadataNoMaxSize(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(4, func(_ int) int {
+		return 0
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maker, err := NewPushPayloadMaker(obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := maker.MakePushPayloads(
+		0, 0, 1*time.Hour, entries, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Payloads) != 1 {
+		t.Fatalf("payload count: got %d want 1", len(result.Payloads))
+	}
+	if len(result.PayloadEntryIndexes) != 1 {
+		t.Fatalf("payload entry index count: got %d want 1", len(result.PayloadEntryIndexes))
+	}
+	if len(result.EntryEncodedSizes) != len(entries) {
+		t.Fatalf("entry encoded size count: got %d want %d", len(result.EntryEncodedSizes), len(entries))
+	}
+	for i, entryIndex := range result.PayloadEntryIndexes[0] {
+		if entryIndex != i {
+			t.Fatalf("payload entry index[%d]=%d, want %d", i, entryIndex, i)
+		}
+		if result.EntryEncodedSizes[i] <= 0 {
+			t.Fatalf("entry encoded size[%d]=%d, want positive", i, result.EntryEncodedSizes[i])
+		}
 	}
 }
 
@@ -532,11 +689,24 @@ func TestComputeObfuscatedPayloadSize_MatchesMeasured(t *testing.T) {
 
 			computed := maker.computeObfuscatedPayloadSize(
 				expiresEncodedSize, numEntries, entrySizeSum, paddingSize)
+			estimated, err := maker.EstimatePushPayloadSize(
+				MakePushPayloadsResult{expiresEncodedSize: expiresEncodedSize},
+				numEntries,
+				entrySizeSum,
+				paddingSize)
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			if computed != measured {
 				t.Fatalf(
 					"mismatch: numEntries=%d paddingSize=%d computed=%d measured=%d",
 					numEntries, paddingSize, computed, measured)
+			}
+			if estimated != measured {
+				t.Fatalf(
+					"mismatch: numEntries=%d paddingSize=%d estimated=%d measured=%d",
+					numEntries, paddingSize, estimated, measured)
 			}
 		}
 	}
