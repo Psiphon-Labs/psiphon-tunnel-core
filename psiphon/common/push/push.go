@@ -227,9 +227,16 @@ type MakePushPayloadsResult struct {
 	// PayloadEntryCounts contains the number of entries in each payload, aligned
 	// by index with Payloads.
 	PayloadEntryCounts []int
+	// PayloadEntryIndexes contains original input indexes for each entry in each
+	// payload, aligned by index with Payloads.
+	PayloadEntryIndexes [][]int
+	// EntryEncodedSizes contains CBOR-encoded PrioritizedServerEntry sizes,
+	// aligned by index with the original input entries.
+	EntryEncodedSizes []int
 	// SkippedIndexes contains original input indexes for entries that could not
 	// fit into a payload when max payload size is enforced.
-	SkippedIndexes []int
+	SkippedIndexes     []int
+	expiresEncodedSize int
 }
 
 type payloadBuffers struct {
@@ -328,6 +335,51 @@ func (m *PushPayloadMaker) MakePushPayloads(
 	prioritizedServerEntries []*PrioritizedServerEntry,
 	maxPayloadSizeBytes int) (MakePushPayloadsResult, error) {
 
+	return m.makePushPayloads(
+		minPadding,
+		maxPadding,
+		TTL,
+		prioritizedServerEntries,
+		maxPayloadSizeBytes)
+}
+
+// EstimatePushPayloadSize estimates the final obfuscated payload size using
+// metadata from MakePushPayloads. entrySizeSum is the sum of the CBOR-encoded
+// PrioritizedServerEntry sizes for the payload, and paddingSize is the
+// requested SignedPayload padding length.
+func (m *PushPayloadMaker) EstimatePushPayloadSize(
+	result MakePushPayloadsResult,
+	numEntries int,
+	entrySizeSum int,
+	paddingSize int) (int, error) {
+
+	if result.expiresEncodedSize <= 0 {
+		return 0, errors.TraceNew("missing push payload metadata")
+	}
+	if numEntries < 0 {
+		return 0, errors.TraceNew("invalid entry count")
+	}
+	if entrySizeSum < 0 {
+		return 0, errors.TraceNew("invalid entry size sum")
+	}
+	if paddingSize < 0 || paddingSize > maxPaddingLimit {
+		return 0, errors.TraceNew("invalid padding size")
+	}
+
+	return m.computeObfuscatedPayloadSize(
+		result.expiresEncodedSize,
+		numEntries,
+		entrySizeSum,
+		paddingSize), nil
+}
+
+func (m *PushPayloadMaker) makePushPayloads(
+	minPadding int,
+	maxPadding int,
+	TTL time.Duration,
+	prioritizedServerEntries []*PrioritizedServerEntry,
+	maxPayloadSizeBytes int) (MakePushPayloadsResult, error) {
+
 	result := MakePushPayloadsResult{}
 
 	if len(prioritizedServerEntries) == 0 {
@@ -346,6 +398,23 @@ func (m *PushPayloadMaker) MakePushPayloads(
 
 	// maxPayloadSizeBytes <= 0 means no payload size cap is enforced.
 	if maxPayloadSizeBytes <= 0 {
+		expiresEncoded, err := protocol.CBOREncoding.Marshal(expires)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+		result.expiresEncodedSize = len(expiresEncoded)
+		result.EntryEncodedSizes = make([]int, len(prioritizedServerEntries))
+		entryIndexes := make([]int, len(prioritizedServerEntries))
+		for i, entry := range prioritizedServerEntries {
+			encodedEntry, err := protocol.CBOREncoding.Marshal(entry)
+			if err != nil {
+				return result, errors.Trace(err)
+			}
+			result.EntryEncodedSizes[i] = len(encodedEntry)
+			entryIndexes[i] = i
+		}
+		result.PayloadEntryIndexes = append(result.PayloadEntryIndexes, entryIndexes)
+
 		paddingSize := prng.Range(minPadding, maxPadding)
 		payload, err := m.buildObfuscatedPayload(
 			bufs, prioritizedServerEntries, expires, paddingSize)
@@ -364,8 +433,10 @@ func (m *PushPayloadMaker) MakePushPayloads(
 		return result, errors.Trace(err)
 	}
 	expiresEncodedSize := len(expiresEncoded)
+	result.expiresEncodedSize = expiresEncodedSize
 
 	// Compute encoded sizes for each PrioritizedServerEntry.
+	result.EntryEncodedSizes = make([]int, len(prioritizedServerEntries))
 	serverEntries := make(
 		[]sortablePrioritizedServerEntry, 0, len(prioritizedServerEntries))
 	for i, entry := range prioritizedServerEntries {
@@ -374,10 +445,13 @@ func (m *PushPayloadMaker) MakePushPayloads(
 			return result, errors.Trace(err)
 		}
 
+		encodedSize := len(encodedEntry)
+		result.EntryEncodedSizes[i] = encodedSize
+
 		serverEntries = append(serverEntries, sortablePrioritizedServerEntry{
 			entry:         entry,
 			originalIndex: i,
-			encodedSize:   len(encodedEntry),
+			encodedSize:   encodedSize,
 		})
 	}
 
@@ -393,6 +467,7 @@ func (m *PushPayloadMaker) MakePushPayloads(
 	// Worst-case each PrioritizedServerEntry gets its own bin.
 	type payloadBin struct {
 		serverEntries []*PrioritizedServerEntry
+		entryIndexes  []int
 		paddingSize   int
 		// sumServerEntrySize is the total encoded size of all server
 		// entries in this bin, used to compute the obfuscated payload size.
@@ -454,6 +529,7 @@ func (m *PushPayloadMaker) MakePushPayloads(
 			}
 			bi := candidates[best].binIndex
 			bins[bi].serverEntries = append(bins[bi].serverEntries, sortedServerEntry.entry)
+			bins[bi].entryIndexes = append(bins[bi].entryIndexes, sortedServerEntry.originalIndex)
 			bins[bi].sumServerEntrySize += sortedServerEntry.encodedSize
 			continue
 		}
@@ -470,11 +546,13 @@ func (m *PushPayloadMaker) MakePushPayloads(
 			continue
 		}
 
-		bins = append(bins, payloadBin{
+		bin := payloadBin{
 			serverEntries:      []*PrioritizedServerEntry{sortedServerEntry.entry},
+			entryIndexes:       []int{sortedServerEntry.originalIndex},
 			paddingSize:        paddingSize,
 			sumServerEntrySize: sortedServerEntry.encodedSize,
-		})
+		}
+		bins = append(bins, bin)
 	}
 
 	// Apply random padding to each bin, respecting maxPayloadSizeBytes.
@@ -502,6 +580,7 @@ func (m *PushPayloadMaker) MakePushPayloads(
 
 	result.Payloads = make([][]byte, 0, len(bins))
 	result.PayloadEntryCounts = make([]int, 0, len(bins))
+	result.PayloadEntryIndexes = make([][]int, 0, len(bins))
 
 	for _, bin := range bins {
 		payload, err := m.buildObfuscatedPayload(
@@ -517,6 +596,8 @@ func (m *PushPayloadMaker) MakePushPayloads(
 		result.Payloads = append(result.Payloads, payload)
 		result.PayloadEntryCounts = append(
 			result.PayloadEntryCounts, len(bin.serverEntries))
+		result.PayloadEntryIndexes = append(
+			result.PayloadEntryIndexes, bin.entryIndexes)
 	}
 
 	return result, nil
