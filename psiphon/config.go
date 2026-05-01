@@ -72,7 +72,6 @@ const (
 // corresponding fields are int pointers. nil means no value was supplied and
 // to use the default; a non-nil pointer to 0 means no timeout.
 type Config struct {
-
 	// DataRootDirectory is the directory in which to store persistent files,
 	// which contain information such as server entries. By default, current
 	// working directory.
@@ -223,6 +222,7 @@ type Config struct {
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to
 	// halt the core tunnel controller if no tunnel has been established. The
 	// default is parameters.EstablishTunnelTimeout.
+	// This timeout takes effect regardless of light proxy configuration.
 	EstablishTunnelTimeoutSeconds *int `json:",omitempty"`
 
 	// EstablishTunnelPausePeriodSeconds specifies the delay between attempts
@@ -807,6 +807,17 @@ type Config struct {
 	// this expensive scan can improve datastore performance on slower devices.
 	DisableServerEntriesReporter *bool `json:",omitempty"`
 
+	// EnableLightProxy enables using a light proxy as fallback if a tunnel is
+	// not available to tunnel traffic. When a light proxy is used, neither
+	// EgressRegion nor any SplitTunnel configuration is applied.
+	EnableLightProxy bool `json:",omitempty"`
+
+	// LightProxyEntry is an optional encoded light proxy entry.
+	LightProxyEntry []byte `json:",omitempty"`
+
+	// LightProxyEntryTracker is the light proxy entry tracker value to report.
+	LightProxyEntryTracker int64 `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -1250,6 +1261,10 @@ type Config struct {
 
 	TunnelConnectTimeoutSeconds *int `json:",omitempty"`
 
+	LightProxyUseRecommendedSNIProbability        *float64 `json:",omitempty"`
+	LightProxyTunnelInactiveThresholdMilliseconds *int     `json:",omitempty"`
+	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1315,7 +1330,6 @@ type UseNoticeFiles struct {
 // Before using the Config, Commit must be called, which will perform further
 // validation and initialize internal data structures.
 func LoadConfig(configJson []byte) (*Config, error) {
-
 	var config Config
 	err := json.Unmarshal(configJson, &config)
 	if err != nil {
@@ -1373,7 +1387,6 @@ func (config *Config) IsCommitted() bool {
 // because file system errors are expected to be rare and persistent files will
 // be re-populated over time.
 func (config *Config) Commit(migrateFromLegacyFields bool) error {
-
 	// Apply any additional parameters first
 	additionalParametersInfoMsgs, err := config.applyAdditionalParameters()
 	if err != nil {
@@ -1702,6 +1715,11 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("build does not enable required in-proxy functionality")
 	}
 
+	if config.EnableLightProxy && config.DisableTunnels {
+
+		return errors.TraceNew("EnableLightProxy is incompatible with DisableTunnels")
+	}
+
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
@@ -1892,7 +1910,6 @@ func (config *Config) GetParameters() *parameters.Parameters {
 // entirely unmodified.
 func (config *Config) SetParameters(
 	tag string, skipOnError bool, applyParameters map[string]interface{}) error {
-
 	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
 		setParameters = append(setParameters, applyParameters)
@@ -2120,7 +2137,6 @@ func (config *Config) IsInproxyProxyPersonalPairingMode() bool {
 // functionality -- onInproxyMustUpgrade initiates a shutdown after emitting
 // the InproxyMustUpgrade notice.
 func (config *Config) OnInproxyMustUpgrade() {
-
 	// TODO: check if LimitTunnelProtocols is set to allow only INPROXY tunnel
 	// protocols; this is another case where in-proxy functionality is
 	// required.
@@ -2135,7 +2151,6 @@ func (config *Config) OnInproxyMustUpgrade() {
 
 func (config *Config) SetServerEntryIterationMetricsUpdater(
 	updater func(movedToFront int)) {
-
 	config.serverEntryIterationMetricsUpdater.Store(updater)
 }
 
@@ -2148,7 +2163,6 @@ func (config *Config) GetServerEntryIterationMetricsUpdater() func(movedToFront 
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
-
 	// Build set of config values to apply to parameters.
 	//
 	// Note: names of some config fields such as
@@ -3240,6 +3254,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.DisableServerEntriesReporter != nil {
 		applyParameters[parameters.DisableServerEntriesReporter] = *config.DisableServerEntriesReporter
+	}
+
+	if config.LightProxyUseRecommendedSNIProbability != nil {
+		applyParameters[parameters.LightProxyUseRecommendedSNIProbability] = *config.LightProxyUseRecommendedSNIProbability
+	}
+
+	if config.LightProxyTunnelInactiveThresholdMilliseconds != nil {
+		applyParameters[parameters.LightProxyTunnelInactiveThreshold] = fmt.Sprintf("%dms", *config.LightProxyTunnelInactiveThresholdMilliseconds)
+	}
+
+	if config.LightProxyDialTimeoutMilliseconds != nil {
+		applyParameters[parameters.LightProxyDialTimeout] = fmt.Sprintf("%dms", *config.LightProxyDialTimeoutMilliseconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also

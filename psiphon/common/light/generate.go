@@ -55,6 +55,7 @@ import (
 //
 // passthroughAddress is a psiphon-tls PassthroughAddress and is required.
 func Generate(
+	providerID string,
 	listenAddress string,
 	dialAddress string,
 	recommendedSNI string,
@@ -91,6 +92,7 @@ func Generate(
 
 	config := &ProxyConfig{
 		Protocol:            LIGHT_PROTOCOL_TLS,
+		ProviderID:          providerID,
 		ListenAddress:       listenAddress,
 		DialAddress:         dialAddress,
 		ObfuscationKey:      obfuscationKey,

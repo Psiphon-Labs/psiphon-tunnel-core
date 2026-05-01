@@ -36,9 +36,9 @@ import (
 const (
 	lightProtocolVersion          = byte(0x01)
 	stopPadding                   = uint16(0xffff)
-	stopPaddingWriteSizeThreshold = 1280
 	paddingMinTargetSize          = 900
 	paddingMaxTargetSize          = 1400
+	stopPaddingWriteSizeThreshold = paddingMaxTargetSize
 )
 
 // lightConn is layered over the proxy TLS connection and adds a light proxy
@@ -65,23 +65,21 @@ type lightHeader struct {
 	SponsorID          []byte `cbor:"1,keyasint,omitempty"`
 	ClientPlatform     uint8  `cbor:"2,keyasint,omitempty"`
 	ClientBuildRev     []byte `cbor:"3,keyasint,omitempty"`
-	ClientID           []byte `cbor:"4,keyasint,omitempty"`
-	DeviceRegion       string `cbor:"5,keyasint,omitempty"`
-	SessionID          []byte `cbor:"6,keyasint,omitempty"`
-	ProxyEntryTracker  int64  `cbor:"7,keyasint,omitempty"`
-	NetworkType        uint8  `cbor:"8,keyasint,omitempty"`
-	ConnectionNum      int64  `cbor:"9,keyasint,omitempty"`
-	DestinationAddress string `cbor:"10,keyasint,omitempty"`
-	TLSProfile         uint8  `cbor:"11,keyasint,omitempty"`
-	TCPDuration        int64  `cbor:"12,keyasint,omitempty"`
-	TLSDuration        int64  `cbor:"13,keyasint,omitempty"`
+	DeviceRegion       string `cbor:"4,keyasint,omitempty"`
+	SessionID          []byte `cbor:"5,keyasint,omitempty"`
+	ProxyEntryTracker  int64  `cbor:"6,keyasint,omitempty"`
+	NetworkType        uint8  `cbor:"7,keyasint,omitempty"`
+	ConnectionNum      int64  `cbor:"8,keyasint,omitempty"`
+	DestinationAddress string `cbor:"9,keyasint,omitempty"`
+	TLSProfile         uint8  `cbor:"10,keyasint,omitempty"`
+	TCPDuration        int64  `cbor:"11,keyasint,omitempty"`
+	TLSDuration        int64  `cbor:"12,keyasint,omitempty"`
 }
 
 func newLightHeader(
 	sponsorID []byte,
 	clientPlatform uint8,
 	clientBuildRev []byte,
-	clientID []byte,
 	deviceRegion string,
 	sessionID []byte,
 	proxyEntryTracker int64,
@@ -102,7 +100,6 @@ func newLightHeader(
 		SponsorID:          sponsorID,
 		ClientPlatform:     clientPlatform,
 		ClientBuildRev:     clientBuildRev,
-		ClientID:           clientID,
 		DeviceRegion:       deviceRegion,
 		SessionID:          sessionID,
 		ProxyEntryTracker:  proxyEntryTracker,

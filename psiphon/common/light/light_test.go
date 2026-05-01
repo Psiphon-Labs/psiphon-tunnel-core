@@ -64,6 +64,7 @@ func runTestLightProxy() error {
 		testClientPlatform          = "Android"
 		testClientBuildRev          = "01020304"
 		testDeviceRegion            = "US"
+		testProviderID              = "01020304"
 		testProxyEntryTracker int64 = 0x0102030405060708
 		testNetworkType             = "WIFI"
 		testTLSProfile              = protocol.TLS_PROFILE_CHROME_120
@@ -115,6 +116,7 @@ func runTestLightProxy() error {
 	}
 
 	proxyConfig, proxyEntry, err := Generate(
+		testProviderID,
 		proxyAddress,
 		proxyAddress,
 		"example.org",
@@ -160,7 +162,6 @@ func runTestLightProxy() error {
 			},
 			TLSDialer:         dialUtls,
 			SponsorID:         prng.HexString(8),
-			ClientID:          prng.HexString(16),
 			ClientPlatform:    testClientPlatform,
 			ClientBuildRev:    testClientBuildRev,
 			DeviceRegion:      testDeviceRegion,
@@ -222,7 +223,13 @@ func runLightClient(
 	destinationAddress string,
 	payloadSize int) error {
 
-	conn, err := client.Dial(ctx, networkType, tlsProfile, destinationAddress)
+	conn, err := client.Dial(
+		ctx,
+		networkType,
+		tlsProfile,
+		nil,
+		client.GetRecommendedSNI(),
+		destinationAddress)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -278,18 +285,17 @@ func runLightClient(
 }
 
 func dialUtls(
-	ctx context.Context,
+	_ context.Context,
 	underlyingConn net.Conn,
 	tlsProfile string,
-	recommendedSNI string,
+	_ *prng.Seed,
+	sni string,
 	passthroughMessage []byte,
 	verifyPin string,
 	verifyServerName string) (net.Conn, error) {
 
-	_ = ctx
-
 	config := &utls.Config{
-		ServerName:         recommendedSNI,
+		ServerName:         sni,
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(
 			rawCerts [][]byte,
@@ -526,7 +532,7 @@ func (r *testProxyEventReceiver) Listening(address string) {
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
-		`buildRev: %s, clientID: %s, deviceRegion: %s, sessionID: %s, ` +
+		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
 		`destination: %s, tlsProfile: %s, sni: %s, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
@@ -541,7 +547,6 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.SponsorID,
 		stats.ClientPlatform,
 		stats.ClientBuildRev,
-		stats.ClientID,
 		stats.DeviceRegion,
 		stats.SessionID,
 		stats.ProxyEntryTracker,

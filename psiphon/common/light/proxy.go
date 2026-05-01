@@ -75,6 +75,8 @@ type ProxyConfig struct {
 type ProxyEventReceiver interface {
 	Listening(address string)
 
+	// The ProxyEventReceiver may assume ownership of stats. The Proxy caller
+	// will not access it after passing it to Connection.
 	Connection(stats *ConnectionStats)
 
 	IrregularConnection(
@@ -364,7 +366,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// failures after this point.
 	defer func() {
 
-		var sponsorID, clientPlatform, clientBuildRev, clientID string
+		var sponsorID, clientPlatform, clientBuildRev string
 		var deviceRegion, sessionID, networkType, tlsProfile string
 		var proxyEntryTracker, clientConnectionNum int64
 		var clientTCPDuration, clientTLSDuration time.Duration
@@ -375,7 +377,6 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			sponsorID = strings.ToUpper(hex.EncodeToString(header.SponsorID))
 			clientPlatform = decodeClientPlatform(header.ClientPlatform)
 			clientBuildRev = hex.EncodeToString(header.ClientBuildRev)
-			clientID = hex.EncodeToString(header.ClientID)
 			deviceRegion = header.DeviceRegion
 			sessionID = hex.EncodeToString(header.SessionID)
 			proxyEntryTracker = header.ProxyEntryTracker
@@ -395,7 +396,6 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			SponsorID:                  sponsorID,
 			ClientPlatform:             clientPlatform,
 			ClientBuildRev:             clientBuildRev,
-			ClientID:                   clientID,
 			DeviceRegion:               deviceRegion,
 			SessionID:                  sessionID,
 			ProxyEntryTracker:          proxyEntryTracker,
@@ -415,6 +415,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			ConnectionFailure:          retErr,
 		}
 
+		// The event receiver assumes ownership of stats; do not access after
+		// this point.
 		proxy.eventReceiver.Connection(stats)
 	}()
 

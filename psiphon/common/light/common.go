@@ -73,7 +73,6 @@ type ConnectionStats struct {
 	SponsorID                  string
 	ClientPlatform             string
 	ClientBuildRev             string
-	ClientID                   string
 	DeviceRegion               string
 	SessionID                  string
 	ProxyEntryTracker          int64

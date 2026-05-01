@@ -40,6 +40,7 @@ func main() {
 
 	var configFilename string
 	var entryFilename string
+	var providerID string
 	var listenAddress string
 	var dialAddress string
 	var recommendedSNI string
@@ -57,6 +58,12 @@ func main() {
 		"entry",
 		"lightproxy.entry",
 		"generate proxy entry filename")
+
+	flag.StringVar(
+		&providerID,
+		"providerID",
+		"",
+		"generate proxy provider ID; optional")
 
 	flag.StringVar(
 		&listenAddress,
@@ -109,6 +116,7 @@ func main() {
 		err := func() error {
 
 			config, entry, err := light.Generate(
+				providerID,
 				listenAddress,
 				dialAddress,
 				recommendedSNI,
@@ -195,7 +203,7 @@ func (r *proxyEventReceiver) Listening(address string) {
 func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
-		`buildRev: %s, clientID: %s, deviceRegion: %s, sessionID: %s, ` +
+		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
 		`destination: %s, tlsProfile: %s, sni: %s, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
@@ -210,7 +218,6 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.SponsorID,
 		stats.ClientPlatform,
 		stats.ClientBuildRev,
-		stats.ClientID,
 		stats.DeviceRegion,
 		stats.SessionID,
 		stats.ProxyEntryTracker,

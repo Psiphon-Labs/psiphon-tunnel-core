@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -53,7 +54,8 @@ type TLSDialer func(
 	ctx context.Context,
 	underlyingConn net.Conn,
 	tlsProfile string,
-	recommendedSNI string,
+	randomizedTLSProfileSeed *prng.Seed,
+	sni string,
 	passthroughMessage []byte,
 	verifyPin string,
 	verifyServerName string) (net.Conn, error)
@@ -65,7 +67,6 @@ type ClientConfig struct {
 	TLSDialer TLSDialer
 
 	SponsorID         string
-	ClientID          string
 	ClientPlatform    string
 	ClientBuildRev    string
 	DeviceRegion      string
@@ -81,11 +82,10 @@ type Client struct {
 	sponsorID         []byte
 	clientPlatform    uint8
 	clientBuildRev    []byte
-	clientID          []byte
 	sessionID         []byte
+	proxyEntry        *ProxyEntry
 	proxyEntryTracker string
 	proxyID           string
-	proxyEntry        *ProxyEntry
 	obfuscationKey    string
 	verifyPin         string
 	connectionNumber  atomic.Int64
@@ -112,11 +112,6 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	clientPlatform := encodeClientPlatform(config.ClientPlatform)
 
 	clientBuildRev, err := hex.DecodeString(config.ClientBuildRev)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	clientID, err := hex.DecodeString(config.ClientID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -162,7 +157,6 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		sponsorID:         sponsorID,
 		clientPlatform:    clientPlatform,
 		clientBuildRev:    clientBuildRev,
-		clientID:          clientID,
 		sessionID:         sessionID,
 		proxyEntryTracker: proxyEntryTracker,
 		proxyEntry:        proxyEntry,
@@ -174,6 +168,12 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	return client, nil
 }
 
+// GetRecommendedSNI returns the recommended SNI included in the proxy entry,
+// if any.
+func (client *Client) GetRecommendedSNI() string {
+	return client.proxyEntry.RecommendedSNI
+}
+
 // Dial connects to the specified destination.
 //
 // The light proxy protocol requires the client to write first, and the light
@@ -182,6 +182,8 @@ func (client *Client) Dial(
 	ctx context.Context,
 	networkType string,
 	tlsProfile string,
+	randomizedTLSProfileSeed *prng.Seed,
+	sni string,
 	destinationAddress string) (retConn *ClientConn, retErr error) {
 
 	passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
@@ -196,10 +198,10 @@ func (client *Client) Dial(
 
 	client.config.Logger.WithTraceFields(common.LogFields{
 		"proxyID":           client.proxyID,
-		"clientID":          client.config.ClientID,
 		"proxyEntryTracker": client.proxyEntryTracker,
 		"connectionNum":     connectionNum,
 		"tlsProfile":        tlsProfile,
+		"sni":               sni,
 	}).Info("dialing")
 
 	start := time.Now()
@@ -227,7 +229,8 @@ func (client *Client) Dial(
 		ctx,
 		activityConn,
 		tlsProfile,
-		client.proxyEntry.RecommendedSNI,
+		randomizedTLSProfileSeed,
+		sni,
 		passthroughMessage,
 		client.verifyPin,
 		client.proxyEntry.VerifyServerName)
@@ -240,7 +243,6 @@ func (client *Client) Dial(
 		client.sponsorID,
 		client.clientPlatform,
 		client.clientBuildRev,
-		client.clientID,
 		client.config.DeviceRegion,
 		client.sessionID,
 		client.config.ProxyEntryTracker,
@@ -256,10 +258,10 @@ func (client *Client) Dial(
 
 	client.config.Logger.WithTraceFields(common.LogFields{
 		"proxyID":           client.proxyID,
-		"clientID":          client.config.ClientID,
 		"proxyEntryTracker": client.proxyEntryTracker,
 		"connectionNum":     connectionNum,
 		"tlsProfile":        tlsProfile,
+		"sni":               sni,
 		"TCPDuration":       TCPDuration.String(),
 		"TLSDuration":       TLSDuration.String(),
 	}).Info("connected")
@@ -294,7 +296,6 @@ func (conn *ClientConn) Close() error {
 		conn.client.config.Logger.WithTraceFields(
 			common.LogFields{
 				"proxyID":       conn.client.proxyID,
-				"clientID":      conn.client.config.ClientID,
 				"connectionNum": conn.connectionNum,
 				"bytesRead":     conn.bytesCounter.bytesRead.Load(),
 				"bytesWritten":  conn.bytesCounter.bytesWritten.Load(),
