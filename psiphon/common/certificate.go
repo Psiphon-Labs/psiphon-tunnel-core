@@ -189,6 +189,38 @@ func VerifyServerCertificate(
 	return verifiedChains, nil
 }
 
+// VerifyServerCertificatePinsOnly parses and verifies raw peer certificates
+// using only a pinned leaf certificate, without building a trusted-root chain.
+// If verifyServerName is set, the leaf certificate must also match that name.
+// This mode is intended for pinned, self-signed certificates.
+// VerifyServerCertificatePinsOnly does not check NotBefore/NotAfter.
+func VerifyServerCertificatePinsOnly(
+	rawCerts [][]byte, verifyServerName string, pins []string) error {
+
+	if len(rawCerts) == 0 {
+		return errors.TraceNew("missing certificates")
+	}
+
+	leafCert, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if verifyServerName != "" {
+		err := leafCert.VerifyHostname(verifyServerName)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	err = VerifyCertificatePins(pins, [][]*x509.Certificate{{leafCert}})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
 // VerifyCertificatePins checks whether any specified certificate pin -- a
 // SHA-256 hash of a certificate public key -- if found in the given
 // certificate chain.

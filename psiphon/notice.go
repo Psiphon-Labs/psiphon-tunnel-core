@@ -1199,6 +1199,11 @@ func NoticeInproxyProxyTotalActivity(
 		"totalBytesDown", totalBytesDown)
 }
 
+// NoticeLightProxyAvailable indicates that a light proxy is available for use.
+func NoticeLightProxyAvailable() {
+	singletonNoticeLogger.outputNotice("LightProxyAvailable", 0)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

@@ -1237,6 +1237,13 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"LightProxyAvailable"]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onLightProxyAvailable)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onLightProxyAvailable];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }

@@ -583,6 +583,10 @@ const (
 	SSHChannelWindowSize                               = "SSHChannelWindowSize"
 	SSHPacketTunnelChannelWindowSize                   = "SSHPacketTunnelChannelWindowSize"
 	DisableServerEntriesReporter                       = "DisableServerEntriesReporter"
+	LightProxyDisable                                  = "LightProxyDisable"
+	LightProxyUseRecommendedSNIProbability             = "LightProxyUseRecommendedSNIProbability"
+	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
+	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 
 	// Retired parameters
 
@@ -1249,6 +1253,11 @@ var defaultParameters = map[string]struct {
 	SSHPacketTunnelChannelWindowSize: {value: 0, minimum: 0},
 
 	DisableServerEntriesReporter: {value: false},
+
+	LightProxyDisable:                      {value: false},
+	LightProxyUseRecommendedSNIProbability: {value: 0.5, minimum: 0.0},
+	LightProxyTunnelInactiveThreshold:      {value: 30 * time.Second, minimum: 0 * time.Millisecond},
+	LightProxyDialTimeout:                  {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

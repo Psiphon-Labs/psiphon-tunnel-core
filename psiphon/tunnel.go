@@ -565,6 +565,10 @@ func (tunnel *Tunnel) IsDiscarded() bool {
 	return tunnel.isDiscarded
 }
 
+func (tunnel *Tunnel) GetReadInactiveDuration() time.Duration {
+	return tunnel.activityConn.GetReadInactiveDuration()
+}
+
 // SendAPIRequest sends an API request as an SSH request through the tunnel.
 // This function blocks awaiting a response. Only one request may be in-flight
 // at once; a concurrent SendAPIRequest will block until an active request

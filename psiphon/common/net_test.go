@@ -136,6 +136,33 @@ func BenchmarkParseDNSQuestion(b *testing.B) {
 	}
 }
 
+func TestGetRateLimitIP(t *testing.T) {
+	testCases := []struct {
+		name     string
+		IP       string
+		expected string
+	}{
+		{
+			name:     "IPv4",
+			IP:       "192.0.2.1",
+			expected: "192.0.2.1",
+		},
+		{
+			name:     "IPv6",
+			IP:       "2001:db8:abcd:1234:1:2:3:4",
+			expected: "2001:db8:abcd:1200::",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if GetRateLimitIP(testCase.IP) != testCase.expected {
+				t.Fatalf("unexpected rate limit IP")
+			}
+		})
+	}
+}
+
 type dummyConn struct {
 	t                   *testing.T
 	timeout             *time.Timer
