@@ -180,11 +180,16 @@ func (client *Client) GetRecommendedSNI() string {
 // header is prepended to the client's first write.
 func (client *Client) Dial(
 	ctx context.Context,
+	additionalLogFields common.LogFields,
 	networkType string,
 	tlsProfile string,
 	randomizedTLSProfileSeed *prng.Seed,
 	sni string,
 	destinationAddress string) (retConn *ClientConn, retErr error) {
+
+	// Start at 1 to distinguish from the zero value the proxy will record if
+	// the header is not delivered.
+	connectionNum := client.connectionNumber.Add(1)
 
 	passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
 		true, client.obfuscationKey)
@@ -192,17 +197,24 @@ func (client *Client) Dial(
 		return nil, errors.Trace(err)
 	}
 
-	// Start at 1 to distinguish from the zero value the proxy will record if
-	// the header is not delivered.
-	connectionNum := client.connectionNumber.Add(1)
-
-	client.config.Logger.WithTraceFields(common.LogFields{
+	logFields := common.LogFields{
 		"proxyID":           client.proxyID,
 		"proxyEntryTracker": client.proxyEntryTracker,
 		"connectionNum":     connectionNum,
 		"tlsProfile":        tlsProfile,
 		"sni":               sni,
-	}).Info("dialing")
+	}
+	logFields.Add(additionalLogFields)
+
+	// Log once per connection. If the dial fails, log accumulated fields
+	// here. Otherwise, log on Close.
+	defer func() {
+		if retErr != nil && ctx.Err() == nil {
+			logFields["error"] = retErr.Error()
+			client.config.Logger.WithTraceFields(
+				logFields).Warning("light proxy dial failed")
+		}
+	}()
 
 	start := time.Now()
 	tcpConn, err := client.config.TCPDialer(ctx, client.proxyEntry.DialAddress)
@@ -215,6 +227,8 @@ func (client *Client) Dial(
 		}
 	}()
 	TCPDuration := time.Since(start)
+
+	logFields["TCPDuration"] = TCPDuration.String()
 
 	// Wrapping here counts outer TLS handshake bytes.
 	bytesCounter := &bytesCounter{}
@@ -239,6 +253,8 @@ func (client *Client) Dial(
 	}
 	TLSDuration := time.Since(start)
 
+	logFields["TLSDuration"] = TLSDuration.String()
+
 	header, err := newLightHeader(
 		client.sponsorID,
 		client.clientPlatform,
@@ -256,19 +272,10 @@ func (client *Client) Dial(
 		return nil, errors.Trace(err)
 	}
 
-	client.config.Logger.WithTraceFields(common.LogFields{
-		"proxyID":           client.proxyID,
-		"proxyEntryTracker": client.proxyEntryTracker,
-		"connectionNum":     connectionNum,
-		"tlsProfile":        tlsProfile,
-		"sni":               sni,
-		"TCPDuration":       TCPDuration.String(),
-		"TLSDuration":       TLSDuration.String(),
-	}).Info("connected")
-
 	lightConn := newLightConn(tlsConn, header)
 
 	clientConn := &ClientConn{
+		logFields:     logFields,
 		lightConn:     lightConn,
 		activityConn:  activityConn,
 		client:        client,
@@ -281,6 +288,7 @@ func (client *Client) Dial(
 
 type ClientConn struct {
 	*lightConn
+	logFields     common.LogFields
 	activityConn  *common.ActivityMonitoredConn
 	client        *Client
 	connectionNum int64
@@ -293,14 +301,13 @@ type ClientConn struct {
 func (conn *ClientConn) Close() error {
 	conn.closeOnce.Do(func() {
 		conn.closeErr = errors.Trace(conn.lightConn.Close())
+
+		conn.logFields["bytesRead"] = conn.bytesCounter.bytesRead.Load()
+		conn.logFields["bytesWritten"] = conn.bytesCounter.bytesWritten.Load()
+		conn.logFields["duration"] = conn.activityConn.GetActiveDuration().String()
+
 		conn.client.config.Logger.WithTraceFields(
-			common.LogFields{
-				"proxyID":       conn.client.proxyID,
-				"connectionNum": conn.connectionNum,
-				"bytesRead":     conn.bytesCounter.bytesRead.Load(),
-				"bytesWritten":  conn.bytesCounter.bytesWritten.Load(),
-				"duration":      conn.activityConn.GetActiveDuration().String(),
-			}).Info("closed")
+			conn.logFields).Info("light proxy connection")
 	})
 	return conn.closeErr
 }

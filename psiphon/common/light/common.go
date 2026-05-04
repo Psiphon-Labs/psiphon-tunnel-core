@@ -49,10 +49,9 @@ type SignedProxyEntry struct {
 
 	// Currently signatures are not added or verified since the initial
 	// distribution scheme for proxy entries is via ephemeral push payloads,
-	// which are already signed, with no persistent storage. Adding the
-	// SignedProxyEntry layer now allows for the addition of signatures in
-	// the future without changing the expected unmarshal type,
-	// SignedProxyEntry.
+	// which are already signed. Adding the SignedProxyEntry layer now allows
+	// for the addition of signatures in the future without changing the
+	// expected unmarshal type, SignedProxyEntry.
 
 	Signature  []byte     `cbor:"1,keyasint,omitempty"`
 	ProxyEntry ProxyEntry `cbor:"2,keyasint,omitempty"`

@@ -82,6 +82,7 @@ jobs:
           go test -v -race ./psiphon/common/dsl
           go test -v -race ./psiphon/common/fragmentor
           go test -v -race ./psiphon/common/inproxy
+          go test -v -race ./psiphon/common/light
           go test -v -race ./psiphon/common/regen
           go test -v -race ./psiphon/common/monotime
           go test -v -race ./psiphon/common/obfuscator
@@ -118,6 +119,7 @@ jobs:
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
           go test -v -covermode=count -coverprofile=dsl.coverprofile ./psiphon/common/dsl
           go test -v -covermode=count -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
+          go test -v -covermode=count -coverprofile=light.coverprofile ./psiphon/common/light
           go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator

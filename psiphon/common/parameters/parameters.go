@@ -1256,7 +1256,7 @@ var defaultParameters = map[string]struct {
 
 	LightProxyDisable:                      {value: false},
 	LightProxyUseRecommendedSNIProbability: {value: 0.5, minimum: 0.0},
-	LightProxyTunnelInactiveThreshold:      {value: 500 * time.Millisecond, minimum: 0 * time.Millisecond},
+	LightProxyTunnelInactiveThreshold:      {value: 30 * time.Second, minimum: 0 * time.Millisecond},
 	LightProxyDialTimeout:                  {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 }
 

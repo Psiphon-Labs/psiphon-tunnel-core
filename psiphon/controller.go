@@ -1716,7 +1716,9 @@ func (controller *Controller) dialLightProxy(
 	remoteAddr string) (net.Conn, error) {
 
 	replay, _ := controller.lightProxyReplay.Load().(lightReplay)
-	if replay.TLSProfile == "" || replay.SNI == "" {
+
+	isReplay := replay.TLSProfile != "" && replay.SNI != ""
+	if !isReplay {
 
 		// Limitation: if SelectTLSProfile selects a CustomTLSProfile, the TLS
 		// profile reported to the proxy will be "unknown".
@@ -1740,8 +1742,11 @@ func (controller *Controller) dialLightProxy(
 		}
 	}
 
+	logFields := common.LogFields{"isReplay": isReplay}
+
 	conn, err := lightClient.Dial(
 		ctx,
+		logFields,
 		GetNetworkType(controller.config.GetNetworkID()),
 		replay.TLSProfile,
 		replay.RandomizedTLSProfileSeed,
@@ -1887,6 +1892,8 @@ func (conn *lightProxyConn) Close() error {
 // related LocalProxy<->SshPortForward connections close.
 func (controller *Controller) Dial(
 	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
+
+	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
 
 	readInactiveThreshold := time.Duration(
 		controller.lightProxyTunnelInactiveThreshold.Load())

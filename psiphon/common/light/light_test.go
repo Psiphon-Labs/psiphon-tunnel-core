@@ -225,6 +225,7 @@ func runLightClient(
 
 	conn, err := client.Dial(
 		ctx,
+		nil,
 		networkType,
 		tlsProfile,
 		nil,

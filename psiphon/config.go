@@ -1715,9 +1715,15 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("build does not enable required in-proxy functionality")
 	}
 
-	if config.EnableLightProxy && config.DisableTunnels {
+	if config.EnableLightProxy {
 
-		return errors.TraceNew("EnableLightProxy is incompatible with DisableTunnels")
+		if config.DisableTunnels {
+			return errors.TraceNew("EnableLightProxy is incompatible with DisableTunnels")
+		}
+
+		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
+			return errors.TraceNew("EnableLightProxy is incompatible with disabled local proxies")
+		}
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
