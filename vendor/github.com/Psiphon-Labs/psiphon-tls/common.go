@@ -1109,6 +1109,13 @@ func (c *Config) Clone() *Config {
 		autoSessionTicketKeys:               c.autoSessionTicketKeys,
 
 		// [Psiphon]
+		ClientHelloPRNG:                c.ClientHelloPRNG,
+		GetClientHelloRandom:           c.GetClientHelloRandom,
+		UseObfuscatedSessionTickets:    c.UseObfuscatedSessionTickets,
+		PassthroughAddress:             c.PassthroughAddress,
+		PassthroughVerifyMessage:       c.PassthroughVerifyMessage,
+		PassthroughHistoryAddNew:       c.PassthroughHistoryAddNew,
+		PassthroughLogInvalidMessage:   c.PassthroughLogInvalidMessage,
 		InsecureSkipTimeVerify:         c.InsecureSkipTimeVerify,
 		ServerHelloMimicryMinimumDelay: c.ServerHelloMimicryMinimumDelay,
 		ServerHelloMimicryMaximumDelay: c.ServerHelloMimicryMaximumDelay,
