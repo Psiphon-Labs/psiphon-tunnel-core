@@ -209,7 +209,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDial: %s, bytesRead: %d, bytesWritten: %d, ` +
-		`failure: %v` + "\n"
+		`failure: %s` + "\n"
 
 	r.logf(
 		connectionFormat,
@@ -234,7 +234,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.ProxyCompletedUpstreamDial.Format(time.RFC3339Nano),
 		stats.BytesRead,
 		stats.BytesWritten,
-		stats.ConnectionFailure)
+		stats.Failure)
 }
 
 func (r *proxyEventReceiver) IrregularConnection(

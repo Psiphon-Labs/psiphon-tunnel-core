@@ -422,7 +422,7 @@ func (receiver *testLightProxyEventReceiver) Listening(address string) {
 func (receiver *testLightProxyEventReceiver) Connection(
 	stats *light.ConnectionStats) {
 
-	fmt.Printf("[Connection] failure: %v\n", stats.ConnectionFailure)
+	fmt.Printf("[Connection] failure: %v\n", stats.Failure)
 }
 
 func (receiver *testLightProxyEventReceiver) IrregularConnection(

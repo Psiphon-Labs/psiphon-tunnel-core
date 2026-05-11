@@ -539,7 +539,7 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDial: %s, bytesRead: %d, bytesWritten: %d, ` +
-		`failure: %v` + "\n"
+		`failure: %s` + "\n"
 
 	fmt.Printf(
 		connectionFormat,
@@ -564,7 +564,7 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.ProxyCompletedUpstreamDial.Format(time.RFC3339Nano),
 		stats.BytesRead,
 		stats.BytesWritten,
-		stats.ConnectionFailure)
+		stats.Failure)
 }
 
 func (r *testProxyEventReceiver) IrregularConnection(_ string, _ common.GeoIPData, irregularity string) {

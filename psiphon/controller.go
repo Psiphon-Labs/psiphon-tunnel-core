@@ -1790,35 +1790,33 @@ func (controller *Controller) dialLightProxyRace(
 	dialTimeout := time.Duration(
 		controller.lightProxyDialTimeout.Load())
 
-	lightDialCtx, cancelLightDial := context.WithTimeout(
+	lightDialCtx, cancel := context.WithTimeout(
 		controller.runCtx, dialTimeout)
-	defer cancelLightDial()
+	defer cancel()
 
 	lightResult := make(chan lightProxyDialResult)
 	var lightDialWaitGroup sync.WaitGroup
+
 	lightDialWaitGroup.Add(1)
 	go func() {
 		defer lightDialWaitGroup.Done()
 
 		conn, err := controller.dialLightProxy(
 			lightDialCtx, lightClient, remoteAddr)
-		if conn != nil && err == nil && lightDialCtx.Err() != nil {
-			conn.Close()
-			return
-		}
-
-		select {
-		case lightResult <- lightProxyDialResult{conn: conn, err: err}:
-		case <-lightDialCtx.Done():
-			if conn != nil {
-				conn.Close()
-			}
-		}
+		lightResult <- lightProxyDialResult{conn: conn, err: err}
 	}()
 	defer lightDialWaitGroup.Wait()
 
+	cancelLightDial := func() {
+		cancel()
+		result := <-lightResult
+		if result.conn != nil {
+			_ = result.conn.Close()
+		}
+	}
+
 	// Simply poll for an active tunnel with a recent read. The getNextActiveTunnel
-	// call in inexpensive, while a signal on either new tunnel established
+	// call is inexpensive, while a signal on either new tunnel established
 	// or existing tunnel reads data is complex.
 	ticker := time.NewTicker(lightProxyTunnelRacePollInterval)
 	defer ticker.Stop()
@@ -1826,26 +1824,26 @@ func (controller *Controller) dialLightProxyRace(
 	for {
 		select {
 		case result := <-lightResult:
-			if result.err != nil {
 
-				// The light dial failed. The final fallback is
-				// Controller.Dial behavior when there is no light
-				// proxy configured and readInactiveThreshold is 0.
-				tunnel := controller.getNextActiveTunnel(0)
-				if tunnel != nil {
-					NoticeWarning(
-						"light proxy dial failed: %v", errors.Trace(result.err))
-					return nil, tunnel, nil
-				}
-				return nil, nil, errors.Trace(result.err)
+			if result.err == nil {
+				// Close downstreamConn when the light conn is closed. See
+				// Controller.Dial and TunneledConn.
+				return &lightProxyConn{
+					Conn:           result.conn,
+					downstreamConn: downstreamConn,
+				}, nil, nil
 			}
 
-			// Close downstreamConn when the light conn is closed. See
-			// Controller.Dial and TunneledConn.
-			return &lightProxyConn{
-				Conn:           result.conn,
-				downstreamConn: downstreamConn,
-			}, nil, nil
+			// The light dial failed. The final fallback is
+			// Controller.Dial behavior when there is no light
+			// proxy configured and readInactiveThreshold is 0.
+			tunnel := controller.getNextActiveTunnel(0)
+			if tunnel != nil {
+				NoticeWarning(
+					"light proxy dial failed: %v", errors.Trace(result.err))
+				return nil, tunnel, nil
+			}
+			return nil, nil, errors.Trace(result.err)
 
 		case <-ticker.C:
 			tunnel := controller.getNextActiveTunnel(readInactiveThreshold)

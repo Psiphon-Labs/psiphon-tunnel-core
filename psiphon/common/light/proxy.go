@@ -234,7 +234,7 @@ func NewProxy(
 	proxy := &Proxy{
 		config:                config,
 		lookupGeoIP:           lookupGeoIP,
-		eventReceiver:         eventReceiver,
+		eventReceiver:         newRedactingProxyEventReceiver(eventReceiver),
 		ID:                    makeProxyID(config.DialAddress, config.ObfuscationKey),
 		proxyGeoIPData:        proxyGeoIPData,
 		tlsConfig:             tlsConfig,
@@ -387,6 +387,14 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			clientTLSDuration = time.Duration(header.TLSDuration)
 		}
 
+		failure := ""
+		if retErr != nil {
+			failure = retErr.Error()
+		}
+
+		// DestinationAddress is logged unredacted in the "disallowed
+		// destination" case.
+
 		stats := &ConnectionStats{
 			ProxyID:                    proxy.ID,
 			ProxyProviderID:            proxy.config.ProviderID,
@@ -412,7 +420,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			ProxyCompletedUpstreamDial: completedUpstreamDial,
 			BytesRead:                  bytesCounter.bytesRead.Load(),
 			BytesWritten:               bytesCounter.bytesWritten.Load(),
-			ConnectionFailure:          retErr,
+			Failure:                    failure,
 		}
 
 		// The event receiver assumes ownership of stats; do not access after
@@ -512,6 +520,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		dialCtx, "tcp", normalizedDestinationAddress)
 	dialCancel()
 	if err != nil {
+		err = common.RedactNetError(err)
 		return errors.Trace(err)
 	}
 
@@ -541,6 +550,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		if err != nil && ctx.Err() == nil {
 			// Debug since errors such as "connection reset by peer" occur
 			// during normal operation
+			err = common.RedactNetError(err)
 			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
 		}
 		lightConn.Close()
@@ -548,6 +558,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	_, err = common.CopyBuffer(
 		upstreamConn, lightConn, make([]byte, proxy.relayBufferSize))
 	if err != nil && ctx.Err() == nil {
+		err = common.RedactNetError(err)
 		proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
 	}
 	upstreamConn.Close()
@@ -617,4 +628,37 @@ func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 	} else {
 		proxy.concurrentConnections[limitIP] = count
 	}
+}
+
+// redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from
+// log messages and ConnectionStats.Failure errors.
+type redactingProxyEventReceiver struct {
+	ProxyEventReceiver
+}
+
+func newRedactingProxyEventReceiver(
+	eventReceiver ProxyEventReceiver) *redactingProxyEventReceiver {
+
+	return &redactingProxyEventReceiver{ProxyEventReceiver: eventReceiver}
+}
+
+func (r *redactingProxyEventReceiver) Connection(stats *ConnectionStats) {
+	stats.Failure = common.RedactIPAddressesString(stats.Failure)
+	r.ProxyEventReceiver.Connection(stats)
+}
+
+func (r *redactingProxyEventReceiver) DebugLog(proxyID string, message string) {
+	r.ProxyEventReceiver.DebugLog(proxyID, common.RedactIPAddressesString(message))
+}
+
+func (r *redactingProxyEventReceiver) InfoLog(proxyID string, message string) {
+	r.ProxyEventReceiver.InfoLog(proxyID, common.RedactIPAddressesString(message))
+}
+
+func (r *redactingProxyEventReceiver) WarningLog(proxyID string, message string) {
+	r.ProxyEventReceiver.WarningLog(proxyID, common.RedactIPAddressesString(message))
+}
+
+func (r *redactingProxyEventReceiver) ErrorLog(proxyID string, message string) {
+	r.ProxyEventReceiver.ErrorLog(proxyID, common.RedactIPAddressesString(message))
 }

@@ -88,7 +88,7 @@ type ConnectionStats struct {
 	ProxyCompletedUpstreamDial time.Time
 	BytesRead                  int64
 	BytesWritten               int64
-	ConnectionFailure          error
+	Failure                    string
 }
 
 // makeProxyID derives a unique proxy ID from a proxy's dial address and
