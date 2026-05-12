@@ -1265,6 +1265,11 @@ type Config struct {
 	LightProxyTunnelInactiveThresholdMilliseconds *int     `json:",omitempty"`
 	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
 
+	TacticsWaitPeriodMilliseconds  *int     `json:",omitempty"`
+	TacticsRetryPeriodMilliseconds *int     `json:",omitempty"`
+	TacticsRetryPeriodJitter       *float64 `json:",omitempty"`
+	TacticsTimeoutMilliseconds     *int     `json:",omitempty"`
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -3248,6 +3253,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.TunnelConnectTimeoutSeconds != nil {
 		applyParameters[parameters.TunnelConnectTimeout] = fmt.Sprintf("%ds", *config.TunnelConnectTimeoutSeconds)
+	}
+
+	if config.TacticsWaitPeriodMilliseconds != nil {
+		applyParameters[parameters.TacticsWaitPeriod] = fmt.Sprintf("%dms", *config.TacticsWaitPeriodMilliseconds)
+	}
+
+	if config.TacticsRetryPeriodMilliseconds != nil {
+		applyParameters[parameters.TacticsRetryPeriod] = fmt.Sprintf("%dms", *config.TacticsRetryPeriodMilliseconds)
+	}
+
+	if config.TacticsRetryPeriodJitter != nil {
+		applyParameters[parameters.TacticsRetryPeriodJitter] = *config.TacticsRetryPeriodJitter
+	}
+
+	if config.TacticsTimeoutMilliseconds != nil {
+		applyParameters[parameters.TacticsTimeout] = fmt.Sprintf("%dms", *config.TacticsTimeoutMilliseconds)
 	}
 
 	if config.SSHChannelWindowSize != nil {

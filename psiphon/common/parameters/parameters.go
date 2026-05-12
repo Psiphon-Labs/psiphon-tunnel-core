@@ -627,8 +627,8 @@ var defaultParameters = map[string]struct {
 	NetworkLatencyMultiplierMax:    {value: 3.0, minimum: 1.0},
 	NetworkLatencyMultiplierLambda: {value: 2.0, minimum: 0.001},
 
-	TacticsWaitPeriod:        {value: 10 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
-	TacticsRetryPeriod:       {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	TacticsWaitPeriod:        {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	TacticsRetryPeriod:       {value: 2 * time.Second, minimum: 1 * time.Millisecond},
 	TacticsRetryPeriodJitter: {value: 0.3, minimum: 0.0},
 	TacticsTimeout:           {value: 2 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
