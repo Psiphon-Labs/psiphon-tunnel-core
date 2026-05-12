@@ -538,7 +538,8 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		`destination: %s, tlsProfile: %s, sni: %s, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
-		`completedUpstreamDial: %s, bytesRead: %d, bytesWritten: %d, ` +
+		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
+		`bytesRead: %d, bytesWritten: %d, ` +
 		`failure: %s` + "\n"
 
 	fmt.Printf(
@@ -561,7 +562,9 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.ProxyCompletedTCP.Format(time.RFC3339Nano),
 		stats.ProxyCompletedTLS.Format(time.RFC3339Nano),
 		stats.ProxyCompletedLightHeader.Format(time.RFC3339Nano),
-		stats.ProxyCompletedUpstreamDial.Format(time.RFC3339Nano),
+		stats.ProxyCompletedUpstreamDNS.Format(time.RFC3339Nano),
+		stats.ProxyCompletedUpstreamTCP.Format(time.RFC3339Nano),
+		stats.UpstreamDNSCached,
 		stats.BytesRead,
 		stats.BytesWritten,
 		stats.Failure)

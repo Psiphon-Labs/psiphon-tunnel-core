@@ -64,31 +64,33 @@ type SignedProxyEntry struct {
 // header was not read successfully, and the proxy's phase-completed
 // timestamps will be zero values when the phase was not completed.
 type ConnectionStats struct {
-	ProxyID                    string
-	ProxyProviderID            string
-	ProxyGeoIPData             common.GeoIPData
-	ProxyConnectionNum         int64
-	ClientGeoIPData            common.GeoIPData
-	SponsorID                  string
-	ClientPlatform             string
-	ClientBuildRev             string
-	DeviceRegion               string
-	SessionID                  string
-	ProxyEntryTracker          int64
-	NetworkType                string
-	ClientConnectionNum        int64
-	DestinationAddress         string
-	TLSProfile                 string
-	SNI                        string
-	ClientTCPDuration          time.Duration
-	ClientTLSDuration          time.Duration
-	ProxyCompletedTCP          time.Time
-	ProxyCompletedTLS          time.Time
-	ProxyCompletedLightHeader  time.Time
-	ProxyCompletedUpstreamDial time.Time
-	BytesRead                  int64
-	BytesWritten               int64
-	Failure                    string
+	ProxyID                   string
+	ProxyProviderID           string
+	ProxyGeoIPData            common.GeoIPData
+	ProxyConnectionNum        int64
+	ClientGeoIPData           common.GeoIPData
+	SponsorID                 string
+	ClientPlatform            string
+	ClientBuildRev            string
+	DeviceRegion              string
+	SessionID                 string
+	ProxyEntryTracker         int64
+	NetworkType               string
+	ClientConnectionNum       int64
+	DestinationAddress        string
+	TLSProfile                string
+	SNI                       string
+	ClientTCPDuration         time.Duration
+	ClientTLSDuration         time.Duration
+	ProxyCompletedTCP         time.Time
+	ProxyCompletedTLS         time.Time
+	ProxyCompletedLightHeader time.Time
+	ProxyCompletedUpstreamDNS time.Time
+	ProxyCompletedUpstreamTCP time.Time
+	UpstreamDNSCached         bool
+	BytesRead                 int64
+	BytesWritten              int64
+	Failure                   string
 }
 
 // makeProxyID derives a unique proxy ID from a proxy's dial address and

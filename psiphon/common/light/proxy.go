@@ -49,25 +49,30 @@ const (
 	defaultRateLimitQuantity        = 100000
 	defaultRateLimitInterval        = 1 * time.Minute
 	defaultMaxConcurrent            = 50000
+	defaultDNSResolverCacheMaxSize  = 256
+	defaultDNSResolverCacheTTL      = 10 * time.Second
+	dnsResolverCacheReapFrequency   = 1 * time.Minute
 )
 
 // ProxyConfig specifies the configuration of a light proxy.
 type ProxyConfig struct {
-	Protocol            string   `json:",omitempty"`
-	ProviderID          string   `json:",omitempty"`
-	ListenAddress       string   `json:",omitempty"`
-	DialAddress         string   `json:",omitempty"`
-	ObfuscationKey      string   `json:",omitempty"`
-	TLSCertificate      []byte   `json:",omitempty"`
-	TLSPrivateKey       []byte   `json:",omitempty"`
-	PassthroughAddress  string   `json:",omitempty"`
-	AllowedDestinations []string `json:",omitempty"`
-	InactivityTimeout   string   `json:",omitempty"`
-	UpstreamDialTimeout string   `json:",omitempty"`
-	RelayBufferSize     int      `json:",omitempty"`
-	RateLimitQuantity   *int     `json:",omitempty"`
-	RateLimitInterval   string   `json:",omitempty"`
-	MaxConcurrent       *int     `json:",omitempty"`
+	Protocol                string   `json:",omitempty"`
+	ProviderID              string   `json:",omitempty"`
+	ListenAddress           string   `json:",omitempty"`
+	DialAddress             string   `json:",omitempty"`
+	ObfuscationKey          string   `json:",omitempty"`
+	TLSCertificate          []byte   `json:",omitempty"`
+	TLSPrivateKey           []byte   `json:",omitempty"`
+	PassthroughAddress      string   `json:",omitempty"`
+	AllowedDestinations     []string `json:",omitempty"`
+	InactivityTimeout       string   `json:",omitempty"`
+	UpstreamDialTimeout     string   `json:",omitempty"`
+	RelayBufferSize         int      `json:",omitempty"`
+	RateLimitQuantity       *int     `json:",omitempty"`
+	RateLimitInterval       string   `json:",omitempty"`
+	MaxConcurrent           *int     `json:",omitempty"`
+	DNSResolverCacheMaxSize *int     `json:",omitempty"`
+	DNSResolverCacheTTL     string   `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -113,6 +118,9 @@ type Proxy struct {
 	limitsMutex           sync.Mutex
 	concurrentConnections map[string]int
 	rateLimiters          *lrucache.Cache
+
+	dnsResolver *net.Resolver
+	dnsCache    *lrucache.Cache
 
 	connectionNumber atomic.Int64
 }
@@ -207,6 +215,51 @@ func NewProxy(
 		maxConcurrent = *config.MaxConcurrent
 	}
 
+	dnsResolverCacheMaxSize := defaultDNSResolverCacheMaxSize
+	if config.DNSResolverCacheMaxSize != nil {
+		if *config.DNSResolverCacheMaxSize < 0 {
+			return nil, errors.TraceNew("invalid max cache size")
+		}
+		dnsResolverCacheMaxSize = *config.DNSResolverCacheMaxSize
+	}
+
+	dnsResolverCacheTTL := defaultDNSResolverCacheTTL
+	if config.DNSResolverCacheTTL != "" {
+		var err error
+		dnsResolverCacheTTL, err = time.ParseDuration(config.DNSResolverCacheTTL)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	// Initialize the DNS resolver and optional cache following the pattern in
+	// psiphon/server.sshClient.getDNSResolver. See additional comments in
+	// that function.
+	//
+	// The light proxy is intended for use by Psiphon Library apps which will
+	// largely all send traffic to the same small set of domains in allowed
+	// destinations. The standard library net.Resolver with "singleflight"
+	// functionality and a cache are shared across all light proxy
+	// connections as timing leaks are not considered a threat in this use
+	// case.
+	//
+	// Since actual DNS response TTLs are not exposed by net.Resolver, the
+	// cache should be configured with a conservative TTL -- 10s of seconds.
+	//
+	// PreferGo, equivalent to GODEBUG=netdns=go, is specified in order to
+	// avoid any cases where Go's resolver fails over to the cgo-based
+	// resolver while will consume an OS thread.
+
+	dnsResolver := &net.Resolver{PreferGo: true}
+
+	var dnsCache *lrucache.Cache
+	if dnsResolverCacheMaxSize > 0 && dnsResolverCacheTTL > 0 {
+		dnsCache = lrucache.NewWithLRU(
+			dnsResolverCacheTTL,
+			dnsResolverCacheReapFrequency,
+			dnsResolverCacheMaxSize)
+	}
+
 	host, _, err := net.SplitHostPort(config.DialAddress)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -245,6 +298,8 @@ func NewProxy(
 		relayBufferSize:       relayBufferSize,
 		rateLimitQuantity:     rateLimitQuantity,
 		rateLimitInterval:     rateLimitInterval,
+		dnsResolver:           dnsResolver,
+		dnsCache:              dnsCache,
 		maxConcurrent:         maxConcurrent,
 		concurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
@@ -358,7 +413,9 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	var completedLightHeader time.Time
 	var header *lightHeader
 	var normalizedDestinationAddress string
-	var completedUpstreamDial time.Time
+	var completedUpstreamDNS time.Time
+	var completedUpstreamTCP time.Time
+	var upstreamDNSCached bool
 
 	connectionNum := proxy.connectionNumber.Add(1)
 
@@ -396,31 +453,33 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		// destination" case.
 
 		stats := &ConnectionStats{
-			ProxyID:                    proxy.ID,
-			ProxyProviderID:            proxy.config.ProviderID,
-			ProxyGeoIPData:             proxy.proxyGeoIPData,
-			ProxyConnectionNum:         connectionNum,
-			ClientGeoIPData:            geoIPData,
-			SponsorID:                  sponsorID,
-			ClientPlatform:             clientPlatform,
-			ClientBuildRev:             clientBuildRev,
-			DeviceRegion:               deviceRegion,
-			SessionID:                  sessionID,
-			ProxyEntryTracker:          proxyEntryTracker,
-			NetworkType:                networkType,
-			ClientConnectionNum:        clientConnectionNum,
-			DestinationAddress:         normalizedDestinationAddress,
-			TLSProfile:                 tlsProfile,
-			SNI:                        clientSNI,
-			ClientTCPDuration:          clientTCPDuration,
-			ClientTLSDuration:          clientTLSDuration,
-			ProxyCompletedTCP:          completedTCP,
-			ProxyCompletedTLS:          completedTLS,
-			ProxyCompletedLightHeader:  completedLightHeader,
-			ProxyCompletedUpstreamDial: completedUpstreamDial,
-			BytesRead:                  bytesCounter.bytesRead.Load(),
-			BytesWritten:               bytesCounter.bytesWritten.Load(),
-			Failure:                    failure,
+			ProxyID:                   proxy.ID,
+			ProxyProviderID:           proxy.config.ProviderID,
+			ProxyGeoIPData:            proxy.proxyGeoIPData,
+			ProxyConnectionNum:        connectionNum,
+			ClientGeoIPData:           geoIPData,
+			SponsorID:                 sponsorID,
+			ClientPlatform:            clientPlatform,
+			ClientBuildRev:            clientBuildRev,
+			DeviceRegion:              deviceRegion,
+			SessionID:                 sessionID,
+			ProxyEntryTracker:         proxyEntryTracker,
+			NetworkType:               networkType,
+			ClientConnectionNum:       clientConnectionNum,
+			DestinationAddress:        normalizedDestinationAddress,
+			TLSProfile:                tlsProfile,
+			SNI:                       clientSNI,
+			ClientTCPDuration:         clientTCPDuration,
+			ClientTLSDuration:         clientTLSDuration,
+			ProxyCompletedTCP:         completedTCP,
+			ProxyCompletedTLS:         completedTLS,
+			ProxyCompletedLightHeader: completedLightHeader,
+			ProxyCompletedUpstreamDNS: completedUpstreamDNS,
+			ProxyCompletedUpstreamTCP: completedUpstreamTCP,
+			UpstreamDNSCached:         upstreamDNSCached,
+			BytesRead:                 bytesCounter.bytesRead.Load(),
+			BytesWritten:              bytesCounter.bytesWritten.Load(),
+			Failure:                   failure,
 		}
 
 		// The event receiver assumes ownership of stats; do not access after
@@ -516,15 +575,25 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	}
 
 	dialCtx, dialCancel := context.WithTimeout(ctx, proxy.upstreamDialTimeout)
-	upstreamConn, err := (&net.Dialer{}).DialContext(
-		dialCtx, "tcp", normalizedDestinationAddress)
-	dialCancel()
+	defer dialCancel()
+
+	upstreamDialAddress, cached, err := proxy.resolve(dialCtx, normalizedDestinationAddress)
 	if err != nil {
 		err = common.RedactNetError(err)
 		return errors.Trace(err)
 	}
 
-	completedUpstreamDial = time.Now().UTC()
+	upstreamDNSCached = cached
+	completedUpstreamDNS = time.Now().UTC()
+
+	upstreamConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", upstreamDialAddress)
+	if err != nil {
+		err = common.RedactNetError(err)
+		return errors.Trace(err)
+	}
+	dialCancel()
+
+	completedUpstreamTCP = time.Now().UTC()
 
 	// TODO: optionally send PROXY protocol header to destination. See
 	// addProxyProtocolHeader in psiphon/server.sshClient.handleTCPChannel.
@@ -628,6 +697,76 @@ func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 	} else {
 		proxy.concurrentConnections[limitIP] = count
 	}
+}
+
+func (proxy *Proxy) resolve(
+	ctx context.Context,
+	destinationAddress string) (string, bool, error) {
+
+	cached := false
+
+	host, port, err := net.SplitHostPort(destinationAddress)
+	if err != nil {
+		return "", false, errors.Trace(err)
+	}
+
+	if net.ParseIP(host) != nil {
+		return destinationAddress, false, nil
+	}
+
+	var IPs []net.IPAddr
+
+	if proxy.dnsCache != nil {
+
+		// Cached values may be read by concurrent goroutines and
+		// must not be mutated.
+
+		cachedIPs, ok := proxy.dnsCache.Get(host)
+		if ok {
+			IPs = cachedIPs.([]net.IPAddr)
+			cached = true
+		}
+	}
+
+	if len(IPs) == 0 {
+
+		var err error
+		IPs, err = proxy.dnsResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			err = common.RedactNetError(err)
+			return "", false, errors.Trace(err)
+		}
+
+		if proxy.dnsCache != nil && len(IPs) > 0 {
+			proxy.dnsCache.Add(host, IPs, lrucache.DefaultExpiration)
+		}
+	}
+
+	// IPv4 is preferred in case the host has limited IPv6 routing, following
+	// the pattern in psiphon/server.sshClient.handleTCPChannel. IPv6 is
+	// selected and attempted only when there's no IPv4 option.
+	//
+	// TODO:
+	// - shuffle list to try other IPs?
+	// - replicate Go's net.Dialer Happy Eyeballs (concurrent IPv4/IPv6 dials)
+	//   and multi-address fallback (try additional IPv4 candidates in
+	//   parallel).
+
+	var IP net.IP
+	for _, ip := range IPs {
+		if ip.IP.To4() != nil {
+			IP = ip.IP
+			break
+		}
+	}
+	if IP == nil && len(IPs) > 0 {
+		IP = IPs[0].IP
+	}
+	if IP == nil {
+		return "", false, errors.TraceNew("no IP address")
+	}
+
+	return net.JoinHostPort(IP.String(), port), cached, nil
 }
 
 // redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from
