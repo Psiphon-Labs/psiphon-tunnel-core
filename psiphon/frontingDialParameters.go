@@ -351,7 +351,12 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 
 		var deviceBinder DeviceBinder
 		if useDeviceBinder {
-			deviceBinder = config.DeviceBinder
+			// Use config.deviceBinder, with wired up logging, not
+			// config.DeviceBinder; other tunnel-core dials do this
+			// indirectly via psiphon.DialConfig. config.deviceBinder also
+			// carries the upstream interface binding in a split-interface
+			// in-proxy proxy configuration.
+			deviceBinder = config.deviceBinder
 		}
 
 		f.dialConfig = &DialConfig{

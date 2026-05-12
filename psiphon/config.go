@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -666,8 +668,27 @@ type Config struct {
 	// connection on the default interface and the proxy/server connection on
 	// the designated interface.
 	//
+	// When set, tunnel-core binds all upstream-destined dials -- including
+	// the broker connection, the proxy/server connection, and any other
+	// in-proxy proxy upstream traffic -- to this interface.
+	//
 	// Only supported on Linux, and cannot be used with DeviceBinder.
 	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
+
+	// InproxyProxySplitDownstreamInterfaceName specifies the network
+	// interface that the in-proxy proxy will use for downstream
+	// proxy/client-facing dials, including ICE, STUN, and the WebRTC data
+	// channel. It is the complement of InproxyProxySplitUpstreamInterfaceName
+	// in a split interface setup.
+	//
+	// When InproxyProxySplitUpstreamInterfaceName is set and this is unset,
+	// tunnel-core falls back to selecting the first non-loopback, up
+	// interface whose name does not match the upstream interface. The
+	// fallback is best-effort and may not select the intended interface in
+	// systems with multiple non-upstream interfaces.
+	//
+	// Only supported on Linux, and cannot be used with DeviceBinder.
+	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy
 	// clients to be proxied concurrently. When InproxyEnableProxy is set,
@@ -1264,8 +1285,9 @@ type Config struct {
 	sponsorID          string
 	authorizations     []string
 
-	deviceBinder    DeviceBinder
-	networkIDGetter *cachingNetworkIDGetter
+	deviceBinder                  DeviceBinder
+	inproxyDownstreamDeviceBinder DeviceBinder
+	networkIDGetter               *cachingNetworkIDGetter
 
 	clientFeatures []string
 
@@ -1632,6 +1654,14 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if config.InproxyProxySplitUpstreamInterfaceName != "" && config.DeviceBinder != nil {
 		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName cannot be used with DeviceBinder")
 	}
+	if config.InproxyProxySplitDownstreamInterfaceName != "" &&
+		config.InproxyProxySplitUpstreamInterfaceName == "" {
+		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName requires InproxyProxySplitUpstreamInterfaceName")
+	}
+	if config.InproxyProxySplitDownstreamInterfaceName != "" &&
+		config.InproxyProxySplitDownstreamInterfaceName == config.InproxyProxySplitUpstreamInterfaceName {
+		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName must differ from InproxyProxySplitUpstreamInterfaceName")
+	}
 
 	if config.InproxyEnableProxy {
 
@@ -1765,6 +1795,41 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if config.DeviceBinder != nil {
 		config.deviceBinder = newLoggingDeviceBinder(config.DeviceBinder)
+	} else if config.InproxyProxySplitUpstreamInterfaceName != "" {
+
+		// When split upstream is configured, wire up an internal
+		// DeviceBinder so that all upstream-destined dials -- including the
+		// broker connection, the in-proxy proxy/server connection, and
+		// related tunnel-core dials -- bind to the upstream interface. A
+		// separate downstream DeviceBinder is wired up for ICE, STUN, and
+		// WebRTC mux sockets that must traverse the non-upstream interface.
+		//
+		// Both binders must be resolved here, before any sockets are
+		// created. If the downstream interface cannot be determined,
+		// Commit fails: silently leaving the downstream binder unset would
+		// cause the downstream call sites to either fall back to the
+		// upstream binder or leave sockets unbound, both of which defeat
+		// the split-interface configuration.
+
+		downstreamInterfaceName := config.InproxyProxySplitDownstreamInterfaceName
+		if downstreamInterfaceName == "" {
+			downstreamInterfaceName = findNonExcludedInterfaceName(
+				config.InproxyProxySplitUpstreamInterfaceName)
+		}
+		if downstreamInterfaceName == "" {
+			return errors.TraceNew(
+				"unable to determine downstream interface for split-interface in-proxy proxy; " +
+					"set InproxyProxySplitDownstreamInterfaceName")
+		}
+
+		config.deviceBinder = newLoggingDeviceBinder(
+			&splitUpstreamDeviceBinder{
+				interfaceName: config.InproxyProxySplitUpstreamInterfaceName,
+			})
+		config.inproxyDownstreamDeviceBinder = newLoggingDeviceBinder(
+			&splitUpstreamDeviceBinder{
+				interfaceName: downstreamInterfaceName,
+			})
 	}
 
 	networkIDGetter := config.NetworkIDGetter
@@ -4213,6 +4278,48 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 		NoticeBindToDevice(deviceInfo)
 	}
 	return deviceInfo, err
+}
+
+// splitUpstreamDeviceBinder implements DeviceBinder by binding sockets to a
+// named network interface via tun.BindToDevice. It is used to wire up the
+// upstream and downstream interfaces in a split-interface in-proxy proxy
+// configuration; see InproxyProxySplitUpstreamInterfaceName and
+// InproxyProxySplitDownstreamInterfaceName.
+type splitUpstreamDeviceBinder struct {
+	interfaceName string
+}
+
+func (b *splitUpstreamDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
+	err := tun.BindToDevice(fileDescriptor, b.interfaceName)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return b.interfaceName, nil
+}
+
+// findNonExcludedInterfaceName returns the name of the first non-loopback,
+// up interface whose name does not match excludeName. It is the best-effort
+// fallback used when InproxyProxySplitDownstreamInterfaceName is unset in a
+// split-upstream configuration.
+func findNonExcludedInterfaceName(excludeName string) string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Name == excludeName {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil || len(addrs) == 0 {
+			continue
+		}
+		return iface.Name
+	}
+	return ""
 }
 
 const unknownNetworkID = "UNKNOWN"
