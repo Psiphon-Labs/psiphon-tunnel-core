@@ -603,3 +603,56 @@ func buildDirectoryTree(basePath, directoryName string) (*FileTree, error) {
 
 	return tree, nil
 }
+
+// stubDeviceBinder is a DeviceBinder that records the device name it would
+// bind to and returns it as the device info.
+type stubDeviceBinder struct{ name string }
+
+func (b *stubDeviceBinder) BindToDevice(int) (string, error) { return b.name, nil }
+
+func TestConfigDeviceBinderGetters(t *testing.T) {
+
+	host := &stubDeviceBinder{name: "host"}
+	upstream := &stubDeviceBinder{name: "upstream"}
+	downstream := &stubDeviceBinder{name: "downstream"}
+
+	// No split, no host binder: both getters return nil.
+	c := &Config{}
+	if c.deviceBinder() != nil {
+		t.Fatalf("deviceBinder: expected nil")
+	}
+	if c.splitDeviceBinder() != nil {
+		t.Fatalf("splitDeviceBinder: expected nil")
+	}
+
+	// No split, host binder set: both getters return the host binder.
+	c = &Config{hostDeviceBinder: host}
+	if c.deviceBinder() != host {
+		t.Fatalf("deviceBinder: expected host binder")
+	}
+	if c.splitDeviceBinder() != host {
+		t.Fatalf("splitDeviceBinder: expected fallback to host binder")
+	}
+
+	// Split mode: deviceBinder() returns upstream, splitDeviceBinder()
+	// returns downstream. hostDeviceBinder must be nil under the Commit
+	// validation in this mode, but the getter logic doesn't depend on
+	// that.
+	c = &Config{
+		splitInterface: &splitInterfaceState{
+			upstreamDeviceBinder:   upstream,
+			downstreamDeviceBinder: downstream,
+			upstreamInterfaceName:  "iface-up",
+		},
+	}
+	if c.deviceBinder() != upstream {
+		t.Fatalf("deviceBinder: expected upstream binder in split mode")
+	}
+	if c.splitDeviceBinder() != downstream {
+		t.Fatalf("splitDeviceBinder: expected downstream binder in split mode")
+	}
+	if c.splitInterfaceUpstreamInterfaceName() != "iface-up" {
+		t.Fatalf("splitInterfaceUpstreamInterfaceName: unexpected value %q",
+			c.splitInterfaceUpstreamInterfaceName())
+	}
+}

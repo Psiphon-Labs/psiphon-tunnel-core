@@ -214,7 +214,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	controller.untunneledDialConfig = &DialConfig{
 		UpstreamProxyURL: controller.config.UpstreamProxyURL,
 		CustomHeaders:    controller.config.CustomHeaders,
-		DeviceBinder:     controller.config.deviceBinder,
+		DeviceBinder:     controller.config.deviceBinder(),
 		IPv6Synthesizer:  controller.config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
 			// Note: when domain fronting would be used for untunneled dials a
@@ -3427,7 +3427,7 @@ func (controller *Controller) runInproxyProxy() {
 		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
-		ExcludeInterfaceName:                 controller.config.InproxyProxySplitUpstreamInterfaceName,
+		ExcludeInterfaceName:                 controller.config.splitInterfaceUpstreamInterfaceName(),
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
 		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,

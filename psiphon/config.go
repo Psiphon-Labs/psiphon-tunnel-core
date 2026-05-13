@@ -662,18 +662,24 @@ type Config struct {
 	InproxyProxySessionPrivateKey string `json:",omitempty"`
 
 	// InproxyProxySplitUpstreamInterfaceName specifies a network interface
-	// that the in-proxy proxy will use for upstream destination dialing. The
-	// specified interface is also excluded from proxy ICE gathering. This is
-	// intended to support split interface setups with the proxy/client
-	// connection on the default interface and the proxy/server connection on
-	// the designated interface.
+	// that the in-proxy proxy will use for upstream destination dialing,
+	// including the broker connection, the proxy/server connection, and any
+	// other in-proxy proxy upstream traffic. The specified interface is
+	// also excluded from proxy ICE gathering. This is intended to support
+	// split interface setups with the proxy/client connection on one
+	// interface and the proxy/server connection on the other.
 	//
-	// When set, tunnel-core binds all upstream-destined dials -- including
-	// the broker connection, the proxy/server connection, and any other
-	// in-proxy proxy upstream traffic -- to this interface.
+	// Setting either InproxyProxySplitUpstreamInterfaceName or
+	// InproxyProxySplitDownstreamInterfaceName activates split-interface
+	// mode. When only one is set, tunnel-core fills in the counterpart by
+	// selecting the first non-loopback, up interface that has at least one
+	// address and is not the set interface. This auto-detection is
+	// best-effort and may not select the intended interface in systems with
+	// more than two eligible interfaces; setting both fields explicitly is
+	// recommended.
 	//
 	// Supported on Linux and Windows, and cannot be used with DeviceBinder.
-	// On Windows, the interface name must match the FriendlyName that Go
+	// On Windows, interface names must match the FriendlyName that Go
 	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
 	// / IPV6_UNICAST_IF, which is semantically "route via interface X"
 	// rather than the stronger Linux SO_BINDTODEVICE.
@@ -683,17 +689,9 @@ type Config struct {
 	// interface that the in-proxy proxy will use for downstream
 	// proxy/client-facing dials, including ICE, STUN, and the WebRTC data
 	// channel. It is the complement of InproxyProxySplitUpstreamInterfaceName
-	// in a split interface setup.
-	//
-	// When InproxyProxySplitUpstreamInterfaceName is set and this is unset,
-	// tunnel-core falls back to selecting the first non-loopback, up
-	// interface whose name does not match the upstream interface. The
-	// fallback is best-effort and may not select the intended interface in
-	// systems with multiple non-upstream interfaces.
-	//
-	// Supported on Linux and Windows, with the same caveats as
-	// InproxyProxySplitUpstreamInterfaceName. Cannot be used with
-	// DeviceBinder.
+	// in a split-interface setup. See InproxyProxySplitUpstreamInterfaceName
+	// for the activation, auto-detection, and platform support rules that
+	// apply to both fields.
 	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy
@@ -1291,9 +1289,9 @@ type Config struct {
 	sponsorID          string
 	authorizations     []string
 
-	deviceBinder                  DeviceBinder
-	inproxyDownstreamDeviceBinder DeviceBinder
-	networkIDGetter               *cachingNetworkIDGetter
+	hostDeviceBinder DeviceBinder
+	splitInterface   *splitInterfaceState
+	networkIDGetter  *cachingNetworkIDGetter
 
 	clientFeatures []string
 
@@ -1654,18 +1652,15 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
+	splitInterfaceMode := config.InproxyProxySplitUpstreamInterfaceName != "" ||
+		config.InproxyProxySplitDownstreamInterfaceName != ""
+	if splitInterfaceMode && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		return errors.TraceNew("InproxyProxySplit{Upstream,Downstream}InterfaceName is only supported on Linux and Windows")
+	}
+	if splitInterfaceMode && config.DeviceBinder != nil {
+		return errors.TraceNew("InproxyProxySplit{Upstream,Downstream}InterfaceName cannot be used with DeviceBinder")
+	}
 	if config.InproxyProxySplitUpstreamInterfaceName != "" &&
-		runtime.GOOS != "linux" && runtime.GOOS != "windows" {
-		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName is only supported on Linux and Windows")
-	}
-	if config.InproxyProxySplitUpstreamInterfaceName != "" && config.DeviceBinder != nil {
-		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName cannot be used with DeviceBinder")
-	}
-	if config.InproxyProxySplitDownstreamInterfaceName != "" &&
-		config.InproxyProxySplitUpstreamInterfaceName == "" {
-		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName requires InproxyProxySplitUpstreamInterfaceName")
-	}
-	if config.InproxyProxySplitDownstreamInterfaceName != "" &&
 		config.InproxyProxySplitDownstreamInterfaceName == config.InproxyProxySplitUpstreamInterfaceName {
 		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName must differ from InproxyProxySplitUpstreamInterfaceName")
 	}
@@ -1789,7 +1784,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	config.SetDynamicConfig(config.SponsorId, config.Authorizations)
 
-	// Initialize config.deviceBinder and config.config.networkIDGetter. These
+	// Initialize config.hostDeviceBinder and config.networkIDGetter. These
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
 	// loggers.
 	//
@@ -1797,31 +1792,46 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	// cachingNetworkIDGetter doc).
 	//
 	// New variables are set to avoid mutating input config fields.
-	// Internally, code must use config.deviceBinder and
-	// config.networkIDGetter and not the input/exported fields.
+	// Internally, code must use Config.deviceBinder /
+	// Config.splitDeviceBinder and config.networkIDGetter and not the
+	// input/exported fields.
 
 	if config.DeviceBinder != nil {
-		config.deviceBinder = newLoggingDeviceBinder(config.DeviceBinder)
-	} else if config.InproxyProxySplitUpstreamInterfaceName != "" {
+		config.hostDeviceBinder = newLoggingDeviceBinder(config.DeviceBinder)
+	}
 
-		// When split upstream is configured, wire up an internal
-		// DeviceBinder so that all upstream-destined dials -- including the
-		// broker connection, the in-proxy proxy/server connection, and
-		// related tunnel-core dials -- bind to the upstream interface. A
-		// separate downstream DeviceBinder is wired up for ICE, STUN, and
-		// WebRTC mux sockets that must traverse the non-upstream interface.
+	if splitInterfaceMode {
+
+		// Resolve and wire up the split-interface state. Bind sites read
+		// the upstream and downstream binders via Config.deviceBinder and
+		// Config.splitDeviceBinder. The upstream binder is applied
+		// to all upstream-destined dials, including the broker
+		// connection, the in-proxy proxy/server connection, and related
+		// tunnel-core dials. The downstream binder is applied to ICE,
+		// STUN, and WebRTC mux sockets, which must traverse the
+		// non-upstream interface.
 		//
-		// Both binders must be resolved here, before any sockets are
-		// created. If the downstream interface cannot be determined,
-		// Commit fails: silently leaving the downstream binder unset would
-		// cause the downstream call sites to either fall back to the
-		// upstream binder or leave sockets unbound, both of which defeat
-		// the split-interface configuration.
+		// Either interface name may be left unset, in which case the
+		// counterpart is filled in by best-effort auto-detection against
+		// the explicitly set interface. Both names must be resolved here,
+		// before any sockets are created. If either ends up unresolved,
+		// Commit fails: silently leaving a binder unset would cause the
+		// affected call sites to either fall back to the wrong binder or
+		// leave sockets unbound, both of which defeat the split-interface
+		// configuration.
 
+		upstreamInterfaceName := config.InproxyProxySplitUpstreamInterfaceName
 		downstreamInterfaceName := config.InproxyProxySplitDownstreamInterfaceName
+		if upstreamInterfaceName == "" {
+			upstreamInterfaceName = findInterfaceExcluding(downstreamInterfaceName)
+		}
 		if downstreamInterfaceName == "" {
-			downstreamInterfaceName = findNonExcludedInterfaceName(
-				config.InproxyProxySplitUpstreamInterfaceName)
+			downstreamInterfaceName = findInterfaceExcluding(upstreamInterfaceName)
+		}
+		if upstreamInterfaceName == "" {
+			return errors.TraceNew(
+				"unable to determine upstream interface for split-interface in-proxy proxy; " +
+					"set InproxyProxySplitUpstreamInterfaceName")
 		}
 		if downstreamInterfaceName == "" {
 			return errors.TraceNew(
@@ -1829,14 +1839,13 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 					"set InproxyProxySplitDownstreamInterfaceName")
 		}
 
-		config.deviceBinder = newLoggingDeviceBinder(
-			&splitUpstreamDeviceBinder{
-				interfaceName: config.InproxyProxySplitUpstreamInterfaceName,
-			})
-		config.inproxyDownstreamDeviceBinder = newLoggingDeviceBinder(
-			&splitUpstreamDeviceBinder{
-				interfaceName: downstreamInterfaceName,
-			})
+		config.splitInterface = &splitInterfaceState{
+			upstreamDeviceBinder: newLoggingDeviceBinder(
+				&interfaceDeviceBinder{interfaceName: upstreamInterfaceName}),
+			downstreamDeviceBinder: newLoggingDeviceBinder(
+				&interfaceDeviceBinder{interfaceName: downstreamInterfaceName}),
+			upstreamInterfaceName: upstreamInterfaceName,
+		}
 	}
 
 	networkIDGetter := config.NetworkIDGetter
@@ -4287,16 +4296,65 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 	return deviceInfo, err
 }
 
-// splitUpstreamDeviceBinder implements DeviceBinder by binding sockets to a
+// splitInterfaceState holds the resolved split-interface in-proxy proxy
+// configuration. It is nil unless split-interface mode is active. See
+// InproxyProxySplitUpstreamInterfaceName and
+// InproxyProxySplitDownstreamInterfaceName.
+//
+// The upstream and downstream binders are logging-wrapped, ready to use at
+// bind sites. upstreamInterfaceName is the resolved name, exposed for call
+// sites that need it as a string (e.g., ICE gathering exclusion).
+type splitInterfaceState struct {
+	upstreamDeviceBinder   DeviceBinder
+	downstreamDeviceBinder DeviceBinder
+	upstreamInterfaceName  string
+}
+
+// deviceBinder returns the default DeviceBinder for dials. In
+// split-interface mode it is the binder for the upstream interface;
+// otherwise it is the host-app-provided DeviceBinder (which may be nil).
+// The returned binder, when non-nil, is logging-wrapped.
+func (config *Config) deviceBinder() DeviceBinder {
+	if config.splitInterface != nil {
+		return config.splitInterface.upstreamDeviceBinder
+	}
+	return config.hostDeviceBinder
+}
+
+// splitDeviceBinder returns the DeviceBinder for the split (downstream /
+// ICE-facing) side of a split-interface configuration. Outside split mode
+// it falls back to deviceBinder, so callers can use splitDeviceBinder
+// unconditionally to mean "the split-specific binder if relevant, the
+// regular one otherwise". The returned binder, when non-nil, is
+// logging-wrapped.
+func (config *Config) splitDeviceBinder() DeviceBinder {
+	if config.splitInterface != nil {
+		return config.splitInterface.downstreamDeviceBinder
+	}
+	return config.deviceBinder()
+}
+
+// splitInterfaceUpstreamInterfaceName returns the resolved upstream
+// interface name in split-interface mode, or "" otherwise. It is used by
+// call sites that need the upstream interface name as a string, such as
+// ICE gathering exclusion.
+func (config *Config) splitInterfaceUpstreamInterfaceName() string {
+	if config.splitInterface != nil {
+		return config.splitInterface.upstreamInterfaceName
+	}
+	return ""
+}
+
+// interfaceDeviceBinder implements DeviceBinder by binding sockets to a
 // named network interface via tun.BindToDevice. It is used to wire up the
 // upstream and downstream interfaces in a split-interface in-proxy proxy
 // configuration; see InproxyProxySplitUpstreamInterfaceName and
 // InproxyProxySplitDownstreamInterfaceName.
-type splitUpstreamDeviceBinder struct {
+type interfaceDeviceBinder struct {
 	interfaceName string
 }
 
-func (b *splitUpstreamDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
+func (b *interfaceDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 	err := tun.BindToDevice(fileDescriptor, b.interfaceName)
 	if err != nil {
 		return "", errors.Trace(err)
@@ -4304,11 +4362,12 @@ func (b *splitUpstreamDeviceBinder) BindToDevice(fileDescriptor int) (string, er
 	return b.interfaceName, nil
 }
 
-// findNonExcludedInterfaceName returns the name of the first non-loopback,
-// up interface whose name does not match excludeName. It is the best-effort
-// fallback used when InproxyProxySplitDownstreamInterfaceName is unset in a
-// split-upstream configuration.
-func findNonExcludedInterfaceName(excludeName string) string {
+// findInterfaceExcluding returns the name of the first non-loopback, up
+// interface that has at least one address and whose name does not match
+// excludeName. It is the best-effort fallback used to fill in the
+// counterpart interface in a split-interface in-proxy proxy configuration
+// when only one of the upstream/downstream interface names is set.
+func findInterfaceExcluding(excludeName string) string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return ""
