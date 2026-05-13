@@ -1297,6 +1297,7 @@ type Config struct {
 
 	resolverMutex sync.Mutex
 	resolver      *resolver.Resolver
+	splitResolver *resolver.Resolver
 
 	committed bool
 
@@ -2057,6 +2058,28 @@ func (config *Config) SetResolver(resolver *resolver.Resolver) {
 func (config *Config) GetResolver() *resolver.Resolver {
 	config.resolverMutex.Lock()
 	defer config.resolverMutex.Unlock()
+	return config.resolver
+}
+
+// SetSplitResolver sets the current split-interface resolver, used in
+// split-interface mode for downstream/ICE-facing DNS resolves.
+func (config *Config) SetSplitResolver(resolver *resolver.Resolver) {
+	config.resolverMutex.Lock()
+	defer config.resolverMutex.Unlock()
+	config.splitResolver = resolver
+}
+
+// GetSplitResolver returns the resolver bound to the split (downstream /
+// ICE-facing) interface in split-interface mode. Outside split mode (or
+// when no split resolver has been set) it falls back to GetResolver, so
+// callers can use GetSplitResolver unconditionally for any
+// split-side-relevant resolve.
+func (config *Config) GetSplitResolver() *resolver.Resolver {
+	config.resolverMutex.Lock()
+	defer config.resolverMutex.Unlock()
+	if config.splitResolver != nil {
+		return config.splitResolver
+	}
 	return config.resolver
 }
 

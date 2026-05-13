@@ -340,11 +340,11 @@ func WaitForNetworkConnectivity(
 	}
 }
 
-// New Resolver creates a new resolver using the specified config.
-// useBindToDevice indicates whether to apply config.BindToDevice, when it
-// exists; set useBindToDevice to false when the resolve doesn't need to be
-// excluded from any VPN routing.
-func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
+// NewResolver creates a new resolver using the specified config.
+// deviceBinder, when non-nil, is applied to the resolver's UDP DNS sockets;
+// pass nil when the resolve doesn't need to be excluded from any VPN
+// routing.
+func NewResolver(config *Config, deviceBinder DeviceBinder) *resolver.Resolver {
 
 	p := config.GetParameters().Get()
 
@@ -359,8 +359,8 @@ func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 		networkConfig.GetDNSServers = config.DNSServerGetter.GetDNSServers
 	}
 
-	if useBindToDevice && config.DeviceBinder != nil {
-		networkConfig.BindToDevice = config.DeviceBinder.BindToDevice
+	if deviceBinder != nil {
+		networkConfig.BindToDevice = deviceBinder.BindToDevice
 		networkConfig.AllowDefaultResolverWithBindToDevice =
 			config.AllowDefaultDNSResolverWithBindToDevice
 	}

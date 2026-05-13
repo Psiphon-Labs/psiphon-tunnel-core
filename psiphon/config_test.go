@@ -29,6 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -654,5 +655,35 @@ func TestConfigDeviceBinderGetters(t *testing.T) {
 	if c.splitInterfaceUpstreamInterfaceName() != "iface-up" {
 		t.Fatalf("splitInterfaceUpstreamInterfaceName: unexpected value %q",
 			c.splitInterfaceUpstreamInterfaceName())
+	}
+}
+
+func TestConfigGetSplitResolverFallback(t *testing.T) {
+
+	c := &Config{}
+
+	// Both nil to start.
+	if c.GetResolver() != nil {
+		t.Fatalf("GetResolver: expected nil before SetResolver")
+	}
+	if c.GetSplitResolver() != nil {
+		t.Fatalf("GetSplitResolver: expected nil before SetResolver/SetSplitResolver")
+	}
+
+	// Main set, split unset: GetSplitResolver falls back to the main one.
+	main := &resolver.Resolver{}
+	c.SetResolver(main)
+	if got := c.GetSplitResolver(); got != main {
+		t.Fatalf("GetSplitResolver: expected fallback to main resolver, got %p", got)
+	}
+
+	// Both set: GetSplitResolver returns the split one.
+	split := &resolver.Resolver{}
+	c.SetSplitResolver(split)
+	if got := c.GetSplitResolver(); got != split {
+		t.Fatalf("GetSplitResolver: expected split resolver, got %p", got)
+	}
+	if got := c.GetResolver(); got != main {
+		t.Fatalf("GetResolver: expected main resolver, got %p", got)
 	}
 }

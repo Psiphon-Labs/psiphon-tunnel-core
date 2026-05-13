@@ -1810,9 +1810,10 @@ func (w *InproxyWebRTCDialInstance) STUNServerAddressSucceeded(RFC5780 bool, add
 	// between local client and proxy instances.
 
 	// Verify/extend the resolver cache entry for any resolved domain after a
-	// success.
+	// success. Use the split resolver, since STUN address resolution goes
+	// via the same in ResolveAddress (and thus its cache holds the entry).
 
-	resolver := w.config.GetResolver()
+	resolver := w.config.GetSplitResolver()
 	if resolver != nil {
 		resolver.VerifyCacheExtension(address)
 	}
@@ -1884,13 +1885,6 @@ func (w *InproxyWebRTCDialInstance) SetPortMappingProbe(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network, address string) (string, error) {
 
-	// Use the Psiphon resolver to resolve addresses.
-
-	r := w.config.GetResolver()
-	if r == nil {
-		return "", errors.TraceNew("missing resolver")
-	}
-
 	// Identify when the address to be resolved is one of the configured STUN
 	// servers, and, in those cases, use/replay any STUN dial parameters
 	// ResolveParameters; and record the resolved IP address for metrics.
@@ -1906,6 +1900,24 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 	var resolveParams *resolver.ResolveParameters
 	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
 		resolveParams = w.stunDialParameters.ResolveParameters
+	}
+
+	// Use the split resolver for STUN server resolves so that, in
+	// split-interface mode, the lookup goes via the downstream (ICE)
+	// interface; the upstream 2nd-hop dial uses the main resolver.
+	//
+	// Limitation: this assumes the only ICE-side resolves routed through
+	// ResolveAddress are the STUN server addresses. Any future ICE-side
+	// resolve (e.g. a TURN server) would silently route through the
+	// upstream resolver instead.
+	var r *resolver.Resolver
+	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
+		r = w.config.GetSplitResolver()
+	} else {
+		r = w.config.GetResolver()
+	}
+	if r == nil {
+		return "", errors.TraceNew("missing resolver")
 	}
 
 	resolved, err := r.ResolveAddress(

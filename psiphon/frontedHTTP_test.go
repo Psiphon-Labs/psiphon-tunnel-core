@@ -112,7 +112,7 @@ func TestFrontedHTTPClientInstance(t *testing.T) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	resolver := NewResolver(config, false)
+	resolver := NewResolver(config, nil)
 	defer resolver.Stop()
 	config.SetResolver(resolver)
 

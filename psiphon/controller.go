@@ -98,6 +98,7 @@ type Controller struct {
 	packetTunnelTransport                   *PacketTunnelTransport
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
+	splitResolver                           *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
 	tlsClientSessionCache                   utls.ClientSessionCache
 	quicTLSClientSessionCache               tls.ClientSessionCache
@@ -334,9 +335,20 @@ func (controller *Controller) Run(ctx context.Context) {
 	// domain concurrently.
 	//
 	// config.SetResolver makes this resolver available to MakeDialParameters.
-	controller.resolver = NewResolver(controller.config, true)
+	controller.resolver = NewResolver(controller.config, controller.config.deviceBinder())
 	defer controller.resolver.Stop()
 	controller.config.SetResolver(controller.resolver)
+
+	// In split-interface mode, also initialize a second resolver bound to
+	// the split (downstream) interface. This is used for ICE/STUN-side
+	// hostname resolves so that STUN server domains, etc., are resolved
+	// over the same interface their connections will traverse. Each
+	// resolver has its own cache (per resolver instance).
+	if controller.config.splitInterface != nil {
+		controller.splitResolver = NewResolver(controller.config, controller.config.splitDeviceBinder())
+		defer controller.splitResolver.Stop()
+		controller.config.SetSplitResolver(controller.splitResolver)
+	}
 
 	// Maintain a cache of steering IPs to be applied to dials. A steering IP
 	// is an alternate dial IP; for example, steering IPs may be specified by
@@ -2491,6 +2503,9 @@ func (controller *Controller) stopEstablishing() {
 
 	// Similarly, establishment generates the bulk of domain resolves.
 	emitDNSMetrics(controller.resolver)
+	if controller.splitResolver != nil {
+		emitDNSMetrics(controller.splitResolver)
+	}
 }
 
 func (controller *Controller) resetServerEntryIterationMetrics() {
