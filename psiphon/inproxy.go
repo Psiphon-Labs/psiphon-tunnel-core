@@ -1934,7 +1934,7 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) UDPListen(ctx context.Context) (net.PacketConn, error) {
 
-	// Create a new inproxyUDPConn for use as the in-proxy STUN and/ord WebRTC
+	// Create a new inproxyUDPConn for use as the in-proxy STUN and/or WebRTC
 	// UDP socket.
 
 	conn, err := newInproxyUDPConn(ctx, w.config)
