@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	std_errors "errors"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,7 @@ const (
 	defaultRateLimitQuantity        = 100000
 	defaultRateLimitInterval        = 1 * time.Minute
 	defaultMaxConcurrent            = 50000
+	defaultDialFallbackDelay        = 300 * time.Millisecond
 	defaultDNSResolverCacheMaxSize  = 256
 	defaultDNSResolverCacheTTL      = 10 * time.Second
 	dnsResolverCacheReapFrequency   = 1 * time.Minute
@@ -71,6 +73,7 @@ type ProxyConfig struct {
 	RateLimitQuantity       *int     `json:",omitempty"`
 	RateLimitInterval       string   `json:",omitempty"`
 	MaxConcurrent           *int     `json:",omitempty"`
+	DialFallbackDelay       string   `json:",omitempty"`
 	DNSResolverCacheMaxSize *int     `json:",omitempty"`
 	DNSResolverCacheTTL     string   `json:",omitempty"`
 }
@@ -114,6 +117,7 @@ type Proxy struct {
 	rateLimitQuantity     int
 	rateLimitInterval     time.Duration
 	maxConcurrent         int
+	dialFallbackDelay     time.Duration
 
 	limitsMutex           sync.Mutex
 	concurrentConnections map[string]int
@@ -215,6 +219,15 @@ func NewProxy(
 		maxConcurrent = *config.MaxConcurrent
 	}
 
+	dialFallbackDelay := defaultDialFallbackDelay
+	if config.DialFallbackDelay != "" {
+		var err error
+		dialFallbackDelay, err = time.ParseDuration(config.DialFallbackDelay)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	dnsResolverCacheMaxSize := defaultDNSResolverCacheMaxSize
 	if config.DNSResolverCacheMaxSize != nil {
 		if *config.DNSResolverCacheMaxSize < 0 {
@@ -301,6 +314,7 @@ func NewProxy(
 		dnsResolver:           dnsResolver,
 		dnsCache:              dnsCache,
 		maxConcurrent:         maxConcurrent,
+		dialFallbackDelay:     dialFallbackDelay,
 		concurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
 			0,
@@ -577,7 +591,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	dialCtx, dialCancel := context.WithTimeout(ctx, proxy.upstreamDialTimeout)
 	defer dialCancel()
 
-	upstreamDialAddress, cached, err := proxy.resolve(dialCtx, normalizedDestinationAddress)
+	upstreamAddrs, cached, err := proxy.resolve(dialCtx, normalizedDestinationAddress)
 	if err != nil {
 		err = common.RedactNetError(err)
 		return errors.Trace(err)
@@ -586,7 +600,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	upstreamDNSCached = cached
 	completedUpstreamDNS = time.Now().UTC()
 
-	upstreamConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", upstreamDialAddress)
+	upstreamConn, err := netDialParallel(dialCtx, proxy.dialFallbackDelay, upstreamAddrs)
 	if err != nil {
 		err = common.RedactNetError(err)
 		return errors.Trace(err)
@@ -701,72 +715,63 @@ func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 
 func (proxy *Proxy) resolve(
 	ctx context.Context,
-	destinationAddress string) (string, bool, error) {
+	destinationAddress string) (netTCPAddrs, bool, error) {
 
+	var addrs netTCPAddrs
 	cached := false
 
-	host, port, err := net.SplitHostPort(destinationAddress)
+	host, portStr, err := net.SplitHostPort(destinationAddress)
 	if err != nil {
-		return "", false, errors.Trace(err)
+		return addrs, false, errors.Trace(err)
 	}
 
-	if net.ParseIP(host) != nil {
-		return destinationAddress, false, nil
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return addrs, false, errors.Trace(err)
 	}
 
-	var IPs []net.IPAddr
+	IP := net.ParseIP(host)
+	if IP != nil {
+		return netIPAddrs(IP, port), false, nil
+	}
 
 	if proxy.dnsCache != nil {
 
+		// The cache key includes the port since the cached values are full
+		// TCP dial addresses, including port, partitioned and ready for
+		// netDialParallel. This does mean the same host with a different
+		// port will be a cache miss, but the much more common case is same
+		// host and port.
+		//
 		// Cached values may be read by concurrent goroutines and
 		// must not be mutated.
 
-		cachedIPs, ok := proxy.dnsCache.Get(host)
+		cachedAddrs, ok := proxy.dnsCache.Get(destinationAddress)
 		if ok {
-			IPs = cachedIPs.([]net.IPAddr)
+			addrs = cachedAddrs.(netTCPAddrs)
 			cached = true
 		}
 	}
 
-	if len(IPs) == 0 {
+	if addrs.isEmpty() {
 
-		var err error
-		IPs, err = proxy.dnsResolver.LookupIPAddr(ctx, host)
+		ipAddrs, err := proxy.dnsResolver.LookupIPAddr(ctx, host)
 		if err != nil {
 			err = common.RedactNetError(err)
-			return "", false, errors.Trace(err)
+			return addrs, false, errors.Trace(err)
 		}
 
-		if proxy.dnsCache != nil && len(IPs) > 0 {
-			proxy.dnsCache.Add(host, IPs, lrucache.DefaultExpiration)
+		addrs = netPartitionAddrs(ipAddrs, port)
+
+		if proxy.dnsCache != nil && !addrs.isEmpty() {
+			proxy.dnsCache.Add(
+				destinationAddress,
+				addrs,
+				lrucache.DefaultExpiration)
 		}
 	}
 
-	// IPv4 is preferred in case the host has limited IPv6 routing, following
-	// the pattern in psiphon/server.sshClient.handleTCPChannel. IPv6 is
-	// selected and attempted only when there's no IPv4 option.
-	//
-	// TODO:
-	// - shuffle list to try other IPs?
-	// - replicate Go's net.Dialer Happy Eyeballs (concurrent IPv4/IPv6 dials)
-	//   and multi-address fallback (try additional IPv4 candidates in
-	//   parallel).
-
-	var IP net.IP
-	for _, ip := range IPs {
-		if ip.IP.To4() != nil {
-			IP = ip.IP
-			break
-		}
-	}
-	if IP == nil && len(IPs) > 0 {
-		IP = IPs[0].IP
-	}
-	if IP == nil {
-		return "", false, errors.TraceNew("no IP address")
-	}
-
-	return net.JoinHostPort(IP.String(), port), cached, nil
+	return addrs, cached, nil
 }
 
 // redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from
