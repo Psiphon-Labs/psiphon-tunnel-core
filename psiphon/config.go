@@ -672,7 +672,11 @@ type Config struct {
 	// the broker connection, the proxy/server connection, and any other
 	// in-proxy proxy upstream traffic -- to this interface.
 	//
-	// Only supported on Linux, and cannot be used with DeviceBinder.
+	// Supported on Linux and Windows, and cannot be used with DeviceBinder.
+	// On Windows, the interface name must match the FriendlyName that Go
+	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
+	// / IPV6_UNICAST_IF, which is semantically "route via interface X"
+	// rather than the stronger Linux SO_BINDTODEVICE.
 	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyProxySplitDownstreamInterfaceName specifies the network
@@ -687,7 +691,9 @@ type Config struct {
 	// fallback is best-effort and may not select the intended interface in
 	// systems with multiple non-upstream interfaces.
 	//
-	// Only supported on Linux, and cannot be used with DeviceBinder.
+	// Supported on Linux and Windows, with the same caveats as
+	// InproxyProxySplitUpstreamInterfaceName. Cannot be used with
+	// DeviceBinder.
 	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy
@@ -1648,8 +1654,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	if config.InproxyProxySplitUpstreamInterfaceName != "" && runtime.GOOS != "linux" {
-		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName is only supported on Linux")
+	if config.InproxyProxySplitUpstreamInterfaceName != "" &&
+		runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName is only supported on Linux and Windows")
 	}
 	if config.InproxyProxySplitUpstreamInterfaceName != "" && config.DeviceBinder != nil {
 		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName cannot be used with DeviceBinder")
