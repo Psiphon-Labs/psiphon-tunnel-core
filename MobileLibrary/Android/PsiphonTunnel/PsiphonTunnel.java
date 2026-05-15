@@ -171,6 +171,10 @@ public class PsiphonTunnel {
          * @param region The server region received.
          */
         default void onConnectedServerRegion(String region) {}
+        /**
+         * Called when a light proxy is available to use even when no tunnel is connected.
+         */
+        default void onLightProxyAvailable() {}
         default void onExiting() {}
     }
 
@@ -978,6 +982,8 @@ public class PsiphonTunnel {
                         data.getLong("bytesDown"),
                         personalRegionActivity,
                         commonRegionActivity);
+            } else if (noticeType.equals("LightProxyAvailable")) {
+                mHostService.onLightProxyAvailable();
             }
 
             if (diagnostic) {

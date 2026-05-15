@@ -331,6 +331,11 @@ followed by a tunnel-core shutdown.
  */
 - (void)onConnectedServerRegion:(NSString * _Nonnull)region;
 
+/*!
+ Called when a light proxy is available to use even when no tunnel is connected.
+ */
+- (void)onLightProxyAvailable;
+
 @end
 
 /*!

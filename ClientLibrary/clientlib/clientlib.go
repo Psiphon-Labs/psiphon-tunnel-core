@@ -266,6 +266,12 @@ func StartTunnel(
 		config.DisableLocalHTTPProxy = *params.DisableLocalHTTPProxy
 	} // else use the value in the config
 
+	// Future enhancement: rework ClientLibrary to have an asynchronous Start
+	// with support for callbacks, and then enable light tunnel mode.
+	if config.EnableLightProxy {
+		return nil, errors.TraceNew("EnableLightProxy is not supported")
+	}
+
 	// config.Commit must be called before calling config.SetParameters
 	// or attempting to connect.
 	err = config.Commit(true)

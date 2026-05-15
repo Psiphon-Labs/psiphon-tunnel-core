@@ -123,6 +123,15 @@ type CustomTLSConfig struct {
 	// etc.
 	VerifyPins []string
 
+	// VerifyPinsOnly verifies VerifyPins against the raw peer certificates
+	// without trusted roots. When VerifyServerName is set, the leaf certificate
+	// must also match VerifyServerName. This mode is intended for pinned,
+	// self-signed certificates.
+	//
+	// When VerifyPinsOnly is set, VerifyPins must be set, and SkipVerify,
+	// DisableSystemRootCAs, and VerifyLegacyCertificate must not be set.
+	VerifyPinsOnly bool
+
 	// VerifyLegacyCertificate is a special case self-signed server
 	// certificate case. Ignores IP SANs and basic constraints. No
 	// certificate chain. Just checks that the server presented the
@@ -227,7 +236,13 @@ func CustomTLSDial(
 		(config.VerifyLegacyCertificate != nil &&
 			(skipVerify ||
 				len(config.VerifyServerName) > 0 ||
-				len(config.VerifyPins) > 0)) {
+				len(config.VerifyPins) > 0)) ||
+
+		(config.VerifyPinsOnly &&
+			(config.VerifyLegacyCertificate != nil ||
+				config.SkipVerify ||
+				config.DisableSystemRootCAs ||
+				len(config.VerifyPins) == 0)) {
 
 		return nil, errors.TraceNew("incompatible certification verification parameters")
 	}
@@ -262,6 +277,7 @@ func CustomTLSDial(
 
 	var tlsConfigRootCAs *x509.CertPool
 	if !skipVerify &&
+		!config.VerifyPinsOnly &&
 		config.VerifyLegacyCertificate == nil &&
 		config.TrustedCACertificatesFilename != "" {
 
@@ -284,6 +300,9 @@ func CustomTLSDial(
 	verifyServerName := hostname
 
 	if skipVerify {
+		tlsConfigInsecureSkipVerify = true
+	}
+	if config.VerifyPinsOnly {
 		tlsConfigInsecureSkipVerify = true
 	}
 
@@ -311,9 +330,12 @@ func CustomTLSDial(
 
 	// When VerifyServerName does not match the SNI, custom certificate
 	// verification is necessary.
-	if config.VerifyServerName != "" && config.VerifyServerName != tlsConfigServerName {
+	if config.VerifyServerName != "" &&
+		(config.VerifyPinsOnly || config.VerifyServerName != tlsConfigServerName) {
 		verifyServerName = config.VerifyServerName
-		tlsConfigInsecureSkipVerify = true
+		if config.VerifyServerName != tlsConfigServerName {
+			tlsConfigInsecureSkipVerify = true
+		}
 	}
 
 	// With the VerifyPeerCertificate callback, we perform any custom certificate
@@ -327,6 +349,20 @@ func CustomTLSDial(
 			if config.VerifyLegacyCertificate != nil {
 				return verifyLegacyCertificate(
 					rawCerts, config.VerifyLegacyCertificate)
+			}
+
+			if config.VerifyPinsOnly {
+				if len(verifiedChains) > 0 {
+					return errors.TraceNew("unexpected verified chains")
+				}
+
+				err := common.VerifyServerCertificatePinsOnly(
+					rawCerts, verifyServerName, config.VerifyPins)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				return nil
 			}
 
 			if tlsConfigInsecureSkipVerify {
