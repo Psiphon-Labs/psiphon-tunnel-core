@@ -110,13 +110,13 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 		return errors.TraceNew("error diagnostics empty")
 	}
 
-	// Initialize a resolver to use for dials. useBindToDevice is false so
-	// that the feedback upload will be tunneled, indirectly, if it routes
-	// through the VPN.
+	// Initialize a resolver to use for dials. No DeviceBinder is applied
+	// so that the feedback upload will be tunneled, indirectly, if it
+	// routes through the VPN.
 	//
 	// config.SetResolver makes this resolver available to MakeDialParameters
 	// in GetTactics.
-	resolver := NewResolver(config, false)
+	resolver := NewResolver(config, nil)
 	defer resolver.Stop()
 	config.SetResolver(resolver)
 

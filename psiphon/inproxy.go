@@ -42,7 +42,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
 )
@@ -1812,9 +1811,10 @@ func (w *InproxyWebRTCDialInstance) STUNServerAddressSucceeded(RFC5780 bool, add
 	// between local client and proxy instances.
 
 	// Verify/extend the resolver cache entry for any resolved domain after a
-	// success.
+	// success. Use the split resolver, since STUN address resolution goes
+	// via the same in ResolveAddress (and thus its cache holds the entry).
 
-	resolver := w.config.GetResolver()
+	resolver := w.config.GetSplitResolver()
 	if resolver != nil {
 		resolver.VerifyCacheExtension(address)
 	}
@@ -1886,13 +1886,6 @@ func (w *InproxyWebRTCDialInstance) SetPortMappingProbe(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network, address string) (string, error) {
 
-	// Use the Psiphon resolver to resolve addresses.
-
-	r := w.config.GetResolver()
-	if r == nil {
-		return "", errors.TraceNew("missing resolver")
-	}
-
 	// Identify when the address to be resolved is one of the configured STUN
 	// servers, and, in those cases, use/replay any STUN dial parameters
 	// ResolveParameters; and record the resolved IP address for metrics.
@@ -1908,6 +1901,24 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 	var resolveParams *resolver.ResolveParameters
 	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
 		resolveParams = w.stunDialParameters.ResolveParameters
+	}
+
+	// Use the split resolver for STUN server resolves so that, in
+	// split-interface mode, the lookup goes via the downstream (ICE)
+	// interface; the upstream 2nd-hop dial uses the main resolver.
+	//
+	// Limitation: this assumes the only ICE-side resolves routed through
+	// ResolveAddress are the STUN server addresses. Any future ICE-side
+	// resolve (e.g. a TURN server) would silently route through the
+	// upstream resolver instead.
+	var r *resolver.Resolver
+	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
+		r = w.config.GetSplitResolver()
+	} else {
+		r = w.config.GetResolver()
+	}
+	if r == nil {
+		return "", errors.TraceNew("missing resolver")
 	}
 
 	resolved, err := r.ResolveAddress(
@@ -1956,8 +1967,11 @@ func (w *InproxyWebRTCDialInstance) UDPConn(
 	// Only IP address destinations are supported. ResolveIP is wired up only
 	// because NewUDPConn requires a non-nil resolver.
 
+	// In a split-interface in-proxy proxy configuration, the probe socket
+	// must be bound to the downstream (non-upstream) interface so that the
+	// active local address discovered here is the one used for ICE.
 	dialConfig := &DialConfig{
-		DeviceBinder:    w.config.deviceBinder,
+		DeviceBinder:    w.config.splitDeviceBinder(),
 		IPv6Synthesizer: w.config.IPv6Synthesizer,
 		ResolveIP: func(_ context.Context, hostname string) ([]net.IP, error) {
 			IP := net.ParseIP(hostname)
@@ -1979,15 +1993,19 @@ func (w *InproxyWebRTCDialInstance) UDPConn(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 
-	if w.config.deviceBinder == nil {
+	// Use Config.splitDeviceBinder, with wired up logging, not the public
+	// config.DeviceBinder; other tunnel-core dials do this indirectly via
+	// psiphon.DialConfig.
+	//
+	// In a split-interface in-proxy proxy configuration, WebRTC port
+	// mapping and other auxiliary sockets bind to the downstream
+	// (non-upstream) interface; splitDeviceBinder carries that.
+	deviceBinder := w.config.splitDeviceBinder()
+	if deviceBinder == nil {
 		return nil
 	}
 
-	// Use config.deviceBinder, with wired up logging, not
-	// config.DeviceBinder; other tunnel-core dials do this indirectly via
-	// psiphon.DialConfig.
-
-	_, err := w.config.deviceBinder.BindToDevice(fileDescriptor)
+	_, err := deviceBinder.BindToDevice(fileDescriptor)
 	return errors.Trace(err)
 }
 
@@ -2005,7 +2023,7 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 	// DNSResolverPreresolvedIPAddressCIDRs proxy tactics. In addition,
 	// replay the selected upstream dial tactics parameters.
 
-	splitUpstreamInterfaceName := w.config.InproxyProxySplitUpstreamInterfaceName
+	deviceBinder := w.config.deviceBinder()
 
 	dialer := net.Dialer{
 		Control: func(_, _ string, c syscall.RawConn) error {
@@ -2016,14 +2034,8 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 
 				setAdditionalSocketOptions(socketFD)
 
-				if w.config.deviceBinder != nil {
-					_, err := w.config.deviceBinder.BindToDevice(socketFD)
-					if err != nil {
-						controlErr = errors.Tracef("BindToDevice failed: %s", err)
-						return
-					}
-				} else if splitUpstreamInterfaceName != "" {
-					err := tun.BindToDevice(socketFD, splitUpstreamInterfaceName)
+				if deviceBinder != nil {
+					_, err := deviceBinder.BindToDevice(socketFD)
 					if err != nil {
 						controlErr = errors.Tracef("BindToDevice failed: %s", err)
 						return
@@ -2515,6 +2527,15 @@ type inproxyUDPConn struct {
 
 func newInproxyUDPConn(ctx context.Context, config *Config) (net.PacketConn, error) {
 
+	// Use Config.splitDeviceBinder, with wired up logging, not the public
+	// config.DeviceBinder; other tunnel-core dials do this indirectly via
+	// psiphon.DialConfig.
+	//
+	// In a split-interface in-proxy proxy configuration, this WebRTC/STUN
+	// mux socket must be bound to the downstream (non-upstream) interface
+	// so that STUN, ICE, and data channel traffic flow through it.
+	deviceBinder := config.splitDeviceBinder()
+
 	listen := &net.ListenConfig{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var controlErr error
@@ -2524,12 +2545,8 @@ func newInproxyUDPConn(ctx context.Context, config *Config) (net.PacketConn, err
 
 				setAdditionalSocketOptions(socketFD)
 
-				// Use config.deviceBinder, with wired up logging, not
-				// config.DeviceBinder; other tunnel-core dials do this
-				// indirectly via psiphon.DialConfig.
-
-				if config.deviceBinder != nil {
-					_, err := config.deviceBinder.BindToDevice(socketFD)
+				if deviceBinder != nil {
+					_, err := deviceBinder.BindToDevice(socketFD)
 					if err != nil {
 						controlErr = errors.Tracef("BindToDevice failed: %s", err)
 						return

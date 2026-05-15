@@ -1788,7 +1788,7 @@ func MakeDialParameters(
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
 		BPFProgramInstructions:        dialParams.BPFProgramInstructions,
-		DeviceBinder:                  config.deviceBinder,
+		DeviceBinder:                  config.deviceBinder(),
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		ResolveIP:                     resolveIP,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
