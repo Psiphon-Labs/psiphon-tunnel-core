@@ -27,8 +27,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
+	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/pprof"
 	"sync"
@@ -125,6 +128,7 @@ type Controller struct {
 	lightProxyReplay                  atomic.Value
 	lightProxyTunnelInactiveThreshold atomic.Int64
 	lightProxyDialTimeout             atomic.Int64
+	signalLightProxyTestFetch         chan struct{}
 }
 
 // NewController initializes a new controller.
@@ -266,6 +270,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 	}
 
 	if config.EnableLightProxy {
+
+		if config.LightProxyTestFetchAddress != "" {
+			controller.signalLightProxyTestFetch = make(chan struct{}, 1)
+		}
 
 		var err error
 
@@ -449,6 +457,11 @@ func (controller *Controller) Run(ctx context.Context) {
 
 		controller.runWaitGroup.Add(1)
 		go controller.runTunnels()
+
+		if controller.config.LightProxyTestFetchAddress != "" {
+			controller.runWaitGroup.Add(1)
+			go controller.lightProxyTestFetcher()
+		}
 
 		if controller.packetTunnelClient != nil {
 			controller.packetTunnelClient.Start()
@@ -1623,6 +1636,117 @@ func (controller *Controller) getTunnelPoolSize() int {
 	return controller.tunnelPoolSize
 }
 
+func (controller *Controller) triggerLightProxyTestFetch() {
+
+	if controller.config.LightProxyTestFetchAddress == "" {
+		return
+	}
+	if controller.lightProxyClient.Load() == nil {
+		return
+	}
+
+	select {
+	case controller.signalLightProxyTestFetch <- struct{}{}:
+	default:
+	}
+}
+
+func (controller *Controller) lightProxyTestFetcher() {
+	defer controller.runWaitGroup.Done()
+
+	for {
+		select {
+		case <-controller.signalLightProxyTestFetch:
+		case <-controller.runCtx.Done():
+			NoticeInfo("exiting light proxy test fetcher")
+			return
+		}
+
+		_ = controller.lightProxyTestFetch()
+	}
+}
+
+func (controller *Controller) lightProxyTestFetch() (retErr error) {
+
+	// Perform a test fetch through the light proxy. triggerLightProxyTestFetch
+	// is called when initially connecting or reconnecting, so there will often
+	// be no tunnel yet when controller.Dial is called.
+	//
+	// The test target is assumed to be a TCP HTTPS server.
+	// LightProxyTestFetchAddress should include a port. Only the raw body is
+	// fetched, without redirects, and non-200 response codes are not
+	// considered to be errors.
+
+	const (
+		requestTimeout = 10 * time.Second
+		maxBodyBytes   = 64 * 1024
+		maxHeaderBytes = 16 * 1024
+	)
+
+	var usedLightProxy atomic.Bool
+	responseBytes := int64(0)
+
+	defer func() {
+		NoticeInfo(
+			"light proxy test fetch: usedLightProxy: %v, response bytes: %d, err: %v",
+			usedLightProxy.Load(), responseBytes, retErr)
+	}()
+
+	testURL := url.URL{
+		Scheme: "https",
+		Host:   controller.config.LightProxyTestFetchAddress,
+		Path:   "",
+	}
+
+	transport := &http.Transport{
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: maxHeaderBytes,
+		DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+			// controller.runCtx.Done will interrupt controller.Dial.
+			conn, err := controller.Dial(address, nil)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			if _, ok := conn.(*lightProxyConn); ok {
+				usedLightProxy.Store(true)
+			}
+			return conn, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	requestCtx, cancel := context.WithTimeout(controller.runCtx, requestTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(
+		requestCtx, http.MethodGet, testURL.String(), nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer response.Body.Close()
+
+	responseBytes, err = io.Copy(
+		io.Discard,
+		io.LimitReader(response.Body, maxBodyBytes))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
 func (controller *Controller) initLightProxy(
 	proxyEntry []byte,
 	proxyEntryTracker int64) error {
@@ -2314,6 +2438,11 @@ func (controller *Controller) startEstablishing() {
 		return
 	}
 	NoticeInfo("start establishing")
+
+	active, _ := controller.numTunnels()
+	if active == 0 && controller.config.LightProxyTestFetchAddress != "" {
+		controller.triggerLightProxyTestFetch()
+	}
 
 	// establishStartTime is used to calculate and report the client's tunnel
 	// establishment duration. Establishment duration should include all
