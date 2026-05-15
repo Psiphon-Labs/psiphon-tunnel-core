@@ -2615,7 +2615,9 @@ func (controller *Controller) launchEstablishing() {
 	// lists) with the original; the contents of these slices don't change
 	// past this point. The rate limiter should not be used by
 	// serverEntriesReporter, but is cleared just in case.
-	if !disableServerEntriesReporter {
+	if disableServerEntriesReporter {
+		NoticeInfo("skip server entries reporter")
+	} else {
 		copyConstraints := *controller.protocolSelectionConstraints
 		copyConstraints.inproxyClientDialRateLimiter = nil
 		controller.signalServerEntriesReporter(

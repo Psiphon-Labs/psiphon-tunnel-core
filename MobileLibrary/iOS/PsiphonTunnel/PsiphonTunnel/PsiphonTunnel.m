@@ -18,6 +18,7 @@
  */
 
 #import <arpa/inet.h>
+#import <netinet/in.h>
 #import <net/if.h>
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
@@ -1418,20 +1419,71 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     char hostBuf[NI_MAXHOST];
     for (int i = 0; i < numServersFound; i++) {
         union res_sockaddr_union s = servers[i];
-        if (s.sin.sin_len > 0) {
-            int ret_code = getnameinfo((struct sockaddr *)&s.sin,
-              (socklen_t)s.sin.sin_len,
-              (char *)&hostBuf,
-              sizeof(hostBuf),
-              nil,
-              0,
-              NI_NUMERICHOST); // Flag "numeric form of hostname"
 
-            if (EXIT_SUCCESS == ret_code) {
-                [serverList addObject:[NSString stringWithUTF8String:hostBuf]];
-            } else {
-                [self logMessage:[NSString stringWithFormat: @"getSystemDNSServers: getnameinfo failed: %d", ret_code]];
+        if (s.sin.sin_len == 0) {
+            continue;
+        }
+
+        switch (s.sin.sin_family) {
+            case AF_INET: {
+                uint32_t address = ntohl(s.sin.sin_addr.s_addr);
+                if (address == INADDR_ANY ||
+                        IN_MULTICAST(address) ||
+                        IN_LINKLOCAL(address)) {
+                    continue;
+                }
+                break;
             }
+
+            case AF_INET6: {
+                const struct in6_addr *address = &s.sin6.sin6_addr;
+                if (IN6_IS_ADDR_UNSPECIFIED(address) ||
+                        IN6_IS_ADDR_MULTICAST(address)) {
+                    continue;
+                }
+
+                // Link-local DNS IPv6 servers are accepted only with a zone/scope ID.
+                if (IN6_IS_ADDR_LINKLOCAL(address) && s.sin6.sin6_scope_id == 0) {
+                    continue;
+                }
+                break;
+            }
+
+            default: {
+                continue;
+            }
+        }
+
+        int ret_code = getnameinfo((struct sockaddr *)&s,
+          (socklen_t)s.sin.sin_len,
+          (char *)&hostBuf,
+          sizeof(hostBuf),
+          nil,
+          0,
+          NI_NUMERICHOST); // Flag "numeric form of hostname"
+
+        if (EXIT_SUCCESS == ret_code) {
+            NSString *server = [NSString stringWithUTF8String:hostBuf];
+
+            if (s.sin.sin_family == AF_INET6 &&
+                    IN6_IS_ADDR_LINKLOCAL(&s.sin6.sin6_addr) &&
+                    [server rangeOfString:@"%"].location == NSNotFound) {
+
+                char interfaceName[IF_NAMESIZE];
+                if (if_indextoname(s.sin6.sin6_scope_id, interfaceName) != NULL) {
+                    server = [server stringByAppendingFormat:@"%%%s", interfaceName];
+                } else {
+                    server = [server stringByAppendingFormat:@"%%%u",
+                              (unsigned int)s.sin6.sin6_scope_id];
+                }
+            }
+
+            [serverList addObject:server];
+
+        } else {
+            [self logMessage:[NSString stringWithFormat:
+                              @"getSystemDNSServers: getnameinfo failed: %d",
+                              ret_code]];
         }
     }
 

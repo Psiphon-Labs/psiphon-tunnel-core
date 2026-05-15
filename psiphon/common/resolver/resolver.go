@@ -29,6 +29,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1237,10 +1238,18 @@ func (r *Resolver) updateNetworkState(networkID string) {
 				host = systemServer
 				systemServer = net.JoinHostPort(systemServer, resolverDNSPort)
 			}
-			if net.ParseIP(host) == nil {
+
+			addr, err := netip.ParseAddr(host)
+
+			// Link-local DNS IPv6 servers are accepted only with a zone/scope ID.
+			if err != nil ||
+				addr.IsUnspecified() ||
+				addr.IsMulticast() ||
+				(addr.IsLinkLocalUnicast() && (addr.Is4() || addr.Zone() == "")) {
+
 				// Log warning and proceed without this DNS server.
 				r.networkConfig.logWarning(
-					errors.TraceNew("invalid DNS server IP address"))
+					errors.TraceNew("invalid DNS server address"))
 				continue
 			}
 			systemServers = append(systemServers, systemServer)
@@ -1349,8 +1358,8 @@ func (r *Resolver) newResolverConn(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		serverIP := net.ParseIP(serverIPStr)
-		if serverIP != nil && serverIP.To4() != nil {
+		serverIP, err := netip.ParseAddr(serverIPStr) // May have zone
+		if err == nil && serverIP.Is4() {
 			synthesized := r.networkConfig.IPv6Synthesize(serverIPStr)
 			if synthesized != "" && net.ParseIP(synthesized) != nil {
 				serverAddr = net.JoinHostPort(synthesized, port)
