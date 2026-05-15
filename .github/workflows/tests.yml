@@ -50,7 +50,6 @@ jobs:
       - name: Install coverage tools
         if: ${{ matrix.test-type == 'coverage' }}
         run: |
-          go install github.com/axw/gocov/gocov@latest
           go install github.com/modocache/gover@latest
           go install github.com/mattn/goveralls@latest
           go install golang.org/x/tools/cmd/cover@latest

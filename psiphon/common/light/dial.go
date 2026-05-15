@@ -60,7 +60,7 @@ func netPartitionAddrs(addrs []net.IPAddr, port int) netTCPAddrs {
 
 func netIPAddrs(IP net.IP, port int) netTCPAddrs {
 	var addrs netTCPAddrs
-	addrs[0] = []net.TCPAddr{net.TCPAddr{IP: IP, Port: port}}
+	addrs[0] = []net.TCPAddr{{IP: IP, Port: port}}
 	return addrs
 }
 
