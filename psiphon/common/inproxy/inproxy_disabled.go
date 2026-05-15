@@ -64,7 +64,7 @@ type webRTCConfig struct {
 	ExcludeInterfaceName        string
 	WebRTCDialCoordinator       WebRTCDialCoordinator
 	ClientRootObfuscationSecret ObfuscationSecret
-	DoDTLSRandomization         bool
+	DTLSFingerprint             string
 	UseMediaStreams             bool
 	TrafficShapingParameters    *TrafficShapingParameters
 	ReliableTransport           bool

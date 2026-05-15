@@ -178,9 +178,9 @@ type Config struct {
 	// This have implication on DoS attack resistance.
 	InsecureSkipVerifyHello bool
 
-	// [Psiphon]
-	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
-	// CustomClientHelloRandom optionaly allows the use of custom random bytes in the ClientHello message
+	// [Psiphon] CustomClientHelloRandom, when set, provides a custom
+	// ClientHello random value. This is used by Conjure/refraction-networking
+	// to embed a deterministic seed in the ClientHello.
 	CustomClientHelloRandom func() [handshake.RandomBytesLength]byte
 }
 

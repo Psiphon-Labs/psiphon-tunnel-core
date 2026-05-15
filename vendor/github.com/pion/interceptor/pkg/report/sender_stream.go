@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package report
@@ -43,12 +43,16 @@ func (stream *senderStream) processRTP(now time.Time, header *rtp.Header, payloa
 	if stream.useLatestPacket || stream.packetCount == 0 || (diff > 0 && diff < (1<<15)) {
 		// Told to consider every packet, or this was the first packet, or it's in-order
 		stream.lastRTPSN = header.SequenceNumber
-		stream.lastRTPTimeRTP = header.Timestamp
-		stream.lastRTPTimeTime = now
+		// update only on first packet of a frame to ensure sender report does not get affected by
+		// processing delay of pushing a large frame which could span multiple packets
+		if header.Timestamp != stream.lastRTPTimeRTP {
+			stream.lastRTPTimeRTP = header.Timestamp
+			stream.lastRTPTimeTime = now
+		}
 	}
 
 	stream.packetCount++
-	stream.octetCount += uint32(len(payload))
+	stream.octetCount += uint32(len(payload)) //nolint:gosec // G115
 }
 
 func (stream *senderStream) generateReport(now time.Time) *rtcp.SenderReport {

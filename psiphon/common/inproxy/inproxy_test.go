@@ -897,7 +897,6 @@ func runTestInproxy(doMustUpgrade bool) error {
 			stunServerAddressFailed:    stunServerAddressFailed,
 
 			clientRootObfuscationSecret: clientRootObfuscationSecret,
-			doDTLSRandomization:         prng.FlipCoin(),
 			useMediaStreams:             useMediaStreams,
 			trafficShapingParameters:    trafficShapingParameters,
 

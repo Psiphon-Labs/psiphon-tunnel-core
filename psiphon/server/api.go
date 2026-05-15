@@ -1459,6 +1459,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_stun_server_RFC5780", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_randomize_dtls", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_dtls_fingerprint", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_padded_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_padded_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_decoy_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},

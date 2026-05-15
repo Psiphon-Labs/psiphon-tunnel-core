@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -37,97 +37,97 @@ package sdp
 //	b=* (zero or more bandwidth information lines)
 //	k=* (encryption key)
 //	a=* (zero or more media attribute lines)
-func (s *SessionDescription) Marshal() ([]byte, error) {
-	m := make(marshaller, 0, s.MarshalSize())
+func (s *SessionDescription) Marshal() ([]byte, error) { //nolint:cyclop
+	marsh := make(marshaller, 0, s.MarshalSize())
 
-	m.addKeyValue("v=", s.Version.marshalInto)
-	m.addKeyValue("o=", s.Origin.marshalInto)
-	m.addKeyValue("s=", s.SessionName.marshalInto)
+	marsh.addKeyValue("v=", s.Version.marshalInto)
+	marsh.addKeyValue("o=", s.Origin.marshalInto)
+	marsh.addKeyValue("s=", s.SessionName.marshalInto)
 
 	if s.SessionInformation != nil {
-		m.addKeyValue("i=", s.SessionInformation.marshalInto)
+		marsh.addKeyValue("i=", s.SessionInformation.marshalInto)
 	}
 
 	if s.URI != nil {
-		m = append(m, "u="...)
-		m = append(m, s.URI.String()...)
-		m = append(m, "\r\n"...)
+		marsh = append(marsh, "u="...)
+		marsh = append(marsh, s.URI.String()...)
+		marsh = append(marsh, "\r\n"...)
 	}
 
 	if s.EmailAddress != nil {
-		m.addKeyValue("e=", s.EmailAddress.marshalInto)
+		marsh.addKeyValue("e=", s.EmailAddress.marshalInto)
 	}
 
 	if s.PhoneNumber != nil {
-		m.addKeyValue("p=", s.PhoneNumber.marshalInto)
+		marsh.addKeyValue("p=", s.PhoneNumber.marshalInto)
 	}
 
 	if s.ConnectionInformation != nil {
-		m.addKeyValue("c=", s.ConnectionInformation.marshalInto)
+		marsh.addKeyValue("c=", s.ConnectionInformation.marshalInto)
 	}
 
 	for _, b := range s.Bandwidth {
-		m.addKeyValue("b=", b.marshalInto)
+		marsh.addKeyValue("b=", b.marshalInto)
 	}
 
 	for _, td := range s.TimeDescriptions {
-		m.addKeyValue("t=", td.Timing.marshalInto)
+		marsh.addKeyValue("t=", td.Timing.marshalInto)
 		for _, r := range td.RepeatTimes {
-			m.addKeyValue("r=", r.marshalInto)
+			marsh.addKeyValue("r=", r.marshalInto)
 		}
 	}
 
 	if len(s.TimeZones) > 0 {
-		m = append(m, "z="...)
+		marsh = append(marsh, "z="...)
 		for i, z := range s.TimeZones {
 			if i > 0 {
-				m = append(m, ' ')
+				marsh = append(marsh, ' ')
 			}
-			m = z.marshalInto(m)
+			marsh = z.marshalInto(marsh)
 		}
-		m = append(m, "\r\n"...)
+		marsh = append(marsh, "\r\n"...)
 	}
 
 	if s.EncryptionKey != nil {
-		m.addKeyValue("k=", s.EncryptionKey.marshalInto)
+		marsh.addKeyValue("k=", s.EncryptionKey.marshalInto)
 	}
 
 	for _, a := range s.Attributes {
-		m.addKeyValue("a=", a.marshalInto)
+		marsh.addKeyValue("a=", a.marshalInto)
 	}
 
 	for _, md := range s.MediaDescriptions {
-		m.addKeyValue("m=", md.MediaName.marshalInto)
+		marsh.addKeyValue("m=", md.MediaName.marshalInto)
 
 		if md.MediaTitle != nil {
-			m.addKeyValue("i=", md.MediaTitle.marshalInto)
+			marsh.addKeyValue("i=", md.MediaTitle.marshalInto)
 		}
 
 		if md.ConnectionInformation != nil {
-			m.addKeyValue("c=", md.ConnectionInformation.marshalInto)
+			marsh.addKeyValue("c=", md.ConnectionInformation.marshalInto)
 		}
 
 		for _, b := range md.Bandwidth {
-			m.addKeyValue("b=", b.marshalInto)
+			marsh.addKeyValue("b=", b.marshalInto)
 		}
 
 		if md.EncryptionKey != nil {
-			m.addKeyValue("k=", md.EncryptionKey.marshalInto)
+			marsh.addKeyValue("k=", md.EncryptionKey.marshalInto)
 		}
 
 		for _, a := range md.Attributes {
-			m.addKeyValue("a=", a.marshalInto)
+			marsh.addKeyValue("a=", a.marshalInto)
 		}
 	}
 
-	return m, nil
+	return marsh, nil
 }
 
-// `$type=` and CRLF size
+// `$type=` and CRLF size.
 const lineBaseSize = 4
 
 // MarshalSize returns the size of the SessionDescription once marshaled.
-func (s *SessionDescription) MarshalSize() (marshalSize int) {
+func (s *SessionDescription) MarshalSize() (marshalSize int) { //nolint:cyclop
 	marshalSize += lineBaseSize + s.Version.marshalSize()
 	marshalSize += lineBaseSize + s.Origin.marshalSize()
 	marshalSize += lineBaseSize + s.SessionName.marshalSize()
@@ -225,6 +225,7 @@ func lenUint(i uint64) (count int) {
 		i /= 10
 		count++
 	}
+
 	return
 }
 
@@ -232,6 +233,7 @@ func lenInt(i int64) (count int) {
 	if i < 0 {
 		return lenUint(uint64(-i)) + 1
 	}
+
 	return lenUint(uint64(i))
 }
 

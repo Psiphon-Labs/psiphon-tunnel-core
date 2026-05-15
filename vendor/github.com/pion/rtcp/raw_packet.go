@@ -22,6 +22,7 @@ func (r *RawPacket) Unmarshal(b []byte) error {
 	*r = b
 
 	var h Header
+
 	return h.Unmarshal(b)
 }
 
@@ -31,6 +32,7 @@ func (r RawPacket) Header() Header {
 	if err := h.Unmarshal(r); err != nil {
 		return Header{}
 	}
+
 	return h
 }
 
@@ -41,5 +43,11 @@ func (r *RawPacket) DestinationSSRC() []uint32 {
 
 func (r RawPacket) String() string {
 	out := fmt.Sprintf("RawPacket: %v", ([]byte)(r))
+
 	return out
+}
+
+// MarshalSize returns the size of the packet once marshaled.
+func (r RawPacket) MarshalSize() int {
+	return len(r)
 }

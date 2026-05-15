@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package report
@@ -16,6 +16,16 @@ type SenderOption func(r *SenderInterceptor) error
 func SenderLog(log logging.LeveledLogger) SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.log = log
+
+		return nil
+	}
+}
+
+// WithSenderLoggerFactory sets a logger factory for the interceptor.
+func WithSenderLoggerFactory(loggerFactory logging.LoggerFactory) SenderOption {
+	return func(r *SenderInterceptor) error {
+		r.loggerFactory = loggerFactory
+
 		return nil
 	}
 }
@@ -24,6 +34,7 @@ func SenderLog(log logging.LeveledLogger) SenderOption {
 func SenderInterval(interval time.Duration) SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.interval = interval
+
 		return nil
 	}
 }
@@ -32,6 +43,7 @@ func SenderInterval(interval time.Duration) SenderOption {
 func SenderNow(f func() time.Time) SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.now = f
+
 		return nil
 	}
 }
@@ -40,6 +52,7 @@ func SenderNow(f func() time.Time) SenderOption {
 func SenderTicker(f TickerFactory) SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.newTicker = f
+
 		return nil
 	}
 }
@@ -49,6 +62,7 @@ func SenderTicker(f TickerFactory) SenderOption {
 func SenderUseLatestPacket() SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.useLatestPacket = true
+
 		return nil
 	}
 }
@@ -58,6 +72,7 @@ func SenderUseLatestPacket() SenderOption {
 func enableStartTracking(startedCh chan struct{}) SenderOption {
 	return func(r *SenderInterceptor) error {
 		r.started = startedCh
+
 		return nil
 	}
 }

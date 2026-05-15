@@ -47,7 +47,7 @@ type BatchConn struct {
 	batchWriteSize     int
 	batchWriteInterval time.Duration
 
-	closed int32
+	closed atomic.Bool
 }
 
 // NewBatchConn creates a *BatchConn from net.PacketConn with batch configs.
@@ -76,7 +76,8 @@ func NewBatchConn(conn net.PacketConn, batchWriteSize int, batchWriteInterval ti
 		go func() {
 			writeTicker := time.NewTicker(batchWriteInterval / 2)
 			defer writeTicker.Stop()
-			for atomic.LoadInt32(&bc.closed) != 1 {
+
+			for !bc.closed.Load() {
 				<-writeTicker.C
 				bc.batchWriteMutex.Lock()
 				if bc.batchWritePos > 0 && time.Since(bc.batchWriteLast) >= bc.batchWriteInterval {
@@ -92,7 +93,7 @@ func NewBatchConn(conn net.PacketConn, batchWriteSize int, batchWriteInterval ti
 
 // Close batchConn and the underlying PacketConn
 func (c *BatchConn) Close() error {
-	atomic.StoreInt32(&c.closed, 1)
+	c.closed.Store(true)
 	c.batchWriteMutex.Lock()
 	if c.batchWritePos > 0 {
 		_ = c.flush()

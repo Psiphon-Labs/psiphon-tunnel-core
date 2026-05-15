@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
@@ -1759,8 +1760,8 @@ func (w *InproxyWebRTCDialInstance) ClientRootObfuscationSecret() inproxy.Obfusc
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) DoDTLSRandomization() bool {
-	return w.webRTCDialParameters.DoDTLSRandomization
+func (w *InproxyWebRTCDialInstance) DTLSFingerprint() string {
+	return w.webRTCDialParameters.DTLSFingerprint
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -2260,7 +2261,7 @@ type InproxyWebRTCDialParameters struct {
 	RootObfuscationSecret    inproxy.ObfuscationSecret
 	UseMediaStreams          bool
 	TrafficShapingParameters *inproxy.TrafficShapingParameters
-	DoDTLSRandomization      bool
+	DTLSFingerprint          string
 }
 
 // MakeInproxyWebRTCDialParameters generates new InproxyWebRTCDialParameters.
@@ -2295,14 +2296,60 @@ func MakeInproxyWebRTCDialParameters(
 		}
 	}
 
-	doDTLSRandomization := p.WeightedCoinFlip(parameters.InproxyDTLSRandomizationProbability)
+	dtlsFingerprint := selectDTLSFingerprint(p)
 
 	return &InproxyWebRTCDialParameters{
 		RootObfuscationSecret:    rootObfuscationSecret,
 		UseMediaStreams:          useMediaStreams,
 		TrafficShapingParameters: trafficSharingParams,
-		DoDTLSRandomization:      doDTLSRandomization,
+		DTLSFingerprint:          dtlsFingerprint,
 	}, nil
+}
+
+// selectDTLSFingerprint selects a DTLS fingerprint following the same
+// two-tier pattern as selectTLSProfile: randomized fingerprints are selected
+// with probability InproxyDTLSFingerprintSelectRandomizedProbability, and
+// parrot (mimicry) fingerprints are selected otherwise.
+//
+// Both the client and proxy call selectDTLSFingerprint independently; the
+// proxy is not told which fingerprint the client chose.
+//
+// Limitation: the proxy independently selects its own DTLS fingerprint using
+// its local protocol.SupportedDTLSFingerprints. If a client replays the same
+// ClientRootObfuscationSecret against a different proxy whose
+// SupportedDTLSFingerprints list has been upgraded, downgraded, or
+// reordered, the proxy's fingerprint choice will not be the same as on the
+// original dial, even though the PRNG seed is identical. The client-side
+// fingerprint selection and handshake remain reproducible; only the proxy
+// side diverges.
+func selectDTLSFingerprint(p parameters.ParametersAccessor) string {
+
+	limitFingerprints := p.DTLSFingerprints(parameters.InproxyLimitDTLSFingerprints)
+
+	randomizedFingerprints := make([]string, 0)
+	parrotFingerprints := make([]string, 0)
+
+	for _, fp := range protocol.SupportedDTLSFingerprints {
+		if len(limitFingerprints) > 0 && !common.Contains(limitFingerprints, fp) {
+			continue
+		}
+		if protocol.DTLSFingerprintIsRandomized(fp) {
+			randomizedFingerprints = append(randomizedFingerprints, fp)
+		} else {
+			parrotFingerprints = append(parrotFingerprints, fp)
+		}
+	}
+
+	if len(randomizedFingerprints) > 0 &&
+		(len(parrotFingerprints) == 0 ||
+			p.WeightedCoinFlip(parameters.InproxyDTLSFingerprintSelectRandomizedProbability)) {
+		return randomizedFingerprints[prng.Intn(len(randomizedFingerprints))]
+	}
+
+	if len(parrotFingerprints) == 0 {
+		return ""
+	}
+	return parrotFingerprints[prng.Intn(len(parrotFingerprints))]
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -2312,9 +2359,13 @@ func (dialParams *InproxyWebRTCDialParameters) GetMetrics() common.LogFields {
 	// higher level, and, for client in-proxy tunnel dials, is part of the
 	// main tunnel dial parameters.
 
-	// Currently, all WebRTC metrics are delivered via
-	// inproxy.ClientConn/WebRTCConn GetMetrics.
-	return common.LogFields{}
+	// All WebRTC metrics except inproxy_webrtc_dtls_fingerprint are
+	// delivered via inproxy.ClientConn/WebRTCConn GetMetrics.
+	logFields := common.LogFields{}
+
+	logFields["inproxy_webrtc_dtls_fingerprint"] = dialParams.DTLSFingerprint
+
+	return logFields
 }
 
 // InproxyNATStateManager manages the NAT-related network topology state for

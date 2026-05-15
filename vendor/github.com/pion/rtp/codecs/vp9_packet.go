@@ -1,35 +1,62 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package codecs
 
 import (
 	"github.com/pion/randutil"
+	"github.com/pion/rtp/codecs/vp9"
 )
 
 // Use global random generator to properly seed by crypto grade random.
 var globalMathRandomGenerator = randutil.NewMathRandomGenerator() // nolint:gochecknoglobals
 
-// VP9Payloader payloads VP9 packets
+// VP9Payloader payloads VP9 packets.
 type VP9Payloader struct {
-	pictureID   uint16
-	initialized bool
+	// whether to use flexible mode or non-flexible mode.
+	FlexibleMode bool
 
 	// InitialPictureIDFn is a function that returns random initial picture ID.
 	InitialPictureIDFn func() uint16
+
+	pictureID   uint16
+	initialized bool
 }
 
 const (
-	vp9HeaderSize    = 3 // Flexible mode 15 bit picture ID
 	maxSpatialLayers = 5
 	maxVP9RefPics    = 3
 )
 
-// Payload fragments an VP9 packet across one or more byte arrays
+// Payload fragments an VP9 packet across one or more byte arrays.
 func (p *VP9Payloader) Payload(mtu uint16, payload []byte) [][]byte {
+	if !p.initialized {
+		if p.InitialPictureIDFn == nil {
+			p.InitialPictureIDFn = func() uint16 {
+				return uint16(globalMathRandomGenerator.Intn(0x7FFF)) // nolint: gosec
+			}
+		}
+		p.pictureID = p.InitialPictureIDFn() & 0x7FFF
+		p.initialized = true
+	}
+
+	var payloads [][]byte
+	if p.FlexibleMode {
+		payloads = p.payloadFlexible(mtu, payload)
+	} else {
+		payloads = p.payloadNonFlexible(mtu, payload)
+	}
+
+	p.pictureID++
+	if p.pictureID >= 0x8000 {
+		p.pictureID = 0
+	}
+
+	return payloads
+}
+
+func (p *VP9Payloader) payloadFlexible(mtu uint16, payload []byte) [][]byte {
 	/*
-	 * https://www.ietf.org/id/draft-ietf-payload-vp9-13.txt
-	 *
 	 * Flexible mode (F=1)
 	 *        0 1 2 3 4 5 6 7
 	 *       +-+-+-+-+-+-+-+-+
@@ -46,7 +73,45 @@ func (p *VP9Payloader) Payload(mtu uint16, payload []byte) [][]byte {
 	 *  V:   | SS            |
 	 *       | ..            |
 	 *       +-+-+-+-+-+-+-+-+
-	 *
+	 */
+
+	headerSize := 3
+	maxFragmentSize := int(mtu) - headerSize
+	payloadDataRemaining := len(payload)
+	payloadDataIndex := 0
+	var payloads [][]byte
+
+	if minInt(maxFragmentSize, payloadDataRemaining) <= 0 {
+		return [][]byte{}
+	}
+
+	for payloadDataRemaining > 0 {
+		currentFragmentSize := minInt(maxFragmentSize, payloadDataRemaining)
+		out := make([]byte, headerSize+currentFragmentSize)
+
+		out[0] = 0x90 // F=1, I=1
+		if payloadDataIndex == 0 {
+			out[0] |= 0x08 // B=1
+		}
+		if payloadDataRemaining == currentFragmentSize {
+			out[0] |= 0x04 // E=1
+		}
+
+		out[1] = byte(p.pictureID>>8) | 0x80
+		out[2] = byte(p.pictureID)
+
+		copy(out[headerSize:], payload[payloadDataIndex:payloadDataIndex+currentFragmentSize])
+		payloads = append(payloads, out)
+
+		payloadDataRemaining -= currentFragmentSize
+		payloadDataIndex += currentFragmentSize
+	}
+
+	return payloads
+}
+
+func (p *VP9Payloader) payloadNonFlexible(mtu uint16, payload []byte) [][]byte { //nolint:cyclop
+	/*
 	 * Non-flexible mode (F=0)
 	 *        0 1 2 3 4 5 6 7
 	 *       +-+-+-+-+-+-+-+-+
@@ -65,56 +130,85 @@ func (p *VP9Payloader) Payload(mtu uint16, payload []byte) [][]byte {
 	 *       +-+-+-+-+-+-+-+-+
 	 */
 
-	if !p.initialized {
-		if p.InitialPictureIDFn == nil {
-			p.InitialPictureIDFn = func() uint16 {
-				return uint16(globalMathRandomGenerator.Intn(0x7FFF))
-			}
-		}
-		p.pictureID = p.InitialPictureIDFn() & 0x7FFF
-		p.initialized = true
-	}
-	if payload == nil {
+	var header vp9.Header
+	err := header.Unmarshal(payload)
+	if err != nil {
 		return [][]byte{}
 	}
 
-	maxFragmentSize := int(mtu) - vp9HeaderSize
 	payloadDataRemaining := len(payload)
 	payloadDataIndex := 0
-
-	if min(maxFragmentSize, payloadDataRemaining) <= 0 {
-		return [][]byte{}
-	}
-
 	var payloads [][]byte
-	for payloadDataRemaining > 0 {
-		currentFragmentSize := min(maxFragmentSize, payloadDataRemaining)
-		out := make([]byte, vp9HeaderSize+currentFragmentSize)
 
-		out[0] = 0x90 // F=1 I=1
+	for payloadDataRemaining > 0 {
+		var headerSize int
+		if !header.NonKeyFrame && payloadDataIndex == 0 {
+			headerSize = 3 + 8
+		} else {
+			headerSize = 3
+		}
+
+		maxFragmentSize := int(mtu) - headerSize
+		currentFragmentSize := minInt(maxFragmentSize, payloadDataRemaining)
+		if currentFragmentSize <= 0 {
+			return [][]byte{}
+		}
+
+		out := make([]byte, headerSize+currentFragmentSize)
+
+		out[0] = 0x80 | 0x01 // I=1, Z=1
+
+		if header.NonKeyFrame {
+			out[0] |= 0x40 // P=1
+		}
 		if payloadDataIndex == 0 {
 			out[0] |= 0x08 // B=1
 		}
 		if payloadDataRemaining == currentFragmentSize {
 			out[0] |= 0x04 // E=1
 		}
+
 		out[1] = byte(p.pictureID>>8) | 0x80
 		out[2] = byte(p.pictureID)
-		copy(out[vp9HeaderSize:], payload[payloadDataIndex:payloadDataIndex+currentFragmentSize])
+		off := 3
+
+		if !header.NonKeyFrame && payloadDataIndex == 0 {
+			out[0] |= 0x02         // V=1
+			out[off] = 0x10 | 0x08 // N_S=0, Y=1, G=1
+			off++
+
+			width := header.Width()
+			out[off] = byte(width >> 8)
+			off++
+			out[off] = byte(width & 0xFF)
+			off++
+
+			height := header.Height()
+			out[off] = byte(height >> 8)
+			off++
+			out[off] = byte(height & 0xFF)
+			off++
+
+			out[off] = 0x01 // N_G=1
+			off++
+
+			out[off] = 1<<4 | 1<<2 // TID=0, U=1, R=1
+			off++
+
+			out[off] = 0x01 // P_DIFF=1
+		}
+
+		copy(out[headerSize:], payload[payloadDataIndex:payloadDataIndex+currentFragmentSize])
 		payloads = append(payloads, out)
 
 		payloadDataRemaining -= currentFragmentSize
 		payloadDataIndex += currentFragmentSize
 	}
-	p.pictureID++
-	if p.pictureID >= 0x8000 {
-		p.pictureID = 0
-	}
 
 	return payloads
 }
 
-// VP9Packet represents the VP9 header that is stored in the payload of an RTP Packet
+// VP9Packet represents the VP9 header that is stored in the payload of an RTP Packet.
 type VP9Packet struct {
 	// Required header
 	I bool // PictureID is present
@@ -155,8 +249,8 @@ type VP9Packet struct {
 	videoDepacketizer
 }
 
-// Unmarshal parses the passed byte slice and stores the result in the VP9Packet this method is called upon
-func (p *VP9Packet) Unmarshal(packet []byte) ([]byte, error) {
+// Unmarshal parses the passed byte slice and stores the result in the VP9Packet this method is called upon.
+func (p *VP9Packet) Unmarshal(packet []byte) ([]byte, error) { // nolint:cyclop
 	if packet == nil {
 		return nil, errNilPacket
 	}
@@ -205,6 +299,7 @@ func (p *VP9Packet) Unmarshal(packet []byte) ([]byte, error) {
 	}
 
 	p.Payload = packet[pos:]
+
 	return p.Payload, nil
 }
 
@@ -216,6 +311,7 @@ func (p *VP9Packet) Unmarshal(packet []byte) ([]byte, error) {
 * M:   | EXTENDED PID  |
 *      +-+-+-+-+-+-+-+-+
 **/
+// .
 func (p *VP9Packet) parsePictureID(packet []byte, pos int) (int, error) {
 	if len(packet) <= pos {
 		return pos, errShortPacket
@@ -230,6 +326,7 @@ func (p *VP9Packet) parsePictureID(packet []byte, pos int) (int, error) {
 		p.PictureID = p.PictureID<<8 | uint16(packet[pos])
 	}
 	pos++
+
 	return pos, nil
 }
 
@@ -252,6 +349,7 @@ func (p *VP9Packet) parseLayerInfo(packet []byte, pos int) (int, error) {
 * L:   |  T  |U|  S  |D|
 *      +-+-+-+-+-+-+-+-+
 **/
+// .
 func (p *VP9Packet) parseLayerInfoCommon(packet []byte, pos int) (int, error) {
 	if len(packet) <= pos {
 		return pos, errShortPacket
@@ -267,6 +365,7 @@ func (p *VP9Packet) parseLayerInfoCommon(packet []byte, pos int) (int, error) {
 	}
 
 	pos++
+
 	return pos, nil
 }
 
@@ -278,6 +377,7 @@ func (p *VP9Packet) parseLayerInfoCommon(packet []byte, pos int) (int, error) {
 *      |   TL0PICIDX   |
 *      +-+-+-+-+-+-+-+-+
 **/
+// .
 func (p *VP9Packet) parseLayerInfoNonFlexibleMode(packet []byte, pos int) (int, error) {
 	if len(packet) <= pos {
 		return pos, errShortPacket
@@ -285,16 +385,19 @@ func (p *VP9Packet) parseLayerInfoNonFlexibleMode(packet []byte, pos int) (int, 
 
 	p.TL0PICIDX = packet[pos]
 	pos++
+
 	return pos, nil
 }
 
-// Reference indices:
+// Reference indices: .
 /*
 *      +-+-+-+-+-+-+-+-+                P=1,F=1: At least one reference index
 * P,F: | P_DIFF      |N|  up to 3 times          has to be specified.
 *      +-+-+-+-+-+-+-+-+                    N=1: An additional P_DIFF follows
 *                                              current P_DIFF.
+*
 **/
+// .
 func (p *VP9Packet) parseRefIndices(packet []byte, pos int) (int, error) {
 	for {
 		if len(packet) <= pos {
@@ -334,14 +437,15 @@ func (p *VP9Packet) parseRefIndices(packet []byte, pos int) (int, error) {
 *      |    P_DIFF     | (OPTIONAL)    . R times    .
 *      +-+-+-+-+-+-+-+-+              -|           -|
 **/
-func (p *VP9Packet) parseSSData(packet []byte, pos int) (int, error) {
+// .
+func (p *VP9Packet) parseSSData(packet []byte, pos int) (int, error) { // nolint: cyclop
 	if len(packet) <= pos {
 		return pos, errShortPacket
 	}
 
 	p.NS = packet[pos] >> 5
 	p.Y = packet[pos]&0x10 != 0
-	p.G = (packet[pos]>>1)&0x7 != 0
+	p.G = packet[pos]&0x8 != 0
 	pos++
 
 	NS := p.NS + 1
@@ -398,20 +502,21 @@ func (p *VP9Packet) parseSSData(packet []byte, pos int) (int, error) {
 
 // VP9PartitionHeadChecker checks VP9 partition head.
 //
-// Deprecated: replaced by VP9Packet.IsPartitionHead()
+// Deprecated: replaced by VP9Packet.IsPartitionHead().
 type VP9PartitionHeadChecker struct{}
 
 // IsPartitionHead checks whether if this is a head of the VP9 partition.
 //
-// Deprecated: replaced by VP9Packet.IsPartitionHead()
+// Deprecated: replaced by VP9Packet.IsPartitionHead().
 func (*VP9PartitionHeadChecker) IsPartitionHead(packet []byte) bool {
 	return (&VP9Packet{}).IsPartitionHead(packet)
 }
 
-// IsPartitionHead checks whether if this is a head of the VP9 partition
+// IsPartitionHead checks whether if this is a head of the VP9 partition.
 func (*VP9Packet) IsPartitionHead(payload []byte) bool {
 	if len(payload) < 1 {
 		return false
 	}
+
 	return (payload[0] & 0x08) != 0
 }

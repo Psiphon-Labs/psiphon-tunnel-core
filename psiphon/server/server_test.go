@@ -3463,7 +3463,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
 			"inproxy_broker_resolved_ip_address",
-			"inproxy_webrtc_randomize_dtls",
+			"inproxy_webrtc_dtls_fingerprint",
 			"inproxy_webrtc_use_media_streams",
 			"inproxy_webrtc_padded_messages_sent",
 			"inproxy_webrtc_padded_messages_received",

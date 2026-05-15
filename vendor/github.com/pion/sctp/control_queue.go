@@ -24,6 +24,7 @@ func (q *controlQueue) pushAll(packets []*packet) {
 func (q *controlQueue) popAll() []*packet {
 	packets := q.queue
 	q.queue = []*packet{}
+
 	return packets
 }
 

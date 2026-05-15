@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package datachannel
 
 import (
@@ -26,6 +29,7 @@ channelOpen represents a DATA_CHANNEL_OPEN Message
 |                            Protocol                           |
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+.
 */
 type channelOpen struct {
 	ChannelType          ChannelType
@@ -40,10 +44,10 @@ const (
 	channelOpenHeaderLength = 12
 )
 
-// ChannelType determines the reliability of the WebRTC DataChannel
+// ChannelType determines the reliability of the WebRTC DataChannel.
 type ChannelType byte
 
-// ChannelType enums
+// ChannelType enums.
 const (
 	// ChannelTypeReliable determines the Data Channel provides a
 	// reliable in-order bi-directional communication.
@@ -72,7 +76,26 @@ const (
 	ChannelTypePartialReliableTimedUnordered ChannelType = 0x82
 )
 
-// ChannelPriority enums
+func (c ChannelType) String() string {
+	switch c {
+	case ChannelTypeReliable:
+		return "ReliableOrdered"
+	case ChannelTypeReliableUnordered:
+		return "ReliableUnordered"
+	case ChannelTypePartialReliableRexmit:
+		return "PartialReliableRexmit"
+	case ChannelTypePartialReliableRexmitUnordered:
+		return "PartialReliableRexmitUnordered"
+	case ChannelTypePartialReliableTimed:
+		return "PartialReliableTimed"
+	case ChannelTypePartialReliableTimedUnordered:
+		return "PartialReliableTimedUnordered"
+	}
+
+	return "Unknown"
+}
+
+// ChannelPriority enums.
 const (
 	ChannelPriorityBelowNormal uint16 = 128
 	ChannelPriorityNormal      uint16 = 256
@@ -80,7 +103,7 @@ const (
 	ChannelPriorityExtraHigh   uint16 = 1024
 )
 
-// Marshal returns raw bytes for the given message
+// Marshal returns raw bytes for the given message.
 func (c *channelOpen) Marshal() ([]byte, error) {
 	labelLength := len(c.Label)
 	protocolLength := len(c.Protocol)
@@ -90,10 +113,11 @@ func (c *channelOpen) Marshal() ([]byte, error) {
 
 	raw[0] = uint8(dataChannelOpen)
 	raw[1] = byte(c.ChannelType)
+
 	binary.BigEndian.PutUint16(raw[2:], c.Priority)
 	binary.BigEndian.PutUint32(raw[4:], c.ReliabilityParameter)
-	binary.BigEndian.PutUint16(raw[8:], uint16(labelLength))
-	binary.BigEndian.PutUint16(raw[10:], uint16(protocolLength))
+	binary.BigEndian.PutUint16(raw[8:], uint16(labelLength))     //nolint:gosec //G115
+	binary.BigEndian.PutUint16(raw[10:], uint16(protocolLength)) //nolint:gosec //G115
 	endLabel := channelOpenHeaderLength + labelLength
 	copy(raw[channelOpenHeaderLength:endLabel], c.Label)
 	copy(raw[endLabel:endLabel+protocolLength], c.Protocol)
@@ -101,7 +125,7 @@ func (c *channelOpen) Marshal() ([]byte, error) {
 	return raw, nil
 }
 
-// Unmarshal populates the struct with the given raw data
+// Unmarshal populates the struct with the given raw data.
 func (c *channelOpen) Unmarshal(raw []byte) error {
 	if len(raw) < channelOpenHeaderLength {
 		return fmt.Errorf("%w expected(%d) actual(%d)", ErrExpectedAndActualLengthMismatch, channelOpenHeaderLength, len(raw))
@@ -113,11 +137,19 @@ func (c *channelOpen) Unmarshal(raw []byte) error {
 	labelLength := binary.BigEndian.Uint16(raw[8:])
 	protocolLength := binary.BigEndian.Uint16(raw[10:])
 
-	if expectedLen := int(channelOpenHeaderLength + labelLength + protocolLength); len(raw) != expectedLen {
+	if expectedLen := channelOpenHeaderLength + int(labelLength) + int(protocolLength); len(raw) != expectedLen {
 		return fmt.Errorf("%w expected(%d) actual(%d)", ErrExpectedAndActualLengthMismatch, expectedLen, len(raw))
 	}
 
 	c.Label = raw[channelOpenHeaderLength : channelOpenHeaderLength+labelLength]
 	c.Protocol = raw[channelOpenHeaderLength+labelLength : channelOpenHeaderLength+labelLength+protocolLength]
+
 	return nil
+}
+
+func (c channelOpen) String() string {
+	return fmt.Sprintf(
+		"Open ChannelType(%s) Priority(%v) ReliabilityParameter(%d) Label(%s) Protocol(%s)",
+		c.ChannelType, c.Priority, c.ReliabilityParameter, string(c.Label), string(c.Protocol),
+	)
 }

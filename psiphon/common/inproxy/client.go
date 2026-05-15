@@ -371,7 +371,7 @@ func dialClientWebRTCConn(
 
 	// Initialize the WebRTC offer
 
-	doTLSRandomization := config.WebRTCDialCoordinator.DoDTLSRandomization()
+	dtlsFingerprint := config.WebRTCDialCoordinator.DTLSFingerprint()
 	useMediaStreams := config.WebRTCDialCoordinator.UseMediaStreams()
 	trafficShapingParameters := config.WebRTCDialCoordinator.TrafficShapingParameters()
 	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()
@@ -382,7 +382,7 @@ func dialClientWebRTCConn(
 			EnableDebugLogging:          config.EnableWebRTCDebugLogging,
 			WebRTCDialCoordinator:       config.WebRTCDialCoordinator,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
-			DoDTLSRandomization:         doTLSRandomization,
+			DTLSFingerprint:             dtlsFingerprint,
 			UseMediaStreams:             useMediaStreams,
 			TrafficShapingParameters:    trafficShapingParameters,
 			ReliableTransport:           config.ReliableTransport,
@@ -431,12 +431,18 @@ func dialClientWebRTCConn(
 				NATType:           config.WebRTCDialCoordinator.NATType(),
 				PortMappingTypes:  config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
-			CommonCompartmentIDs:         commonCompartmentIDs,
-			PersonalCompartmentIDs:       personalCompartmentIDs,
-			ClientOfferSDP:               SDP,
-			ICECandidateTypes:            SDPMetrics.iceCandidateTypes,
-			ClientRootObfuscationSecret:  clientRootObfuscationSecret,
-			DoDTLSRandomization:          doTLSRandomization,
+			CommonCompartmentIDs:        commonCompartmentIDs,
+			PersonalCompartmentIDs:      personalCompartmentIDs,
+			ClientOfferSDP:              SDP,
+			ICECandidateTypes:           SDPMetrics.iceCandidateTypes,
+			ClientRootObfuscationSecret: clientRootObfuscationSecret,
+
+			// Legacy-compat: always signal DoDTLSRandomization so old
+			// proxies running pre-covert-dtls code still randomize their
+			// DTLS handshake. New proxies ignore this field and select
+			// their own fingerprint via selectDTLSFingerprint.
+			DoDTLSRandomization: true,
+
 			UseMediaStreams:              useMediaStreams,
 			TrafficShapingParameters:     trafficShapingParameters,
 			PackedDestinationServerEntry: config.PackedDestinationServerEntry,

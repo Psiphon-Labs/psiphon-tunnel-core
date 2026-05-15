@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -37,13 +37,14 @@ type MediaDescription struct {
 	Attributes []Attribute
 }
 
-// Attribute returns the value of an attribute and if it exists
+// Attribute returns the value of an attribute and if it exists.
 func (d *MediaDescription) Attribute(key string) (string, bool) {
 	for _, a := range d.Attributes {
 		if a.Key == key {
 			return a.Value, true
 		}
 	}
+
 	return "", false
 }
 
@@ -61,6 +62,7 @@ func (p *RangedPort) String() string {
 	if p.Range != nil {
 		output += "/" + strconv.Itoa(*p.Range)
 	}
+
 	return output
 }
 
@@ -70,6 +72,7 @@ func (p RangedPort) marshalInto(b []byte) []byte {
 		b = append(b, '/')
 		b = strconv.AppendInt(b, int64(*p.Range), 10)
 	}
+
 	return b
 }
 
@@ -109,6 +112,7 @@ func (m MediaName) marshalInto(b []byte) []byte {
 	appendList(m.Protos, '/')
 	b = append(b, ' ')
 	appendList(m.Formats, ' ')
+
 	return b
 }
 

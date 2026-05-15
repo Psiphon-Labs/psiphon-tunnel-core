@@ -16,7 +16,7 @@ type Goodbye struct {
 	Reason string
 }
 
-// Marshal encodes the Goodbye packet in binary
+// Marshal encodes the Goodbye packet in binary.
 func (g Goodbye) Marshal() ([]byte, error) {
 	/*
 	 *        0                   1                   2                   3
@@ -32,7 +32,7 @@ func (g Goodbye) Marshal() ([]byte, error) {
 	 *       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 	 */
 
-	rawPacket := make([]byte, g.len())
+	rawPacket := make([]byte, g.MarshalSize())
 	packetBody := rawPacket[headerLength:]
 
 	if len(g.Sources) > countMax {
@@ -51,7 +51,7 @@ func (g Goodbye) Marshal() ([]byte, error) {
 		}
 
 		reasonOffset := len(g.Sources) * ssrcLength
-		packetBody[reasonOffset] = uint8(len(reason))
+		packetBody[reasonOffset] = uint8(len(reason)) //nolint:gosec // G115
 		copy(packetBody[reasonOffset+1:], reason)
 	}
 
@@ -64,7 +64,7 @@ func (g Goodbye) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the Goodbye packet from binary
+// Unmarshal decodes the Goodbye packet from binary.
 func (g *Goodbye) Unmarshal(rawPacket []byte) error {
 	/*
 	 *        0                   1                   2                   3
@@ -124,15 +124,20 @@ func (g *Goodbye) Unmarshal(rawPacket []byte) error {
 func (g *Goodbye) Header() Header {
 	return Header{
 		Padding: false,
-		Count:   uint8(len(g.Sources)),
+		Count:   uint8(len(g.Sources)), //nolint:gosec //G115
 		Type:    TypeGoodbye,
-		Length:  uint16((g.len() / 4) - 1),
+		Length:  uint16((g.MarshalSize() / 4) - 1), //nolint:gosec //G115
 	}
 }
 
-func (g *Goodbye) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (g *Goodbye) MarshalSize() int {
 	srcsLength := len(g.Sources) * ssrcLength
-	reasonLength := len(g.Reason) + 1
+	// reason is optional
+	reasonLength := len(g.Reason)
+	if reasonLength > 0 {
+		reasonLength++
+	}
 
 	l := headerLength + srcsLength + reasonLength
 
@@ -144,6 +149,7 @@ func (g *Goodbye) len() int {
 func (g *Goodbye) DestinationSSRC() []uint32 {
 	out := make([]uint32, len(g.Sources))
 	copy(out, g.Sources)
+
 	return out
 }
 
