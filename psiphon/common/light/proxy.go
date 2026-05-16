@@ -54,6 +54,8 @@ const (
 	defaultDNSResolverCacheMaxSize  = 256
 	defaultDNSResolverCacheTTL      = 10 * time.Second
 	dnsResolverCacheReapFrequency   = 1 * time.Minute
+
+	pauseAcceptInterval = time.Second
 )
 
 // ProxyConfig specifies the configuration of a light proxy.
@@ -127,6 +129,8 @@ type Proxy struct {
 	dnsCache    *lrucache.Cache
 
 	connectionNumber atomic.Int64
+
+	paused atomic.Bool
 }
 
 // NewProxy initializes a Proxy. ProxyConfig, LookupGeoIP, and
@@ -364,6 +368,21 @@ func NewProxy(
 	return proxy, nil
 }
 
+// Pause prevents the proxy from accepting new connections in user space,
+// leaving existing in-flight connections untouched. The listening socket
+// remains open, so the kernel may still complete handshakes and queue
+// connections in the listen backlog; queued connections may be accepted
+// after Resume.
+func (proxy *Proxy) Pause() {
+	proxy.paused.Store(true)
+}
+
+// Resume puts the proxy back into the state where
+// it is actively accepting new connections again.
+func (proxy *Proxy) Resume() {
+	proxy.paused.Store(false)
+}
+
 // Run runs the proxy until the specified context is done.
 func (proxy *Proxy) Run(ctx context.Context) error {
 
@@ -383,6 +402,20 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 	go func() {
 		defer waitGroup.Done()
 		for {
+			// Pause is intentionally implemented as coarse polling instead of
+			// adding a wakeup channel or condition variable to the accept loop.
+			// That keeps Pause/Resume simple and race-free for a control-plane
+			// operation where up to pauseAcceptInterval of resume latency is
+			// acceptable. Context cancellation still wakes this path promptly.
+			if proxy.paused.Load() {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(pauseAcceptInterval):
+				}
+				continue
+			}
+
 			conn, err := listener.Accept()
 			if err != nil {
 				if ctx.Err() != nil {
