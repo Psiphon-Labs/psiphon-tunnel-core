@@ -82,6 +82,8 @@ type ProxyConfig struct {
 // logging and stats shipping.
 type ProxyEventReceiver interface {
 	Listening(address string)
+	Paused()
+	Resumed()
 
 	// The ProxyEventReceiver may assume ownership of stats. The Proxy caller
 	// will not access it after passing it to Connection.
@@ -127,6 +129,7 @@ type Proxy struct {
 	dnsCache    *lrucache.Cache
 
 	connectionNumber atomic.Int64
+	paused           atomic.Bool
 }
 
 // NewProxy initializes a Proxy. ProxyConfig, LookupGeoIP, and
@@ -364,6 +367,19 @@ func NewProxy(
 	return proxy, nil
 }
 
+// Pause sets the paused state, in which new proxy connections are rejected.
+// This is intended for load limiting.
+func (proxy *Proxy) Pause() {
+	proxy.paused.Store(true)
+	proxy.eventReceiver.Paused()
+}
+
+// Resume unsets the paused state.
+func (proxy *Proxy) Resume() {
+	proxy.paused.Store(false)
+	proxy.eventReceiver.Resumed()
+}
+
 // Run runs the proxy until the specified context is done.
 func (proxy *Proxy) Run(ctx context.Context) error {
 
@@ -390,6 +406,21 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 				}
 				proxy.eventReceiver.WarningLog(
 					proxy.ID, errors.Trace(err).Error())
+				continue
+			}
+			if proxy.paused.Load() {
+
+				// Immediately close the accepted TCP connection when paused.
+				// Clients will observe a fast failure.
+				//
+				// Future enhancement: close the listener while paused, to
+				// avoid the load of accepting TCP connections.
+				// Alternatively, for certain proxy load patterns it may be
+				// more optimal to accept the connection and, rather than
+				// immediately close it, enqueue for a short time in
+				// anticipation of resume.
+
+				conn.Close()
 				continue
 			}
 			waitGroup.Add(1)

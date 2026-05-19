@@ -419,6 +419,14 @@ func (receiver *testLightProxyEventReceiver) Listening(address string) {
 	fmt.Printf("[Listening] %s\n", address)
 }
 
+func (r *testLightProxyEventReceiver) Paused() {
+	fmt.Printf("[Paused]\n")
+}
+
+func (r *testLightProxyEventReceiver) Resumed() {
+	fmt.Printf("[Resumed]\n")
+}
+
 func (receiver *testLightProxyEventReceiver) Connection(
 	stats *light.ConnectionStats) {
 
