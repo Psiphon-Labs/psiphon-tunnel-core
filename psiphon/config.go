@@ -1295,6 +1295,8 @@ type Config struct {
 	TacticsRetryPeriodJitter       *float64 `json:",omitempty"`
 	TacticsTimeoutMilliseconds     *int     `json:",omitempty"`
 
+	LightProxyTestFetchAddress string `json:",omitempty"`
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1760,6 +1762,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 
 		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
+
 			return errors.TraceNew("EnableLightProxy is incompatible with disabled local proxies")
 		}
 	}
