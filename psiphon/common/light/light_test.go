@@ -205,6 +205,21 @@ func runTestLightProxy() error {
 		return errors.Trace(err)
 	}
 
+	proxy.Pause()
+
+	_, err = clients[0].Dial(ctx, nil, testNetworkType, testTLSProfile, nil, "", echoAddress)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	proxy.Resume()
+
+	conn, err := clients[0].Dial(ctx, nil, testNetworkType, testTLSProfile, nil, "", echoAddress)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	conn.Close()
+
 	cancel()
 
 	err = serverGroup.Wait()
