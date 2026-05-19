@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -115,10 +116,18 @@ func runTestLightProxy() error {
 		return errors.Trace(err)
 	}
 
+	// Exercise the dual dialer.
+	//
+	// TODO: also listen on "::1".
+	proxyIPv6Address := net.JoinHostPort(
+		"::1",
+		strconv.Itoa(proxyListener.Addr().(*net.TCPAddr).Port))
+
 	proxyConfig, proxyEntry, err := Generate(
 		testProviderID,
 		proxyAddress,
 		proxyAddress,
+		proxyIPv6Address,
 		"example.org",
 		[]string{echoAddress},
 		echoListener.Addr().String())

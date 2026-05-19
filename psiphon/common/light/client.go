@@ -89,6 +89,18 @@ type Client struct {
 	obfuscationKey    string
 	verifyPin         string
 	connectionNumber  atomic.Int64
+	dialIPv4Count     atomic.Int64
+	dialIPv6Count     atomic.Int64
+	dialFailedCount   atomic.Int64
+}
+
+type ClientMetrics struct {
+	ProxyID           string
+	ProxyEntryTracker int64
+	DialIPv4Count     int64
+	HasIPv6           bool
+	DialIPv6Count     int64
+	DialFailedCount   int64
 }
 
 // NewClient initializes a Client.
@@ -150,7 +162,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	}
 	verifyPin := base64.StdEncoding.EncodeToString(proxyEntry.VerifyPin)
 
-	proxyID := makeProxyID(proxyEntry.DialAddress, obfuscationKey)
+	proxyID := makeProxyID(proxyEntry.DialAddressIPv4, obfuscationKey)
 
 	client := &Client{
 		config:            config,
@@ -172,6 +184,17 @@ func NewClient(config *ClientConfig) (*Client, error) {
 // if any.
 func (client *Client) GetRecommendedSNI() string {
 	return client.proxyEntry.RecommendedSNI
+}
+
+func (client *Client) GetMetrics() *ClientMetrics {
+	return &ClientMetrics{
+		ProxyID:           client.proxyID,
+		ProxyEntryTracker: client.config.ProxyEntryTracker,
+		DialIPv4Count:     client.dialIPv4Count.Load(),
+		HasIPv6:           client.proxyEntry.DialAddressIPv6 != "",
+		DialIPv6Count:     client.dialIPv6Count.Load(),
+		DialFailedCount:   client.dialFailedCount.Load(),
+	}
 }
 
 // Dial connects to the specified destination.
@@ -202,7 +225,8 @@ func (client *Client) Dial(
 		"proxyEntryTracker": client.proxyEntryTracker,
 		"connectionNum":     connectionNum,
 		"tlsProfile":        tlsProfile,
-		"sni":               sni,
+		"SNI":               sni,
+		"hasIPv6":           client.proxyEntry.DialAddressIPv6 != "",
 	}
 	logFields.Add(additionalLogFields)
 
@@ -210,6 +234,7 @@ func (client *Client) Dial(
 	// here. Otherwise, log on Close.
 	defer func() {
 		if retErr != nil && ctx.Err() == nil {
+			client.dialFailedCount.Add(1)
 			logFields["error"] = retErr.Error()
 			client.config.Logger.WithTraceFields(
 				logFields).Warning("light proxy dial failed")
@@ -217,18 +242,68 @@ func (client *Client) Dial(
 	}()
 
 	start := time.Now()
-	tcpConn, err := client.config.TCPDialer(ctx, client.proxyEntry.DialAddress)
-	if err != nil {
-		return nil, errors.Trace(err)
+
+	var tcpConn net.Conn
+	isIPv6 := false
+
+	if client.proxyEntry.DialAddressIPv6 == "" {
+		tcpConn, err = client.config.TCPDialer(ctx, client.proxyEntry.DialAddressIPv4)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	} else {
+
+		// Dial IPv4 and IPv6 concurrently and use the first to connect.
+		//
+		// Currently, there's no check that the client has an IPv6 interface as
+		// that case is expected to simply fail fast and not generate log
+		// noise. An interface check is possible, similar to
+		// resolver.hasRoutableIPv6Interface and/or inproxy.pionNetwork.Interfaces,
+		// although that may be more expensive than just dialing.
+
+		tcpCtx, tcpCancel := context.WithCancel(ctx)
+		defer tcpCancel()
+		type tcpResult struct {
+			conn   net.Conn
+			isIPv6 bool
+			err    error
+		}
+		tcpChan := make(chan tcpResult, 2)
+		tcpDial := func(addr string, isIPv6 bool) {
+			conn, err := client.config.TCPDialer(tcpCtx, addr)
+			tcpChan <- tcpResult{conn, isIPv6, errors.Trace(err)}
+		}
+		go tcpDial(client.proxyEntry.DialAddressIPv4, false)
+		go tcpDial(client.proxyEntry.DialAddressIPv6, true)
+		result := <-tcpChan
+		if result.err == nil {
+			tcpConn = result.conn
+			isIPv6 = result.isIPv6
+			tcpCancel()
+			result = <-tcpChan
+			if result.err == nil {
+				_ = result.conn.Close()
+			}
+		} else {
+			result = <-tcpChan
+			if result.err != nil {
+				return nil, errors.Trace(result.err)
+			}
+			tcpConn = result.conn
+			isIPv6 = result.isIPv6
+			tcpCancel()
+		}
 	}
 	defer func() {
 		if retErr != nil {
 			_ = tcpConn.Close()
 		}
 	}()
+
 	TCPDuration := time.Since(start)
 
 	logFields["TCPDuration"] = TCPDuration.String()
+	logFields["isIPv6"] = isIPv6
 
 	// Wrapping here counts outer TLS handshake bytes.
 	bytesCounter := &bytesCounter{}
@@ -281,6 +356,12 @@ func (client *Client) Dial(
 		client:        client,
 		connectionNum: connectionNum,
 		bytesCounter:  bytesCounter,
+	}
+
+	if isIPv6 {
+		client.dialIPv6Count.Add(1)
+	} else {
+		client.dialIPv4Count.Add(1)
 	}
 
 	return clientConn, nil

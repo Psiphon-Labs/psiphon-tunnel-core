@@ -34,14 +34,19 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+const (
+	proxyIDSize = 16
+)
+
 // ProxyEntry is the proxy connection information distributed to clients.
 type ProxyEntry struct {
 	Protocol         string `cbor:"1,keyasint,omitempty"`
-	DialAddress      string `cbor:"2,keyasint,omitempty"`
+	DialAddressIPv4  string `cbor:"2,keyasint,omitempty"`
 	RecommendedSNI   string `cbor:"3,keyasint,omitempty"`
 	ObfuscationKey   []byte `cbor:"4,keyasint,omitempty"`
 	VerifyPin        []byte `cbor:"5,keyasint,omitempty"`
 	VerifyServerName string `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6  string `cbor:"7,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -98,7 +103,7 @@ type ConnectionStats struct {
 func makeProxyID(dialAddress, obfuscationKey string) string {
 	h := hmac.New(sha256.New, []byte(obfuscationKey))
 	h.Write([]byte(dialAddress))
-	return base64.RawStdEncoding.EncodeToString(h.Sum(nil))
+	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
 }
 
 type bytesCounter struct {

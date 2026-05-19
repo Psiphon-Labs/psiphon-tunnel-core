@@ -1088,7 +1088,7 @@ loop:
 		reported := false
 		tunnel := controller.getNextActiveTunnel(0)
 		if tunnel != nil {
-			err := tunnel.serverContext.DoConnectedRequest()
+			err := tunnel.serverContext.DoConnectedRequest(controller)
 			if err == nil {
 				reported = true
 			} else {

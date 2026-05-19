@@ -61,7 +61,8 @@ type ProxyConfig struct {
 	Protocol                string   `json:",omitempty"`
 	ProviderID              string   `json:",omitempty"`
 	ListenAddress           string   `json:",omitempty"`
-	DialAddress             string   `json:",omitempty"`
+	DialAddressIPv4         string   `json:",omitempty"`
+	DialAddressIPv6         string   `json:",omitempty"`
 	ObfuscationKey          string   `json:",omitempty"`
 	TLSCertificate          []byte   `json:",omitempty"`
 	TLSPrivateKey           []byte   `json:",omitempty"`
@@ -276,7 +277,7 @@ func NewProxy(
 			dnsResolverCacheMaxSize)
 	}
 
-	host, _, err := net.SplitHostPort(config.DialAddress)
+	host, _, err := net.SplitHostPort(config.DialAddressIPv4)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -304,7 +305,7 @@ func NewProxy(
 		config:                config,
 		lookupGeoIP:           lookupGeoIP,
 		eventReceiver:         newRedactingProxyEventReceiver(eventReceiver),
-		ID:                    makeProxyID(config.DialAddress, config.ObfuscationKey),
+		ID:                    makeProxyID(config.DialAddressIPv4, config.ObfuscationKey),
 		proxyGeoIPData:        proxyGeoIPData,
 		tlsConfig:             tlsConfig,
 		obfuscatorSeedHistory: obfuscator.NewSeedHistory(nil),
