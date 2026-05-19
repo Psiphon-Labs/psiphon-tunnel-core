@@ -1762,7 +1762,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 
 		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
-
 			return errors.TraceNew("EnableLightProxy is incompatible with disabled local proxies")
 		}
 	}
