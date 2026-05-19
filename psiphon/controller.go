@@ -2039,7 +2039,13 @@ func (controller *Controller) Dial(
 	if tunnel == nil {
 
 		lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
-		if lightProxyClient != nil {
+		if lightProxyClient != nil &&
+
+			// In test fetch mode, only the test address is routed through
+			// light proxy.
+			(controller.config.LightProxyTestFetchAddress == "" ||
+				remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
 			var lightConn net.Conn
 			lightConn, tunnel, err = controller.dialLightProxyRace(
 				lightProxyClient,
