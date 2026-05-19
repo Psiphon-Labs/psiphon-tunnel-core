@@ -545,6 +545,14 @@ func (r *testProxyEventReceiver) Listening(address string) {
 	fmt.Printf("[Listening] %s\n", address)
 }
 
+func (r *testProxyEventReceiver) Paused() {
+	fmt.Printf("[Paused]\n")
+}
+
+func (r *testProxyEventReceiver) Resumed() {
+	fmt.Printf("[Resumed]\n")
+}
+
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +

@@ -82,6 +82,8 @@ type ProxyConfig struct {
 // logging and stats shipping.
 type ProxyEventReceiver interface {
 	Listening(address string)
+	Paused()
+	Resumed()
 
 	// The ProxyEventReceiver may assume ownership of stats. The Proxy caller
 	// will not access it after passing it to Connection.
@@ -369,11 +371,13 @@ func NewProxy(
 // This is intended for load limiting.
 func (proxy *Proxy) Pause() {
 	proxy.paused.Store(true)
+	proxy.eventReceiver.Paused()
 }
 
 // Resume unsets the paused state.
 func (proxy *Proxy) Resume() {
 	proxy.paused.Store(false)
+	proxy.eventReceiver.Resumed()
 }
 
 // Run runs the proxy until the specified context is done.
