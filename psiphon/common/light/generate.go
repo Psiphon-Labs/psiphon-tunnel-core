@@ -30,6 +30,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -42,11 +43,11 @@ import (
 // running a proxy and corresponding, encoded SignedProxyEntry for
 // distribution to clients.
 //
-// listenAddress specifies the network address the proxy is to listen on. A
-// distinct dialAddress is optional, and defaults to listenAddress.
-// dialAddress is the value, distributed in the proxy entry, which the client
-// will connect to. recommendedSNI is an optional SNI selection hint
-// distributed in the proxy entry.
+// listenAddress specifies the network address the proxy is to listen on.
+// dialAddressIPv4 and an optional dialAddressIPv6 are the values,
+// distributed in the proxy entry, which the client will connect to.
+// recommendedSNI is an optional SNI selection hint distributed in the proxy
+// entry.
 //
 // allowedDestinations is a list of network addresses, host and post, that the
 // proxy will connect to. Only destinations on this list are allowed, and at
@@ -57,7 +58,8 @@ import (
 func Generate(
 	providerID string,
 	listenAddress string,
-	dialAddress string,
+	dialAddressIPv4 string,
+	dialAddressIPv6 string,
 	recommendedSNI string,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
@@ -66,8 +68,35 @@ func Generate(
 		return nil, nil, errors.TraceNew("missing listen address")
 	}
 
-	if dialAddress == "" {
-		dialAddress = listenAddress
+	if dialAddressIPv4 == "" {
+		return nil, nil, errors.TraceNew("missing IPv4 dial address")
+	}
+
+	checkAddress := func(addr string, isIPv6 bool) error {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		IP := net.ParseIP(host)
+		if IP == nil {
+			return errors.TraceNew("invalid IP address")
+		}
+		if (IP.To4() == nil) != isIPv6 {
+			return errors.TraceNew("unexpected IP address family")
+		}
+		return nil
+	}
+
+	err := checkAddress(dialAddressIPv4, false)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
+	if dialAddressIPv6 != "" {
+		err := checkAddress(dialAddressIPv6, true)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
 	}
 
 	if len(allowedDestinations) == 0 {
@@ -94,7 +123,8 @@ func Generate(
 		Protocol:            LIGHT_PROTOCOL_TLS,
 		ProviderID:          providerID,
 		ListenAddress:       listenAddress,
-		DialAddress:         dialAddress,
+		DialAddressIPv4:     dialAddressIPv4,
+		DialAddressIPv6:     dialAddressIPv6,
 		ObfuscationKey:      obfuscationKey,
 		TLSCertificate:      cert,
 		TLSPrivateKey:       privateKey,
@@ -107,7 +137,8 @@ func Generate(
 
 	entry := ProxyEntry{
 		Protocol:         LIGHT_PROTOCOL_TLS,
-		DialAddress:      dialAddress,
+		DialAddressIPv4:  dialAddressIPv4,
+		DialAddressIPv6:  dialAddressIPv6,
 		RecommendedSNI:   recommendedSNI,
 		ObfuscationKey:   obfuscationKeyBytes,
 		VerifyPin:        verifyPin,

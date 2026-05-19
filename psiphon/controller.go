@@ -1088,7 +1088,7 @@ loop:
 		reported := false
 		tunnel := controller.getNextActiveTunnel(0)
 		if tunnel != nil {
-			err := tunnel.serverContext.DoConnectedRequest()
+			err := tunnel.serverContext.DoConnectedRequest(controller)
 			if err == nil {
 				reported = true
 			} else {
@@ -1678,7 +1678,7 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 	// considered to be errors.
 
 	const (
-		requestTimeout = 10 * time.Second
+		requestTimeout = 5 * time.Second
 		maxBodyBytes   = 64 * 1024
 		maxHeaderBytes = 16 * 1024
 	)
@@ -1702,7 +1702,8 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 		DisableKeepAlives:      true,
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
-			// controller.runCtx.Done will interrupt controller.Dial.
+			// controller.runCtx.Done will interrupt controller.Dial; and
+			// controller.Dial's light proxy path uses controller.lightProxyDialTimeout.
 			conn, err := controller.Dial(address, nil)
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -1722,7 +1723,9 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 		},
 	}
 
-	requestCtx, cancel := context.WithTimeout(controller.runCtx, requestTimeout)
+	requestCtx, cancel := context.WithTimeout(
+		controller.runCtx,
+		time.Duration(controller.lightProxyDialTimeout.Load())+requestTimeout)
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(
@@ -2036,7 +2039,13 @@ func (controller *Controller) Dial(
 	if tunnel == nil {
 
 		lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
-		if lightProxyClient != nil {
+		if lightProxyClient != nil &&
+
+			// In test fetch mode, only the test address is routed through
+			// light proxy.
+			(controller.config.LightProxyTestFetchAddress == "" ||
+				remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
 			var lightConn net.Conn
 			lightConn, tunnel, err = controller.dialLightProxyRace(
 				lightProxyClient,

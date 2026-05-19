@@ -42,7 +42,8 @@ func main() {
 	var entryFilename string
 	var providerID string
 	var listenAddress string
-	var dialAddress string
+	var dialAddressIPv4 string
+	var dialAddressIPv6 string
 	var recommendedSNI string
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
@@ -72,10 +73,16 @@ func main() {
 		"generate proxy listen address")
 
 	flag.StringVar(
-		&dialAddress,
-		"dialAddress",
+		&dialAddressIPv4,
+		"dialAddressIPv4",
 		"",
-		"generate proxy dial address; optional")
+		"generate proxy IPv4 dial address")
+
+	flag.StringVar(
+		&dialAddressIPv6,
+		"dialAddressIPv6",
+		"",
+		"generate proxy IPv6 dial address; optional")
 
 	flag.StringVar(
 		&recommendedSNI,
@@ -118,7 +125,8 @@ func main() {
 			config, entry, err := light.Generate(
 				providerID,
 				listenAddress,
-				dialAddress,
+				dialAddressIPv4,
+				dialAddressIPv6,
 				recommendedSNI,
 				[]string(allowedDestinations),
 				passthroughAddress)
