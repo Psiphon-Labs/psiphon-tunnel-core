@@ -43,7 +43,7 @@ import (
 // running a proxy and corresponding, encoded SignedProxyEntry for
 // distribution to clients.
 //
-// listenAddress specifies the network address the proxy is to listen on.
+// listenAddresses specifies the network addresses the proxy is to listen on.
 // dialAddressIPv4 and an optional dialAddressIPv6 are the values,
 // distributed in the proxy entry, which the client will connect to.
 // recommendedSNI is an optional SNI selection hint distributed in the proxy
@@ -57,15 +57,21 @@ import (
 // passthroughAddress is a psiphon-tls PassthroughAddress and is required.
 func Generate(
 	providerID string,
-	listenAddress string,
+	listenAddresses []string,
 	dialAddressIPv4 string,
 	dialAddressIPv6 string,
 	recommendedSNI string,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
-	if listenAddress == "" {
-		return nil, nil, errors.TraceNew("missing listen address")
+	if len(listenAddresses) == 0 {
+		return nil, nil, errors.TraceNew("missing listen addresses")
+	}
+
+	for _, listenAddress := range listenAddresses {
+		if listenAddress == "" {
+			return nil, nil, errors.TraceNew("missing listen address")
+		}
 	}
 
 	if dialAddressIPv4 == "" {
@@ -122,7 +128,7 @@ func Generate(
 	config := &ProxyConfig{
 		Protocol:            LIGHT_PROTOCOL_TLS,
 		ProviderID:          providerID,
-		ListenAddress:       listenAddress,
+		ListenAddresses:     append([]string(nil), listenAddresses...),
 		DialAddressIPv4:     dialAddressIPv4,
 		DialAddressIPv6:     dialAddressIPv6,
 		ObfuscationKey:      obfuscationKey,

@@ -60,7 +60,7 @@ const (
 type ProxyConfig struct {
 	Protocol                string   `json:",omitempty"`
 	ProviderID              string   `json:",omitempty"`
-	ListenAddress           string   `json:",omitempty"`
+	ListenAddresses         []string `json:",omitempty"`
 	DialAddressIPv4         string   `json:",omitempty"`
 	DialAddressIPv6         string   `json:",omitempty"`
 	ObfuscationKey          string   `json:",omitempty"`
@@ -146,6 +146,16 @@ func NewProxy(
 
 	if config.Protocol != LIGHT_PROTOCOL_TLS {
 		return nil, errors.TraceNew("unsupported proxy protocol")
+	}
+
+	if len(config.ListenAddresses) == 0 {
+		return nil, errors.TraceNew("missing listen addresses")
+	}
+
+	for _, listenAddress := range config.ListenAddresses {
+		if listenAddress == "" {
+			return nil, errors.TraceNew("missing listen address")
+		}
 	}
 
 	if config.ObfuscationKey == "" {
@@ -386,54 +396,70 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 
 	// Future enhancement: use psiphon/server.newTCPListenerWithBPF.
 	listenConfig := &net.ListenConfig{}
-	listener, err := listenConfig.Listen(
-		context.Background(), "tcp", proxy.config.ListenAddress)
-	if err != nil {
-		return errors.Trace(err)
+	listeners := make([]net.Listener, 0, len(proxy.config.ListenAddresses))
+	closeListeners := func() {
+		for _, listener := range listeners {
+			listener.Close()
+		}
 	}
 
-	proxy.eventReceiver.Listening(listener.Addr().String())
+	for _, listenAddress := range proxy.config.ListenAddresses {
+		listener, err := listenConfig.Listen(
+			context.Background(), "tcp", listenAddress)
+		if err != nil {
+			closeListeners()
+			return errors.Trace(err)
+		}
+		listeners = append(listeners, listener)
+	}
+
+	for _, listener := range listeners {
+		proxy.eventReceiver.Listening(listener.Addr().String())
+	}
 
 	waitGroup := new(sync.WaitGroup)
 
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				if ctx.Err() != nil {
-					break
+	for _, listener := range listeners {
+		listener := listener
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					if ctx.Err() != nil {
+						break
+					}
+					proxy.eventReceiver.WarningLog(
+						proxy.ID, errors.Trace(err).Error())
+					continue
 				}
-				proxy.eventReceiver.WarningLog(
-					proxy.ID, errors.Trace(err).Error())
-				continue
-			}
-			if proxy.paused.Load() {
+				if proxy.paused.Load() {
 
-				// Immediately close the accepted TCP connection when paused.
-				// Clients will observe a fast failure.
-				//
-				// Future enhancement: close the listener while paused, to
-				// avoid the load of accepting TCP connections.
-				// Alternatively, for certain proxy load patterns it may be
-				// more optimal to accept the connection and, rather than
-				// immediately close it, enqueue for a short time in
-				// anticipation of resume.
+					// Immediately close the accepted TCP connection when paused.
+					// Clients will observe a fast failure.
+					//
+					// Future enhancement: close the listener while paused, to
+					// avoid the load of accepting TCP connections.
+					// Alternatively, for certain proxy load patterns it may be
+					// more optimal to accept the connection and, rather than
+					// immediately close it, enqueue for a short time in
+					// anticipation of resume.
 
-				conn.Close()
-				continue
+					conn.Close()
+					continue
+				}
+				waitGroup.Add(1)
+				go func(conn net.Conn) {
+					defer waitGroup.Done()
+					proxy.handleConn(ctx, conn)
+				}(conn)
 			}
-			waitGroup.Add(1)
-			go func() {
-				defer waitGroup.Done()
-				proxy.handleConn(ctx, conn)
-			}()
-		}
-	}()
+		}()
+	}
 
 	<-ctx.Done()
-	listener.Close()
+	closeListeners()
 	waitGroup.Wait()
 
 	return nil

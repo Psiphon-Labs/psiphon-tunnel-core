@@ -252,15 +252,13 @@ func startLightTestProxy(
 	}
 
 	// Exercise the dual dialer.
-	//
-	// TODO: also listen on "::1".
 	proxyIPv6Address := net.JoinHostPort(
 		"::1",
 		strconv.Itoa(proxyListener.Addr().(*net.TCPAddr).Port))
 
 	proxyConfig, proxyEntry, err := light.Generate(
 		prng.HexString(8),
-		proxyAddress,
+		[]string{proxyAddress, proxyIPv6Address},
 		proxyAddress,
 		proxyIPv6Address,
 		"example.org",
