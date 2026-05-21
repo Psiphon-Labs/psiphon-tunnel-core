@@ -3034,21 +3034,28 @@ type StoredLightProxy struct {
 }
 
 // StoreLightProxy updates the latest stored light proxy.
-func StoreLightProxy(lightProxy *StoredLightProxy) {
+func StoreLightProxy(lightProxy *StoredLightProxy) bool {
 
 	// TODO: add a StoredLightProxy.TTL?
+
+	if lightProxy == nil {
+		NoticeWarning("StoreLightProxy failed: missing light proxy")
+		return false
+	}
 
 	jsonLightProxy, err := json.Marshal(lightProxy)
 	if err != nil {
 		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
-		return
+		return false
 	}
 
 	err = SetKeyValue(datastoreStoredLightProxyKey, string(jsonLightProxy))
 	if err != nil {
 		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
-		return
+		return false
 	}
+
+	return true
 }
 
 // LoadLightProxy returns the latest stored light proxy, or nil if there is

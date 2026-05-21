@@ -41,10 +41,11 @@ func main() {
 	var configFilename string
 	var entryFilename string
 	var providerID string
-	var listenAddress string
+	var listenAddresses stringListFlag
 	var dialAddressIPv4 string
 	var dialAddressIPv6 string
 	var recommendedSNI string
+	var recommendedSNIRegex string
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
 
@@ -66,11 +67,10 @@ func main() {
 		"",
 		"generate proxy provider ID; optional")
 
-	flag.StringVar(
-		&listenAddress,
+	flag.Var(
+		&listenAddresses,
 		"listenAddress",
-		"",
-		"generate proxy listen address")
+		"generate proxy listen address; flag may be repeated")
 
 	flag.StringVar(
 		&dialAddressIPv4,
@@ -89,6 +89,12 @@ func main() {
 		"recommendedSNI",
 		"",
 		"generate recommended SNI; optional")
+
+	flag.StringVar(
+		&recommendedSNIRegex,
+		"recommendedSNIRegex",
+		"",
+		"generate recommended SNI regex; optional")
 
 	flag.Var(
 		&allowedDestinations,
@@ -124,10 +130,11 @@ func main() {
 
 			config, entry, err := light.Generate(
 				providerID,
-				listenAddress,
+				[]string(listenAddresses),
 				dialAddressIPv4,
 				dialAddressIPv6,
 				recommendedSNI,
+				recommendedSNIRegex,
 				[]string(allowedDestinations),
 				passthroughAddress)
 			if err != nil {

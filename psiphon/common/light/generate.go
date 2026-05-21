@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
@@ -43,11 +44,11 @@ import (
 // running a proxy and corresponding, encoded SignedProxyEntry for
 // distribution to clients.
 //
-// listenAddress specifies the network address the proxy is to listen on.
+// listenAddresses specifies the network addresses the proxy is to listen on.
 // dialAddressIPv4 and an optional dialAddressIPv6 are the values,
 // distributed in the proxy entry, which the client will connect to.
-// recommendedSNI is an optional SNI selection hint distributed in the proxy
-// entry.
+// recommendedSNI and recommendedSNIRegex are optional SNI selection hints
+// distributed in the proxy entry.
 //
 // allowedDestinations is a list of network addresses, host and post, that the
 // proxy will connect to. Only destinations on this list are allowed, and at
@@ -57,15 +58,22 @@ import (
 // passthroughAddress is a psiphon-tls PassthroughAddress and is required.
 func Generate(
 	providerID string,
-	listenAddress string,
+	listenAddresses []string,
 	dialAddressIPv4 string,
 	dialAddressIPv6 string,
 	recommendedSNI string,
+	recommendedSNIRegex string,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
-	if listenAddress == "" {
-		return nil, nil, errors.TraceNew("missing listen address")
+	if len(listenAddresses) == 0 {
+		return nil, nil, errors.TraceNew("missing listen addresses")
+	}
+
+	for _, listenAddress := range listenAddresses {
+		if listenAddress == "" {
+			return nil, nil, errors.TraceNew("missing listen address")
+		}
 	}
 
 	if dialAddressIPv4 == "" {
@@ -99,6 +107,13 @@ func Generate(
 		}
 	}
 
+	if recommendedSNIRegex != "" {
+		_, err := regen.GenerateString(recommendedSNIRegex)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+	}
+
 	if len(allowedDestinations) == 0 {
 		return nil, nil, errors.TraceNew("missing allowed destinations")
 	}
@@ -122,7 +137,7 @@ func Generate(
 	config := &ProxyConfig{
 		Protocol:            LIGHT_PROTOCOL_TLS,
 		ProviderID:          providerID,
-		ListenAddress:       listenAddress,
+		ListenAddresses:     append([]string(nil), listenAddresses...),
 		DialAddressIPv4:     dialAddressIPv4,
 		DialAddressIPv6:     dialAddressIPv6,
 		ObfuscationKey:      obfuscationKey,
@@ -136,13 +151,14 @@ func Generate(
 	// of the obfuscation key.
 
 	entry := ProxyEntry{
-		Protocol:         LIGHT_PROTOCOL_TLS,
-		DialAddressIPv4:  dialAddressIPv4,
-		DialAddressIPv6:  dialAddressIPv6,
-		RecommendedSNI:   recommendedSNI,
-		ObfuscationKey:   obfuscationKeyBytes,
-		VerifyPin:        verifyPin,
-		VerifyServerName: verifyServerName,
+		Protocol:            LIGHT_PROTOCOL_TLS,
+		DialAddressIPv4:     dialAddressIPv4,
+		DialAddressIPv6:     dialAddressIPv6,
+		RecommendedSNI:      recommendedSNI,
+		RecommendedSNIRegex: recommendedSNIRegex,
+		ObfuscationKey:      obfuscationKeyBytes,
+		VerifyPin:           verifyPin,
+		VerifyServerName:    verifyServerName,
 	}
 
 	// There is currently no signature. See SignedProxyEntry comment.

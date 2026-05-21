@@ -40,13 +40,14 @@ const (
 
 // ProxyEntry is the proxy connection information distributed to clients.
 type ProxyEntry struct {
-	Protocol         string `cbor:"1,keyasint,omitempty"`
-	DialAddressIPv4  string `cbor:"2,keyasint,omitempty"`
-	RecommendedSNI   string `cbor:"3,keyasint,omitempty"`
-	ObfuscationKey   []byte `cbor:"4,keyasint,omitempty"`
-	VerifyPin        []byte `cbor:"5,keyasint,omitempty"`
-	VerifyServerName string `cbor:"6,keyasint,omitempty"`
-	DialAddressIPv6  string `cbor:"7,keyasint,omitempty"`
+	Protocol            string `cbor:"1,keyasint,omitempty"`
+	DialAddressIPv4     string `cbor:"2,keyasint,omitempty"`
+	RecommendedSNI      string `cbor:"3,keyasint,omitempty"`
+	ObfuscationKey      []byte `cbor:"4,keyasint,omitempty"`
+	VerifyPin           []byte `cbor:"5,keyasint,omitempty"`
+	VerifyServerName    string `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6     string `cbor:"7,keyasint,omitempty"`
+	RecommendedSNIRegex string `cbor:"8,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.

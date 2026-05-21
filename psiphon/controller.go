@@ -48,9 +48,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
 	"github.com/axiomhq/hyperloglog"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -1865,19 +1867,16 @@ func (controller *Controller) dialLightProxy(
 		p := controller.config.GetParameters().Get()
 		tlsProfile, _, randomizedTLSProfileSeed, err := SelectTLSProfile(false, true, false, "", p)
 		if err != nil {
+			p.Close()
 			return nil, errors.Trace(err)
 		}
-		sni := lightClient.GetRecommendedSNI()
-		if sni == "" ||
-			!p.WeightedCoinFlip(parameters.LightProxyUseRecommendedSNIProbability) {
-			sni = selectHostName(protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH, p)
-		}
+		SNI := selectLightProxySNI(lightClient, p)
 		p.Close()
 
 		replay = lightReplay{
 			TLSProfile:               tlsProfile,
 			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
-			SNI:                      sni,
+			SNI:                      SNI,
 		}
 	}
 
@@ -1906,6 +1905,46 @@ func (controller *Controller) dialLightProxy(
 	controller.lightProxyReplay.Store(replay)
 
 	return conn, nil
+}
+
+func selectLightProxySNI(
+	lightClient *light.Client, p parameters.ParametersAccessor) string {
+
+	// Prefer light proxy entry recommended regex SNI, then recommended SNI,
+	// then light proxy custom hostname tactic.
+
+	recommendedRegexSNI := lightClient.GetRecommendedSNIRegex()
+	recommendedSNI := lightClient.GetRecommendedSNI()
+
+	if (recommendedRegexSNI != "" || recommendedSNI != "") &&
+		p.WeightedCoinFlip(parameters.LightProxyUseRecommendedSNIProbability) {
+
+		if recommendedRegexSNI != "" {
+			SNI, err := regen.GenerateString(recommendedRegexSNI)
+			if err != nil {
+				NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
+				SNI = values.GetHostName()
+			}
+			return SNI
+		}
+		return recommendedSNI
+	}
+
+	if p.WeightedCoinFlip(parameters.LightProxyCustomHostNameProbability) {
+		regexStrings := p.RegexStrings(parameters.LightProxyCustomHostNameRegexes)
+		if len(regexStrings) == 0 {
+			return values.GetHostName()
+		}
+		choice := prng.Intn(len(regexStrings))
+		SNI, err := regen.GenerateString(regexStrings[choice])
+		if err != nil {
+			NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
+			SNI = values.GetHostName()
+		}
+		return SNI
+	}
+
+	return values.GetHostName()
 }
 
 type lightProxyDialResult struct {
