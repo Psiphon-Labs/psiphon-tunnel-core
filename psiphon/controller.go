@@ -2012,15 +2012,6 @@ func (controller *Controller) dialLightProxyRace(
 				}, nil, nil
 			}
 
-			// The light dial failed. The final fallback is
-			// Controller.Dial behavior when there is no light
-			// proxy configured and readInactiveThreshold is 0.
-			tunnel := controller.getNextActiveTunnel(0)
-			if tunnel != nil {
-				NoticeWarning(
-					"light proxy dial failed: %v", errors.Trace(result.err))
-				return nil, tunnel, nil
-			}
 			return nil, nil, errors.Trace(result.err)
 
 		case <-ticker.C:
@@ -2091,14 +2082,21 @@ func (controller *Controller) Dial(
 				remoteAddr,
 				downstreamConn,
 				readInactiveThreshold)
-			if err != nil {
-				return nil, errors.Trace(err)
+			if err != nil && controller.runCtx.Err() == nil {
+				NoticeWarning(
+					"light proxy dial failed: %v", errors.Trace(err))
 			}
 
 			if lightConn != nil {
 				return lightConn, nil
 			}
 			// Drop through with tunnel returned from dialLightProxyRace.
+		}
+
+		if tunnel == nil {
+			// The final fallback is the Controller.Dial behavior when there
+			// is no light proxy configured and readInactiveThreshold is 0.
+			tunnel = controller.getNextActiveTunnel(0)
 		}
 
 		if tunnel == nil {
