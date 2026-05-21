@@ -45,6 +45,7 @@ func main() {
 	var dialAddressIPv4 string
 	var dialAddressIPv6 string
 	var recommendedSNI string
+	var recommendedSNIRegex string
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
 
@@ -89,6 +90,12 @@ func main() {
 		"",
 		"generate recommended SNI; optional")
 
+	flag.StringVar(
+		&recommendedSNIRegex,
+		"recommendedSNIRegex",
+		"",
+		"generate recommended SNI regex; optional")
+
 	flag.Var(
 		&allowedDestinations,
 		"allowedDestination",
@@ -127,6 +134,7 @@ func main() {
 				dialAddressIPv4,
 				dialAddressIPv6,
 				recommendedSNI,
+				recommendedSNIRegex,
 				[]string(allowedDestinations),
 				passthroughAddress)
 			if err != nil {

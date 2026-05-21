@@ -262,6 +262,7 @@ func startLightTestProxy(
 		proxyAddress,
 		proxyIPv6Address,
 		"example.org",
+		"",
 		[]string{allowedWebServerAddress},
 		allowedWebServerAddress)
 	if err != nil {

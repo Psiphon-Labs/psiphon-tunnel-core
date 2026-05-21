@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
@@ -46,8 +47,8 @@ import (
 // listenAddresses specifies the network addresses the proxy is to listen on.
 // dialAddressIPv4 and an optional dialAddressIPv6 are the values,
 // distributed in the proxy entry, which the client will connect to.
-// recommendedSNI is an optional SNI selection hint distributed in the proxy
-// entry.
+// recommendedSNI and recommendedSNIRegex are optional SNI selection hints
+// distributed in the proxy entry.
 //
 // allowedDestinations is a list of network addresses, host and post, that the
 // proxy will connect to. Only destinations on this list are allowed, and at
@@ -61,6 +62,7 @@ func Generate(
 	dialAddressIPv4 string,
 	dialAddressIPv6 string,
 	recommendedSNI string,
+	recommendedSNIRegex string,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
@@ -105,6 +107,13 @@ func Generate(
 		}
 	}
 
+	if recommendedSNIRegex != "" {
+		_, err := regen.GenerateString(recommendedSNIRegex)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+	}
+
 	if len(allowedDestinations) == 0 {
 		return nil, nil, errors.TraceNew("missing allowed destinations")
 	}
@@ -142,13 +151,14 @@ func Generate(
 	// of the obfuscation key.
 
 	entry := ProxyEntry{
-		Protocol:         LIGHT_PROTOCOL_TLS,
-		DialAddressIPv4:  dialAddressIPv4,
-		DialAddressIPv6:  dialAddressIPv6,
-		RecommendedSNI:   recommendedSNI,
-		ObfuscationKey:   obfuscationKeyBytes,
-		VerifyPin:        verifyPin,
-		VerifyServerName: verifyServerName,
+		Protocol:            LIGHT_PROTOCOL_TLS,
+		DialAddressIPv4:     dialAddressIPv4,
+		DialAddressIPv6:     dialAddressIPv6,
+		RecommendedSNI:      recommendedSNI,
+		RecommendedSNIRegex: recommendedSNIRegex,
+		ObfuscationKey:      obfuscationKeyBytes,
+		VerifyPin:           verifyPin,
+		VerifyServerName:    verifyServerName,
 	}
 
 	// There is currently no signature. See SignedProxyEntry comment.

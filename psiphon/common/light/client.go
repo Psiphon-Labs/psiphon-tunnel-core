@@ -186,6 +186,12 @@ func (client *Client) GetRecommendedSNI() string {
 	return client.proxyEntry.RecommendedSNI
 }
 
+// GetRecommendedSNIRegex returns the recommended SNI regex included in the
+// proxy entry, if any.
+func (client *Client) GetRecommendedSNIRegex() string {
+	return client.proxyEntry.RecommendedSNIRegex
+}
+
 func (client *Client) GetMetrics() *ClientMetrics {
 	return &ClientMetrics{
 		ProxyID:           client.proxyID,

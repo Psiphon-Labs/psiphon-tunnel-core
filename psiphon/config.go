@@ -1287,6 +1287,8 @@ type Config struct {
 	TunnelConnectTimeoutSeconds *int `json:",omitempty"`
 
 	LightProxyUseRecommendedSNIProbability        *float64 `json:",omitempty"`
+	LightProxyCustomHostNameRegexes               []string `json:",omitempty"`
+	LightProxyCustomHostNameProbability           *float64 `json:",omitempty"`
 	LightProxyTunnelInactiveThresholdMilliseconds *int     `json:",omitempty"`
 	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
 
@@ -3389,6 +3391,16 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.DisableServerEntriesReporter] = *config.DisableServerEntriesReporter
 	}
 
+	if config.LightProxyCustomHostNameRegexes != nil {
+		applyParameters[parameters.LightProxyCustomHostNameRegexes] =
+			parameters.RegexStrings(config.LightProxyCustomHostNameRegexes)
+	}
+
+	if config.LightProxyCustomHostNameProbability != nil {
+		applyParameters[parameters.LightProxyCustomHostNameProbability] =
+			*config.LightProxyCustomHostNameProbability
+	}
+
 	if config.LightProxyUseRecommendedSNIProbability != nil {
 		applyParameters[parameters.LightProxyUseRecommendedSNIProbability] = *config.LightProxyUseRecommendedSNIProbability
 	}
@@ -3668,6 +3680,18 @@ func (config *Config) setDialParametersHash() {
 		for _, protocol := range config.CustomHostNameLimitProtocols {
 			hash.Write([]byte(protocol))
 		}
+	}
+
+	if len(config.LightProxyCustomHostNameRegexes) > 0 {
+		hash.Write([]byte("LightProxyCustomHostNameRegexes"))
+		for _, regex := range config.LightProxyCustomHostNameRegexes {
+			hash.Write([]byte(regex))
+		}
+	}
+
+	if config.LightProxyCustomHostNameProbability != nil {
+		hash.Write([]byte("LightProxyCustomHostNameProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightProxyCustomHostNameProbability)
 	}
 
 	if config.ConjureCachedRegistrationTTLSeconds != nil {

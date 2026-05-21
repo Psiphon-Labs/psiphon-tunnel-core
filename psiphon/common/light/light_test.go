@@ -127,6 +127,7 @@ func runTestLightProxy() error {
 		proxyAddress,
 		proxyIPv6Address,
 		"example.org",
+		"",
 		[]string{echoAddress},
 		echoListener.Addr().String())
 	if err != nil {
