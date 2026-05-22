@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -3040,6 +3041,13 @@ func StoreLightProxy(lightProxy *StoredLightProxy) bool {
 
 	if lightProxy == nil {
 		NoticeWarning("StoreLightProxy failed: missing light proxy")
+		return false
+	}
+
+	// Ensure the proxy entry is valid before storing.
+	_, err := light.DecodeAndValidateProxyEntry(lightProxy.LightProxyEntry)
+	if err != nil {
+		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
 		return false
 	}
 

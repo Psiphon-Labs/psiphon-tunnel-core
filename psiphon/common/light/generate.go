@@ -80,28 +80,13 @@ func Generate(
 		return nil, nil, errors.TraceNew("missing IPv4 dial address")
 	}
 
-	checkAddress := func(addr string, isIPv6 bool) error {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		IP := net.ParseIP(host)
-		if IP == nil {
-			return errors.TraceNew("invalid IP address")
-		}
-		if (IP.To4() == nil) != isIPv6 {
-			return errors.TraceNew("unexpected IP address family")
-		}
-		return nil
-	}
-
-	err := checkAddress(dialAddressIPv4, false)
+	err := validateIPAddressFamily(dialAddressIPv4, false)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 
 	if dialAddressIPv6 != "" {
-		err := checkAddress(dialAddressIPv6, true)
+		err := validateIPAddressFamily(dialAddressIPv6, true)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -173,6 +158,21 @@ func Generate(
 	}
 
 	return config, cborEntry, nil
+}
+
+func validateIPAddressFamily(addr string, isIPv6 bool) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	IP := net.ParseIP(host)
+	if IP == nil {
+		return errors.TraceNew("invalid IP address")
+	}
+	if (IP.To4() == nil) != isIPv6 {
+		return errors.TraceNew("unexpected IP address family")
+	}
+	return nil
 }
 
 func generateCert() ([]byte, string, []byte, []byte, error) {

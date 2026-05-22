@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -61,6 +62,45 @@ type SignedProxyEntry struct {
 
 	Signature  []byte     `cbor:"1,keyasint,omitempty"`
 	ProxyEntry ProxyEntry `cbor:"2,keyasint,omitempty"`
+}
+
+// DecodeAndValidateProxyEntry decodes and validates a SignedProxyEntry.
+func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, error) {
+
+	var signedProxyEntry SignedProxyEntry
+	err := cbor.Unmarshal(encodedSignedProxyEntry, &signedProxyEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// There is currently no signature. See SignedProxyEntry comment.
+	proxyEntry := &signedProxyEntry.ProxyEntry
+
+	if proxyEntry.Protocol != LIGHT_PROTOCOL_TLS {
+		return nil, errors.TraceNew("unsupported proxy protocol")
+	}
+
+	err = validateIPAddressFamily(proxyEntry.DialAddressIPv4, false)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if proxyEntry.DialAddressIPv6 != "" {
+		err = validateIPAddressFamily(proxyEntry.DialAddressIPv6, true)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	if len(proxyEntry.ObfuscationKey) == 0 {
+		return nil, errors.TraceNew("missing obfuscation key")
+	}
+
+	if len(proxyEntry.VerifyPin) == 0 {
+		return nil, errors.TraceNew("missing TLS verify pin")
+	}
+
+	return proxyEntry, nil
 }
 
 // ConnectionStats are the proxy connection stats reported to

@@ -33,7 +33,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -139,29 +138,13 @@ func NewClient(config *ClientConfig) (*Client, error) {
 
 	proxyEntryTracker := fmt.Sprintf("%016x", config.ProxyEntryTracker)
 
-	var signedProxyEntry SignedProxyEntry
-	err = cbor.Unmarshal(config.ProxyEntry, &signedProxyEntry)
+	proxyEntry, err := DecodeAndValidateProxyEntry(config.ProxyEntry)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// There is currently no signature. See SignedProxyEntry comment.
-	proxyEntry := &signedProxyEntry.ProxyEntry
-
-	if proxyEntry.Protocol != LIGHT_PROTOCOL_TLS {
-		return nil, errors.TraceNew("unsupported proxy protocol")
-	}
-
-	if len(proxyEntry.ObfuscationKey) == 0 {
-		return nil, errors.TraceNew("missing obfuscation key")
-	}
 	obfuscationKey := hex.EncodeToString(proxyEntry.ObfuscationKey)
-
-	if len(proxyEntry.VerifyPin) == 0 {
-		return nil, errors.TraceNew("missing TLS verify pin")
-	}
 	verifyPin := base64.StdEncoding.EncodeToString(proxyEntry.VerifyPin)
-
 	proxyID := makeProxyID(proxyEntry.DialAddressIPv4, obfuscationKey)
 
 	client := &Client{
