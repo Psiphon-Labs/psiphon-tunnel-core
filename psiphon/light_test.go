@@ -41,15 +41,22 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
 )
 
 func TestControllerLightProxy(t *testing.T) {
-	if err := runTestControllerLightProxy(); err != nil {
+	if err := runTestControllerLightProxy(false); err != nil {
 		t.Fatal(err.Error())
 	}
 }
 
-func runTestControllerLightProxy() (retErr error) {
+func TestControllerImportPushPayloadLightProxyDial(t *testing.T) {
+	if err := runTestControllerLightProxy(true); err != nil {
+		t.Fatal(err.Error())
+	}
+}
+
+func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -70,6 +77,15 @@ func runTestControllerLightProxy() (retErr error) {
 		return errors.Trace(err)
 	}
 	defer shutdownLightProxy()
+	const lightProxyEntryTracker = 0x0102030405060708
+
+	var obfuscationKey, publicKey, privateKey string
+	if importPushPayload {
+		obfuscationKey, publicKey, privateKey, err = push.GenerateKeys()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
 
 	targetServerEntry, err := makeUnreachableTargetServerEntry()
 	if err != nil {
@@ -86,8 +102,13 @@ func runTestControllerLightProxy() (retErr error) {
 		TargetServerEntry:             targetServerEntry,
 		EstablishTunnelTimeoutSeconds: &establishTunnelTimeoutSeconds,
 		EnableLightProxy:              true,
-		LightProxyEntry:               lightProxyEntry,
-		LightProxyEntryTracker:        0x01020304,
+	}
+	if importPushPayload {
+		config.PushPayloadObfuscationKey = obfuscationKey
+		config.PushPayloadSignaturePublicKey = publicKey
+	} else {
+		config.LightProxyEntry = lightProxyEntry
+		config.LightProxyEntryTracker = lightProxyEntryTracker
 	}
 
 	err = config.Commit(false)
@@ -165,10 +186,54 @@ func runTestControllerLightProxy() (retErr error) {
 		return errors.Trace(ctx.Err())
 	}
 
+	if importPushPayload {
+		maker, err := push.NewPushPayloadMaker(
+			obfuscationKey, publicKey, privateKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		result, err := maker.MakePushPayloads(
+			0,
+			0,
+			1*time.Hour,
+			nil,
+			push.PinnedEntries{
+				LightProxyEntries: []*push.LightProxyEntry{{
+					ProxyEntry:        lightProxyEntry,
+					ProxyEntryTracker: lightProxyEntryTracker,
+				}},
+			},
+			0,
+		)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if len(result.Payloads) != 1 {
+			return errors.TraceNew("unexpected push payload count")
+		}
+
+		if !controller.ImportPushPayload(result.Payloads[0]) {
+			return errors.TraceNew("push payload import failed")
+		}
+	}
+
 	select {
 	case <-lightProxyAvailable:
 	case <-ctx.Done():
 		return errors.Trace(ctx.Err())
+	}
+
+	if importPushPayload {
+		storedLightProxy := LoadLightProxy()
+		if storedLightProxy == nil {
+			return errors.TraceNew("missing stored light proxy")
+		}
+		if !bytes.Equal(storedLightProxy.LightProxyEntry, lightProxyEntry) ||
+			storedLightProxy.LightProxyEntryTracker != lightProxyEntryTracker {
+
+			return errors.TraceNew("unexpected stored light proxy")
+		}
 	}
 
 	// Allow for known race condition described in NewHttpProxy().
@@ -459,4 +524,293 @@ func (receiver *testLightProxyEventReceiver) WarningLog(_ string, message string
 
 func (receiver *testLightProxyEventReceiver) ErrorLog(_ string, message string) {
 	fmt.Printf("[ErrorLog] %s\n", message)
+}
+
+func TestControllerImportPushPayloadLightProxy(t *testing.T) {
+
+	dataRoot, err := ioutil.TempDir("", "psiphon-controller-push-light-proxy-test")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer os.RemoveAll(dataRoot)
+
+	_, lightProxyEntry, err := light.Generate(
+		prng.HexString(8),
+		[]string{"127.0.0.1:1"},
+		"127.0.0.1:1",
+		"",
+		"example.org",
+		"",
+		[]string{"example.com:443"},
+		"example.com:443")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	_, lightProxyEntry2, err := light.Generate(
+		prng.HexString(8),
+		[]string{"127.0.0.1:2"},
+		"127.0.0.1:2",
+		"",
+		"example.org",
+		"",
+		[]string{"example.com:443"},
+		"example.com:443")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	obfuscationKey, publicKey, privateKey, err := push.GenerateKeys()
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	config := &Config{
+		DataRootDirectory:             dataRoot,
+		PropagationChannelId:          "0000000000000000",
+		SponsorId:                     "0000000000000000",
+		DisableLocalSocksProxy:        true,
+		EnableLightProxy:              true,
+		PushPayloadObfuscationKey:     obfuscationKey,
+		PushPayloadSignaturePublicKey: publicKey,
+	}
+
+	err = config.Commit(false)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer CloseDataStore()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	maker, err := push.NewPushPayloadMaker(
+		obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	const lightProxyEntryTracker = 0x0102030405060708
+	const lightProxyEntryTracker2 = 0x1112131415161718
+	result, err := maker.MakePushPayloads(
+		0,
+		0,
+		1*time.Hour,
+		nil,
+		push.PinnedEntries{
+			LightProxyEntries: []*push.LightProxyEntry{{
+				ProxyEntry:        lightProxyEntry,
+				ProxyEntryTracker: lightProxyEntryTracker,
+			}, {
+				ProxyEntry:        lightProxyEntry2,
+				ProxyEntryTracker: lightProxyEntryTracker2,
+			}},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	if len(result.Payloads) != 1 {
+		t.Fatal("unexpected push payload count")
+	}
+
+	if !controller.ImportPushPayload(result.Payloads[0]) {
+		t.Fatal("push payload import failed")
+	}
+
+	storedLightProxy := LoadLightProxy()
+	if storedLightProxy == nil {
+		t.Fatal("missing stored light proxy")
+	}
+	if (!bytes.Equal(storedLightProxy.LightProxyEntry, lightProxyEntry) ||
+		storedLightProxy.LightProxyEntryTracker != lightProxyEntryTracker) &&
+		(!bytes.Equal(storedLightProxy.LightProxyEntry, lightProxyEntry2) ||
+			storedLightProxy.LightProxyEntryTracker != lightProxyEntryTracker2) {
+
+		t.Fatal("unexpected stored light proxy")
+	}
+
+	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	if lightProxyClient == nil {
+		t.Fatal("missing initialized light proxy client")
+	}
+}
+
+func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
+
+	dataRoot, err := ioutil.TempDir("", "psiphon-controller-push-light-proxy-store-failure-test")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer os.RemoveAll(dataRoot)
+
+	_, lightProxyEntry, err := light.Generate(
+		prng.HexString(8),
+		[]string{"127.0.0.1:1"},
+		"127.0.0.1:1",
+		"",
+		"example.org",
+		"",
+		[]string{"example.com:443"},
+		"example.com:443")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	obfuscationKey, publicKey, privateKey, err := push.GenerateKeys()
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	config := &Config{
+		DataRootDirectory:             dataRoot,
+		PropagationChannelId:          "0000000000000000",
+		SponsorId:                     "0000000000000000",
+		DisableLocalSocksProxy:        true,
+		EnableLightProxy:              true,
+		PushPayloadObfuscationKey:     obfuscationKey,
+		PushPayloadSignaturePublicKey: publicKey,
+	}
+
+	err = config.Commit(false)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	datastoreOpen := true
+	defer func() {
+		if datastoreOpen {
+			CloseDataStore()
+		}
+	}()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	maker, err := push.NewPushPayloadMaker(
+		obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	result, err := maker.MakePushPayloads(
+		0,
+		0,
+		1*time.Hour,
+		nil,
+		push.PinnedEntries{
+			LightProxyEntries: []*push.LightProxyEntry{{
+				ProxyEntry:        lightProxyEntry,
+				ProxyEntryTracker: 0x0102030405060708,
+			}},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	if len(result.Payloads) != 1 {
+		t.Fatal("unexpected push payload count")
+	}
+
+	CloseDataStore()
+	datastoreOpen = false
+
+	if controller.ImportPushPayload(result.Payloads[0]) {
+		t.Fatal("push payload import succeeded despite light proxy store failure")
+	}
+
+	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	if lightProxyClient != nil {
+		t.Fatal("light proxy client was initialized despite store failure")
+	}
+}
+
+func TestControllerImportPushPayloadInvalidLightProxyNotStored(t *testing.T) {
+
+	dataRoot, err := ioutil.TempDir("", "psiphon-controller-push-invalid-light-proxy-test")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer os.RemoveAll(dataRoot)
+
+	obfuscationKey, publicKey, privateKey, err := push.GenerateKeys()
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	config := &Config{
+		DataRootDirectory:             dataRoot,
+		PropagationChannelId:          "0000000000000000",
+		SponsorId:                     "0000000000000000",
+		DisableLocalSocksProxy:        true,
+		EnableLightProxy:              true,
+		PushPayloadObfuscationKey:     obfuscationKey,
+		PushPayloadSignaturePublicKey: publicKey,
+	}
+
+	err = config.Commit(false)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer CloseDataStore()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	maker, err := push.NewPushPayloadMaker(
+		obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	result, err := maker.MakePushPayloads(
+		0,
+		0,
+		1*time.Hour,
+		nil,
+		push.PinnedEntries{
+			LightProxyEntries: []*push.LightProxyEntry{{
+				ProxyEntry:        []byte("invalid-light-proxy-entry"),
+				ProxyEntryTracker: 0x0102030405060708,
+			}},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	if len(result.Payloads) != 1 {
+		t.Fatal("unexpected push payload count")
+	}
+
+	if controller.ImportPushPayload(result.Payloads[0]) {
+		t.Fatal("invalid light proxy push payload import succeeded")
+	}
+
+	if storedLightProxy := LoadLightProxy(); storedLightProxy != nil {
+		t.Fatal("invalid light proxy was stored")
+	}
+
+	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	if lightProxyClient != nil {
+		t.Fatal("invalid light proxy client was initialized")
+	}
 }

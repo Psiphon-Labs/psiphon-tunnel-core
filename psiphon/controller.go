@@ -701,6 +701,8 @@ func (controller *Controller) ImportExchangePayload(payload string) bool {
 // overall goal is establish _any_ connection.
 func (controller *Controller) ImportPushPayload(payload []byte) bool {
 
+	var lightProxyEntries []*push.LightProxyEntry
+
 	importer := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
@@ -723,17 +725,42 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		return nil
 	}
 
-	n, err := push.ImportPushPayload(
+	lightProxyImporter := func(
+		proxyEntry []byte,
+		proxyEntryTracker int64) error {
+
+		if len(proxyEntry) == 0 {
+			return errors.TraceNew("missing light proxy entry")
+		}
+
+		lightProxyEntries = append(lightProxyEntries, &push.LightProxyEntry{
+			ProxyEntry:        append([]byte(nil), proxyEntry...),
+			ProxyEntryTracker: proxyEntryTracker,
+		})
+
+		return nil
+	}
+
+	n, nLightProxy, err := push.ImportPushPayload(
 		controller.config.PushPayloadObfuscationKey,
 		controller.config.PushPayloadSignaturePublicKey,
 		payload,
-		importer)
+		importer,
+		lightProxyImporter)
 
 	if err != nil {
-		NoticeWarning("push payload: %d imported, %v", n, err)
+		NoticeWarning(
+			"push payload: %d server entries, %d light proxy entries imported, %v",
+			n,
+			nLightProxy,
+			err)
 	} else {
-		NoticeInfo("push payload: %d imported", n)
+		NoticeInfo(
+			"push payload: %d server entries, %d light proxy entries imported",
+			n,
+			nLightProxy)
 	}
+	importOK := err == nil
 
 	if n > 0 {
 		select {
@@ -742,11 +769,28 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		}
 	}
 
-	// TODO: when the push payload contains light proxy entries, select one,
-	// store with StoreLightProxy for use in future sessions, and initialize
-	// for immediate use with controller.initLightProxy.
+	if importOK && len(lightProxyEntries) > 0 {
 
-	return err == nil
+		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
+
+		ok := StoreLightProxy(&StoredLightProxy{
+			LightProxyEntry:        lightProxyEntry.ProxyEntry,
+			LightProxyEntryTracker: lightProxyEntry.ProxyEntryTracker,
+		})
+		if !ok {
+			importOK = false
+		} else {
+			lightProxyErr := controller.initLightProxy(
+				lightProxyEntry.ProxyEntry,
+				lightProxyEntry.ProxyEntryTracker)
+			if lightProxyErr != nil {
+				NoticeWarning("light proxy init failed: %v", errors.Trace(lightProxyErr))
+				importOK = false
+			}
+		}
+	}
+
+	return importOK
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
