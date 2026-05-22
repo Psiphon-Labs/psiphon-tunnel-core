@@ -58,4 +58,6 @@ message InproxyBroker {
     optional bool meek_missing_required_headers = 144;
     optional int64 ice_candidate_count = 145;
     optional int64 allowed_geoip_mismatches = 146;
+    optional string ice_region = 147;
+    optional string ice_asn = 148;
 }

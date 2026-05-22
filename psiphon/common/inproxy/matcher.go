@@ -218,6 +218,8 @@ type MatchOffer struct {
 	NetworkProtocol             NetworkProtocol
 	DestinationAddress          string
 	DestinationServerID         string
+	ICERegion                   string
+	ICEASN                      string
 }
 
 // MatchAnswer is a proxy answer, the proxy's follow up to a matched
@@ -228,6 +230,8 @@ type MatchAnswer struct {
 	ConnectionID         ID
 	ProxyAnswerSDP       WebRTCSessionDescription
 	ProxyDTLSFingerprint string
+	ICERegion            string
+	ICEASN               string
 }
 
 // MatchMetrics records statistics about the match queue state at the time a

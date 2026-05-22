@@ -2777,6 +2777,8 @@ func filterSDPAddresses(
 type webRTCSDPMetrics struct {
 	iceCandidateCount      int
 	iceCandidateTypes      []ICECandidateType
+	iceRegion              string
+	iceASN                 string
 	hasIPv4                bool
 	hasIPv6                bool
 	hasPrivateIP           bool
@@ -2850,6 +2852,9 @@ func processSDPAddresses(
 	hasPrivateIP := false
 	filteredCandidateReasons := make(map[string]int)
 	allowedGeoIPMismatches := 0
+	iceRegion := ""
+	iceASN := ""
+	recordedICEGeoIP := false
 
 	var portMappingICECandidates []sdp.Attribute
 	if portMappingExternalAddr != "" {
@@ -3033,6 +3038,21 @@ func processSDPAddresses(
 
 						if allowGeoIPMismatchCandidates {
 							allowedGeoIPMismatches += 1
+
+							// Record the first non-private, mismatching ICE
+							// candidate's GeoIP. Matching candidates are
+							// skipped because they duplicate the peer's
+							// broker-observed region.
+							//
+							// Limitation: in some circumstances, an SDP may
+							// contain multiple non-private, mismatching
+							// candidates with distinct GeoIP regions/ASNs;
+							// only the first is recorded.
+							if !recordedICEGeoIP && !candidateIsPrivateIP {
+								iceRegion = candidateGeoIPData.Country
+								iceASN = candidateGeoIPData.ASN
+								recordedICEGeoIP = true
+							}
 						} else {
 							version := "IPv4"
 							if candidateIsIPv6 {
@@ -3092,6 +3112,8 @@ func processSDPAddresses(
 
 	metrics := &webRTCSDPMetrics{
 		iceCandidateCount:      candidateCount,
+		iceRegion:              iceRegion,
+		iceASN:                 iceASN,
 		hasIPv4:                hasIPv4,
 		hasIPv6:                hasIPv6,
 		hasPrivateIP:           hasPrivateIP,

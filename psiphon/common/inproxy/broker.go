@@ -1053,6 +1053,7 @@ func (b *Broker) handleClientOffer(
 	var logFields common.LogFields
 	var serverParams *serverParams
 	var clientMatchOffer *MatchOffer
+	var sdpMetrics *webRTCSDPMetrics
 	var proxyMatchAnnouncement *MatchAnnouncement
 	var proxyAnswer *MatchAnswer
 	var matchMetrics *MatchMetrics
@@ -1119,7 +1120,7 @@ func (b *Broker) handleClientOffer(
 	// permitted in exchanged SDPs and not filtered out.
 
 	var filteredSDP []byte
-	filteredSDP, logFields, err = offerRequest.ValidateAndGetLogFields(
+	filteredSDP, sdpMetrics, logFields, err = offerRequest.ValidateAndGetLogFields(
 		int(b.maxCompartmentIDs.Load()),
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
@@ -1233,6 +1234,8 @@ func (b *Broker) handleClientOffer(
 		NetworkProtocol:             offerRequest.NetworkProtocol,
 		DestinationAddress:          offerRequest.DestinationAddress,
 		DestinationServerID:         serverParams.serverID,
+		ICERegion:                   sdpMetrics.iceRegion,
+		ICEASN:                      sdpMetrics.iceASN,
 	}
 
 	proxyAnswer, proxyMatchAnnouncement, matchMetrics, err = b.matcher.Offer(
@@ -1361,6 +1364,10 @@ func (b *Broker) handleClientOffer(
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
 			ProxyDTLSFingerprint:        proxyAnswer.ProxyDTLSFingerprint,
+			ClientICERegion:             clientMatchOffer.ICERegion,
+			ClientICEASN:                clientMatchOffer.ICEASN,
+			ProxyICERegion:              proxyAnswer.ICERegion,
+			ProxyICEASN:                 proxyAnswer.ICEASN,
 			// ProxyMetrics includes proxy NAT and port mapping types.
 			ProxyMetrics:    proxyMatchAnnouncement.ProxyMetrics,
 			ProxyIsPriority: proxyMatchAnnouncement.Properties.IsPriority,
@@ -1411,6 +1418,7 @@ func (b *Broker) handleProxyAnswer(
 
 	var logFields common.LogFields
 	var proxyAnswer *MatchAnswer
+	var sdpMetrics *webRTCSDPMetrics
 	var answerError string
 
 	// The proxy ID is an implicit parameter: it's the proxy's session public
@@ -1479,7 +1487,7 @@ func (b *Broker) handleProxyAnswer(
 	}
 
 	var filteredSDP []byte
-	filteredSDP, logFields, err = answerRequest.ValidateAndGetLogFields(
+	filteredSDP, sdpMetrics, logFields, err = answerRequest.ValidateAndGetLogFields(
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
@@ -1513,6 +1521,8 @@ func (b *Broker) handleProxyAnswer(
 			ConnectionID:         answerRequest.ConnectionID,
 			ProxyAnswerSDP:       answerSDP,
 			ProxyDTLSFingerprint: answerRequest.ProxyDTLSFingerprint,
+			ICERegion:            sdpMetrics.iceRegion,
+			ICEASN:               sdpMetrics.iceASN,
 		}
 
 		err = b.matcher.Answer(proxyAnswer)
