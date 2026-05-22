@@ -1116,6 +1116,12 @@ func (p *Proxy) proxyOneClient(
 		regionActivity: regionActivity,
 	}
 
+	proxyDTLSFingerprint, err := webRTCCoordinator.ProxyDTLSFingerprint(
+		announceResponse.ClientRootObfuscationSecret)
+	if err != nil {
+		return backOff, errors.Trace(err)
+	}
+
 	// Trigger back-off if the following WebRTC operations fail to establish a
 	// connections.
 
@@ -1147,12 +1153,6 @@ func (p *Proxy) proxyOneClient(
 	// included in SDPs.
 	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
 
-	// Limitation: the proxy's independently-selected DTLS fingerprint is not
-	// currently reported in the stats pipeline. Only the client-side choice
-	// flows to server logs via inproxy_webrtc_dtls_fingerprint.
-	//
-	// TODO: Revisit later to add a proxy-side metric.
-
 	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnForAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
@@ -1161,7 +1161,7 @@ func (p *Proxy) proxyOneClient(
 			ExcludeInterfaceName:        p.config.ExcludeInterfaceName,
 			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
-			DTLSFingerprint:             webRTCCoordinator.DTLSFingerprint(),
+			DTLSFingerprint:             proxyDTLSFingerprint,
 			UseMediaStreams:             announceResponse.UseMediaStreams,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
 
@@ -1175,6 +1175,7 @@ func (p *Proxy) proxyOneClient(
 		},
 		announceResponse.ClientOfferSDP,
 		hasPersonalCompartmentIDs)
+
 	var webRTCRequestErr string
 	if webRTCErr != nil {
 		webRTCErr = errors.Trace(webRTCErr)
@@ -1192,10 +1193,11 @@ func (p *Proxy) proxyOneClient(
 	answerResponse, err := brokerClient.ProxyAnswer(
 		ctx,
 		&ProxyAnswerRequest{
-			ConnectionID:      announceResponse.ConnectionID,
-			ProxyAnswerSDP:    SDP,
-			ICECandidateTypes: sdpMetrics.iceCandidateTypes,
-			AnswerError:       webRTCRequestErr,
+			ConnectionID:         announceResponse.ConnectionID,
+			ProxyAnswerSDP:       SDP,
+			ICECandidateTypes:    sdpMetrics.iceCandidateTypes,
+			AnswerError:          webRTCRequestErr,
+			ProxyDTLSFingerprint: proxyDTLSFingerprint,
 		})
 	if err != nil {
 		if webRTCErr != nil {

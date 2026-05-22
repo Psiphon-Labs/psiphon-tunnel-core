@@ -1661,9 +1661,11 @@ func NewInproxyWebRTCDialInstance(
 	}
 
 	if isProxy && webRTCDialParameters == nil {
-		// Auto-generate STUN dial parameters. There's no replay in this case.
+		// Auto-generate WebRTC dial parameters. There's no replay in this
+		// case. The proxy DTLS fingerprint is selected later, after the
+		// client root obfuscation secret is received from the broker.
 		var err error
-		webRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p)
+		webRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p, true)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1759,8 +1761,24 @@ func (w *InproxyWebRTCDialInstance) ClientRootObfuscationSecret() inproxy.Obfusc
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) DTLSFingerprint() string {
+func (w *InproxyWebRTCDialInstance) ClientDTLSFingerprint() string {
 	return w.webRTCDialParameters.DTLSFingerprint
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) ProxyDTLSFingerprint(
+	clientRootObfuscationSecret inproxy.ObfuscationSecret) (string, error) {
+
+	p := w.config.GetParameters().Get()
+	defer p.Close()
+
+	isOffer := false
+	dtlsFingerprint, err := selectDTLSFingerprint(
+		p, clientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return dtlsFingerprint, nil
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -2278,7 +2296,8 @@ type InproxyWebRTCDialParameters struct {
 
 // MakeInproxyWebRTCDialParameters generates new InproxyWebRTCDialParameters.
 func MakeInproxyWebRTCDialParameters(
-	p parameters.ParametersAccessor) (*InproxyWebRTCDialParameters, error) {
+	p parameters.ParametersAccessor,
+	isProxy bool) (*InproxyWebRTCDialParameters, error) {
 
 	rootObfuscationSecret, err := inproxy.GenerateRootObfuscationSecret()
 	if err != nil {
@@ -2308,7 +2327,18 @@ func MakeInproxyWebRTCDialParameters(
 		}
 	}
 
-	dtlsFingerprint := selectDTLSFingerprint(p)
+	// Clients select a DTLS fingerprint now. Proxies select later, once they
+	// receive the ClientRootObfuscationSecret.
+
+	var dtlsFingerprint string
+	if !isProxy {
+		isOffer := true
+		dtlsFingerprint, err = selectDTLSFingerprint(
+			p, rootObfuscationSecret, isOffer)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
 
 	return &InproxyWebRTCDialParameters{
 		RootObfuscationSecret:    rootObfuscationSecret,
@@ -2323,20 +2353,30 @@ func MakeInproxyWebRTCDialParameters(
 // with probability InproxyDTLSFingerprintSelectRandomizedProbability, and
 // parrot (mimicry) fingerprints are selected otherwise.
 //
-// Both the client and proxy call selectDTLSFingerprint independently; the
-// proxy is not told which fingerprint the client chose.
+// Clients and proxies select their replayable DTLS fingerprints
+// deterministically from the same client root obfuscation secret, using
+// distinct offer and answer contexts.
 //
-// Limitation: the proxy independently selects its own DTLS fingerprint using
-// its local protocol.SupportedDTLSFingerprints. If a client replays the same
-// ClientRootObfuscationSecret against a different proxy whose
-// SupportedDTLSFingerprints list has been upgraded, downgraded, or
+// Limitation: the proxy selects its DTLS fingerprint using its local
+// protocol.SupportedDTLSFingerprints and tactics parameters. If a client
+// replays the same ClientRootObfuscationSecret against a different proxy
+// whose SupportedDTLSFingerprints list has been upgraded, downgraded, or
 // reordered, the proxy's fingerprint choice will not be the same as on the
-// original dial, even though the PRNG seed is identical. The client-side
-// fingerprint selection and handshake remain reproducible; only the proxy
-// side diverges.
-func selectDTLSFingerprint(p parameters.ParametersAccessor) string {
+// original dial, even though the PRNG seed is identical.
+func selectDTLSFingerprint(
+	p parameters.ParametersAccessor,
+	clientRootObfuscationSecret inproxy.ObfuscationSecret,
+	isOffer bool) (string, error) {
 
-	limitFingerprints := p.DTLSFingerprints(parameters.InproxyLimitDTLSFingerprints)
+	PRNG, err := inproxy.DeriveDTLSFingerprintPRNG(
+		clientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+
+	limitFingerprints := p.DTLSFingerprintsWithPRNG(
+		parameters.InproxyLimitDTLSFingerprints,
+		PRNG)
 
 	randomizedFingerprints := make([]string, 0)
 	parrotFingerprints := make([]string, 0)
@@ -2354,14 +2394,16 @@ func selectDTLSFingerprint(p parameters.ParametersAccessor) string {
 
 	if len(randomizedFingerprints) > 0 &&
 		(len(parrotFingerprints) == 0 ||
-			p.WeightedCoinFlip(parameters.InproxyDTLSFingerprintSelectRandomizedProbability)) {
-		return randomizedFingerprints[prng.Intn(len(randomizedFingerprints))]
+			PRNG.FlipWeightedCoin(
+				p.Float(parameters.InproxyDTLSFingerprintSelectRandomizedProbability))) {
+		return randomizedFingerprints[PRNG.Intn(len(randomizedFingerprints))], nil
 	}
 
 	if len(parrotFingerprints) == 0 {
-		return ""
+		return "", nil
 	}
-	return parrotFingerprints[prng.Intn(len(parrotFingerprints))]
+
+	return parrotFingerprints[PRNG.Intn(len(parrotFingerprints))], nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -2375,7 +2417,9 @@ func (dialParams *InproxyWebRTCDialParameters) GetMetrics() common.LogFields {
 	// delivered via inproxy.ClientConn/WebRTCConn GetMetrics.
 	logFields := common.LogFields{}
 
-	logFields["inproxy_webrtc_dtls_fingerprint"] = dialParams.DTLSFingerprint
+	if dialParams.DTLSFingerprint != "" {
+		logFields["inproxy_webrtc_dtls_fingerprint"] = dialParams.DTLSFingerprint
+	}
 
 	return logFields
 }

@@ -371,7 +371,7 @@ func dialClientWebRTCConn(
 
 	// Initialize the WebRTC offer
 
-	dtlsFingerprint := config.WebRTCDialCoordinator.DTLSFingerprint()
+	dtlsFingerprint := config.WebRTCDialCoordinator.ClientDTLSFingerprint()
 	useMediaStreams := config.WebRTCDialCoordinator.UseMediaStreams()
 	trafficShapingParameters := config.WebRTCDialCoordinator.TrafficShapingParameters()
 	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()

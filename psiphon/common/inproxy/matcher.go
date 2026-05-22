@@ -223,10 +223,11 @@ type MatchOffer struct {
 // MatchAnswer is a proxy answer, the proxy's follow up to a matched
 // announcement, to be routed to the awaiting client offer.
 type MatchAnswer struct {
-	ProxyIP        string
-	ProxyID        ID
-	ConnectionID   ID
-	ProxyAnswerSDP WebRTCSessionDescription
+	ProxyIP              string
+	ProxyID              ID
+	ConnectionID         ID
+	ProxyAnswerSDP       WebRTCSessionDescription
+	ProxyDTLSFingerprint string
 }
 
 // MatchMetrics records statistics about the match queue state at the time a

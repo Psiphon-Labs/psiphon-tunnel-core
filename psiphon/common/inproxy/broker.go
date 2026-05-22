@@ -1360,6 +1360,7 @@ func (b *Broker) handleClientOffer(
 			ClientPortMappingTypes:      clientMatchOffer.Properties.PortMappingTypes,
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
+			ProxyDTLSFingerprint:        proxyAnswer.ProxyDTLSFingerprint,
 			// ProxyMetrics includes proxy NAT and port mapping types.
 			ProxyMetrics:    proxyMatchAnnouncement.ProxyMetrics,
 			ProxyIsPriority: proxyMatchAnnouncement.Properties.IsPriority,
@@ -1507,10 +1508,11 @@ func (b *Broker) handleProxyAnswer(
 		answerSDP.SDP = string(filteredSDP)
 
 		proxyAnswer = &MatchAnswer{
-			ProxyIP:        proxyIP,
-			ProxyID:        initiatorID,
-			ConnectionID:   answerRequest.ConnectionID,
-			ProxyAnswerSDP: answerSDP,
+			ProxyIP:              proxyIP,
+			ProxyID:              initiatorID,
+			ConnectionID:         answerRequest.ConnectionID,
+			ProxyAnswerSDP:       answerSDP,
+			ProxyDTLSFingerprint: answerRequest.ProxyDTLSFingerprint,
 		}
 
 		err = b.matcher.Answer(proxyAnswer)

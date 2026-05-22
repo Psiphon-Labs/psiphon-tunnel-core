@@ -256,10 +256,15 @@ type WebRTCDialCoordinator interface {
 	// obfuscation/replay on both sides.
 	ClientRootObfuscationSecret() ObfuscationSecret
 
-	// DTLSFingerprint returns the selected DTLS fingerprint name. New
+	// ClientDTLSFingerprint returns the selected DTLS fingerprint name. New
 	// clients always select a fingerprint (Randomized, Chrome, Firefox,
 	// etc.).
-	DTLSFingerprint() string
+	ClientDTLSFingerprint() string
+
+	// ProxyDTLSFingerprint deterministically selects a DTLS fingerprint
+	// name from the specified client root obfuscation secret.
+	ProxyDTLSFingerprint(
+		ClientRootObfuscationSecret ObfuscationSecret) (string, error)
 
 	// UseMediaStreams indicates whether to use WebRTC media streams to tunnel
 	// traffic. When false, a WebRTC data channel is used to tunnel traffic.

@@ -451,10 +451,11 @@ type ClientOfferResponse struct {
 // reason, it should still send ProxyAnswerRequest with AnswerError
 // populated; the broker will signal the client to abort this connection.
 type ProxyAnswerRequest struct {
-	ConnectionID      ID                       `cbor:"1,keyasint,omitempty"`
-	ProxyAnswerSDP    WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
-	ICECandidateTypes ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
-	AnswerError       string                   `cbor:"5,keyasint,omitempty"`
+	ConnectionID         ID                       `cbor:"1,keyasint,omitempty"`
+	ProxyAnswerSDP       WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
+	ICECandidateTypes    ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
+	AnswerError          string                   `cbor:"5,keyasint,omitempty"`
+	ProxyDTLSFingerprint string                   `cbor:"6,keyasint,omitempty"`
 
 	// These fields are no longer used.
 	//
@@ -521,6 +522,7 @@ type BrokerServerReport struct {
 	ProxyIP                     string           `cbor:"10,keyasint,omitempty"`
 	ProxyMetrics                *ProxyMetrics    `cbor:"11,keyasint,omitempty"`
 	ProxyIsPriority             bool             `cbor:"12,keyasint,omitempty"`
+	ProxyDTLSFingerprint        string           `cbor:"13,keyasint,omitempty"`
 
 	// These legacy fields are now sent in ProxyMetrics.
 	ProxyNATType          NATType          `cbor:"5,keyasint,omitempty"`
@@ -1062,6 +1064,9 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 	logFields["inproxy_client_nat_type"] = report.ClientNATType
 	logFields["inproxy_client_port_mapping_types"] = report.ClientPortMappingTypes
 	logFields["inproxy_proxy_is_priority"] = report.ProxyIsPriority
+	if report.ProxyDTLSFingerprint != "" {
+		logFields["inproxy_proxy_webrtc_dtls_fingerprint"] = report.ProxyDTLSFingerprint
+	}
 
 	// TODO:
 	// - log IPv4 vs. IPv6 information
