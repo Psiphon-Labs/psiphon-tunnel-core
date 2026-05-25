@@ -30,7 +30,7 @@ func validateListedKeys(t *testing.T, a Agent, expectedKeys []string) {
 		return
 	}
 	if len(listedKeys) != len(expectedKeys) {
-		t.Fatalf("expeted %d key, got %d", len(expectedKeys), len(listedKeys))
+		t.Fatalf("expected %d key, got %d", len(expectedKeys), len(listedKeys))
 		return
 	}
 	actualKeys := make(map[string]bool)
@@ -118,5 +118,44 @@ func TestAddDuplicateKey(t *testing.T) {
 	}
 	if !isFound {
 		t.Fatal("key with the updated comment not found")
+	}
+}
+
+func TestAddKeyWithConstraints(t *testing.T) {
+	// Verifies the keyring refuses keys carrying constraint extensions it
+	// cannot enforce.
+	agent, cleanup := startKeyringAgent(t)
+	defer cleanup()
+
+	constraints := []ConstraintExtension{
+		{
+			ExtensionName:    "extension1",
+			ExtensionDetails: []byte("details1"),
+		},
+	}
+
+	key := testPrivateKeys["rsa"]
+
+	err := agent.Add(AddedKey{
+		PrivateKey:           key,
+		ConstraintExtensions: constraints,
+	})
+	if err == nil {
+		t.Fatal("adding a key with unsupported constraints succeeded")
+	}
+}
+
+func TestAddKeyWithConfirmBeforeUse(t *testing.T) {
+	agent, cleanup := startKeyringAgent(t)
+	defer cleanup()
+
+	key := testPrivateKeys["rsa"]
+
+	err := agent.Add(AddedKey{
+		PrivateKey:       key,
+		ConfirmBeforeUse: true,
+	})
+	if err == nil {
+		t.Fatal("adding a key with confirm before use constraint succeeded")
 	}
 }

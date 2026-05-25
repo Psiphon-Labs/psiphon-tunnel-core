@@ -5,12 +5,12 @@
 package ssh
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 
@@ -44,7 +44,7 @@ type keyingTransport interface {
 	// prepareKeyChange sets up a key change. The key change for a
 	// direction will be effected if a msgNewKeys message is sent
 	// or received.
-	prepareKeyChange(*algorithms, *kexResult) error
+	prepareKeyChange(*NegotiatedAlgorithms, *kexResult) error
 
 	// setStrictMode sets the strict KEX mode, notably triggering
 	// sequence number resets on sending or receiving msgNewKeys.
@@ -121,7 +121,7 @@ type handshakeTransport struct {
 	bannerCallback BannerCallback
 
 	// Algorithms agreed in the last key exchange.
-	algorithms *algorithms
+	algorithms *NegotiatedAlgorithms
 
 	// Counters exclusively owned by readLoop.
 	readPacketsLeft uint32
@@ -178,7 +178,7 @@ func newClientTransport(conn keyingTransport, clientVersion, serverVersion []byt
 	if config.HostKeyAlgorithms != nil {
 		t.hostKeyAlgorithms = config.HostKeyAlgorithms
 	} else {
-		t.hostKeyAlgorithms = supportedHostKeyAlgos
+		t.hostKeyAlgorithms = defaultHostKeyAlgos
 	}
 	go t.readLoop()
 	go t.kexLoop()
@@ -196,6 +196,10 @@ func newServerTransport(conn keyingTransport, clientVersion, serverVersion []byt
 
 func (t *handshakeTransport) getSessionID() []byte {
 	return t.sessionID
+}
+
+func (t *handshakeTransport) getAlgorithms() NegotiatedAlgorithms {
+	return *t.algorithms
 }
 
 // waitSession waits for the session to be established. This should be
@@ -318,7 +322,7 @@ func (t *handshakeTransport) resetWriteThresholds() {
 	if t.config.RekeyThreshold > 0 {
 		t.writeBytesLeft = int64(t.config.RekeyThreshold)
 	} else if t.algorithms != nil {
-		t.writeBytesLeft = t.algorithms.w.rekeyBytes()
+		t.writeBytesLeft = t.algorithms.Write.rekeyBytes()
 	} else {
 		t.writeBytesLeft = 1 << 30
 	}
@@ -435,7 +439,7 @@ func (t *handshakeTransport) resetReadThresholds() {
 	if t.config.RekeyThreshold > 0 {
 		t.readBytesLeft = int64(t.config.RekeyThreshold)
 	} else if t.algorithms != nil {
-		t.readBytesLeft = t.algorithms.r.rekeyBytes()
+		t.readBytesLeft = t.algorithms.Read.rekeyBytes()
 	} else {
 		t.readBytesLeft = 1 << 30
 	}
@@ -534,7 +538,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		CompressionClientServer: supportedCompressions,
 		CompressionServerClient: supportedCompressions,
 	}
-	io.ReadFull(rand.Reader, msg.Cookie[:])
+	io.ReadFull(t.config.Rand, msg.Cookie[:])
 
 	// We mutate the KexAlgos slice, in order to add the kex-strict extension algorithm,
 	// and possibly to add the ext-info extension algorithm. Since the slice may be the
@@ -557,7 +561,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			switch s := k.(type) {
 			case MultiAlgorithmSigner:
 				for _, algo := range algorithmsForKeyFormat(keyFormat) {
-					if contains(s.Algorithms(), underlyingAlgo(algo)) {
+					if slices.Contains(s.Algorithms(), underlyingAlgo(algo)) {
 						msg.ServerHostKeyAlgos = append(msg.ServerHostKeyAlgos, algo)
 					}
 				}
@@ -625,9 +629,9 @@ func (t *handshakeTransport) sendKexInit() error {
 
 	// Psiphon transforms assume that default algorithms are configured.
 	if (t.config.NoEncryptThenMACHash || t.config.KEXPRNGSeed != nil) &&
-		(!equal(t.config.KeyExchanges, preferredKexAlgos) ||
-			!equal(t.config.Ciphers, preferredCiphers) ||
-			!equal(t.config.MACs, supportedMACs)) {
+		(!equal(t.config.KeyExchanges, defaultKexAlgos) ||
+			!equal(t.config.Ciphers, defaultCiphers) ||
+			!equal(t.config.MACs, defaultMACs)) {
 		return errors.New("ssh: custom algorithm preferences not supported")
 	}
 
@@ -640,7 +644,12 @@ func (t *handshakeTransport) sendKexInit() error {
 	//
 	// When using obfuscated SSH, where only the initial, unencrypted
 	// packets are obfuscated, NoEncryptThenMACHash should be set.
-	noEncryptThenMACs := []string{"hmac-sha2-256", "hmac-sha2-512", "hmac-sha1", "hmac-sha1-96"}
+	noEncryptThenMACs := []string{
+		HMACSHA256,
+		HMACSHA512,
+		HMACSHA1,
+		InsecureHMACSHA196,
+	}
 
 	if t.config.NoEncryptThenMACHash {
 		msg.MACsClientServer = noEncryptThenMACs
@@ -736,8 +745,8 @@ func (t *handshakeTransport) sendKexInit() error {
 			for _, kexAlgo := range kexAlgos {
 				switch kexAlgo {
 				case "ext-info-c",
-					"kex-strict-c-v00@openssh.com",
-					"kex-strict-s-v00@openssh.com":
+					kexStrictClient,
+					kexStrictServer:
 					// These extensions are not KEX algorithms
 				default:
 					return kexAlgo, true
@@ -753,7 +762,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			if _, ok := firstKexAlgo(kexAlgos); ok {
 				return kexAlgos
 			}
-			return retain(PRNG, kexAlgos, permute(PRNG, preferredKexAlgos)[0])
+			return retain(PRNG, kexAlgos, permute(PRNG, defaultKexAlgos)[0])
 		}
 
 		// Downgrade servers to use the algorithm lists used previously in
@@ -766,21 +775,30 @@ func (t *handshakeTransport) sendKexInit() error {
 		// lists are processed in legacy PRNG state order.
 
 		legacyServerKexAlgos := []string{
-			kexAlgoCurve25519SHA256LibSSH,
-			kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521,
-			kexAlgoDH14SHA256, kexAlgoDH14SHA1,
+			KeyExchangeCurve25519,
+			KeyExchangeECDHP256,
+			KeyExchangeECDHP384,
+			KeyExchangeECDHP521,
+			KeyExchangeDH14SHA256,
+			InsecureKeyExchangeDH14SHA1,
 		}
 		legacyServerCiphers := []string{
-			"aes128-gcm@openssh.com",
-			chacha20Poly1305ID,
-			"aes128-ctr", "aes192-ctr", "aes256-ctr",
+			CipherAES128GCM,
+			CipherChaCha20Poly1305,
+			CipherAES128CTR,
+			CipherAES192CTR,
+			CipherAES256CTR,
 		}
 		legacyServerMACs := []string{
-			"hmac-sha2-256-etm@openssh.com",
-			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96",
+			HMACSHA256ETM,
+			HMACSHA256,
+			HMACSHA1,
+			InsecureHMACSHA196,
 		}
 		legacyServerNoEncryptThenMACs := []string{
-			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96",
+			HMACSHA256,
+			HMACSHA1,
+			InsecureHMACSHA196,
 		}
 		if t.config.NoEncryptThenMACHash {
 			legacyServerMACs = legacyServerNoEncryptThenMACs
@@ -830,7 +848,9 @@ func (t *handshakeTransport) sendKexInit() error {
 		// weakMACs are the highest priority item. Clients will make
 		// adjustments after predicting the server KEX.
 
-		weakMACs := []string{"hmac-sha1-96"}
+		weakMACs := []string{
+			InsecureHMACSHA196,
+		}
 
 		if isServer {
 			MACs = avoid(PRNG, MACs, weakMACs, startingMACs)
@@ -841,17 +861,21 @@ func (t *handshakeTransport) sendKexInit() error {
 		// of each type, ensuring compatibility with legacy clients.
 
 		newServerKexAlgos := []string{
-			kexAlgoCurve25519SHA256, kexAlgoDH16SHA512,
-			"kex-strict-s-v00@openssh.com",
+			KeyExchangeCurve25519,
+			KeyExchangeDH16SHA512,
+			KeyExchangeDHGEXSHA256,
+			KeyExchangeMLKEM768X25519,
+			kexStrictServer,
 		}
 		newServerCiphers := []string{
-			gcm256CipherID,
+			CipherAES256GCM,
 		}
 		newServerMACs := []string{
-			"hmac-sha2-512-etm@openssh.com", "hmac-sha2-512",
+			HMACSHA512ETM,
+			HMACSHA512,
 		}
 		newServerNoEncryptThenMACs := []string{
-			"hmac-sha2-512",
+			HMACSHA512,
 		}
 		if t.config.NoEncryptThenMACHash {
 			newServerMACs = newServerNoEncryptThenMACs
@@ -919,17 +943,19 @@ func (t *handshakeTransport) sendKexInit() error {
 
 			// Adjust to ensure compatibility with the server KEX.
 
-			if _, err := findCommon("", msg.KexAlgos, serverKexAlgos); err != nil {
+			isClient := !isServer
+
+			if _, err := findCommon("", msg.KexAlgos, serverKexAlgos, isClient); err != nil {
 				if kexAlgo, ok := firstKexAlgo(serverKexAlgos); ok {
 					kexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
 				}
 			}
 
-			if _, err := findCommon("", ciphers, serverCiphers); err != nil {
+			if _, err := findCommon("", ciphers, serverCiphers, isClient); err != nil {
 				ciphers = retain(PRNG, ciphers, serverCiphers[0])
 			}
 
-			if _, err := findCommon("", MACs, serverMACs); err != nil {
+			if _, err := findCommon("", MACs, serverMACs, isClient); err != nil {
 				MACs = retain(PRNG, MACs, serverMACs[0])
 			}
 
@@ -938,7 +964,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			// Legacy clients, without this logic, may still select only weak
 			// MACs or predict only weak MACs for the server KEX.
 
-			commonMAC, _ := findCommon("", MACs, serverMACs)
+			commonMAC, _ := findCommon("", MACs, serverMACs, isClient)
 			if common.Contains(weakMACs, commonMAC) {
 				// serverMACs[0] is not in weakMACs.
 				MACs = toFront(MACs, serverMACs[0])
@@ -1113,12 +1139,12 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 		return err
 	}
 
-	if t.sessionID == nil && ((isClient && contains(serverInit.KexAlgos, kexStrictServer)) || (!isClient && contains(clientInit.KexAlgos, kexStrictClient))) &&
+	if t.sessionID == nil && ((isClient && slices.Contains(serverInit.KexAlgos, kexStrictServer)) || (!isClient && slices.Contains(clientInit.KexAlgos, kexStrictClient))) &&
 
 		// [Psiphon]
 		// When KEX randomization omits "kex-strict-c/s-v00@openssh.com"
 		// (see comment in sendKexInit), do not enable strict mode.
-		((isClient && contains(t.sentInitMsg.KexAlgos, kexStrictClient)) || (!isClient && contains(t.sentInitMsg.KexAlgos, kexStrictServer))) {
+		((isClient && slices.Contains(t.sentInitMsg.KexAlgos, kexStrictClient)) || (!isClient && slices.Contains(t.sentInitMsg.KexAlgos, kexStrictServer))) {
 
 		t.strictMode = true
 		if err := t.conn.setStrictMode(); err != nil {
@@ -1144,9 +1170,9 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 		}
 	}
 
-	kex, ok := kexAlgoMap[t.algorithms.kex]
+	kex, ok := kexAlgoMap[t.algorithms.KeyExchange]
 	if !ok {
-		return fmt.Errorf("ssh: unexpected key exchange algorithm %v", t.algorithms.kex)
+		return fmt.Errorf("ssh: unexpected key exchange algorithm %v", t.algorithms.KeyExchange)
 	}
 
 	var result *kexResult
@@ -1176,7 +1202,7 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 	// On the server side, after the first SSH_MSG_NEWKEYS, send a SSH_MSG_EXT_INFO
 	// message with the server-sig-algs extension if the client supports it. See
 	// RFC 8308, Sections 2.4 and 3.1, and [PROTOCOL], Section 1.9.
-	if !isClient && firstKeyExchange && contains(clientInit.KexAlgos, "ext-info-c") {
+	if !isClient && firstKeyExchange && slices.Contains(clientInit.KexAlgos, "ext-info-c") {
 		supportedPubKeyAuthAlgosList := strings.Join(t.publicKeyAuthAlgorithms, ",")
 		extInfo := &extInfoMsg{
 			NumExtensions: 2,
@@ -1230,7 +1256,7 @@ func (a algorithmSignerWrapper) SignWithAlgorithm(rand io.Reader, data []byte, a
 func pickHostKey(hostKeys []Signer, algo string) AlgorithmSigner {
 	for _, k := range hostKeys {
 		if s, ok := k.(MultiAlgorithmSigner); ok {
-			if !contains(s.Algorithms(), underlyingAlgo(algo)) {
+			if !slices.Contains(s.Algorithms(), underlyingAlgo(algo)) {
 				continue
 			}
 		}
@@ -1253,12 +1279,12 @@ func pickHostKey(hostKeys []Signer, algo string) AlgorithmSigner {
 }
 
 func (t *handshakeTransport) server(kex kexAlgorithm, magics *handshakeMagics) (*kexResult, error) {
-	hostKey := pickHostKey(t.hostKeys, t.algorithms.hostKey)
+	hostKey := pickHostKey(t.hostKeys, t.algorithms.HostKey)
 	if hostKey == nil {
 		return nil, errors.New("ssh: internal error: negotiated unsupported signature type")
 	}
 
-	r, err := kex.Server(t.conn, t.config.Rand, magics, hostKey, t.algorithms.hostKey)
+	r, err := kex.Server(t.conn, t.config.Rand, magics, hostKey, t.algorithms.HostKey)
 	return r, err
 }
 
@@ -1273,7 +1299,7 @@ func (t *handshakeTransport) client(kex kexAlgorithm, magics *handshakeMagics) (
 		return nil, err
 	}
 
-	if err := verifyHostKeySignature(hostKey, t.algorithms.hostKey, result); err != nil {
+	if err := verifyHostKeySignature(hostKey, t.algorithms.HostKey, result); err != nil {
 		return nil, err
 	}
 
