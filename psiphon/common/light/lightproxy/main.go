@@ -24,13 +24,24 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
+	utls "github.com/Psiphon-Labs/utls"
+	"golang.org/x/sync/errgroup"
 )
 
 // This program is primarily intended for testing and does not provide
@@ -48,6 +59,12 @@ func main() {
 	var recommendedSNIRegex string
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
+	var destination string
+	var workerCount int
+	var minSleepDuration time.Duration
+	var maxSleepDuration time.Duration
+	var disableTLSCache bool
+	var lightProxyFetchTimeout time.Duration
 
 	flag.StringVar(
 		&configFilename,
@@ -59,7 +76,7 @@ func main() {
 		&entryFilename,
 		"entry",
 		"lightproxy.entry",
-		"generate proxy entry filename")
+		"generate/test proxy entry filename")
 
 	flag.StringVar(
 		&providerID,
@@ -107,12 +124,49 @@ func main() {
 		"",
 		"generate passthrough address")
 
+	flag.StringVar(
+		&destination,
+		"destination",
+		"",
+		"test HTTPS destination address; must include port")
+
+	flag.IntVar(
+		&workerCount,
+		"workerCount",
+		1,
+		"test worker count")
+
+	flag.DurationVar(
+		&minSleepDuration,
+		"minSleepDuration",
+		1*time.Second,
+		"test minimum sleep duration")
+
+	flag.DurationVar(
+		&maxSleepDuration,
+		"maxSleepDuration",
+		2*time.Second,
+		"test maximum sleep duration")
+
+	flag.BoolVar(
+		&disableTLSCache,
+		"disableTLSCache",
+		false,
+		"test disable TLS client session cache")
+
+	flag.DurationVar(
+		&lightProxyFetchTimeout,
+		"fetchTimeout",
+		20*time.Second,
+		"test fetch timeout")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
 			"Usage:\n\n"+
 				"%s <flags> generate    generates a light proxy config and entry\n"+
-				"%s <flags> run         runs a light proxy\n\n",
-			os.Args[0], os.Args[0])
+				"%s <flags> run         runs a light proxy\n"+
+				"%s <flags> test        tests a light proxy\n\n",
+			os.Args[0], os.Args[0], os.Args[0])
 		flag.PrintDefaults()
 	}
 
@@ -198,10 +252,214 @@ func main() {
 			os.Exit(1)
 		}
 
+	} else if args[0] == "test" {
+		err := runTestLightProxy(
+			entryFilename,
+			destination,
+			workerCount,
+			minSleepDuration,
+			maxSleepDuration,
+			disableTLSCache,
+			lightProxyFetchTimeout)
+		if err != nil {
+			fmt.Printf("test failed: %s\n", err)
+			os.Exit(1)
+		}
+
 	} else {
 		flag.Usage()
 		os.Exit(1)
 	}
+}
+
+func runTestLightProxy(
+	entryFilename string,
+	destination string,
+	workerCount int,
+	minSleepDuration time.Duration,
+	maxSleepDuration time.Duration,
+	disableTLSCache bool,
+	lightProxyFetchTimeout time.Duration) error {
+
+	if destination == "" {
+		return errors.TraceNew("missing destination")
+	}
+
+	_, _, err := net.SplitHostPort(destination)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if workerCount < 1 {
+		return errors.TraceNew("invalid workerCount")
+	}
+
+	if minSleepDuration < 0 {
+		return errors.TraceNew("invalid minSleepDuration")
+	}
+
+	if maxSleepDuration < minSleepDuration {
+		return errors.TraceNew("invalid maxSleepDuration")
+	}
+
+	if lightProxyFetchTimeout <= 0 {
+		return errors.TraceNew("invalid fetchTimeout")
+	}
+
+	proxyEntry, err := os.ReadFile(entryFilename)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	var tlsClientSessionCache utls.ClientSessionCache
+	if !disableTLSCache {
+		tlsClientSessionCache = utls.NewLRUClientSessionCache(0)
+	}
+
+	tlsDialer := func(
+		ctx context.Context,
+		underlyingConn net.Conn,
+		tlsProfile string,
+		randomizedTLSProfileSeed *prng.Seed,
+		sni string,
+		passthroughMessage []byte,
+		verifyPin string,
+		verifyServerName string) (net.Conn, error) {
+
+		customTLSConfig := &psiphon.CustomTLSConfig{
+			Parameters: params,
+			Dial: func(context.Context, string, string) (net.Conn, error) {
+				return underlyingConn, nil
+			},
+			UseDialAddrSNI:           false,
+			SNIServerName:            sni,
+			VerifyServerName:         verifyServerName,
+			VerifyPins:               []string{verifyPin},
+			VerifyPinsOnly:           true,
+			TLSProfile:               tlsProfile,
+			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+			PassthroughMessage:       passthroughMessage,
+		}
+
+		if tlsClientSessionCache != nil {
+			customTLSConfig.ClientSessionCache = common.WrapUtlsClientSessionCache(
+				tlsClientSessionCache,
+				underlyingConn.RemoteAddr().String())
+		}
+
+		return psiphon.CustomTLSDial(
+			ctx,
+			"tcp",
+			underlyingConn.RemoteAddr().String(),
+			customTLSConfig)
+	}
+
+	infoLogSampleRate := float64(10) / float64(workerCount)
+	logger := testutils.NewTestLoggerWithInfoSampling(infoLogSampleRate)
+
+	client, err := light.NewClient(&light.ClientConfig{
+		Logger: logger,
+		TCPDialer: func(ctx context.Context, addr string) (net.Conn, error) {
+			d := &net.Dialer{}
+			conn, err := d.DialContext(ctx, "tcp", addr)
+			return conn, errors.Trace(err)
+		},
+		TLSDialer:         tlsDialer,
+		SponsorID:         "0000000000000000",
+		ClientPlatform:    "lightproxy",
+		ClientBuildRev:    buildinfo.GetBuildInfo().BuildRev,
+		ProxyEntryTracker: 0,
+		ProxyEntry:        proxyEntry,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	group, ctx := errgroup.WithContext(context.Background())
+	for i := 0; i < workerCount; i++ {
+		workerID := i + 1
+		group.Go(func() error {
+			for {
+				time.Sleep(prng.Period(minSleepDuration, maxSleepDuration))
+				_ = lightProxyTestFetch(
+					ctx,
+					params,
+					client,
+					workerID,
+					destination,
+					lightProxyFetchTimeout)
+			}
+			return nil
+		})
+	}
+
+	return errors.Trace(group.Wait())
+}
+
+func lightProxyTestFetch(
+	ctx context.Context,
+	params *parameters.Parameters,
+	lightClient *light.Client,
+	workerID int,
+	destination string,
+	lightProxyFetchTimeout time.Duration) (retErr error) {
+
+	testURL := url.URL{
+		Scheme: "https",
+		Host:   destination,
+		Path:   "",
+	}
+
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(dialCtx context.Context, _, address string) (net.Conn, error) {
+			conn, err := lightClient.Dial(
+				dialCtx, nil, "UNKNOWN", "Chrome-120", nil, "", address)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return conn, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, lightProxyFetchTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(
+		requestCtx, http.MethodGet, testURL.String(), nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer response.Body.Close()
+
+	_, err = io.Copy(io.Discard, response.Body)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
 }
 
 type proxyEventReceiver struct{}

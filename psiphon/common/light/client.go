@@ -222,7 +222,7 @@ func (client *Client) Dial(
 	// Log once per connection. If the dial fails, log accumulated fields
 	// here. Otherwise, log on Close.
 	defer func() {
-		if retErr != nil && ctx.Err() == nil {
+		if retErr != nil && ctx.Err() == context.Canceled {
 			client.dialFailedCount.Add(1)
 			logFields["error"] = retErr.Error()
 			client.config.Logger.WithTraceFields(
