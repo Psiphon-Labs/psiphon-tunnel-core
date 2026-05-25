@@ -394,7 +394,6 @@ func runTestLightProxy(
 					destination,
 					lightProxyFetchTimeout)
 			}
-			return nil
 		})
 	}
 
