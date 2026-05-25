@@ -478,6 +478,12 @@ func (r *proxyEventReceiver) Paused() {
 func (r *proxyEventReceiver) Resumed() {
 }
 
+func (r *proxyEventReceiver) Accepted() {
+}
+
+func (r *proxyEventReceiver) Rejected() {
+}
+
 func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +

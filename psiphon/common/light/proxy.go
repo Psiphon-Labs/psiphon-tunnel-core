@@ -80,12 +80,23 @@ type ProxyConfig struct {
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
-// logging and stats shipping.
+// logging and stats shipping. ProxyEventReceiver callbacks should not block
+// on processing and instead should dispatch any work that is to be performed.
 type ProxyEventReceiver interface {
 	Listening(address string)
 	Paused()
 	Resumed()
 
+	// Accepted indicates that a new connection has been accepted. The outcome
+	// will be reported in a Connection event.
+	Accepted()
+
+	// Rejected indicates that a connection was rejected in the paused state.
+	// There will be no Connection event.
+	Rejected()
+
+	// Connection reports the outcome and statistics for a completed connection.
+	//
 	// The ProxyEventReceiver may assume ownership of stats. The Proxy caller
 	// will not access it after passing it to Connection.
 	Connection(stats *ConnectionStats)
@@ -447,11 +458,13 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 					// anticipation of resume.
 
 					conn.Close()
+					proxy.eventReceiver.Rejected() // Blocks accept loop
 					continue
 				}
 				waitGroup.Add(1)
 				go func(conn net.Conn) {
 					defer waitGroup.Done()
+					proxy.eventReceiver.Accepted()
 					proxy.handleConn(ctx, conn)
 				}(conn)
 			}

@@ -561,6 +561,14 @@ func (r *testProxyEventReceiver) Resumed() {
 	fmt.Printf("[Resumed]\n")
 }
 
+func (r *testProxyEventReceiver) Accepted() {
+	fmt.Printf("[Accepted]\n")
+}
+
+func (r *testProxyEventReceiver) Rejected() {
+	fmt.Printf("[Rejected]\n")
+}
+
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +

@@ -499,6 +499,14 @@ func (r *testLightProxyEventReceiver) Resumed() {
 	fmt.Printf("[Resumed]\n")
 }
 
+func (r *testLightProxyEventReceiver) Accepted() {
+	fmt.Printf("[Accepted]\n")
+}
+
+func (r *testLightProxyEventReceiver) Rejected() {
+	fmt.Printf("[Rejected]\n")
+}
+
 func (receiver *testLightProxyEventReceiver) Connection(
 	stats *light.ConnectionStats) {
 
