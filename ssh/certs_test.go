@@ -9,8 +9,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"reflect"
 	"testing"
@@ -125,6 +127,103 @@ func TestValidateCert(t *testing.T) {
 	}
 	if err := checker.CheckCert("testcertificate", invalidCert); err == nil {
 		t.Error("Invalid cert signature passed validation")
+	}
+}
+
+// signSKCert builds an SK-ECDSA signature over cert.bytesForSigning()
+// using caKey as the simulated hardware token. The SK signing flags
+// byte (UP bit and others) is caller-controlled so tests can exercise
+// the user-presence enforcement paths. caApp is the SK application
+// string (typically "ssh:").
+func signSKCert(t *testing.T, cert *Certificate, caKey *ecdsa.PrivateKey, caApp string, flags byte) {
+	t.Helper()
+	cert.SignatureKey = &skECDSAPublicKey{
+		application: caApp,
+		PublicKey:   caKey.PublicKey,
+	}
+	cert.Nonce = make([]byte, 32)
+	if _, err := rand.Read(cert.Nonce); err != nil {
+		t.Fatal(err)
+	}
+
+	h := sha256.New()
+	h.Write([]byte(caApp))
+	appDigest := h.Sum(nil)
+	h.Reset()
+	h.Write(cert.bytesForSigning())
+	dataDigest := h.Sum(nil)
+
+	var counter uint32 = 1
+	blob := struct {
+		ApplicationDigest []byte `ssh:"rest"`
+		Flags             byte
+		Counter           uint32
+		MessageDigest     []byte `ssh:"rest"`
+	}{appDigest, flags, counter, dataDigest}
+	h.Reset()
+	h.Write(Marshal(blob))
+	digest := h.Sum(nil)
+
+	r, s, err := ecdsa.Sign(rand.Reader, caKey, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert.Signature = &Signature{
+		Format: KeyAlgoSKECDSA256,
+		Blob:   Marshal(struct{ R, S *big.Int }{r, s}),
+		Rest: Marshal(struct {
+			Flags   byte
+			Counter uint32
+		}{flags, counter}),
+	}
+}
+
+// TestCheckCertSKAuthorityNoUPRequired pins the OpenSSH-parity
+// behavior of CertChecker.CheckCert for SK CA signatures: a
+// certificate signed by an SK CA that produced a UP=0 signature is
+// accepted, because the UP bit on a CA signature has no bearing on
+// the current user authentication (see sshkey.c:cert_parse, which
+// passes detailsp==NULL to sshkey_verify). Without this, certs issued
+// by non-interactive SK CAs would fail to verify.
+func TestCheckCertSKAuthorityNoUPRequired(t *testing.T) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userPub, err := NewPublicKey(&userKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mkCert := func(flags byte) *Certificate {
+		c := &Certificate{
+			CertType:        UserCert,
+			Key:             userPub,
+			ValidBefore:     CertTimeInfinity,
+			ValidPrincipals: []string{"user"},
+		}
+		signSKCert(t, c, caKey, "ssh:", flags)
+		return c
+	}
+
+	checker := CertChecker{
+		IsUserAuthority: func(k PublicKey) bool {
+			caSK := &skECDSAPublicKey{application: "ssh:", PublicKey: caKey.PublicKey}
+			return bytes.Equal(k.Marshal(), caSK.Marshal())
+		},
+	}
+
+	// Both UP=0 and UP=1 CA signatures verify: UP is not enforced
+	// here, matching OpenSSH.
+	if err := checker.CheckCert("user", mkCert(0)); err != nil {
+		t.Errorf("UP=0 CA signature must verify (OpenSSH parity): %v", err)
+	}
+	if err := checker.CheckCert("user", mkCert(flagUserPresence)); err != nil {
+		t.Errorf("UP=1 CA signature must verify: %v", err)
 	}
 }
 
@@ -297,7 +396,7 @@ func TestCertTypes(t *testing.T) {
 		{"legacyRSASigner", &legacyRSASigner{testSigners["rsa"]}, KeyAlgoRSA},
 		{"multiAlgoRSASignerSHA256", multiAlgoSignerSHA256, KeyAlgoRSASHA256},
 		{"multiAlgoRSASignerSHA512", multiAlgoSignerSHA512, KeyAlgoRSASHA512},
-		{CertAlgoDSAv01, testSigners["dsa"], ""},
+		{InsecureCertAlgoDSAv01, testSigners["dsa"], ""},
 	}
 
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -330,15 +429,13 @@ func TestCertTypes(t *testing.T) {
 			go NewServerConn(c1, conf)
 
 			priv := m.signer
-			if err != nil {
-				t.Fatalf("error generating ssh pubkey: %v", err)
-			}
-
 			cert := &Certificate{
 				CertType: UserCert,
 				Key:      priv.PublicKey(),
 			}
-			cert.SignCert(rand.Reader, priv)
+			if err := cert.SignCert(rand.Reader, priv); err != nil {
+				t.Fatalf("error signing certificate: %v", err)
+			}
 
 			certSigner, err := NewCertSigner(cert, priv)
 			if err != nil {
@@ -402,5 +499,34 @@ func TestCertSignWithMultiAlgorithmSigner(t *testing.T) {
 				t.Fatalf("got signature format %q, want %q", cert.Signature.Format, c.sigAlgo)
 			}
 		})
+	}
+}
+
+func TestCertSignWithCertificate(t *testing.T) {
+	cert := &Certificate{
+		Key:         testPublicKeys["rsa"],
+		ValidBefore: CertTimeInfinity,
+		CertType:    UserCert,
+	}
+	if err := cert.SignCert(rand.Reader, testSigners["ecdsa"]); err != nil {
+		t.Fatalf("SignCert: %v", err)
+	}
+	signer, err := NewSignerWithAlgorithms(testSigners["rsa"].(AlgorithmSigner), []string{KeyAlgoRSASHA256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certSigner, err := NewCertSigner(cert, signer)
+	if err != nil {
+		t.Fatalf("NewCertSigner: %v", err)
+	}
+
+	cert1 := &Certificate{
+		Key:         testPublicKeys["ecdsa"],
+		ValidBefore: CertTimeInfinity,
+		CertType:    UserCert,
+	}
+
+	if err := cert1.SignCert(rand.Reader, certSigner); err == nil {
+		t.Fatal("successfully signed a certificate using another certificate, it is expected to fail")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -324,6 +325,9 @@ func TestMethodInvalidAlgorithm(t *testing.T) {
 }
 
 func TestClientHMAC(t *testing.T) {
+	supportedAlgos := SupportedAlgorithms()
+	insecureAlgos := InsecureAlgorithms()
+	supportedMACs := append(supportedAlgos.MACs, insecureAlgos.MACs...)
 	for _, mac := range supportedMACs {
 		config := &ClientConfig{
 			User: "testuser",
@@ -349,7 +353,7 @@ func TestClientUnsupportedCipher(t *testing.T) {
 			PublicKeys(),
 		},
 		Config: Config{
-			Ciphers: []string{"aes128-cbc"}, // not currently supported
+			Ciphers: []string{"unsupported-cipher"}, // not currently supported
 		},
 	}
 	if err := tryAuth(t, config); err == nil {
@@ -1132,7 +1136,7 @@ func TestPickSignatureAlgorithm(t *testing.T) {
 				t.Fatalf("error generating cert signer: %v", err)
 			}
 			// The signer supports the public key algorithm and the
-			// public key format is a certificate type so the cerificate
+			// public key format is a certificate type so the certificate
 			// algorithm matching the key format must be returned
 			_, algo, err = pickSignatureAlgorithm(certSigner, c.extensions)
 			if err != nil {
@@ -1150,6 +1154,52 @@ func TestPickSignatureAlgorithm(t *testing.T) {
 			_, _, err = pickSignatureAlgorithm(signer, c.extensions)
 			if err == nil {
 				t.Fatal("got no error, no common public key signature algorithm error expected")
+			}
+		})
+	}
+}
+
+func TestPickSignatureAlgorithmRespectsSignerPreference(t *testing.T) {
+	algoSigner, ok := testSigners["rsa"].(AlgorithmSigner)
+	if !ok {
+		t.Fatalf("rsa test signer does not implement the AlgorithmSigner interface")
+	}
+
+	serverExtensions := map[string][]byte{
+		"server-sig-algs": []byte(KeyAlgoRSASHA256 + "," + KeyAlgoRSASHA512),
+	}
+
+	tests := []struct {
+		name         string
+		signerPrefs  []string
+		expectedAlgo string
+	}{
+		{
+			name:         "Signer prefers SHA512 then SHA256",
+			signerPrefs:  []string{KeyAlgoRSASHA512, KeyAlgoRSASHA256},
+			expectedAlgo: KeyAlgoRSASHA512,
+		},
+		{
+			name:         "Signer prefers SHA256 then SHA512",
+			signerPrefs:  []string{KeyAlgoRSASHA256, KeyAlgoRSASHA512},
+			expectedAlgo: KeyAlgoRSASHA256,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			orderedSigner, err := NewSignerWithAlgorithms(algoSigner, tc.signerPrefs)
+			if err != nil {
+				t.Fatalf("failed to create ordered signer: %v", err)
+			}
+
+			_, selectedAlgo, err := pickSignatureAlgorithm(orderedSigner, serverExtensions)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if selectedAlgo != tc.expectedAlgo {
+				t.Errorf("Algorithm mismatch; got %q want %q", selectedAlgo, tc.expectedAlgo)
 			}
 		})
 	}
@@ -1211,7 +1261,7 @@ func (cb configurablePublicKeyCallback) auth(session []byte, user string, c pack
 	if err != nil {
 		return authFailure, nil, err
 	}
-	if success == authSuccess || !contains(methods, cb.method()) {
+	if success == authSuccess || !slices.Contains(methods, cb.method()) {
 		return success, methods, err
 	}
 
