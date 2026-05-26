@@ -318,6 +318,7 @@ func (client *Client) Dial(
 	TLSDuration := time.Since(start)
 
 	logFields["TLSDuration"] = TLSDuration.String()
+	// TODO: log tlsConn.ConnectionState().DidResume
 
 	header, err := newLightHeader(
 		client.sponsorID,

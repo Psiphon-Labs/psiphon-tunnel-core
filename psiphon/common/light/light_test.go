@@ -140,6 +140,8 @@ func runTestLightProxy() error {
 
 	receiver := newTestProxyEventReceiver()
 
+	proxyConfig.EnableDebugLogs = true
+
 	proxy, err := NewProxy(
 		proxyConfig,
 		lookupGeoIP,
@@ -574,7 +576,7 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
 		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
-		`destination: %s, tlsProfile: %s, sni: %s, ` +
+		`destination: %s, tlsProfile: %s, sni: %s, tlsDidResume: %t, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
@@ -596,6 +598,7 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.DestinationAddress,
 		stats.TLSProfile,
 		stats.SNI,
+		stats.TLSDidResume,
 		stats.ClientTCPDuration,
 		stats.ClientTLSDuration,
 		stats.ProxyCompletedTCP.Format(time.RFC3339Nano),

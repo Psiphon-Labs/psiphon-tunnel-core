@@ -489,7 +489,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
 		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
-		`destination: %s, tlsProfile: %s, sni: %s, ` +
+		`destination: %s, tlsProfile: %s, sni: %s, tlsDidResume: %t, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
@@ -511,6 +511,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.DestinationAddress,
 		stats.TLSProfile,
 		stats.SNI,
+		stats.TLSDidResume,
 		stats.ClientTCPDuration,
 		stats.ClientTLSDuration,
 		stats.ProxyCompletedTCP.Format(time.RFC3339Nano),

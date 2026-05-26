@@ -77,6 +77,7 @@ type ProxyConfig struct {
 	DialFallbackDelay       string   `json:",omitempty"`
 	DNSResolverCacheMaxSize *int     `json:",omitempty"`
 	DNSResolverCacheTTL     string   `json:",omitempty"`
+	EnableDebugLogs         bool     `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -128,6 +129,7 @@ type Proxy struct {
 	inactivityTimeout     time.Duration
 	upstreamDialTimeout   time.Duration
 	relayBufferSize       int
+	relayBufferPool       sync.Pool
 	rateLimitQuantity     int
 	rateLimitInterval     time.Duration
 	maxConcurrent         int
@@ -334,6 +336,10 @@ func NewProxy(
 		inactivityTimeout:     inactivityTimeout,
 		upstreamDialTimeout:   upstreamDialTimeout,
 		relayBufferSize:       relayBufferSize,
+		relayBufferPool: sync.Pool{New: func() any {
+			b := make([]byte, relayBufferSize)
+			return &b
+		}},
 		rateLimitQuantity:     rateLimitQuantity,
 		rateLimitInterval:     rateLimitInterval,
 		dnsResolver:           dnsResolver,
@@ -494,6 +500,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	completedTCP := time.Now().UTC()
 	var completedTLS time.Time
 	var clientSNI string
+	var tlsDidResume bool
 	bytesCounter := &bytesCounter{}
 	var completedLightHeader time.Time
 	var header *lightHeader
@@ -554,6 +561,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			DestinationAddress:        normalizedDestinationAddress,
 			TLSProfile:                tlsProfile,
 			SNI:                       clientSNI,
+			TLSDidResume:              tlsDidResume,
 			ClientTCPDuration:         clientTCPDuration,
 			ClientTLSDuration:         clientTLSDuration,
 			ProxyCompletedTCP:         completedTCP,
@@ -589,25 +597,18 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		return errors.Trace(err)
 	}
 
-	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
+	handleCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	unassociateAfter := context.AfterFunc(handleCtx, func() {
+		// Interrupt TLS handshake, light header read.
+		activityConn.Close()
+	})
+	defer unassociateAfter()
 
-	tlsDone := make(chan struct{})
-	tlsWaitGroup := new(sync.WaitGroup)
-	tlsWaitGroup.Add(1)
-	go func() {
-		// Interrupt TLS handshake or header read on ctx done.
-		defer tlsWaitGroup.Done()
-		select {
-		case <-ctx.Done():
-			activityConn.Close()
-		case <-tlsDone:
-		}
-	}()
+	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
 
 	err = tlsConn.Handshake()
 	if err != nil {
-		close(tlsDone)
-		tlsWaitGroup.Wait()
 		return errors.Trace(err)
 	}
 
@@ -617,22 +618,21 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// psiphon-tls.Config.Clone, where it fails to copy the passthrough
 	// configuration.
 
-	clientSNI = tlsConn.ConnectionState().ServerName
 	completedTLS = time.Now().UTC()
+	connectionState := tlsConn.ConnectionState()
+	clientSNI = connectionState.ServerName
+	tlsDidResume = connectionState.DidResume
 
 	lightConn := newLightConn(tlsConn, nil)
 
 	header, err = lightConn.readHeader()
 	if err != nil {
-		close(tlsDone)
-		tlsWaitGroup.Wait()
 		return errors.Trace(err)
 	}
 
-	completedLightHeader = time.Now().UTC()
+	unassociateAfter()
 
-	close(tlsDone)
-	tlsWaitGroup.Wait()
+	completedLightHeader = time.Now().UTC()
 
 	// Apply limits after reading the header so that the ConnectionFailure
 	// will be accompanied by client characteristics such as sponsor ID. A
@@ -683,39 +683,45 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// TODO: optionally send PROXY protocol header to destination. See
 	// addProxyProtocolHeader in psiphon/server.sshClient.handleTCPChannel.
 
-	relayCtx, cancel := context.WithCancel(ctx)
+	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
+		relayBuffer := proxy.relayBufferPool.Get().(*[]byte)
+		defer proxy.relayBufferPool.Put(relayBuffer)
+		return common.CopyBuffer(dst, src, *relayBuffer)
+	}
+
+	unassociateAfter = context.AfterFunc(handleCtx, func() {
+		// Interrupt relay.
+		lightConn.Close()
+		upstreamConn.Close()
+	})
+	defer unassociateAfter()
 
 	relayWaitGroup := new(sync.WaitGroup)
 
 	relayWaitGroup.Add(1)
 	go func() {
-		// Interrupt relay on ctx done.
 		defer relayWaitGroup.Done()
-		<-relayCtx.Done()
-		lightConn.Close()
-		upstreamConn.Close()
-	}()
-
-	relayWaitGroup.Add(1)
-	go func() {
-		defer relayWaitGroup.Done()
-		_, err := common.CopyBuffer(
-			lightConn, upstreamConn, make([]byte, proxy.relayBufferSize))
+		_, err := copyWithRelayBuffer(lightConn, upstreamConn)
 		if err != nil && ctx.Err() == nil {
 			// Debug since errors such as "connection reset by peer" occur
 			// during normal operation
-			err = common.RedactNetError(err)
-			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+			if proxy.config.EnableDebugLogs {
+				err = common.RedactNetError(err)
+				proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+			}
 		}
 		lightConn.Close()
 	}()
-	_, err = common.CopyBuffer(
-		upstreamConn, lightConn, make([]byte, proxy.relayBufferSize))
+
+	_, err = copyWithRelayBuffer(upstreamConn, lightConn)
 	if err != nil && ctx.Err() == nil {
-		err = common.RedactNetError(err)
-		proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+		if proxy.config.EnableDebugLogs {
+			err = common.RedactNetError(err)
+			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+		}
 	}
 	upstreamConn.Close()
+
 	cancel()
 	relayWaitGroup.Wait()
 
