@@ -128,6 +128,7 @@ type Proxy struct {
 	inactivityTimeout     time.Duration
 	upstreamDialTimeout   time.Duration
 	relayBufferSize       int
+	relayBufferPool       sync.Pool
 	rateLimitQuantity     int
 	rateLimitInterval     time.Duration
 	maxConcurrent         int
@@ -334,6 +335,9 @@ func NewProxy(
 		inactivityTimeout:     inactivityTimeout,
 		upstreamDialTimeout:   upstreamDialTimeout,
 		relayBufferSize:       relayBufferSize,
+		relayBufferPool: sync.Pool{New: func() any {
+			return make([]byte, relayBufferSize)
+		}},
 		rateLimitQuantity:     rateLimitQuantity,
 		rateLimitInterval:     rateLimitInterval,
 		dnsResolver:           dnsResolver,
@@ -687,6 +691,12 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 
 	relayWaitGroup := new(sync.WaitGroup)
 
+	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
+		relayBuffer := proxy.relayBufferPool.Get().([]byte)
+		defer proxy.relayBufferPool.Put(relayBuffer)
+		return common.CopyBuffer(dst, src, relayBuffer)
+	}
+
 	relayWaitGroup.Add(1)
 	go func() {
 		// Interrupt relay on ctx done.
@@ -699,8 +709,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
-		_, err := common.CopyBuffer(
-			lightConn, upstreamConn, make([]byte, proxy.relayBufferSize))
+		_, err := copyWithRelayBuffer(lightConn, upstreamConn)
 		if err != nil && ctx.Err() == nil {
 			// Debug since errors such as "connection reset by peer" occur
 			// during normal operation
@@ -709,8 +718,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		}
 		lightConn.Close()
 	}()
-	_, err = common.CopyBuffer(
-		upstreamConn, lightConn, make([]byte, proxy.relayBufferSize))
+
+	_, err = copyWithRelayBuffer(upstreamConn, lightConn)
 	if err != nil && ctx.Err() == nil {
 		err = common.RedactNetError(err)
 		proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
