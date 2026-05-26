@@ -77,6 +77,7 @@ type ProxyConfig struct {
 	DialFallbackDelay       string   `json:",omitempty"`
 	DNSResolverCacheMaxSize *int     `json:",omitempty"`
 	DNSResolverCacheTTL     string   `json:",omitempty"`
+	DebugLogLevel           bool     `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -699,16 +700,20 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		if err != nil && ctx.Err() == nil {
 			// Debug since errors such as "connection reset by peer" occur
 			// during normal operation
-			err = common.RedactNetError(err)
-			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+			if proxy.config.DebugLogLevel {
+				err = common.RedactNetError(err)
+				proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+			}
 		}
 		lightConn.Close()
 	}()
 
 	_, err = copyWithRelayBuffer(upstreamConn, lightConn)
 	if err != nil && ctx.Err() == nil {
-		err = common.RedactNetError(err)
-		proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+		if proxy.config.DebugLogLevel {
+			err = common.RedactNetError(err)
+			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
+		}
 	}
 	upstreamConn.Close()
 

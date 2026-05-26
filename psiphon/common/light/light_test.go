@@ -140,6 +140,8 @@ func runTestLightProxy() error {
 
 	receiver := newTestProxyEventReceiver()
 
+	proxyConfig.DebugLogLevel = true
+
 	proxy, err := NewProxy(
 		proxyConfig,
 		lookupGeoIP,
