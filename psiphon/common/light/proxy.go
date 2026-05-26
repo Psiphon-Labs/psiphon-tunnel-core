@@ -593,25 +593,18 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		return errors.Trace(err)
 	}
 
-	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
+	handleCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	unassociateAfter := context.AfterFunc(handleCtx, func() {
+		// Interrupt TLS handshake, light header read.
+		activityConn.Close()
+	})
+	defer unassociateAfter()
 
-	tlsDone := make(chan struct{})
-	tlsWaitGroup := new(sync.WaitGroup)
-	tlsWaitGroup.Add(1)
-	go func() {
-		// Interrupt TLS handshake or header read on ctx done.
-		defer tlsWaitGroup.Done()
-		select {
-		case <-ctx.Done():
-			activityConn.Close()
-		case <-tlsDone:
-		}
-	}()
+	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
 
 	err = tlsConn.Handshake()
 	if err != nil {
-		close(tlsDone)
-		tlsWaitGroup.Wait()
 		return errors.Trace(err)
 	}
 
@@ -628,15 +621,12 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 
 	header, err = lightConn.readHeader()
 	if err != nil {
-		close(tlsDone)
-		tlsWaitGroup.Wait()
 		return errors.Trace(err)
 	}
 
-	completedLightHeader = time.Now().UTC()
+	unassociateAfter()
 
-	close(tlsDone)
-	tlsWaitGroup.Wait()
+	completedLightHeader = time.Now().UTC()
 
 	// Apply limits after reading the header so that the ConnectionFailure
 	// will be accompanied by client characteristics such as sponsor ID. A
@@ -687,24 +677,20 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// TODO: optionally send PROXY protocol header to destination. See
 	// addProxyProtocolHeader in psiphon/server.sshClient.handleTCPChannel.
 
-	relayCtx, cancel := context.WithCancel(ctx)
-
-	relayWaitGroup := new(sync.WaitGroup)
-
 	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
 		relayBuffer := proxy.relayBufferPool.Get().([]byte)
 		defer proxy.relayBufferPool.Put(relayBuffer)
 		return common.CopyBuffer(dst, src, relayBuffer)
 	}
 
-	relayWaitGroup.Add(1)
-	go func() {
-		// Interrupt relay on ctx done.
-		defer relayWaitGroup.Done()
-		<-relayCtx.Done()
+	unassociateAfter = context.AfterFunc(handleCtx, func() {
+		// Interrupt relay.
 		lightConn.Close()
 		upstreamConn.Close()
-	}()
+	})
+	defer unassociateAfter()
+
+	relayWaitGroup := new(sync.WaitGroup)
 
 	relayWaitGroup.Add(1)
 	go func() {
@@ -725,6 +711,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
 	}
 	upstreamConn.Close()
+
 	cancel()
 	relayWaitGroup.Wait()
 
