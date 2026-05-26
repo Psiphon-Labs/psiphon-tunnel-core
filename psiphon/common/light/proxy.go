@@ -77,7 +77,7 @@ type ProxyConfig struct {
 	DialFallbackDelay       string   `json:",omitempty"`
 	DNSResolverCacheMaxSize *int     `json:",omitempty"`
 	DNSResolverCacheTTL     string   `json:",omitempty"`
-	DebugLogLevel           bool     `json:",omitempty"`
+	EnableDebugLogs         bool     `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -337,7 +337,8 @@ func NewProxy(
 		upstreamDialTimeout:   upstreamDialTimeout,
 		relayBufferSize:       relayBufferSize,
 		relayBufferPool: sync.Pool{New: func() any {
-			return make([]byte, relayBufferSize)
+			b := make([]byte, relayBufferSize)
+			return &b
 		}},
 		rateLimitQuantity:     rateLimitQuantity,
 		rateLimitInterval:     rateLimitInterval,
@@ -683,9 +684,9 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// addProxyProtocolHeader in psiphon/server.sshClient.handleTCPChannel.
 
 	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
-		relayBuffer := proxy.relayBufferPool.Get().([]byte)
+		relayBuffer := proxy.relayBufferPool.Get().(*[]byte)
 		defer proxy.relayBufferPool.Put(relayBuffer)
-		return common.CopyBuffer(dst, src, relayBuffer)
+		return common.CopyBuffer(dst, src, *relayBuffer)
 	}
 
 	unassociateAfter = context.AfterFunc(handleCtx, func() {
@@ -704,7 +705,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		if err != nil && ctx.Err() == nil {
 			// Debug since errors such as "connection reset by peer" occur
 			// during normal operation
-			if proxy.config.DebugLogLevel {
+			if proxy.config.EnableDebugLogs {
 				err = common.RedactNetError(err)
 				proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
 			}
@@ -714,7 +715,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 
 	_, err = copyWithRelayBuffer(upstreamConn, lightConn)
 	if err != nil && ctx.Err() == nil {
-		if proxy.config.DebugLogLevel {
+		if proxy.config.EnableDebugLogs {
 			err = common.RedactNetError(err)
 			proxy.eventReceiver.DebugLog(proxy.ID, errors.Trace(err).Error())
 		}
