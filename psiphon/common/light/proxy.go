@@ -499,6 +499,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	completedTCP := time.Now().UTC()
 	var completedTLS time.Time
 	var clientSNI string
+	var tlsDidResume bool
 	bytesCounter := &bytesCounter{}
 	var completedLightHeader time.Time
 	var header *lightHeader
@@ -559,6 +560,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			DestinationAddress:        normalizedDestinationAddress,
 			TLSProfile:                tlsProfile,
 			SNI:                       clientSNI,
+			TLSDidResume:              tlsDidResume,
 			ClientTCPDuration:         clientTCPDuration,
 			ClientTLSDuration:         clientTLSDuration,
 			ProxyCompletedTCP:         completedTCP,
@@ -615,8 +617,10 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// psiphon-tls.Config.Clone, where it fails to copy the passthrough
 	// configuration.
 
-	clientSNI = tlsConn.ConnectionState().ServerName
 	completedTLS = time.Now().UTC()
+	connectionState := tlsConn.ConnectionState()
+	clientSNI = connectionState.ServerName
+	tlsDidResume = connectionState.DidResume
 
 	lightConn := newLightConn(tlsConn, nil)
 

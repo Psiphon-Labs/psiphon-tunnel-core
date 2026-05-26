@@ -126,6 +126,7 @@ type ConnectionStats struct {
 	DestinationAddress        string
 	TLSProfile                string
 	SNI                       string
+	TLSDidResume              bool
 	ClientTCPDuration         time.Duration
 	ClientTLSDuration         time.Duration
 	ProxyCompletedTCP         time.Time
