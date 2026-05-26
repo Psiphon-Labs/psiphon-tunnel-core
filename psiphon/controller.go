@@ -34,6 +34,7 @@ import (
 	"net/url"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,11 +127,12 @@ type Controller struct {
 	currentNetworkCtx        context.Context
 	currentNetworkCancelFunc context.CancelFunc
 
-	lightProxyClient                  atomic.Value
-	lightProxyReplay                  atomic.Value
-	lightProxyTunnelInactiveThreshold atomic.Int64
-	lightProxyDialTimeout             atomic.Int64
-	signalLightProxyTestFetch         chan struct{}
+	lightProxyClient                    atomic.Value
+	lightProxyReplay                    atomic.Value
+	lightProxyTunnelInactiveThreshold   atomic.Int64
+	lightProxyDialTimeout               atomic.Int64
+	lightProxyLimitDestinationAddresses atomic.Value
+	signalLightProxyTestFetch           chan struct{}
 }
 
 // NewController initializes a new controller.
@@ -1884,6 +1886,9 @@ func (controller *Controller) initLightProxy(
 	controller.lightProxyDialTimeout.Store(
 		int64(p.Duration(parameters.LightProxyDialTimeout)))
 
+	controller.lightProxyLimitDestinationAddresses.Store(
+		slices.Clone(p.Strings(parameters.LightProxyLimitDestinationAddresses)))
+
 	NoticeLightProxyAvailable()
 
 	return nil
@@ -2113,28 +2118,35 @@ func (controller *Controller) Dial(
 	if tunnel == nil {
 
 		lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
-		if lightProxyClient != nil &&
+		if lightProxyClient != nil {
 
-			// In test fetch mode, only the test address is routed through
-			// light proxy.
-			(controller.config.LightProxyTestFetchAddress == "" ||
-				remoteAddr == controller.config.LightProxyTestFetchAddress) {
+			limitDestinationAddresses, _ :=
+				controller.lightProxyLimitDestinationAddresses.Load().([]string)
 
-			var lightConn net.Conn
-			lightConn, tunnel, err = controller.dialLightProxyRace(
-				lightProxyClient,
-				remoteAddr,
-				downstreamConn,
-				readInactiveThreshold)
-			if err != nil && controller.runCtx.Err() == nil {
-				NoticeWarning(
-					"light proxy dial failed: %v", errors.Trace(err))
+			if (len(limitDestinationAddresses) == 0 ||
+				common.Contains(limitDestinationAddresses, remoteAddr)) &&
+
+				// In test fetch mode, only the test address is routed through
+				// light proxy.
+				(controller.config.LightProxyTestFetchAddress == "" ||
+					remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
+				var lightConn net.Conn
+				lightConn, tunnel, err = controller.dialLightProxyRace(
+					lightProxyClient,
+					remoteAddr,
+					downstreamConn,
+					readInactiveThreshold)
+				if err != nil && controller.runCtx.Err() == nil {
+					NoticeWarning(
+						"light proxy dial failed: %v", errors.Trace(err))
+				}
+
+				if lightConn != nil {
+					return lightConn, nil
+				}
+				// Drop through with tunnel returned from dialLightProxyRace.
 			}
-
-			if lightConn != nil {
-				return lightConn, nil
-			}
-			// Drop through with tunnel returned from dialLightProxyRace.
 		}
 
 		if tunnel == nil {

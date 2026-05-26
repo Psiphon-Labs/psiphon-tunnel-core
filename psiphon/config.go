@@ -843,6 +843,11 @@ type Config struct {
 	// LightProxyEntryTracker is the light proxy entry tracker value to report.
 	LightProxyEntryTracker int64 `json:",omitempty"`
 
+	// LightProxyLimitDestinationAddresses limits light proxy dial attempts to
+	// the specified destination addresses, in host:port form. When empty,
+	// light proxy dials are not limited by destination address.
+	LightProxyLimitDestinationAddresses []string `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -3403,6 +3408,11 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LightProxyUseRecommendedSNIProbability != nil {
 		applyParameters[parameters.LightProxyUseRecommendedSNIProbability] = *config.LightProxyUseRecommendedSNIProbability
+	}
+
+	if config.LightProxyLimitDestinationAddresses != nil {
+		applyParameters[parameters.LightProxyLimitDestinationAddresses] =
+			config.LightProxyLimitDestinationAddresses
 	}
 
 	if config.LightProxyTunnelInactiveThresholdMilliseconds != nil {

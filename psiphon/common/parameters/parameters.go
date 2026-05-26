@@ -591,6 +591,7 @@ const (
 	LightProxyUseRecommendedSNIProbability             = "LightProxyUseRecommendedSNIProbability"
 	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
+	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 
 	// Retired parameters
 
@@ -1268,6 +1269,7 @@ var defaultParameters = map[string]struct {
 	LightProxyUseRecommendedSNIProbability: {value: 0.5, minimum: 0.0},
 	LightProxyTunnelInactiveThreshold:      {value: 30 * time.Second, minimum: 0 * time.Millisecond},
 	LightProxyDialTimeout:                  {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	LightProxyLimitDestinationAddresses:    {value: []string{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

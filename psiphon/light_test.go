@@ -102,6 +102,9 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 		TargetServerEntry:             targetServerEntry,
 		EstablishTunnelTimeoutSeconds: &establishTunnelTimeoutSeconds,
 		EnableLightProxy:              true,
+		LightProxyLimitDestinationAddresses: []string{
+			webServerAddress,
+		},
 	}
 	if importPushPayload {
 		config.PushPayloadObfuscationKey = obfuscationKey
