@@ -101,6 +101,13 @@ var (
 	defaultKexAlgos = []string{
 		KeyExchangeMLKEM768X25519,
 		KeyExchangeCurve25519,
+
+		// [Psiphon]
+		// Include the alias in the default list, which would otherwise be
+		// added in SetDefaults. This accomodates the "Psiphon transforms
+		// assume that default algorithms are configured" check in sendKexInit.
+		keyExchangeCurve25519LibSSH,
+
 		KeyExchangeECDHP256,
 		KeyExchangeECDHP384,
 		KeyExchangeECDHP521,

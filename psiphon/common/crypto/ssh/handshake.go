@@ -774,8 +774,8 @@ func (t *handshakeTransport) sendKexInit() error {
 		// New algorithms are then randomly inserted only after the legacy
 		// lists are processed in legacy PRNG state order.
 
-		legacyServerKexAlgos := []string{
-			KeyExchangeCurve25519,
+	legacyServerKexAlgos := []string{
+			keyExchangeCurve25519LibSSH,
 			KeyExchangeECDHP256,
 			KeyExchangeECDHP384,
 			KeyExchangeECDHP521,
