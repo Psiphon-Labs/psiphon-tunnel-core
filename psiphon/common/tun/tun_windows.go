@@ -94,13 +94,13 @@ func configureClientInterface(_ *ClientConfig, _ string) error {
 // deviceName must match the interface FriendlyName that Go exposes as
 // net.Interface.Name.
 //
-// Uses IP_UNICAST_IF for IPv4 sockets and IPV6_UNICAST_IF for IPv6
-// sockets. The socket's address family is detected by probing the
-// IPV6_V6ONLY option, which is documented to work on a socket of any
-// type in any state; this avoids a getsockname call that, per
-// Microsoft's docs, may return WSAEINVAL on an unbound, unconnected
-// socket -- the state of the sockets we get from net.Dialer.Control and
-// net.ListenConfig.Control.
+// Sets both IP_UNICAST_IF and IPV6_UNICAST_IF unconditionally. Go may
+// create AF_INET, AF_INET6 dual-stack, or AF_INET6 v6-only sockets
+// depending on the dial target and platform. Rather than probing the
+// socket family, which is unreliable on some Windows versions, both
+// options are attempted unconditionally. The option that doesn't apply
+// to the socket's address family fails harmlessly. At least one must
+// succeed for the bind to be successful.
 //
 // Caveat: this is not as strong as Linux SO_BINDTODEVICE. It is
 // effectively "route this socket via interface X", which is the normal
@@ -111,48 +111,15 @@ func BindToDevice(fd int, deviceName string) error {
 		return errors.Trace(err)
 	}
 
-	socket := windows.Handle(fd)
+	handle := windows.Handle(fd)
 	ifIndexBE := int(nativeToBigEndian(uint32(iface.Index)))
 
-	// Probe IPV6_V6ONLY to detect address family: on an AF_INET socket
-	// this returns WSAENOPROTOOPT because IPPROTO_IPV6 is not a valid
-	// level for IPv4; on an AF_INET6 socket it returns the v6-only flag
-	// (0 means dual-stack, 1 means v6-only).
-	v6only, err := windows.GetsockoptInt(
-		socket, windows.IPPROTO_IPV6, windows.IPV6_V6ONLY)
-	if err != nil {
-		// AF_INET socket: bind the IPv4 routing only.
-		if err := windows.SetsockoptInt(
-			socket,
-			windows.IPPROTO_IP,
-			sockoptBoundInterface,
-			ifIndexBE); err != nil {
-			return errors.Trace(err)
-		}
-		return nil
-	}
+	ipv4Err := windows.SetsockoptInt(handle, windows.IPPROTO_IP, sockoptBoundInterface, ifIndexBE)
+	ipv6Err := windows.SetsockoptInt(handle, windows.IPPROTO_IPV6, sockoptBoundInterface, iface.Index)
 
-	// AF_INET6 socket: always bind the IPv6 routing. On a dual-stack
-	// socket (v6only == 0, which is Go's default for "udp" listens on
-	// Windows), IPv4-mapped traffic uses the IPv4 routing table and is
-	// not constrained by IPV6_UNICAST_IF alone, so IP_UNICAST_IF is also
-	// set. IP_UNICAST_IF is not set on v6-only sockets, where some
-	// Windows versions reject IPPROTO_IP options with WSAEINVAL.
-	if err := windows.SetsockoptInt(
-		socket,
-		windows.IPPROTO_IPV6,
-		sockoptBoundInterface,
-		iface.Index); err != nil {
-		return errors.Trace(err)
-	}
-	if v6only == 0 {
-		if err := windows.SetsockoptInt(
-			socket,
-			windows.IPPROTO_IP,
-			sockoptBoundInterface,
-			ifIndexBE); err != nil {
-			return errors.Trace(err)
-		}
+	if ipv4Err != nil && ipv6Err != nil {
+		return errors.Tracef(
+			"BindToDevice failed: IPv4=%v, IPv6=%v", ipv4Err, ipv6Err)
 	}
 
 	return nil
