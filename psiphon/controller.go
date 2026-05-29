@@ -34,7 +34,6 @@ import (
 	"net/url"
 	"runtime"
 	"runtime/pprof"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1886,8 +1885,11 @@ func (controller *Controller) initLightProxy(
 	controller.lightProxyDialTimeout.Store(
 		int64(p.Duration(parameters.LightProxyDialTimeout)))
 
+	lightProxyLimitLookup := common.NewStringLookup(
+		p.Strings(parameters.LightProxyLimitDestinationAddresses))
+
 	controller.lightProxyLimitDestinationAddresses.Store(
-		slices.Clone(p.Strings(parameters.LightProxyLimitDestinationAddresses)))
+		&lightProxyLimitLookup)
 
 	NoticeLightProxyAvailable()
 
@@ -2121,10 +2123,10 @@ func (controller *Controller) Dial(
 		if lightProxyClient != nil {
 
 			limitDestinationAddresses, _ :=
-				controller.lightProxyLimitDestinationAddresses.Load().([]string)
+				controller.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
 
-			if (len(limitDestinationAddresses) == 0 ||
-				common.Contains(limitDestinationAddresses, remoteAddr)) &&
+			if (limitDestinationAddresses.Len() == 0 ||
+				limitDestinationAddresses.Contains(remoteAddr)) &&
 
 				// In test fetch mode, only the test address is routed through
 				// light proxy.

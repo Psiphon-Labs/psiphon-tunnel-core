@@ -42,6 +42,10 @@ func TestStringLookup(t *testing.T) {
 		t.Fatal("unexpected item found")
 	}
 
+	if lookup.Len() != 3 {
+		t.Fatal("unexpected length")
+	}
+
 	// Long list
 
 	lookup = NewStringLookup([]string{"a", "b", "c", "d", "e", "f"})
@@ -52,6 +56,10 @@ func TestStringLookup(t *testing.T) {
 
 	if lookup.Contains("g") {
 		t.Fatal("unexpected item found")
+	}
+
+	if lookup.Len() != 6 {
+		t.Fatal("unexpected length")
 	}
 }
 
@@ -80,6 +88,10 @@ func TestStringValueLookup(t *testing.T) {
 		t.Fatal("unexpected item found")
 	}
 
+	if lookup.Len() != 3 {
+		t.Fatal("unexpected length")
+	}
+
 	// Long list
 
 	lookup, err = NewStringValueLookup(
@@ -97,6 +109,10 @@ func TestStringValueLookup(t *testing.T) {
 	_, ok = lookup.Get("g")
 	if ok {
 		t.Fatal("unexpected item found")
+	}
+
+	if lookup.Len() != 6 {
+		t.Fatal("unexpected length")
 	}
 
 	// Invalid input
