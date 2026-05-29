@@ -97,4 +97,9 @@ message InproxyDialParams {
     optional int64 inproxy_proxy_max_common_clients = 90;
     optional int64 inproxy_proxy_max_personal_clients = 91;
     optional string inproxy_webrtc_dtls_fingerprint = 92;
+    optional string inproxy_proxy_webrtc_dtls_fingerprint = 93;
+    optional string inproxy_client_ice_region = 94;
+    optional string inproxy_client_ice_asn = 95;
+    optional string inproxy_proxy_ice_region = 96;
+    optional string inproxy_proxy_ice_asn = 97;
 }

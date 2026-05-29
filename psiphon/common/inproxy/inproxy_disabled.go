@@ -128,6 +128,8 @@ func GetQUICMaxPacketSizeAdjustment() int {
 type webRTCSDPMetrics struct {
 	iceCandidateCount      int
 	iceCandidateTypes      []ICECandidateType
+	iceRegion              string
+	iceASN                 string
 	hasIPv4                bool
 	hasIPv6                bool
 	hasPrivateIP           bool

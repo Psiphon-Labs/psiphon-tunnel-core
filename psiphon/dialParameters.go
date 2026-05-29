@@ -1444,7 +1444,7 @@ func MakeDialParameters(
 
 		if !isReplay || !replayInproxyWebRTC {
 
-			dialParams.InproxyWebRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p)
+			dialParams.InproxyWebRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p, false)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}

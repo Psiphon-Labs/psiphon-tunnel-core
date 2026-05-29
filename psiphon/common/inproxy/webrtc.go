@@ -412,43 +412,44 @@ func newWebRTCConn(
 	// so the client can orchestrate replay on both ends of the connection by
 	// reusing an obfuscation secret. Derive a secret specific to DTLS.
 	//
-	// Each side independently selects its DTLS fingerprint profile. This
-	// intentional asymmetry produces a circumvention-friendly mix of profiles
-	// across the two peers, while determinism and replay are preserved by
-	// seeding both sides' PRNGs from the shared obfuscation secret.
-	//
-	// Implementation uses stock pion/dtls v3 ClientHelloMessageHook and
-	// ServerHelloMessageHook on the SettingEngine.
+	// Each side selects its DTLS fingerprint profile deterministically from
+	// ClientRootObfuscationSecret using distinct offer and answer salts. This
+	// produces a circumvention-friendly mix of profiles across the two peers,
+	// while determinism and replay are preserved by seeding both sides' PRNGs
+	// from the shared obfuscation secret.
 
 	if config.DTLSFingerprint != "" {
-
-		dtlsObfuscationSecret, err := deriveObfuscationSecret(
-			config.ClientRootObfuscationSecret, "in-proxy-DTLS-seed")
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
-		}
-
-		baseSeed := prng.Seed(dtlsObfuscationSecret)
 
 		// Derive distinct sub-seeds for client hello and server hello,
 		// and for the offer vs answer side so each peer's randomization
 		// is distinct.
-		clientHelloSaltSuffix := "-client-hello-offer"
+
+		dtlsClientHelloContext := "in-proxy-DTLS-randomization-client-hello-offer"
+		dtlsServerHelloContext := "in-proxy-DTLS-randomization-server-hello-offer"
 		if !isOffer {
-			clientHelloSaltSuffix = "-client-hello-answer"
-		}
-		clientHelloSeed, err := prng.NewSaltedSeed(
-			&baseSeed, "in-proxy-DTLS"+clientHelloSaltSuffix)
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
-		}
-		serverHelloSeed, err := prng.NewSaltedSeed(
-			&baseSeed, "in-proxy-DTLS-server-hello")
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
+			dtlsClientHelloContext = "in-proxy-DTLS-randomization-client-hello-answer"
+			dtlsServerHelloContext = "in-proxy-DTLS-randomization-server-hello-answer"
 		}
 
-		setDTLSHooks(&settingEngine, config.DTLSFingerprint, clientHelloSeed, serverHelloSeed)
+		dtlsClientHelloObfuscationSecret, err := deriveObfuscationSecret(
+			config.ClientRootObfuscationSecret, dtlsClientHelloContext)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+		clientHelloSeed := prng.Seed(dtlsClientHelloObfuscationSecret)
+
+		dtlsServerHelloObfuscationSecret, err := deriveObfuscationSecret(
+			config.ClientRootObfuscationSecret, dtlsServerHelloContext)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+		serverHelloSeed := prng.Seed(dtlsServerHelloObfuscationSecret)
+
+		setDTLSHooks(
+			&settingEngine,
+			config.DTLSFingerprint,
+			&clientHelloSeed,
+			&serverHelloSeed)
 	}
 
 	// Configure traffic shaping, which adds random padding and decoy messages
@@ -2776,6 +2777,8 @@ func filterSDPAddresses(
 type webRTCSDPMetrics struct {
 	iceCandidateCount      int
 	iceCandidateTypes      []ICECandidateType
+	iceRegion              string
+	iceASN                 string
 	hasIPv4                bool
 	hasIPv6                bool
 	hasPrivateIP           bool
@@ -2849,6 +2852,9 @@ func processSDPAddresses(
 	hasPrivateIP := false
 	filteredCandidateReasons := make(map[string]int)
 	allowedGeoIPMismatches := 0
+	iceRegion := ""
+	iceASN := ""
+	recordedICEGeoIP := false
 
 	var portMappingICECandidates []sdp.Attribute
 	if portMappingExternalAddr != "" {
@@ -3032,6 +3038,21 @@ func processSDPAddresses(
 
 						if allowGeoIPMismatchCandidates {
 							allowedGeoIPMismatches += 1
+
+							// Record the first non-private, mismatching ICE
+							// candidate's GeoIP. Matching candidates are
+							// skipped because they duplicate the peer's
+							// broker-observed region.
+							//
+							// Limitation: in some circumstances, an SDP may
+							// contain multiple non-private, mismatching
+							// candidates with distinct GeoIP regions/ASNs;
+							// only the first is recorded.
+							if !recordedICEGeoIP && !candidateIsPrivateIP {
+								iceRegion = candidateGeoIPData.Country
+								iceASN = candidateGeoIPData.ASN
+								recordedICEGeoIP = true
+							}
 						} else {
 							version := "IPv4"
 							if candidateIsIPv6 {
@@ -3091,6 +3112,8 @@ func processSDPAddresses(
 
 	metrics := &webRTCSDPMetrics{
 		iceCandidateCount:      candidateCount,
+		iceRegion:              iceRegion,
+		iceASN:                 iceASN,
 		hasIPv4:                hasIPv4,
 		hasIPv6:                hasIPv6,
 		hasPrivateIP:           hasPrivateIP,

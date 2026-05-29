@@ -2252,13 +2252,18 @@ func (p ParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUI
 // DTLSFingerprints returns a protocol.DTLSFingerprints parameter value,
 // applying a probability gate as with TLSProfiles and QUICVersions.
 func (p ParametersAccessor) DTLSFingerprints(name string) protocol.DTLSFingerprints {
+	return p.DTLSFingerprintsWithPRNG(name, prng.DefaultPRNG())
+}
 
+// DTLSFingerprintsWithPRNG returns a protocol.DTLSFingerprints parameter
+// value, applying a probability gate as with TLSProfiles and QUICVersions.
+func (p ParametersAccessor) DTLSFingerprintsWithPRNG(name string, PRNG *prng.PRNG) protocol.DTLSFingerprints {
 	probabilityName := name + "Probability"
 	_, ok := p.snapshot.parameters[probabilityName]
 	if ok {
 		probabilityValue := float64(1.0)
 		p.snapshot.getValue(probabilityName, &probabilityValue)
-		if !prng.FlipWeightedCoin(probabilityValue) {
+		if !PRNG.FlipWeightedCoin(probabilityValue) {
 			defaultParameter, ok := defaultParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.DTLSFingerprints)

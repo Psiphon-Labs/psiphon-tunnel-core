@@ -257,8 +257,14 @@ func (t *testWebRTCDialCoordinator) ClientRootObfuscationSecret() ObfuscationSec
 	return t.clientRootObfuscationSecret
 }
 
-func (t *testWebRTCDialCoordinator) DTLSFingerprint() string {
+func (t *testWebRTCDialCoordinator) ClientDTLSFingerprint() string {
 	return ""
+}
+
+func (t *testWebRTCDialCoordinator) ProxyDTLSFingerprint(
+	ClientRootObfuscationSecret ObfuscationSecret) (string, error) {
+
+	return "", nil
 }
 
 func (t *testWebRTCDialCoordinator) UseMediaStreams() bool {
