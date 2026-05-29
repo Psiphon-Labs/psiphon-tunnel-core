@@ -2125,7 +2125,8 @@ func (controller *Controller) Dial(
 			limitDestinationAddresses, _ :=
 				controller.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
 
-			if (limitDestinationAddresses.Len() == 0 ||
+			if (limitDestinationAddresses == nil ||
+				limitDestinationAddresses.Len() == 0 ||
 				limitDestinationAddresses.Contains(remoteAddr)) &&
 
 				// In test fetch mode, only the test address is routed through
