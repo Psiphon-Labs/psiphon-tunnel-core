@@ -99,13 +99,22 @@ func NewHttpProxy(
 	tunneler Tunneler,
 	listenIP string) (proxy *HttpProxy, err error) {
 
-	listener, portInUse, err := makeLocalProxyListener(
-		listenIP, config.LocalHttpProxyPort)
-	if err != nil {
-		if portInUse {
-			NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)
+	var listener net.Listener
+	if config.UseUnixDomainSockets {
+		listener, err = makeLocalProxyUnixListener(config.LocalHttpProxyUnixPath)
+		if err != nil {
+			return nil, errors.Trace(err)
 		}
-		return nil, errors.Trace(err)
+	} else {
+		var portInUse bool
+		listener, portInUse, err = makeLocalProxyListener(
+			listenIP, config.LocalHttpProxyPort)
+		if err != nil {
+			if portInUse {
+				NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)
+			}
+			return nil, errors.Trace(err)
+		}
 	}
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
@@ -158,8 +167,16 @@ func NewHttpProxy(
 		Jar:       nil,
 	}
 
-	proxyIP, proxyPortString, _ := net.SplitHostPort(listener.Addr().String())
-	proxyPort, _ := strconv.Atoi(proxyPortString)
+	// In Unix domain socket mode there is no IP:port; listenIP/listenPort are
+	// left as zero values. The URL proxy M3U8 rewrite, which depends on an
+	// IP:port to construct rewritten URLs, is not supported in this mode.
+	var proxyIP string
+	var proxyPort int
+	if !config.UseUnixDomainSockets {
+		var proxyPortString string
+		proxyIP, proxyPortString, _ = net.SplitHostPort(listener.Addr().String())
+		proxyPort, _ = strconv.Atoi(proxyPortString)
+	}
 
 	proxy = &HttpProxy{
 		config:                 config,
@@ -191,7 +208,11 @@ func NewHttpProxy(
 	// NoticeListeningHttpProxyPort after that call.
 	// Also, check the listen backlog queue length -- shouldn't it be possible
 	// to enqueue pending connections between net.Listen() and httpServer.Serve()?
-	NoticeListeningHttpProxyPort(proxy.listenPort)
+	if config.UseUnixDomainSockets {
+		NoticeListeningHttpProxyUnixPath(config.LocalHttpProxyUnixPath)
+	} else {
+		NoticeListeningHttpProxyPort(proxy.listenPort)
+	}
 
 	return proxy, nil
 }

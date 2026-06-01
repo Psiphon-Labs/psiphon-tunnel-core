@@ -48,3 +48,7 @@ func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, erro
 	}
 	return listener, false, nil
 }
+
+func makeLocalProxyUnixListener(_ string) (net.Listener, error) {
+	return nil, errors.TraceNew("Unix domain sockets are not supported on this platform")
+}

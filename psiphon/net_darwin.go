@@ -21,7 +21,9 @@ package psiphon
 
 import (
 	"net"
+	"os"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -50,4 +52,23 @@ func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, erro
 		return nil, IsAddressInUseError(err), errors.Trace(err)
 	}
 	return listener, false, nil
+}
+
+func makeLocalProxyUnixListener(path string) (net.Listener, error) {
+	// A leading "@" specifies an abstract namespace socket, which has no
+	// filesystem entry and so requires no stale-socket cleanup. Abstract
+	// namespace sockets are not supported on Darwin; config validation
+	// rejects them, but guard here as well.
+	if !strings.HasPrefix(path, "@") {
+		// Remove any stale socket file left by a previous, unclean shutdown;
+		// otherwise net.Listen would fail with "address already in use".
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return nil, errors.Trace(err)
+		}
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return listener, nil
 }
