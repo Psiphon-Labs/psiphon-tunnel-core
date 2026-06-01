@@ -1595,7 +1595,11 @@ func (sshServer *sshServer) reloadTactics() error {
 				brokerRootObfuscationSecrets = append(
 					brokerRootObfuscationSecrets, brokerRootObfuscationSecret)
 
-				brokerSpecHashes = append(brokerSpecHashes, brokerSpec.Hash())
+				brokerSpecHash, err := brokerSpec.Hash()
+				if err != nil {
+					return errors.Trace(err)
+				}
+				brokerSpecHashes = append(brokerSpecHashes, brokerSpecHash)
 			}
 
 			// SetKnownBrokerPublicKeys will terminate any existing sessions

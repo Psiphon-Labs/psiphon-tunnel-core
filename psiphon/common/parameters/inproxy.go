@@ -21,11 +21,11 @@ package parameters
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/cespare/xxhash"
 )
 
@@ -81,14 +81,16 @@ func (specs InproxyBrokerSpecsValue) Validate(checkBrokerSpecsList *InproxyBroke
 	return nil
 }
 
-// Hash hashes the broker spec. The hash is used to detect when broker spec
-// tactics have changed.
-func (spec *InproxyBrokerSpec) Hash() []byte {
+// Hash deterministically hashes the broker spec. The hash is used to detect
+// when broker spec tactics have changed.
+func (spec *InproxyBrokerSpec) Hash() ([]byte, error) {
+	b, err := protocol.CBOREncoding.Marshal(spec)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	var hash [8]byte
-	binary.BigEndian.PutUint64(
-		hash[:],
-		uint64(xxhash.Sum64String(fmt.Sprintf("%+v", spec))))
-	return hash[:]
+	binary.BigEndian.PutUint64(hash[:], xxhash.Sum64(b))
+	return hash[:], nil
 }
 
 // InproxyCompartmentIDsValue is a list of in-proxy common compartment IDs.

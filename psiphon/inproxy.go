@@ -499,8 +499,15 @@ func NewInproxyBrokerClientInstance(
 				func(spec *parameters.InproxyBrokerSpec, dialParams *InproxyBrokerDialParameters) bool {
 					// Replay the successful broker spec, if present, by
 					// comparing its hash with that of the candidate.
-					return dialParams.LastUsedTimestamp.After(now.Add(-ttl)) &&
-						bytes.Equal(dialParams.LastUsedBrokerSpecHash, spec.Hash())
+					if !dialParams.LastUsedTimestamp.After(now.Add(-ttl)) {
+						return false
+					}
+					brokerSpecHash, err := spec.Hash()
+					if err != nil {
+						NoticeWarning("InproxyBrokerSpec.Hash failed: %v", errors.Trace(err))
+						return false
+					}
+					return bytes.Equal(dialParams.LastUsedBrokerSpecHash, brokerSpecHash)
 				})
 		if err != nil {
 			NoticeWarning("SelectCandidateWithNetworkReplayParameters failed: %v", errors.Trace(err))
@@ -1213,10 +1220,15 @@ func MakeInproxyBrokerDialParameters(
 
 	// Select new broker dial parameters
 
+	brokerSpecHash, err := brokerSpec.Hash()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	brokerDialParams := &InproxyBrokerDialParameters{
 		brokerSpec:             brokerSpec,
 		LastUsedTimestamp:      currentTimestamp,
-		LastUsedBrokerSpecHash: brokerSpec.Hash(),
+		LastUsedBrokerSpecHash: brokerSpecHash,
 	}
 
 	// FrontedMeekDialParameters
@@ -1228,7 +1240,6 @@ func MakeInproxyBrokerDialParameters(
 	payloadSecure := true
 	skipVerify := false
 
-	var err error
 	brokerDialParams.FrontedHTTPDialParameters, err = makeFrontedMeekDialParameters(
 		config,
 		p,
