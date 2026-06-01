@@ -1817,7 +1817,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	// Calculate and set the dial parameters hash. After this point, related
 	// config fields must not change.
 
-	config.setDialParametersHash()
+	err = config.setDialParametersHash()
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// Set defaults for dynamic config fields.
 
@@ -3429,7 +3432,7 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	return applyParameters
 }
 
-func (config *Config) setDialParametersHash() {
+func (config *Config) setDialParametersHash() error {
 
 	// Calculate and store a hash of the config values that may impact
 	// dial parameters. This hash is used as part of the dial parameters
@@ -4171,33 +4174,32 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyTunnelProtocolSelectionProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyTunnelProtocolSelectionProbability)
 	}
-	if len(config.InproxyBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyBrokerSpecs)))
-	}
-	if len(config.InproxyPersonalPairingBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyPersonalPairingBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyPersonalPairingBrokerSpecs)))
-	}
-	if len(config.InproxyProxyBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyProxyBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyBrokerSpecs)))
-	}
-	if len(config.InproxyProxyPersonalPairingBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyProxyPersonalPairingBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyPersonalPairingBrokerSpecs)))
+
+	for _, entry := range []struct {
+		name        string
+		brokerSpecs parameters.InproxyBrokerSpecsValue
+	}{
+		{"InproxyBrokerSpecs", config.InproxyBrokerSpecs},
+		{"InproxyPersonalPairingBrokerSpecs", config.InproxyPersonalPairingBrokerSpecs},
+		{"InproxyProxyBrokerSpecs", config.InproxyProxyBrokerSpecs},
+		{"InproxyProxyPersonalPairingBrokerSpecs", config.InproxyProxyPersonalPairingBrokerSpecs},
+		{"InproxyClientBrokerSpecs", config.InproxyClientBrokerSpecs},
+		{"InproxyClientPersonalPairingBrokerSpecs", config.InproxyClientPersonalPairingBrokerSpecs}} {
+		if len(entry.brokerSpecs) == 0 {
+			continue
+		}
+		hash.Write([]byte(entry.name))
+		for _, brokerSpec := range entry.brokerSpecs {
+			brokerSpecHash, err := brokerSpec.Hash()
+			if err != nil {
+				return errors.Trace(err)
+			}
+			hash.Write(brokerSpecHash)
+		}
 	}
 	if config.InproxyPersonalPairingMaxBrokerSpecCount != nil {
 		hash.Write([]byte("InproxyPersonalPairingMaxBrokerSpecCount"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyPersonalPairingMaxBrokerSpecCount))
-	}
-	if len(config.InproxyClientBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyClientBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientBrokerSpecs)))
-	}
-	if len(config.InproxyClientPersonalPairingBrokerSpecs) > 0 {
-		hash.Write([]byte("InproxyClientPersonalPairingBrokerSpecs"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientPersonalPairingBrokerSpecs)))
 	}
 	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
 		hash.Write([]byte("InproxyReplayBrokerDialParametersTTLSeconds"))
@@ -4325,6 +4327,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
+	return nil
 }
 
 // applyAdditionalParameters decodes and applies any additional parameters
