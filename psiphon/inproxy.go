@@ -22,7 +22,6 @@ package psiphon
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	std_errors "errors"
 	"fmt"
 	"io"
@@ -43,7 +42,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	utls "github.com/Psiphon-Labs/utls"
-	"github.com/cespare/xxhash"
 )
 
 // InproxyBrokerClientManager manages an InproxyBrokerClientInstance, an
@@ -502,7 +500,7 @@ func NewInproxyBrokerClientInstance(
 					// Replay the successful broker spec, if present, by
 					// comparing its hash with that of the candidate.
 					return dialParams.LastUsedTimestamp.After(now.Add(-ttl)) &&
-						bytes.Equal(dialParams.LastUsedBrokerSpecHash, hashBrokerSpec(spec))
+						bytes.Equal(dialParams.LastUsedBrokerSpecHash, spec.Hash())
 				})
 		if err != nil {
 			NoticeWarning("SelectCandidateWithNetworkReplayParameters failed: %v", errors.Trace(err))
@@ -1218,7 +1216,7 @@ func MakeInproxyBrokerDialParameters(
 	brokerDialParams := &InproxyBrokerDialParameters{
 		brokerSpec:             brokerSpec,
 		LastUsedTimestamp:      currentTimestamp,
-		LastUsedBrokerSpecHash: hashBrokerSpec(brokerSpec),
+		LastUsedBrokerSpecHash: brokerSpec.Hash(),
 	}
 
 	// FrontedMeekDialParameters
@@ -1337,16 +1335,6 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	// Requires a reference to the InproxyBrokerRoundTripper.
 
 	return logFields
-}
-
-// hashBrokerSpec hashes the broker spec. The hash is used to detect when
-// broker spec tactics have changed.
-func hashBrokerSpec(spec *parameters.InproxyBrokerSpec) []byte {
-	var hash [8]byte
-	binary.BigEndian.PutUint64(
-		hash[:],
-		uint64(xxhash.Sum64String(fmt.Sprintf("%+v", spec))))
-	return hash[:]
 }
 
 // InproxyBrokerRoundTripper is a broker request round trip transport

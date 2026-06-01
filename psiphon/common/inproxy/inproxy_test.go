@@ -345,6 +345,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 		ServerRootObfuscationSecret:  serverRootObfuscationSecret,
 		BrokerPublicKeys:             []SessionPublicKey{brokerPublicKey},
 		BrokerRootObfuscationSecrets: []ObfuscationSecret{brokerRootObfuscationSecret},
+		BrokerSpecHashes:             [][]byte{[]byte("test-broker-spec-hash")},
 		BrokerRoundTripperMaker:      makeServerBrokerClientRoundTripper,
 		ProxyMetricsValidator:        apiParameterValidator,
 		ProxyMetricsFormatter:        apiParameterLogFieldFormatter,

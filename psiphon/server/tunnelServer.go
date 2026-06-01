@@ -1573,6 +1573,7 @@ func (sshServer *sshServer) reloadTactics() error {
 
 			var brokerPublicKeys []inproxy.SessionPublicKey
 			var brokerRootObfuscationSecrets []inproxy.ObfuscationSecret
+			var brokerSpecHashes [][]byte
 
 			for _, brokerSpec := range brokerSpecs {
 
@@ -1593,6 +1594,8 @@ func (sshServer *sshServer) reloadTactics() error {
 
 				brokerRootObfuscationSecrets = append(
 					brokerRootObfuscationSecrets, brokerRootObfuscationSecret)
+
+				brokerSpecHashes = append(brokerSpecHashes, brokerSpec.Hash())
 			}
 
 			// SetKnownBrokerPublicKeys will terminate any existing sessions
@@ -1600,7 +1603,7 @@ func (sshServer *sshServer) reloadTactics() error {
 			// but will retain any existing sessions for broker public keys
 			// that remain in the list.
 			err = sshServer.inproxyBrokerSessions.SetKnownBrokers(
-				brokerPublicKeys, brokerRootObfuscationSecrets)
+				brokerPublicKeys, brokerRootObfuscationSecrets, brokerSpecHashes)
 			if err != nil {
 				return errors.Trace(err)
 			}

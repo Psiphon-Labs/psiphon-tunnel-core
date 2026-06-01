@@ -144,6 +144,7 @@ func runTestProxyQualityReporter() error {
 		SessionPrivateKey{},
 		nil,
 		nil,
+		nil,
 		nil)
 	if err != nil {
 		return errors.Trace(err)

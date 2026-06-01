@@ -70,6 +70,10 @@ type ServerBrokerSessionsConfig struct {
 	// to the entries in BrokerPublicKeys.
 	BrokerRootObfuscationSecrets []ObfuscationSecret
 
+	// BrokerSpecHashes are the broker spec hashes corresponding to the entries in
+	// BrokerPublicKeys.
+	BrokerSpecHashes [][]byte
+
 	// BrokerRoundTripperMaker constructs round trip transports used to send
 	// proxy quality requests to the specified broker.
 	BrokerRoundTripperMaker ProxyQualityBrokerRoundTripperMaker
@@ -112,6 +116,7 @@ func NewServerBrokerSessions(
 		config.ServerPrivateKey,
 		config.BrokerPublicKeys,
 		config.BrokerRootObfuscationSecrets,
+		config.BrokerSpecHashes,
 		config.BrokerRoundTripperMaker)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -147,7 +152,8 @@ func (s *ServerBrokerSessions) Stop() {
 // secrets are used by the reporter.
 func (s *ServerBrokerSessions) SetKnownBrokers(
 	brokerPublicKeys []SessionPublicKey,
-	brokerRootObfuscationSecrets []ObfuscationSecret) error {
+	brokerRootObfuscationSecrets []ObfuscationSecret,
+	brokerSpecHashes [][]byte) error {
 
 	err := s.sessions.SetKnownInitiatorPublicKeys(
 		brokerPublicKeys)
@@ -156,7 +162,7 @@ func (s *ServerBrokerSessions) SetKnownBrokers(
 	}
 
 	err = s.proxyQualityReporter.SetKnownBrokers(
-		brokerPublicKeys, brokerRootObfuscationSecrets)
+		brokerPublicKeys, brokerRootObfuscationSecrets, brokerSpecHashes)
 	if err != nil {
 		return errors.Trace(err)
 	}
