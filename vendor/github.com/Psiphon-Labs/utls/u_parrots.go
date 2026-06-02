@@ -3048,6 +3048,13 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	uconn.echCtx = ech
 	hello := uconn.HandshakeState.Hello
 
+	// [Psiphon]
+	// uTLS presets should control TLS 1.2 EMS through their extension lists.
+	// The default ClientHello enables EMS, so clear it before extension
+	// writeToUConn hooks re-enable it only when an EMS extension is present.
+	// This change is required for the EMS state check in Conn.loadSession.
+	hello.Ems = false
+
 	switch len(hello.Random) {
 	case 0:
 		hello.Random = make([]byte, 32)
