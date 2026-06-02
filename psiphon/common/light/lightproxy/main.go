@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/sync/errgroup"
@@ -418,7 +419,7 @@ func lightProxyTestFetch(
 		DisableKeepAlives: true,
 		DialContext: func(dialCtx context.Context, _, address string) (net.Conn, error) {
 			conn, err := lightClient.Dial(
-				dialCtx, nil, "UNKNOWN", "Chrome-120", nil, "", address)
+				dialCtx, nil, "UNKNOWN", protocol.TLS_PROFILE_CHROME_133, nil, "", address)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
