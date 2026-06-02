@@ -1723,16 +1723,20 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if config.UseUnixDomainSockets {
 
-		if runtime.GOOS != "darwin" && runtime.GOOS != "android" && runtime.GOOS != "linux" {
-			return errors.TraceNew("UseUnixDomainSockets is only supported on Darwin, Android, and Linux")
+		unixSocketsSupported, abstractSocketsSupported := IsUnixDomainSocketsSupported()
+		if !unixSocketsSupported {
+			return errors.TraceNew("UseUnixDomainSockets is not supported on this platform")
 		}
 
 		// validateUnixSocketPath checks that a Unix domain socket path is set
 		// and within the platform sockaddr_un length limit. The tightest
-		// limit, Darwin's 104-byte sun_path (including the NUL terminator), is
-		// applied on all supported platforms. A leading "@" specifies an
-		// abstract namespace socket, which is only supported on Android and
-		// Linux.
+		// limit, Darwin's 104-byte sun_path (including the NUL terminator,
+		// leaving 103 usable bytes), is applied on all supported platforms.
+		// Linux and Android allow a slightly larger 108-byte sun_path, so
+		// applying the Darwin limit everywhere is safe and avoids a
+		// per-platform value. A leading "@" specifies an abstract namespace
+		// socket, which is not supported on all platforms (for example,
+		// Darwin).
 		validateUnixSocketPath := func(name, path string) error {
 			if path == "" {
 				return errors.Tracef("missing %s", name)
@@ -1740,8 +1744,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			if len(path) > 103 {
 				return errors.Tracef("%s exceeds maximum length", name)
 			}
-			if strings.HasPrefix(path, "@") && runtime.GOOS == "darwin" {
-				return errors.Tracef("%s abstract namespace socket is not supported on Darwin", name)
+			if strings.HasPrefix(path, "@") && !abstractSocketsSupported {
+				return errors.Tracef("%s abstract namespace socket is not supported on this platform", name)
 			}
 			return nil
 		}
@@ -1758,6 +1762,15 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 				"LocalHttpProxyUnixPath", config.LocalHttpProxyUnixPath); err != nil {
 				return errors.Trace(err)
 			}
+		}
+
+		// When both local proxies are enabled, they must listen on distinct
+		// paths; otherwise one proxy's listener would bind the shared path and
+		// the other would be unreachable.
+		if !config.DisableLocalSocksProxy && !config.DisableLocalHTTPProxy &&
+			config.LocalSocksProxyUnixPath == config.LocalHttpProxyUnixPath {
+			return errors.TraceNew(
+				"LocalSocksProxyUnixPath and LocalHttpProxyUnixPath must differ")
 		}
 	}
 

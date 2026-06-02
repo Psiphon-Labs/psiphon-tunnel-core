@@ -127,7 +127,7 @@ func TestRewriteM3U8(t *testing.T) {
 		response.Body = inFile
 		response.Header.Set("Content-Length", strconv.FormatInt(inFileInfo.Size(), 10))
 
-		err := rewriteM3U8("127.0.0.1", 12345, &response)
+		err := rewriteM3U8(false, "127.0.0.1", 12345, &response)
 		if err != nil {
 			if !tt.expectError {
 				t.Errorf("rewriteM3U8 returned error: %s", err)
@@ -152,5 +152,10 @@ func TestRewriteM3U8(t *testing.T) {
 		if contentLength != int64(len(rewrittenBody)) {
 			t.Errorf("rewriteM3U8 Content-Length incorrect for test %d: %d != %d", i, contentLength, len(rewrittenBody))
 		}
+	}
+
+	// M3U8 rewriting is not supported with UDS, and will fail loudly
+	if err := rewriteM3U8(true, "", 0, &http.Response{}); err == nil {
+		t.Errorf("rewriteM3U8 expected error with Unix domain sockets enabled")
 	}
 }

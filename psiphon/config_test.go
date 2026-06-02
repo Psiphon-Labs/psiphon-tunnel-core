@@ -797,4 +797,23 @@ func TestUseUnixDomainSocketsValidation(t *testing.T) {
 			t.Fatalf("expected success when UseUnixDomainSockets is off, got: %s", err)
 		}
 	})
+
+	t.Run("identical paths with both proxies enabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalHttpProxyUnixPath = config.LocalSocksProxyUnixPath
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for identical enabled proxy paths")
+		}
+	})
+
+	t.Run("identical paths but one proxy disabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalHttpProxyUnixPath = config.LocalSocksProxyUnixPath
+		config.DisableLocalHTTPProxy = true
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("expected success when only one proxy is enabled, got: %s", err)
+		}
+	})
 }

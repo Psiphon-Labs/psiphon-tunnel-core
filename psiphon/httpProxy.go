@@ -533,7 +533,9 @@ func (proxy *HttpProxy) relayHTTPRequest(
 
 		switch key {
 		case "m3u8":
-			err = rewriteM3U8(proxy.listenIP, proxy.listenPort, response)
+			err = rewriteM3U8(
+				proxy.config.UseUnixDomainSockets,
+				proxy.listenIP, proxy.listenPort, response)
 		}
 
 		if err != nil {
@@ -748,7 +750,15 @@ func proxifyURL(localHTTPProxyIP string, localHTTPProxyPort int, urlString strin
 
 // Rewrite the contents of the M3U8 file in body to be compatible with URL proxying.
 // If error is returned, response body may not be valid for reading.
-func rewriteM3U8(localHTTPProxyIP string, localHTTPProxyPort int, response *http.Response) error {
+//
+// M3U8 rewriting is not supported when the local HTTP proxy is listening on a
+// Unix domain socket, as the rewritten segment URLs require an IP:port to
+// address the local proxy.
+func rewriteM3U8(useUnixDomainSockets bool, localHTTPProxyIP string, localHTTPProxyPort int, response *http.Response) error {
+	if useUnixDomainSockets {
+		return errors.TraceNew("M3U8 rewriting is not supported with Unix domain sockets")
+	}
+
 	// Check URL path extension
 	extension := filepath.Ext(response.Request.URL.Path)
 	var shouldHandle = (extension == ".m3u8")
