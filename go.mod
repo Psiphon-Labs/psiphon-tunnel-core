@@ -28,7 +28,7 @@ require (
 	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
-	github.com/Psiphon-Labs/utls v1.1.1-0.20260423193914-69eb96d02588
+	github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/axiomhq/hyperloglog v0.2.6
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61

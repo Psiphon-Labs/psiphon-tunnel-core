@@ -487,6 +487,17 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	}
 
 	if session.version != VersionTLS13 {
+
+		// [Psiphon]
+		// TLS 1.2 resumption requires the cached session EMS state to match
+		// the new ClientHello. Randomized fingerprints may omit the EMS
+		// extension. If a dial uses such a fingerprint with a cached EMS
+		// session, the server will reject the handshake. Instead, don't use
+		// the cached session and proceed with the selected fingerprint.
+		if session.extMasterSecret != hello.extendedMasterSecret {
+			return nil, nil, nil, nil
+		}
+
 		// In TLS 1.2 the cipher suite must match the resumed session. Ensure we
 		// are still offering it.
 		if mutualCipherSuite(hello.cipherSuites, session.cipherSuite) == nil {
