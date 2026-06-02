@@ -19,7 +19,7 @@ prepare_build () {
   BUILDINFOFILE="psiphond_buildinfo.txt"
   BUILDDATE=$(date -Iseconds)
   BUILDREPO=$(git config --get remote.origin.url)
-  BUILDREV=$(git rev-parse --short HEAD)
+  BUILDREV=$(git rev-parse --short=10 HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
   LDFLAGS="\

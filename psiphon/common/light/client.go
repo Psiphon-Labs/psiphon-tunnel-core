@@ -122,7 +122,15 @@ func NewClient(config *ClientConfig) (*Client, error) {
 
 	clientPlatform := encodeClientPlatform(config.ClientPlatform)
 
-	clientBuildRev, err := hex.DecodeString(config.ClientBuildRev)
+	// Truncate odd length client build revs to enable conversion to binary.
+	// This is a fail safe: the build script should set a sufficiently long,
+	// even-length build rev.
+	hexClientBuildRev := config.ClientBuildRev
+	if len(hexClientBuildRev)%2 == 1 {
+		hexClientBuildRev = hexClientBuildRev[:len(hexClientBuildRev)-1]
+	}
+
+	clientBuildRev, err := hex.DecodeString(hexClientBuildRev)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

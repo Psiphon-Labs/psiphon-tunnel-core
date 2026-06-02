@@ -77,7 +77,7 @@ prepare_build () {
 
   BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
   BUILDREPO=$(git config --get remote.origin.url)
-  BUILDREV=$(git rev-parse --short HEAD)
+  BUILDREV=$(git rev-parse --short=10 HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
   cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary

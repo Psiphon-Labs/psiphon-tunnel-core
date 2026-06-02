@@ -115,7 +115,7 @@ cd "${TUNNEL_CORE_SRC_DIR}"
 BUILDINFOFILE="${BASE_DIR}/psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
-BUILDREV=$(git rev-parse --short HEAD)
+BUILDREV=$(git rev-parse --short=10 HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
 LDFLAGS="\
