@@ -140,6 +140,9 @@ func runTestLightProxy() error {
 
 	receiver := newTestProxyEventReceiver()
 
+	maxConcurrent := numClients * numConnectionsPerClient * 2
+	proxyConfig.MaxConcurrent = &maxConcurrent
+
 	proxyConfig.EnableDebugLogs = true
 
 	proxy, err := NewProxy(

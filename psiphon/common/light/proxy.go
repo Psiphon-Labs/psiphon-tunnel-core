@@ -47,9 +47,10 @@ const (
 	defaultRelayBufferSize          = 8192
 	rateLimiterReapHistoryFrequency = 300 * time.Second
 	rateLimiterMaxCacheEntries      = 1000000
-	defaultRateLimitQuantity        = 100000
-	defaultRateLimitInterval        = 1 * time.Minute
-	defaultMaxConcurrent            = 50000
+	defaultPerIPRateLimitQuantity   = 100000
+	defaultPerIPRateLimitInterval   = 1 * time.Minute
+	defaultPerIPMaxConcurrent       = 50000
+	defaultMaxConcurrent            = 1000000
 	defaultDialFallbackDelay        = 300 * time.Millisecond
 	defaultDNSResolverCacheMaxSize  = 256
 	defaultDNSResolverCacheTTL      = 10 * time.Second
@@ -71,8 +72,9 @@ type ProxyConfig struct {
 	InactivityTimeout       string   `json:",omitempty"`
 	UpstreamDialTimeout     string   `json:",omitempty"`
 	RelayBufferSize         int      `json:",omitempty"`
-	RateLimitQuantity       *int     `json:",omitempty"`
-	RateLimitInterval       string   `json:",omitempty"`
+	PerIPRateLimitQuantity  *int     `json:",omitempty"`
+	PerIPRateLimitInterval  string   `json:",omitempty"`
+	PerIPMaxConcurrent      *int     `json:",omitempty"`
 	MaxConcurrent           *int     `json:",omitempty"`
 	DialFallbackDelay       string   `json:",omitempty"`
 	DNSResolverCacheMaxSize *int     `json:",omitempty"`
@@ -132,12 +134,14 @@ type Proxy struct {
 	relayBufferPool       sync.Pool
 	rateLimitQuantity     int
 	rateLimitInterval     time.Duration
+	perIPMaxConcurrent    int
 	maxConcurrent         int
 	dialFallbackDelay     time.Duration
 
-	limitsMutex           sync.Mutex
-	concurrentConnections map[string]int
-	rateLimiters          *lrucache.Cache
+	limitsMutex                sync.Mutex
+	perIPConcurrentConnections map[string]int
+	rateLimiters               *lrucache.Cache
+	concurrentConnections      int
 
 	dnsResolver *net.Resolver
 	dnsCache    *lrucache.Cache
@@ -221,24 +225,30 @@ func NewProxy(
 		relayBufferSize = config.RelayBufferSize
 	}
 
-	if (config.RateLimitQuantity != nil) != (config.RateLimitInterval != "") ||
-		(config.RateLimitQuantity != nil && *config.RateLimitQuantity < 0) ||
+	if (config.PerIPRateLimitQuantity != nil) != (config.PerIPRateLimitInterval != "") ||
+		(config.PerIPRateLimitQuantity != nil && *config.PerIPRateLimitQuantity < 0) ||
+		(config.PerIPMaxConcurrent != nil && *config.PerIPMaxConcurrent < 0) ||
 		(config.MaxConcurrent != nil && *config.MaxConcurrent < 0) {
 		return nil, errors.TraceNew("invalid limits")
 	}
 
-	rateLimitQuantity := defaultRateLimitQuantity
-	if config.RateLimitQuantity != nil {
-		rateLimitQuantity = *config.RateLimitQuantity
+	rateLimitQuantity := defaultPerIPRateLimitQuantity
+	if config.PerIPRateLimitQuantity != nil {
+		rateLimitQuantity = *config.PerIPRateLimitQuantity
 	}
 
-	rateLimitInterval := defaultRateLimitInterval
-	if config.RateLimitInterval != "" {
+	rateLimitInterval := defaultPerIPRateLimitInterval
+	if config.PerIPRateLimitInterval != "" {
 		var err error
-		rateLimitInterval, err = time.ParseDuration(config.RateLimitInterval)
+		rateLimitInterval, err = time.ParseDuration(config.PerIPRateLimitInterval)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	perIPMaxConcurrent := defaultPerIPMaxConcurrent
+	if config.PerIPMaxConcurrent != nil {
+		perIPMaxConcurrent = *config.PerIPMaxConcurrent
 	}
 
 	maxConcurrent := defaultMaxConcurrent
@@ -340,13 +350,15 @@ func NewProxy(
 			b := make([]byte, relayBufferSize)
 			return &b
 		}},
-		rateLimitQuantity:     rateLimitQuantity,
-		rateLimitInterval:     rateLimitInterval,
-		dnsResolver:           dnsResolver,
-		dnsCache:              dnsCache,
-		maxConcurrent:         maxConcurrent,
-		dialFallbackDelay:     dialFallbackDelay,
-		concurrentConnections: make(map[string]int),
+		rateLimitQuantity:  rateLimitQuantity,
+		rateLimitInterval:  rateLimitInterval,
+		perIPMaxConcurrent: perIPMaxConcurrent,
+		maxConcurrent:      maxConcurrent,
+		dnsResolver:        dnsResolver,
+		dnsCache:           dnsCache,
+		dialFallbackDelay:  dialFallbackDelay,
+
+		perIPConcurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
 			0,
 			rateLimiterReapHistoryFrequency,
@@ -757,36 +769,36 @@ func (proxy *Proxy) applyRateLimit(limitIP string) error {
 
 func (proxy *Proxy) takeMaxConcurrent(limitIP string) error {
 
-	if proxy.maxConcurrent <= 0 {
-		return nil
-	}
-
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[limitIP]
-	if count >= proxy.maxConcurrent {
+	if proxy.maxConcurrent > 0 && proxy.concurrentConnections >= proxy.maxConcurrent {
 		return errors.TraceNew("max concurrent exceeded")
 	}
-	proxy.concurrentConnections[limitIP] = count + 1
+	proxy.concurrentConnections += 1
+
+	count := proxy.perIPConcurrentConnections[limitIP]
+	if proxy.perIPMaxConcurrent > 0 && count >= proxy.perIPMaxConcurrent {
+		proxy.concurrentConnections -= 1
+		return errors.TraceNew("max per IP concurrent exceeded")
+	}
+	proxy.perIPConcurrentConnections[limitIP] = count + 1
 
 	return nil
 }
 
 func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 
-	if proxy.maxConcurrent <= 0 {
-		return
-	}
-
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[limitIP] - 1
+	proxy.concurrentConnections -= 1
+
+	count := proxy.perIPConcurrentConnections[limitIP] - 1
 	if count <= 0 {
-		delete(proxy.concurrentConnections, limitIP)
+		delete(proxy.perIPConcurrentConnections, limitIP)
 	} else {
-		proxy.concurrentConnections[limitIP] = count
+		proxy.perIPConcurrentConnections[limitIP] = count
 	}
 }
 
