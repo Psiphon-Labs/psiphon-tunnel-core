@@ -1017,6 +1017,32 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ListeningSocksProxyUnixPath"]) {
+        id path = [notice valueForKeyPath:@"data.path"];
+        if (![path isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ListeningSocksProxyUnixPath notice missing data.path: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyUnixPath:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onListeningSocksProxyUnixPath:(NSString *)path];
+            });
+        }
+    }
+    else if ([noticeType isEqualToString:@"ListeningHttpProxyUnixPath"]) {
+        id path = [notice valueForKeyPath:@"data.path"];
+        if (![path isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyUnixPath notice missing data.path: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyUnixPath:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onListeningHttpProxyUnixPath:(NSString *)path];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"UpstreamProxyError"]) {
         id message = [notice valueForKeyPath:@"data.message"];
         if (![message isKindOfClass:[NSString class]]) {
