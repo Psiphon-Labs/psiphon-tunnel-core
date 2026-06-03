@@ -741,6 +741,37 @@ func (t *handshakeTransport) sendKexInit() error {
 			return append([]string{item}, list...)
 		}
 
+		firstInList := func(list, allowed []string) (string, bool) {
+			for _, item := range list {
+				if common.Contains(allowed, item) {
+					return item, true
+				}
+			}
+			return "", false
+		}
+
+		ensureHasOne := func(list, requiredList []string) []string {
+			if _, ok := firstInList(list, requiredList); ok {
+				return list
+			}
+			if len(requiredList) > 0 {
+				return toFront(list, requiredList[0])
+			}
+			return list
+		}
+
+		preferCommon := func(clientList, serverList, preferredList []string) []string {
+			for _, item := range clientList {
+				if common.Contains(preferredList, item) && common.Contains(serverList, item) {
+					return toFront(clientList, item)
+				}
+			}
+			if item, ok := firstInList(serverList, preferredList); ok {
+				return toFront(clientList, item)
+			}
+			return clientList
+		}
+
 		firstKexAlgo := func(kexAlgos []string) (string, bool) {
 			for _, kexAlgo := range kexAlgos {
 				switch kexAlgo {
@@ -885,11 +916,29 @@ func (t *handshakeTransport) sendKexInit() error {
 			newServerMACs = newServerNoEncryptThenMACs
 		}
 
+		nonSHA1KexAlgos := []string{
+			keyExchangeCurve25519LibSSH, KeyExchangeCurve25519,
+			KeyExchangeECDHP256, KeyExchangeECDHP384, KeyExchangeECDHP521,
+			KeyExchangeDH14SHA256, KeyExchangeDH16SHA512,
+			KeyExchangeDHGEXSHA256, KeyExchangeMLKEM768X25519,
+		}
+		nonSHA1MACs := []string{HMACSHA256, HMACSHA512, HMACSHA256ETM, HMACSHA512ETM}
+		nonSHA1RSAHostKeyAlgos := []string{KeyAlgoRSASHA256, KeyAlgoRSASHA512}
+
 		if isServer {
 			kexAlgos = addSome(PRNG, kexAlgos, newServerKexAlgos)
 			ciphers = addSome(PRNG, ciphers, newServerCiphers)
 			MACs = addSome(PRNG, MACs, newServerMACs)
 			kexAlgos = addSome(PRNG, kexAlgos, newServerKexAlgosV2)
+
+			// Ensure the server has non-SHA1 options.
+
+			kexAlgos = ensureHasOne(kexAlgos, nonSHA1KexAlgos)
+			MACs = ensureHasOne(MACs, nonSHA1MACs)
+
+			// Assumes RSA host key + AlgorithmSigner (so msg.ServerHostKeyAlgos already
+			// contains rsa-sha2-256/512); see algorithmsForKeyFormat("ssh-rsa") below.
+			hostKeyAlgos = ensureHasOne(hostKeyAlgos, nonSHA1RSAHostKeyAlgos)
 		}
 
 		msg.KexAlgos = kexAlgos
@@ -932,12 +981,15 @@ func (t *handshakeTransport) sendKexInit() error {
 			serverKexAlgos := selectKexAlgos(PeerPRNG, startingKexAlgos)
 			serverCiphers := truncate(PeerPRNG, permute(PeerPRNG, startingCiphers))
 			serverMACs := truncate(PeerPRNG, permute(PeerPRNG, startingMACs))
+			var serverHostKeyAlgos []string
+
+			isClient := !isServer
 
 			if !testLegacyClient {
 
 				// This value is not used, but the identical PRNG operation must be
 				// performed in order to predict the PeerPRNG state.
-				_ = permute(PeerPRNG, startingHostKeyAlgos)
+				serverHostKeyAlgos = permute(PeerPRNG, startingHostKeyAlgos)
 
 				serverMACs = avoid(PeerPRNG, serverMACs, weakMACs, startingMACs)
 
@@ -945,35 +997,54 @@ func (t *handshakeTransport) sendKexInit() error {
 				serverCiphers = addSome(PeerPRNG, serverCiphers, newServerCiphers)
 				serverMACs = addSome(PeerPRNG, serverMACs, newServerMACs)
 				serverKexAlgos = addSome(PeerPRNG, serverKexAlgos, newServerKexAlgosV2)
-			}
+				serverKexAlgos = ensureHasOne(serverKexAlgos, nonSHA1KexAlgos)
+				serverMACs = ensureHasOne(serverMACs, nonSHA1MACs)
+				serverHostKeyAlgos = ensureHasOne(serverHostKeyAlgos, nonSHA1RSAHostKeyAlgos)
 
-			// Adjust to ensure compatibility with the server KEX.
+				// Adjust to ensure compatibility with the server KEX.
+				//
+				// Ensure SHA-1 is not negotiated: the client's preferences
+				// take priority, so move a predicted common server/peer
+				// non-SHA-1 option to the front, or add the same option the
+				// server adds from the nonSHA1 lists (supersedes weakMACs check).
 
-			isClient := !isServer
+				kexAlgos = preferCommon(kexAlgos, serverKexAlgos, nonSHA1KexAlgos)
 
-			if _, err := findCommon("", msg.KexAlgos, serverKexAlgos, isClient); err != nil {
-				if kexAlgo, ok := firstKexAlgo(serverKexAlgos); ok {
-					kexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
+				if _, err := findCommon("", ciphers, serverCiphers, isClient); err != nil {
+					ciphers = retain(PRNG, ciphers, serverCiphers[0])
 				}
-			}
 
-			if _, err := findCommon("", ciphers, serverCiphers, isClient); err != nil {
-				ciphers = retain(PRNG, ciphers, serverCiphers[0])
-			}
+				MACs = preferCommon(MACs, serverMACs, nonSHA1MACs)
 
-			if _, err := findCommon("", MACs, serverMACs, isClient); err != nil {
-				MACs = retain(PRNG, MACs, serverMACs[0])
-			}
+				hostKeyAlgos = preferCommon(hostKeyAlgos, serverHostKeyAlgos, nonSHA1RSAHostKeyAlgos)
 
-			// Avoid negotiating weak MAC algorithms.
-			//
-			// Legacy clients, without this logic, may still select only weak
-			// MACs or predict only weak MACs for the server KEX.
+			} else {
 
-			commonMAC, _ := findCommon("", MACs, serverMACs, isClient)
-			if common.Contains(weakMACs, commonMAC) {
-				// serverMACs[0] is not in weakMACs.
-				MACs = toFront(MACs, serverMACs[0])
+				// Adjust to ensure compatibility with the server KEX.
+
+				if _, err := findCommon("", kexAlgos, serverKexAlgos, isClient); err != nil {
+					if kexAlgo, ok := firstKexAlgo(serverKexAlgos); ok {
+						kexAlgos = retain(PRNG, kexAlgos, kexAlgo)
+					}
+				}
+
+				if _, err := findCommon("", ciphers, serverCiphers, isClient); err != nil {
+					ciphers = retain(PRNG, ciphers, serverCiphers[0])
+				}
+
+				if _, err := findCommon("", MACs, serverMACs, isClient); err != nil {
+					MACs = retain(PRNG, MACs, serverMACs[0])
+				}
+
+				// Avoid negotiating weak MAC algorithms.
+				//
+				// Older legacy clients, without this logic, may still select
+				// only weak MACs or predict only weak MACs for the server KEX.
+				commonMAC, _ := findCommon("", MACs, serverMACs, isClient)
+				if common.Contains(weakMACs, commonMAC) {
+					// serverMACs[0] is not in weakMACs.
+					MACs = toFront(MACs, serverMACs[0])
+				}
 			}
 
 			msg.KexAlgos = kexAlgos
@@ -981,6 +1052,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			msg.CiphersServerClient = ciphers
 			msg.MACsClientServer = MACs
 			msg.MACsServerClient = MACs
+			msg.ServerHostKeyAlgos = hostKeyAlgos
 		}
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH. Compression
@@ -1143,6 +1215,21 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 	t.algorithms, err = findAgreedAlgorithms(isClient, clientInit, serverInit)
 	if err != nil {
 		return err
+	}
+
+	// [Psiphon]
+	// Fail the dial if SHA-1 is used unexpectedly.
+	isSHA1 := func(s string) bool {
+		return strings.Contains(s, "sha1") ||
+			s == KeyAlgoRSA || s == CertAlgoRSAv01 ||
+			s == InsecureKeyAlgoDSA || s == InsecureCertAlgoDSAv01
+	}
+	if isClient && !testLegacyClient &&
+		t.config.KEXPRNGSeed != nil && t.config.PeerKEXPRNGSeed != nil &&
+		(isSHA1(t.algorithms.KeyExchange) || isSHA1(t.algorithms.HostKey) ||
+			isSHA1(t.algorithms.Read.MAC) || isSHA1(t.algorithms.Write.MAC)) {
+		return fmt.Errorf("ssh: unexpected SHA-1 algorithm negotiated: kex=%q hostkey=%q read_mac=%q write_mac=%q",
+			t.algorithms.KeyExchange, t.algorithms.HostKey, t.algorithms.Read.MAC, t.algorithms.Write.MAC)
 	}
 
 	if t.sessionID == nil && ((isClient && slices.Contains(serverInit.KexAlgos, kexStrictServer)) || (!isClient && slices.Contains(clientInit.KexAlgos, kexStrictClient))) &&
