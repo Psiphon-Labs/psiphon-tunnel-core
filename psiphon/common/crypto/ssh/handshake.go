@@ -774,7 +774,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		// New algorithms are then randomly inserted only after the legacy
 		// lists are processed in legacy PRNG state order.
 
-	legacyServerKexAlgos := []string{
+		legacyServerKexAlgos := []string{
 			keyExchangeCurve25519LibSSH,
 			KeyExchangeECDHP256,
 			KeyExchangeECDHP384,
@@ -863,9 +863,13 @@ func (t *handshakeTransport) sendKexInit() error {
 		newServerKexAlgos := []string{
 			KeyExchangeCurve25519,
 			KeyExchangeDH16SHA512,
+			kexStrictServer,
+		}
+		// This newer set is added after, to preserve the previous "Generate
+		// the server KEX" PRNG order with the newServerKexAlgos list.
+		newServerKexAlgosV2 := []string{
 			KeyExchangeDHGEXSHA256,
 			KeyExchangeMLKEM768X25519,
-			kexStrictServer,
 		}
 		newServerCiphers := []string{
 			CipherAES256GCM,
@@ -885,6 +889,7 @@ func (t *handshakeTransport) sendKexInit() error {
 			kexAlgos = addSome(PRNG, kexAlgos, newServerKexAlgos)
 			ciphers = addSome(PRNG, ciphers, newServerCiphers)
 			MACs = addSome(PRNG, MACs, newServerMACs)
+			kexAlgos = addSome(PRNG, kexAlgos, newServerKexAlgosV2)
 		}
 
 		msg.KexAlgos = kexAlgos
@@ -939,6 +944,7 @@ func (t *handshakeTransport) sendKexInit() error {
 				serverKexAlgos = addSome(PeerPRNG, serverKexAlgos, newServerKexAlgos)
 				serverCiphers = addSome(PeerPRNG, serverCiphers, newServerCiphers)
 				serverMACs = addSome(PeerPRNG, serverMACs, newServerMACs)
+				serverKexAlgos = addSome(PeerPRNG, serverKexAlgos, newServerKexAlgosV2)
 			}
 
 			// Adjust to ensure compatibility with the server KEX.
