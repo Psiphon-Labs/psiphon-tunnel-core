@@ -21,6 +21,9 @@
 #import <netinet/in.h>
 #import <net/if.h>
 #import <stdatomic.h>
+#import <sys/socket.h>
+#import <sys/un.h>
+#import <unistd.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
 #import <Contacts/CNContactsUserDefaults.h>
@@ -112,6 +115,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     _Atomic NSInteger localSocksProxyPort;
     _Atomic NSInteger localHttpProxyPort;
+
+    // Unix domain socket paths for the local proxies, when UseUnixDomainSockets
+    // is enabled. Guarded by @synchronized(self). Empty when not in use.
+    NSString *localSocksProxyUnixPath;
+    NSString *localHttpProxyUnixPath;
 
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
@@ -409,6 +417,22 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         needRestart = (httpProxyPort != 0 && ![self isLocalProxyAliveAtPort:httpProxyPort]);
     }
 
+    // In UseUnixDomainSockets mode the proxies listen on Unix domain sockets
+    // rather than ports, so apply the same liveness check to the socket paths.
+    // Note that check is skipped if a path is not set, i.e. proxy not running.
+    NSString *socksUnixPath;
+    NSString *httpUnixPath;
+    @synchronized (self) {
+        socksUnixPath = self->localSocksProxyUnixPath;
+        httpUnixPath = self->localHttpProxyUnixPath;
+    }
+    if (!needRestart && socksUnixPath.length != 0) {
+        needRestart = ![self isLocalProxyAliveAtUnixPath:socksUnixPath];
+    }
+    if (!needRestart && httpUnixPath.length != 0) {
+        needRestart = ![self isLocalProxyAliveAtUnixPath:httpUnixPath];
+    }
+
     if (needRestart) {
         return [self start];
     }
@@ -433,6 +457,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         atomic_store(&self->localSocksProxyPort, 0);
         atomic_store(&self->localHttpProxyPort, 0);
+
+        @synchronized (self) {
+            self->localSocksProxyUnixPath = nil;
+            self->localHttpProxyUnixPath = nil;
+        }
 
         [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
     }
@@ -1024,6 +1053,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             return;
         }
 
+        @synchronized (self) {
+            self->localSocksProxyUnixPath = (NSString *)path;
+        }
+
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningSocksProxyUnixPath:)]) {
             dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onListeningSocksProxyUnixPath:(NSString *)path];
@@ -1035,6 +1068,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         if (![path isKindOfClass:[NSString class]]) {
             [self logMessage:[NSString stringWithFormat: @"ListeningHttpProxyUnixPath notice missing data.path: %@", noticeJSON]];
             return;
+        }
+
+        @synchronized (self) {
+            self->localHttpProxyUnixPath = (NSString *)path;
         }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onListeningHttpProxyUnixPath:)]) {
@@ -1594,6 +1631,31 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     CFSocketInvalidate(sockfd);
     CFRelease(sockfd);
     CFRelease(connectAddr);
+
+    return proxyTestSuccess;
+}
+
+- (BOOL)isLocalProxyAliveAtUnixPath:(NSString *)path {
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+
+    const char *cPath = [path fileSystemRepresentation];
+    // If the path can't be represented or won't fit in sun_path, we can't
+    // complete the test. Be optimistic, matching isLocalProxyAliveAtPort:.
+    if (cPath == NULL || strlen(cPath) >= sizeof(addr.sun_path)) {
+        return YES;
+    }
+    strlcpy(addr.sun_path, cPath, sizeof(addr.sun_path));
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        // Can't create the socket; be optimistic.
+        return YES;
+    }
+
+    BOOL proxyTestSuccess = (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    close(fd);
 
     return proxyTestSuccess;
 }

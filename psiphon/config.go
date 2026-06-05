@@ -196,14 +196,14 @@ type Config struct {
 
 	// LocalSocksProxyUnixPath specifies the Unix domain socket path for the
 	// local SOCKS proxy, used when UseUnixDomainSockets is enabled. The path
-	// must be a full path that all participating processes can access. On
+	// must be an absolute path that all participating processes can access. On
 	// Android and Linux, a path with a leading "@" specifies a socket in the
 	// abstract namespace, which has no filesystem entry.
 	LocalSocksProxyUnixPath string `json:",omitempty"`
 
 	// LocalHttpProxyUnixPath specifies the Unix domain socket path for the
 	// local HTTP proxy, used when UseUnixDomainSockets is enabled. The path
-	// must be a full path that all participating processes can access. On
+	// must be an absolute path that all participating processes can access. On
 	// Android and Linux, a path with a leading "@" specifies a socket in the
 	// abstract namespace, which has no filesystem entry.
 	LocalHttpProxyUnixPath string `json:",omitempty"`
@@ -1744,8 +1744,16 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			if len(path) > 103 {
 				return errors.Tracef("%s exceeds maximum length", name)
 			}
-			if strings.HasPrefix(path, "@") && !abstractSocketsSupported {
-				return errors.Tracef("%s abstract namespace socket is not supported on this platform", name)
+			if strings.HasPrefix(path, "@") {
+				if !abstractSocketsSupported {
+					return errors.Tracef("%s abstract namespace socket is not supported on this platform", name)
+				}
+			} else if !filepath.IsAbs(path) {
+				// Filesystem paths must be absolute. A relative path binds
+				// relative to the process working directory, which is fragile
+				// for IPC across processes that may have different working
+				// directories.
+				return errors.Tracef("%s must be an absolute path", name)
 			}
 			return nil
 		}

@@ -771,6 +771,15 @@ func TestUseUnixDomainSocketsValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("relative path rejected", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = "socks.sock"
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for relative path")
+		}
+	})
+
 	t.Run("abstract namespace path", func(t *testing.T) {
 		config := newUnixSocketTestConfig(t)
 		config.LocalSocksProxyUnixPath = "@psiphon-socks"
