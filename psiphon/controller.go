@@ -399,21 +399,25 @@ func (controller *Controller) Run(ctx context.Context) {
 	controller.steeringIPCache.Flush()
 
 	// TODO: IPv6 support
+	// listenIP is not used when the local proxies listen on Unix domain
+	// sockets, so the listen interface resolution is skipped in that case.
 	var listenIP string
-	if controller.config.ListenInterface == "" {
-		listenIP = "127.0.0.1"
-	} else if controller.config.ListenInterface == "any" {
-		listenIP = "0.0.0.0"
-	} else {
-		IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
-		if err == nil && IPv4Address == nil {
-			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+	if !controller.config.UseUnixDomainSockets {
+		if controller.config.ListenInterface == "" {
+			listenIP = "127.0.0.1"
+		} else if controller.config.ListenInterface == "any" {
+			listenIP = "0.0.0.0"
+		} else {
+			IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
+			if err == nil && IPv4Address == nil {
+				err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+			}
+			if err != nil {
+				NoticeError("error getting listener IP: %v", errors.Trace(err))
+				return
+			}
+			listenIP = IPv4Address.String()
 		}
-		if err != nil {
-			NoticeError("error getting listener IP: %v", errors.Trace(err))
-			return
-		}
-		listenIP = IPv4Address.String()
 	}
 
 	// The controller run may include client tunnel establishment, in-proxy

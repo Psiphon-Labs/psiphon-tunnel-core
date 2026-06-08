@@ -78,11 +78,13 @@ const (
 )
 
 type startResult struct {
-	Code           startResultCode
-	ConnectTimeMS  int64  `json:",omitempty"`
-	Error          string `json:",omitempty"`
-	HTTPProxyPort  int    `json:",omitempty"`
-	SOCKSProxyPort int    `json:",omitempty"`
+	Code               startResultCode
+	ConnectTimeMS      int64  `json:",omitempty"`
+	Error              string `json:",omitempty"`
+	HTTPProxyPort      int    `json:",omitempty"`
+	SOCKSProxyPort     int    `json:",omitempty"`
+	HTTPProxyUnixPath  string `json:",omitempty"`
+	SOCKSProxyUnixPath string `json:",omitempty"`
 }
 
 var tunnel *clientlib.PsiphonTunnel
@@ -110,7 +112,9 @@ var managedStartResult *C.char
 //	  "Code": 0,
 //	  "ConnectTimeMS": <milliseconds to establish tunnel>,
 //	  "HTTPProxyPort": <http proxy port number>,
-//	  "SOCKSProxyPort": <socks proxy port number>
+//	  "SOCKSProxyPort": <socks proxy port number>,
+//	  "HTTPProxyUnixPath": <http proxy Unix domain socket path>,
+//	  "SOCKSProxyUnixPath": <socks proxy Unix domain socket path>
 //	}
 //
 // On timeout:
@@ -240,10 +244,12 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 
 	// Success
 	managedStartResult = marshalStartResult(startResult{
-		Code:           startResultCodeSuccess,
-		ConnectTimeMS:  int64(time.Since(startTime) / time.Millisecond),
-		HTTPProxyPort:  tunnel.HTTPProxyPort,
-		SOCKSProxyPort: tunnel.SOCKSProxyPort,
+		Code:               startResultCodeSuccess,
+		ConnectTimeMS:      int64(time.Since(startTime) / time.Millisecond),
+		HTTPProxyPort:      tunnel.HTTPProxyPort,
+		SOCKSProxyPort:     tunnel.SOCKSProxyPort,
+		HTTPProxyUnixPath:  tunnel.HTTPProxyUnixPath,
+		SOCKSProxyUnixPath: tunnel.SOCKSProxyUnixPath,
 	})
 	return managedStartResult
 }
