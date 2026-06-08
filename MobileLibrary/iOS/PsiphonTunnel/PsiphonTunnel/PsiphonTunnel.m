@@ -1647,6 +1647,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return YES;
     }
     strlcpy(addr.sun_path, cPath, sizeof(addr.sun_path));
+    addr.sun_len = SUN_LEN(&addr);
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -1654,7 +1655,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return YES;
     }
 
-    BOOL proxyTestSuccess = (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    BOOL proxyTestSuccess = (connect(fd, (struct sockaddr *)&addr, addr.sun_len) == 0);
     close(fd);
 
     return proxyTestSuccess;

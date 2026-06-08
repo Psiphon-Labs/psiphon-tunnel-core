@@ -2,7 +2,7 @@
 // +build darwin android linux
 
 /*
- * Copyright (c) 2024, Psiphon Inc.
+ * Copyright (c) 2026, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
