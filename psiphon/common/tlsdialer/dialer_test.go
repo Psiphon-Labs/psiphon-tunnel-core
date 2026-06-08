@@ -17,27 +17,17 @@
  *
  */
 
-package psiphon
+package tlsdialer
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"net"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	utls "github.com/Psiphon-Labs/utls"
 )
 
@@ -64,7 +55,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		serverCertificatePin,
 		shutdown,
 		serverAddr,
-		dialer := initTestCertificatesAndWebServer(
+		dialer := testutils.InitTestCertificatesAndWebServer(
 		t, testDataDirName, serverName)
 	defer shutdown()
 
@@ -75,9 +66,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
-	conn, err := CustomTLSDial(
+	conn, err := Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters: params,
 			Dial:       dialer,
 		})
@@ -89,41 +80,41 @@ func TestTLSCertificateVerification(t *testing.T) {
 
 	// Test: without custom RootCAs and with SkipVerify, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters: params,
 			Dial:       dialer,
 			SkipVerify: true,
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
 
 	// Test: with custom RootCAs, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			TrustedCACertificatesFilename: rootCAsFileName,
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
 
 	// Test: with SNI changed and VerifyServerName set, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			SNIServerName:                 "not-" + serverName,
@@ -132,7 +123,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -141,9 +132,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 
 	invalidPin := base64.StdEncoding.EncodeToString(make([]byte, 32))
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			VerifyPins:                    []string{invalidPin},
@@ -157,9 +148,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 
 	// Test: with the root CA certificate pinned, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			VerifyPins:                    []string{rootCACertificatePin},
@@ -167,16 +158,16 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
 
 	// Test: with the server certificate pinned, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			VerifyPins:                    []string{serverCertificatePin},
@@ -184,7 +175,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -192,9 +183,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 	// Test: with SNI changed, VerifyServerName set, and pinning the TLS dial
 	// succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			SNIServerName:                 "not-" + serverName,
@@ -204,7 +195,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -212,9 +203,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 	// Test: with DisableSystemRootCAs set and without VerifyServerName or
 	// VerifyPins set, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:           params,
 			Dial:                 dialer,
 			SNIServerName:        "not-" + serverName,
@@ -222,7 +213,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -230,9 +221,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 	// Test: with DisableSystemRootCAs set along with VerifyServerName and
 	// VerifyPins, the TLS dial fails.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:           params,
 			Dial:                 dialer,
 			SNIServerName:        serverName,
@@ -249,9 +240,9 @@ func TestTLSCertificateVerification(t *testing.T) {
 	// Test: with DisableSystemRootCAs set, SNI changed, and without
 	// VerifyServerName or VerifyPins set, the TLS dial succeeds.
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:           params,
 			Dial:                 dialer,
 			SNIServerName:        "not-" + serverName,
@@ -259,197 +250,10 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}
-}
-
-// initTestCertificatesAndWebServer creates a Root CA, a web server
-// certificate, for serverName, signed by that Root CA, and runs a web server
-// that uses that server certificate. initRootCAandWebServer returns:
-//
-//   - the file name containing the Root CA, to be used with
-//     CustomTLSConfig.TrustedCACertificatesFilename
-//
-//   - pin values for the Root CA and server certificare, to be used with
-//     CustomTLSConfig.VerifyPins
-//
-//   - a shutdown function which the caller must invoked to terminate the web
-//     server
-//
-// - the web server dial address: serverName and port
-//
-//   - and a dialer function, which bypasses DNS resolution of serverName, to be
-//     used with CustomTLSConfig.Dial
-func initTestCertificatesAndWebServer(
-	t *testing.T,
-	testDataDirName string,
-	serverName string) (string, string, string, func(), string, common.Dialer) {
-
-	// Generate a root CA certificate.
-
-	rootCACertificate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"test"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(1, 0, 0),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-	}
-
-	rootCAPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Fatalf("rsa.GenerateKey failed: %v", err)
-	}
-
-	rootCACertificateBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		rootCACertificate,
-		rootCACertificate,
-		&rootCAPrivateKey.PublicKey,
-		rootCAPrivateKey)
-	if err != nil {
-		t.Fatalf("x509.CreateCertificate failed: %v", err)
-	}
-
-	pemRootCACertificate := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: rootCACertificateBytes,
-		})
-
-	// Generate a server certificate.
-
-	serverCertificate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject: pkix.Name{
-			Organization: []string{"test"},
-		},
-		DNSNames:    []string{serverName},
-		NotBefore:   time.Now(),
-		NotAfter:    time.Now().AddDate(1, 0, 0),
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:    x509.KeyUsageDigitalSignature,
-	}
-
-	serverPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Fatalf("rsa.GenerateKey failed: %v", err)
-	}
-
-	serverCertificateBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		serverCertificate,
-		rootCACertificate,
-		&serverPrivateKey.PublicKey,
-		rootCAPrivateKey)
-	if err != nil {
-		t.Fatalf("x509.CreateCertificate failed: %v", err)
-	}
-
-	pemServerCertificate := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: serverCertificateBytes,
-		})
-
-	pemServerPrivateKey := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "RSA PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(serverPrivateKey),
-		})
-
-	// Pave Root CA file.
-
-	rootCAsFileName := filepath.Join(testDataDirName, "RootCAs.pem")
-	err = ioutil.WriteFile(rootCAsFileName, pemRootCACertificate, 0600)
-	if err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	// Calculate certificate pins.
-
-	parsedCertificate, err := x509.ParseCertificate(rootCACertificateBytes)
-	if err != nil {
-		t.Fatalf("x509.ParseCertificate failed: %v", err)
-	}
-	publicKeyDigest := sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
-	rootCACertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
-
-	parsedCertificate, err = x509.ParseCertificate(serverCertificateBytes)
-	if err != nil {
-		t.Fatalf("x509.ParseCertificate failed: %v", err)
-	}
-	publicKeyDigest = sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
-	serverCertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
-
-	// Run an HTTPS server with the server certificate.
-
-	// Do not include the Root CA certificate in the certificate chain returned
-	// by the server to the client in the TLS handshake by excluding it from
-	// the key pair, which matches the behavior observed in the wild.
-	serverKeyPair, err := tls.X509KeyPair(
-		pemServerCertificate, pemServerPrivateKey)
-	if err != nil {
-		t.Fatalf("tls.X509KeyPair failed: %v", err)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("test"))
-	})
-
-	server := &http.Server{
-		Handler: mux,
-	}
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen failed: %v", err)
-	}
-	dialAddr := listener.Addr().String()
-	_, port, _ := net.SplitHostPort(dialAddr)
-	serverAddr := fmt.Sprintf("%s:%s", serverName, port)
-
-	listener = tls.NewListener(
-		listener,
-		&tls.Config{
-			Certificates: []tls.Certificate{serverKeyPair},
-		})
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		wg.Done()
-		server.Serve(listener)
-	}()
-
-	shutdown := func() {
-		listener.Close()
-		server.Shutdown(context.Background())
-		wg.Wait()
-	}
-
-	// Initialize a custom dialer for the client which bypasses DNS resolution.
-
-	dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := &net.Dialer{}
-		// Ignore the address input, which will be serverAddr, and dial dialAddr, as
-		// if the serverName in serverAddr had been resolved to "127.0.0.1".
-		return d.DialContext(ctx, network, dialAddr)
-	}
-
-	return rootCAsFileName,
-		rootCACertificatePin,
-		serverCertificatePin,
-		shutdown,
-		serverAddr,
-		dialer
 }
 
 func TestTLSDialerCompatibility(t *testing.T) {
@@ -557,7 +361,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 			transformHostname := i%2 == 0
 
-			tlsConfig := &CustomTLSConfig{
+			tlsConfig := &Config{
 				Parameters:          params,
 				Dial:                dialer,
 				SkipVerify:          true,
@@ -573,10 +377,10 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
 
-			conn, err := CustomTLSDial(ctx, "tcp", address, tlsConfig)
+			conn, err := Dial(ctx, "tcp", address, tlsConfig)
 
 			if err != nil {
-				t.Logf("CustomTLSDial failed: %s (transformHostname: %v): %v",
+				t.Logf("Dial failed: %s (transformHostname: %v): %v",
 					tlsProfile, transformHostname, err)
 			} else {
 
@@ -813,7 +617,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 		serverCertificatePin,
 		shutdown,
 		serverAddr,
-		dialer := initTestCertificatesAndWebServer(
+		dialer := testutils.InitTestCertificatesAndWebServer(
 		t, testDataDirName, serverName)
 	defer shutdown()
 
@@ -824,9 +628,9 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 
 	// Test: missing SNI, the TLS dial fails
 
-	conn, err := CustomTLSDial(
+	conn, err := Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			SNIServerName:                 "",
@@ -843,9 +647,9 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 
 	// Test: with SNI, the TLS dial succeeds
 
-	conn, err = CustomTLSDial(
+	conn, err = Dial(
 		context.Background(), "tcp", serverAddr,
-		&CustomTLSConfig{
+		&Config{
 			Parameters:                    params,
 			Dial:                          dialer,
 			SNIServerName:                 serverName,
@@ -856,7 +660,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %v", err)
+		t.Errorf("Dial failed: %v", err)
 	} else {
 		conn.Close()
 	}

@@ -51,6 +51,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
@@ -1829,15 +1830,17 @@ func (controller *Controller) initLightProxy(
 		tlsProfile string,
 		randomizedTLSProfileSeed *prng.Seed,
 		sni string,
+		fragmentClientHello bool,
+		tlsPadding int,
 		passthroughMessage []byte,
 		verifyPin string,
 		verifyServerName string) (net.Conn, error) {
 
-		return CustomTLSDial(
+		return tlsdialer.Dial(
 			ctx,
 			"tcp",
 			underlyingConn.RemoteAddr().String(),
-			&CustomTLSConfig{
+			&tlsdialer.Config{
 				Parameters: controller.config.GetParameters(),
 				Dial: func(context.Context, string, string) (net.Conn, error) {
 					return underlyingConn, nil
@@ -1849,6 +1852,8 @@ func (controller *Controller) initLightProxy(
 				VerifyPinsOnly:           true,
 				TLSProfile:               tlsProfile,
 				RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+				FragmentClientHello:      fragmentClientHello,
+				TLSPadding:               tlsPadding,
 				PassthroughMessage:       passthroughMessage,
 				ClientSessionCache: common.WrapUtlsClientSessionCache(
 					controller.tlsClientSessionCache,
@@ -1900,6 +1905,12 @@ type lightReplay struct {
 	TLSProfile               string
 	RandomizedTLSProfileSeed *prng.Seed
 	SNI                      string
+	FragmentClientHello      bool
+	TLSPadding               int
+}
+
+func (r *lightReplay) isReplay() bool {
+	return r.TLSProfile != "" && r.SNI != ""
 }
 
 func (controller *Controller) dialLightProxy(
@@ -1909,14 +1920,14 @@ func (controller *Controller) dialLightProxy(
 
 	replay, _ := controller.lightProxyReplay.Load().(lightReplay)
 
-	isReplay := replay.TLSProfile != "" && replay.SNI != ""
+	isReplay := replay.isReplay()
 	if !isReplay {
 
-		// Limitation: if SelectTLSProfile selects a CustomTLSProfile, the TLS
+		// Limitation: if tlsdialer.SelectTLSProfile selects a CustomTLSProfile, the TLS
 		// profile reported to the proxy will be "unknown".
 
 		p := controller.config.GetParameters().Get()
-		tlsProfile, _, randomizedTLSProfileSeed, err := SelectTLSProfile(false, true, false, "", p)
+		tlsProfile, _, randomizedTLSProfileSeed, err := tlsdialer.SelectTLSProfile(false, true, false, "", p)
 		if err != nil {
 			p.Close()
 			return nil, errors.Trace(err)
@@ -1924,10 +1935,22 @@ func (controller *Controller) dialLightProxy(
 		SNI := selectLightProxySNI(lightClient, p)
 		p.Close()
 
+		fragmentClientHello := prng.FlipWeightedCoin(
+			lightClient.GetRecommendedFragmentClientHelloProbability())
+
+		tlsPadding := 0
+		if prng.FlipWeightedCoin(lightClient.GetRecommendedTLSPaddingProbability()) {
+			tlsPadding = prng.Range(
+				lightClient.GetRecommendedMinTLSPadding(),
+				lightClient.GetRecommendedMaxTLSPadding())
+		}
+
 		replay = lightReplay{
 			TLSProfile:               tlsProfile,
 			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
 			SNI:                      SNI,
+			FragmentClientHello:      fragmentClientHello,
+			TLSPadding:               tlsPadding,
 		}
 	}
 
@@ -1940,6 +1963,8 @@ func (controller *Controller) dialLightProxy(
 		replay.TLSProfile,
 		replay.RandomizedTLSProfileSeed,
 		replay.SNI,
+		replay.FragmentClientHello,
+		replay.TLSPadding,
 		remoteAddr)
 	if err != nil {
 		if ctx.Err() == nil {

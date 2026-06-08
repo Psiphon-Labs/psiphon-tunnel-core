@@ -64,8 +64,8 @@ type FrontingSpec struct {
 // - Dial Address (domain or IP address)
 // - Transport (e.g., protocol.FRONTING_TRANSPORT_HTTPS)
 // - SNI (which may be transformed; unless it is "", which indicates omit SNI)
-// - VerifyServerName (see psiphon.CustomTLSConfig)
-// - VerifyPins (see psiphon.CustomTLSConfig)
+// - VerifyServerName (see tlsdialer.Config)
+// - VerifyPins (see tlsdialer.Config)
 // - Host (Host header value)
 func (specs FrontingSpecs) SelectParameters() (
 	string, string, string, string, string, []string, string, error) {
@@ -100,7 +100,7 @@ func (specs FrontingSpecs) SelectParameters() (
 
 	// When SkipVerify is true, VerifyServerName and VerifyPins must be empty,
 	// as checked in Validate. When dialing in any mode, MeekConn will set
-	// CustomTLSConfig.SkipVerify to true as long as VerifyServerName is "".
+	// tlsdialer.Config.SkipVerify to true as long as VerifyServerName is "".
 	// So SkipVerify does not need to be explicitly returned.
 
 	return spec.FrontingProviderID,

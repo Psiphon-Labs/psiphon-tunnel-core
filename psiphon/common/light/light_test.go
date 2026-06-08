@@ -22,7 +22,6 @@ package light
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -35,21 +34,27 @@ import (
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
-	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/sync/errgroup"
 )
 
 func TestLightProxy(t *testing.T) {
-	err := runTestLightProxy()
-	if err != nil {
-		t.Fatal(err.Error())
+	for _, tlsTrafficShaping := range []bool{false, true} {
+		tlsTrafficShaping := tlsTrafficShaping
+		t.Run(fmt.Sprintf("tlsTrafficShaping=%t", tlsTrafficShaping), func(t *testing.T) {
+			err := runTestLightProxy(tlsTrafficShaping)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+		})
 	}
 }
 
-func runTestLightProxy() error {
+func runTestLightProxy(tlsTrafficShaping bool) error {
 
 	// Exercise multiple concurrent clients and concurrent dials over over one
 	// proxy. The proxied traffic is an inner TLS connection to an "echo"
@@ -68,8 +73,24 @@ func runTestLightProxy() error {
 		testProviderID              = "01020304"
 		testProxyEntryTracker int64 = 0x0102030405060708
 		testNetworkType             = "WIFI"
-		testTLSProfile              = protocol.TLS_PROFILE_CHROME_120
+		testTLSProfile              = protocol.TLS_PROFILE_CHROME_133
+		testTLSPaddingLength        = 128
 	)
+
+	recommendedFragmentClientHelloProbability := 0.0
+	recommendedTLSPaddingProbability := 0.0
+	recommendedMinTLSPadding := 0
+	recommendedMaxTLSPadding := 0
+	expectedTLSClientHelloFragmented := false
+	expectedTLSClientHelloPadding := 0
+	if tlsTrafficShaping {
+		recommendedFragmentClientHelloProbability = 1.0
+		recommendedTLSPaddingProbability = 1.0
+		recommendedMinTLSPadding = testTLSPaddingLength
+		recommendedMaxTLSPadding = testTLSPaddingLength
+		expectedTLSClientHelloFragmented = true
+		expectedTLSClientHelloPadding = testTLSPaddingLength
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
@@ -128,6 +149,10 @@ func runTestLightProxy() error {
 		proxyIPv6Address,
 		"example.org",
 		"",
+		recommendedFragmentClientHelloProbability,
+		recommendedTLSPaddingProbability,
+		recommendedMinTLSPadding,
+		recommendedMaxTLSPadding,
 		[]string{echoAddress},
 		echoListener.Addr().String())
 	if err != nil {
@@ -138,7 +163,14 @@ func runTestLightProxy() error {
 		return common.GeoIPData{}
 	}
 
-	receiver := newTestProxyEventReceiver()
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver := newTestProxyEventReceiver(
+		expectedTLSClientHelloFragmented,
+		expectedTLSClientHelloPadding)
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
 	proxyConfig.MaxConcurrent = &maxConcurrent
@@ -173,7 +205,31 @@ func runTestLightProxy() error {
 				}
 				return newPaddingCheckerConn(conn), nil
 			},
-			TLSDialer:         dialUtls,
+			TLSDialer: func(
+				ctx context.Context,
+				underlyingConn net.Conn,
+				tlsProfile string,
+				randomizedTLSProfileSeed *prng.Seed,
+				sni string,
+				fragmentClientHello bool,
+				tlsPadding int,
+				passthroughMessage []byte,
+				verifyPin string,
+				verifyServerName string) (net.Conn, error) {
+
+				return dialTLS(
+					params,
+					ctx,
+					underlyingConn,
+					tlsProfile,
+					randomizedTLSProfileSeed,
+					sni,
+					fragmentClientHello,
+					tlsPadding,
+					passthroughMessage,
+					verifyPin,
+					verifyServerName)
+			},
 			SponsorID:         prng.HexString(8),
 			ClientPlatform:    testClientPlatform,
 			ClientBuildRev:    testClientBuildRev,
@@ -193,6 +249,17 @@ func runTestLightProxy() error {
 		clients[i] = client
 	}
 
+	// All clients reuse the same dialer, but the probabilities are deterministic: 0.0 or 1.0.
+	tlsFragmentClientHello := prng.FlipWeightedCoin(
+		clients[0].GetRecommendedFragmentClientHelloProbability())
+
+	tlsPadding := 0
+	if prng.FlipWeightedCoin(clients[0].GetRecommendedTLSPaddingProbability()) {
+		tlsPadding = prng.Range(
+			clients[0].GetRecommendedMinTLSPadding(),
+			clients[0].GetRecommendedMaxTLSPadding())
+	}
+
 	clientGroup, clientCtx := errgroup.WithContext(ctx)
 	for _, client := range clients {
 		client := client
@@ -203,6 +270,8 @@ func runTestLightProxy() error {
 					client,
 					testNetworkType,
 					testTLSProfile,
+					tlsFragmentClientHello,
+					tlsPadding,
 					echoAddress,
 					payloadSize)
 				if err != nil {
@@ -220,14 +289,32 @@ func runTestLightProxy() error {
 
 	proxy.Pause()
 
-	_, err = clients[0].Dial(ctx, nil, testNetworkType, testTLSProfile, nil, "", echoAddress)
+	_, err = clients[0].Dial(
+		ctx,
+		nil,
+		testNetworkType,
+		testTLSProfile,
+		nil,
+		clients[0].GetRecommendedSNI(),
+		tlsFragmentClientHello,
+		tlsPadding,
+		echoAddress)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
 
 	proxy.Resume()
 
-	conn, err := clients[0].Dial(ctx, nil, testNetworkType, testTLSProfile, nil, "", echoAddress)
+	conn, err := clients[0].Dial(
+		ctx,
+		nil,
+		testNetworkType,
+		testTLSProfile,
+		nil,
+		clients[0].GetRecommendedSNI(),
+		tlsFragmentClientHello,
+		tlsPadding,
+		echoAddress)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -240,6 +327,11 @@ func runTestLightProxy() error {
 		return errors.Trace(err)
 	}
 
+	err = receiver.checkResults()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
@@ -248,6 +340,8 @@ func runLightClient(
 	client *Client,
 	networkType string,
 	tlsProfile string,
+	tlsFragmentClientHello bool,
+	tlsPadding int,
 	destinationAddress string,
 	payloadSize int) error {
 
@@ -258,6 +352,8 @@ func runLightClient(
 		tlsProfile,
 		nil,
 		client.GetRecommendedSNI(),
+		tlsFragmentClientHello,
+		tlsPadding,
 		destinationAddress)
 	if err != nil {
 		return errors.Trace(err)
@@ -313,52 +409,40 @@ func runLightClient(
 	return nil
 }
 
-func dialUtls(
-	_ context.Context,
+func dialTLS(
+	params *parameters.Parameters,
+	ctx context.Context,
 	underlyingConn net.Conn,
 	tlsProfile string,
-	_ *prng.Seed,
+	randomizedTLSProfileSeed *prng.Seed,
 	sni string,
+	fragmentClientHello bool,
+	tlsPadding int,
 	passthroughMessage []byte,
 	verifyPin string,
 	verifyServerName string) (net.Conn, error) {
 
-	config := &utls.Config{
-		ServerName:         sni,
-		InsecureSkipVerify: true,
-		VerifyPeerCertificate: func(
-			rawCerts [][]byte,
-			_ [][]*x509.Certificate) error {
-			return verifyPinnedPeerCertificate(rawCerts, verifyPin, verifyServerName)
+	tlsConfig := &tlsdialer.Config{
+		Parameters: params,
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			return underlyingConn, nil
 		},
+		SNIServerName:            sni,
+		VerifyServerName:         verifyServerName,
+		VerifyPins:               []string{verifyPin},
+		VerifyPinsOnly:           true,
+		TLSProfile:               tlsProfile,
+		RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+		FragmentClientHello:      fragmentClientHello,
+		TLSPadding:               tlsPadding,
+		PassthroughMessage:       passthroughMessage,
 	}
 
-	var clientHelloID utls.ClientHelloID
-	switch tlsProfile {
-	case protocol.TLS_PROFILE_CHROME_120:
-		clientHelloID = utls.HelloChrome_120
-	default:
-		return nil, errors.TraceNew("unsupported TLS profile")
-	}
-
-	conn := utls.UClient(underlyingConn, config, clientHelloID)
-
-	err := conn.BuildHandshakeState()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	err = conn.SetClientRandom(passthroughMessage)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	err = conn.MarshalClientHello()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	err = conn.Handshake()
+	conn, err := tlsdialer.Dial(
+		ctx,
+		"tcp",
+		underlyingConn.RemoteAddr().String(),
+		tlsConfig)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -369,33 +453,6 @@ func dialUtls(
 		Conn.(*paddingCheckerConn).startChecking()
 
 	return conn, nil
-}
-
-func verifyPinnedPeerCertificate(rawCerts [][]byte, verifyPin string, verifyServerName string) error {
-	certs := make([]*x509.Certificate, 0, len(rawCerts))
-	for _, rawCert := range rawCerts {
-		cert, err := x509.ParseCertificate(rawCert)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		certs = append(certs, cert)
-	}
-
-	if verifyServerName != "" {
-		err := certs[0].VerifyHostname(verifyServerName)
-		if err != nil {
-			return errors.Trace(err)
-		}
-	}
-
-	err := common.VerifyCertificatePins(
-		[]string{verifyPin},
-		[][]*x509.Certificate{certs})
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
 }
 
 func runTLSEchoServer(
@@ -528,12 +585,14 @@ func (conn *paddingCheckerConn) checkTLSRecordLength(isWrite bool, b []byte) {
 		return
 	}
 
-	if recordSize < paddingMinTargetSize || recordSize > paddingMaxTargetSize {
+	// If the initial inner payload already exceeds the padding target,
+	// lightConn sends stopPadding instead of adding padding, and the TLS record
+	// may exceed paddingMaxTargetSize.
+	if recordSize < paddingMinTargetSize {
 		*checkErr = errors.Tracef(
-			"TLS record size %d outside padding target [%d, %d]",
+			"TLS record size %d below padding target minimum %d",
 			recordSize,
-			paddingMinTargetSize,
-			paddingMaxTargetSize)
+			paddingMinTargetSize)
 	}
 
 	*checked = true
@@ -541,13 +600,23 @@ func (conn *paddingCheckerConn) checkTLSRecordLength(isWrite bool, b []byte) {
 }
 
 type testProxyEventReceiver struct {
-	listening     chan struct{}
-	listeningOnce sync.Once
+	listening                        chan struct{}
+	listeningOnce                    sync.Once
+	mutex                            sync.Mutex
+	statsErr                         error
+	successfulConnectionStats        int
+	expectedTLSClientHelloFragmented bool
+	expectedTLSClientHelloPadding    int
 }
 
-func newTestProxyEventReceiver() *testProxyEventReceiver {
+func newTestProxyEventReceiver(
+	expectedTLSClientHelloFragmented bool,
+	expectedTLSClientHelloPadding int) *testProxyEventReceiver {
+
 	return &testProxyEventReceiver{
-		listening: make(chan struct{}),
+		listening:                        make(chan struct{}),
+		expectedTLSClientHelloFragmented: expectedTLSClientHelloFragmented,
+		expectedTLSClientHelloPadding:    expectedTLSClientHelloPadding,
 	}
 }
 
@@ -575,11 +644,15 @@ func (r *testProxyEventReceiver) Rejected() {
 }
 
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
+	r.checkConnectionStats(stats)
+
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
 		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
-		`destination: %s, tlsProfile: %s, sni: %s, tlsDidResume: %t, ` +
+		`destination: %s, tlsProfile: %s, sni: %s, ` +
+		`tlsClientHelloFragmented: %t, tlsClientHelloPadding: %d, ` +
+		`tlsDidResume: %t, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
@@ -601,6 +674,8 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.DestinationAddress,
 		stats.TLSProfile,
 		stats.SNI,
+		stats.TLSClientHelloFragmented,
+		stats.TLSClientHelloPadding,
 		stats.TLSDidResume,
 		stats.ClientTCPDuration,
 		stats.ClientTLSDuration,
@@ -613,6 +688,45 @@ func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
 		stats.BytesRead,
 		stats.BytesWritten,
 		stats.Failure)
+}
+
+func (r *testProxyEventReceiver) checkConnectionStats(stats *ConnectionStats) {
+	if stats.Failure != "" {
+		return
+	}
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.successfulConnectionStats++
+
+	if r.statsErr != nil {
+		return
+	}
+
+	if stats.TLSClientHelloFragmented != r.expectedTLSClientHelloFragmented {
+		r.statsErr = errors.TraceNew("unexpected TLSClientHelloFragmented")
+		return
+	}
+
+	if stats.TLSClientHelloPadding != r.expectedTLSClientHelloPadding {
+		r.statsErr = errors.TraceNew("unexpected TLSClientHelloPadding")
+	}
+}
+
+func (r *testProxyEventReceiver) checkResults() error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if r.statsErr != nil {
+		return r.statsErr
+	}
+
+	if r.successfulConnectionStats == 0 {
+		return errors.TraceNew("missing successful connection stats")
+	}
+
+	return nil
 }
 
 func (r *testProxyEventReceiver) IrregularConnection(_ string, _ common.GeoIPData, irregularity string) {

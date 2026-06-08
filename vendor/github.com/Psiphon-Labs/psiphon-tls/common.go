@@ -132,6 +132,9 @@ const (
 	extensionRenegotiationInfo       uint16 = 0xff01
 	extensionECHOuterExtensions      uint16 = 0xfd00
 	extensionEncryptedClientHello    uint16 = 0xfe0d
+
+	// [Psiphon] Used for recording TLS ClientHello padding metrics.
+	extensionPadding uint16 = 21
 )
 
 // TLS signaling cipher suite values
@@ -253,6 +256,12 @@ type ConnectionMetrics struct {
 	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
 	// or a TLS 1.3 PSK in the ClientHello successfully.
 	ClientSentTicket bool
+
+	// [Psiphon] ClientHelloFragmented records TLS ClientHello fragmentation metrics.
+	ClientHelloFragmented bool
+
+	// [Psiphon] ClientHelloPaddingLength records TLS ClientHello padding metrics.
+	ClientHelloPaddingLength int
 }
 
 // ConnectionState records basic TLS details about the connection.

@@ -331,6 +331,10 @@ func startLightTestProxy(
 		proxyIPv6Address,
 		"example.org",
 		"",
+		0,
+		0,
+		0,
+		0,
 		[]string{allowedWebServerAddress},
 		allowedWebServerAddress)
 	if err != nil {
@@ -552,6 +556,10 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {
@@ -564,6 +572,10 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {
@@ -668,6 +680,10 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {

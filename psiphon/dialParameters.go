@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
@@ -905,7 +906,10 @@ func MakeDialParameters(
 		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
 			dialParams.ConjureAPIRegistration
 
-		dialParams.TLSProfile, dialParams.TLSVersion, dialParams.RandomizedTLSProfileSeed, err = SelectTLSProfile(
+		dialParams.TLSProfile,
+			dialParams.TLSVersion,
+			dialParams.RandomizedTLSProfileSeed,
+			err = tlsdialer.SelectTLSProfile(
 			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, p)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -1901,7 +1905,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 	// term reference to TLSTunnelConfig.Parameters.
 
 	return &TLSTunnelConfig{
-		CustomTLSConfig: &CustomTLSConfig{
+		TLSConfig: &tlsdialer.Config{
 			Parameters:               config.GetParameters(),
 			DialAddr:                 dialParams.DirectDialAddress,
 			SNIServerName:            dialParams.TLSOSSHSNIServerName,

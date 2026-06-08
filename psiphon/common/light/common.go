@@ -36,19 +36,24 @@ import (
 )
 
 const (
-	proxyIDSize = 16
+	proxyIDSize              = 16
+	maxRecommendedTLSPadding = 65535
 )
 
 // ProxyEntry is the proxy connection information distributed to clients.
 type ProxyEntry struct {
-	Protocol            string `cbor:"1,keyasint,omitempty"`
-	DialAddressIPv4     string `cbor:"2,keyasint,omitempty"`
-	RecommendedSNI      string `cbor:"3,keyasint,omitempty"`
-	ObfuscationKey      []byte `cbor:"4,keyasint,omitempty"`
-	VerifyPin           []byte `cbor:"5,keyasint,omitempty"`
-	VerifyServerName    string `cbor:"6,keyasint,omitempty"`
-	DialAddressIPv6     string `cbor:"7,keyasint,omitempty"`
-	RecommendedSNIRegex string `cbor:"8,keyasint,omitempty"`
+	Protocol                                  string  `cbor:"1,keyasint,omitempty"`
+	DialAddressIPv4                           string  `cbor:"2,keyasint,omitempty"`
+	RecommendedSNI                            string  `cbor:"3,keyasint,omitempty"`
+	ObfuscationKey                            []byte  `cbor:"4,keyasint,omitempty"`
+	VerifyPin                                 []byte  `cbor:"5,keyasint,omitempty"`
+	VerifyServerName                          string  `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6                           string  `cbor:"7,keyasint,omitempty"`
+	RecommendedSNIRegex                       string  `cbor:"8,keyasint,omitempty"`
+	RecommendedFragmentClientHelloProbability float64 `cbor:"9,keyasint,omitempty"`
+	RecommendedTLSPaddingProbability          float64 `cbor:"10,keyasint,omitempty"`
+	RecommendedMinTLSPadding                  int     `cbor:"11,keyasint,omitempty"`
+	RecommendedMaxTLSPadding                  int     `cbor:"12,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -100,7 +105,41 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 		return nil, errors.TraceNew("missing TLS verify pin")
 	}
 
+	err = validateRecommendedTLSSettings(
+		proxyEntry.RecommendedFragmentClientHelloProbability,
+		proxyEntry.RecommendedTLSPaddingProbability,
+		proxyEntry.RecommendedMinTLSPadding,
+		proxyEntry.RecommendedMaxTLSPadding)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	return proxyEntry, nil
+}
+
+func validateRecommendedTLSSettings(
+	fragmentClientHelloProbability float64,
+	tlsPaddingProbability float64,
+	minTLSPadding int,
+	maxTLSPadding int) error {
+
+	if !(fragmentClientHelloProbability >= 0.0 &&
+		fragmentClientHelloProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended FragmentClientHello probability")
+	}
+
+	if !(tlsPaddingProbability >= 0.0 &&
+		tlsPaddingProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS padding probability")
+	}
+
+	if minTLSPadding < 0 ||
+		maxTLSPadding < minTLSPadding ||
+		maxTLSPadding > maxRecommendedTLSPadding {
+		return errors.TraceNew("invalid recommended TLS padding range")
+	}
+
+	return nil
 }
 
 // ConnectionStats are the proxy connection stats reported to
@@ -126,6 +165,8 @@ type ConnectionStats struct {
 	DestinationAddress        string
 	TLSProfile                string
 	SNI                       string
+	TLSClientHelloFragmented  bool
+	TLSClientHelloPadding     int
 	TLSDidResume              bool
 	ClientTCPDuration         time.Duration
 	ClientTLSDuration         time.Duration

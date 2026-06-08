@@ -512,6 +512,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	completedTCP := time.Now().UTC()
 	var completedTLS time.Time
 	var clientSNI string
+	var tlsClientHelloFragmented bool
+	var tlsClientHelloPadding int
 	var tlsDidResume bool
 	bytesCounter := &bytesCounter{}
 	var completedLightHeader time.Time
@@ -573,6 +575,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			DestinationAddress:        normalizedDestinationAddress,
 			TLSProfile:                tlsProfile,
 			SNI:                       clientSNI,
+			TLSClientHelloFragmented:  tlsClientHelloFragmented,
+			TLSClientHelloPadding:     tlsClientHelloPadding,
 			TLSDidResume:              tlsDidResume,
 			ClientTCPDuration:         clientTCPDuration,
 			ClientTLSDuration:         clientTLSDuration,
@@ -620,6 +624,9 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
 
 	err = tlsConn.Handshake()
+	connectionMetrics := tlsConn.ConnectionMetrics()
+	tlsClientHelloFragmented = connectionMetrics.ClientHelloFragmented
+	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
 		return errors.Trace(err)
 	}

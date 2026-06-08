@@ -104,6 +104,9 @@ type clientHelloMsg struct {
 
 	// extensions are only populated on the server-side of a handshake
 	extensions []uint16
+
+	// [Psiphon] Used for recording TLS ClientHello padding metrics.
+	paddingLength int
 }
 
 func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
@@ -970,6 +973,12 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 		case extensionSCT:
 			// RFC 6962, Section 3.3.1
 			m.scts = true
+		case extensionPadding:
+			// [Psiphon] Record the TLS ClientHello padding extension length for metrics.
+			m.paddingLength = len(extData)
+			if !extData.Skip(len(extData)) {
+				return false
+			}
 		case extensionSupportedVersions:
 			// RFC 8446, Section 4.2.1
 			var versList cryptobyte.String

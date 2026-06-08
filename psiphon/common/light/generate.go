@@ -50,6 +50,10 @@ import (
 // recommendedSNI and recommendedSNIRegex are optional SNI selection hints
 // distributed in the proxy entry.
 //
+// recommendedFragmentClientHelloProbability, recommendedTLSPaddingProbability,
+// recommendedMinTLSPadding, and recommendedMaxTLSPadding are optional TLS
+// traffic-shaping recommendations distributed in the proxy entry.
+//
 // allowedDestinations is a list of network addresses, host and post, that the
 // proxy will connect to. Only destinations on this list are allowed, and at
 // least one destination must be specified. This list is not distributed in
@@ -63,6 +67,10 @@ func Generate(
 	dialAddressIPv6 string,
 	recommendedSNI string,
 	recommendedSNIRegex string,
+	recommendedFragmentClientHelloProbability float64,
+	recommendedTLSPaddingProbability float64,
+	recommendedMinTLSPadding int,
+	recommendedMaxTLSPadding int,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
@@ -97,6 +105,15 @@ func Generate(
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
+	}
+
+	err = validateRecommendedTLSSettings(
+		recommendedFragmentClientHelloProbability,
+		recommendedTLSPaddingProbability,
+		recommendedMinTLSPadding,
+		recommendedMaxTLSPadding)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
 	}
 
 	if len(allowedDestinations) == 0 {
@@ -141,9 +158,13 @@ func Generate(
 		DialAddressIPv6:     dialAddressIPv6,
 		RecommendedSNI:      recommendedSNI,
 		RecommendedSNIRegex: recommendedSNIRegex,
-		ObfuscationKey:      obfuscationKeyBytes,
-		VerifyPin:           verifyPin,
-		VerifyServerName:    verifyServerName,
+		RecommendedFragmentClientHelloProbability: recommendedFragmentClientHelloProbability,
+		RecommendedTLSPaddingProbability:          recommendedTLSPaddingProbability,
+		RecommendedMinTLSPadding:                  recommendedMinTLSPadding,
+		RecommendedMaxTLSPadding:                  recommendedMaxTLSPadding,
+		ObfuscationKey:                            obfuscationKeyBytes,
+		VerifyPin:                                 verifyPin,
+		VerifyServerName:                          verifyServerName,
 	}
 
 	// There is currently no signature. See SignedProxyEntry comment.

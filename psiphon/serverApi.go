@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/fxamacker/cbor/v2"
@@ -1564,8 +1565,8 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 	// timeout which is the same as SSH API requests: if the tunnel has stalled then SSH keep
 	// alives will cause the tunnel to close.
 
-	dialer := NewCustomTLSDialer(
-		&CustomTLSConfig{
+	dialer := tlsdialer.NewDialer(
+		&tlsdialer.Config{
 			Parameters:              tunnel.config.GetParameters(),
 			Dial:                    tunneledDialer,
 			VerifyLegacyCertificate: certificate,
