@@ -1998,6 +1998,7 @@ type trafficState struct {
 	concurrentPortForwardCount            int64
 	peakConcurrentPortForwardCount        int64
 	totalPortForwardCount                 int64
+	totalDomainPortForwardCount           int64
 	availablePortForwardCond              *sync.Cond
 }
 
@@ -3721,6 +3722,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount
 		logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
 		logFields["total_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalPortForwardCount
+		// See comment in allocatePortForward.
+		logFields["total_domain_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalDomainPortForwardCount
 		logFields["bytes_up_udp"] = sshClient.udpTrafficState.bytesUp
 		logFields["bytes_down_udp"] = sshClient.udpTrafficState.bytesDown
 		// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
@@ -5021,7 +5024,7 @@ func (sshClient *sshClient) abortedTCPPortForward() {
 	sshClient.tcpTrafficState.concurrentDialingPortForwardCount -= 1
 }
 
-func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
+func (sshClient *sshClient) allocatePortForward(portForwardType int, isDomainName bool) bool {
 
 	sshClient.Lock()
 	defer sshClient.Unlock()
@@ -5066,6 +5069,15 @@ func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
 		state.peakConcurrentPortForwardCount = state.concurrentPortForwardCount
 	}
 	state.totalPortForwardCount += 1
+	if isDomainName {
+
+		// isDomainName applies only to TCP port forward mode. VPN user
+		// traffic is not tracked or distinguished: iOS VPN does not use port
+		// forward mode, and Android VPN uses udpgw for DNS, while tun2socks
+		// traffic port forwards are IP addresses only.
+
+		state.totalDomainPortForwardCount += 1
+	}
 
 	return true
 }
@@ -5085,7 +5097,7 @@ func (sshClient *sshClient) allocatePortForward(portForwardType int) bool {
 // goroutine) are released or will very soon be released before
 // proceeding.
 func (sshClient *sshClient) establishedPortForward(
-	portForwardType int, portForwardLRU *common.LRUConns) {
+	portForwardType int, portForwardLRU *common.LRUConns, isDomainName bool) {
 
 	// Do not lock sshClient here.
 
@@ -5122,7 +5134,7 @@ func (sshClient *sshClient) establishedPortForward(
 	//   serialized and TCP calls are limited by the dial
 	//   queue/count.
 
-	if !sshClient.allocatePortForward(portForwardType) {
+	if !sshClient.allocatePortForward(portForwardType, isDomainName) {
 
 		portForwardLRU.CloseOldest()
 
@@ -5131,7 +5143,7 @@ func (sshClient *sshClient) establishedPortForward(
 		}
 
 		state.availablePortForwardCond.L.Lock()
-		for !sshClient.allocatePortForward(portForwardType) {
+		for !sshClient.allocatePortForward(portForwardType, isDomainName) {
 			state.availablePortForwardCond.Wait()
 		}
 		state.availablePortForwardCond.L.Unlock()
@@ -5282,7 +5294,10 @@ func (sshClient *sshClient) handleTCPChannel(
 	// handle DNS-over-TCP; in the DNS-over-TCP case, a client may bypass the
 	// block list check.
 
-	if net.ParseIP(hostToConnect) == nil {
+	IP := net.ParseIP(hostToConnect)
+	isDomainName := IP == nil
+
+	if isDomainName {
 
 		ok, rejectMessage := sshClient.isDomainPermitted(hostToConnect)
 		if !ok {
@@ -5302,8 +5317,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	// cancelled when the client is stopping) and timeouts.
 
 	dialStartTime := time.Now()
-
-	IP := net.ParseIP(hostToConnect)
 
 	if IP == nil {
 
@@ -5509,7 +5522,8 @@ func (sshClient *sshClient) handleTCPChannel(
 	// - Closed LRU TCP sockets will enter the TIME_WAIT state,
 	//   continuing to consume some resources.
 
-	sshClient.establishedPortForward(portForwardTypeTCP, sshClient.tcpPortForwardLRU)
+	sshClient.establishedPortForward(
+		portForwardTypeTCP, sshClient.tcpPortForwardLRU, isDomainName)
 
 	// "established = true" cancels the deferred abortedTCPPortForward()
 	established = true

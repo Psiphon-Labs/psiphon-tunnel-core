@@ -116,6 +116,7 @@ type ServerTunnel struct {
 	LightProxyDial_IPv4                           *int64                 `protobuf:"varint,193,opt,name=light_proxy_dial_IPv4,json=lightProxyDialIPv4,proto3,oneof" json:"light_proxy_dial_IPv4,omitempty"`
 	LightProxyDial_IPv6                           *int64                 `protobuf:"varint,194,opt,name=light_proxy_dial_IPv6,json=lightProxyDialIPv6,proto3,oneof" json:"light_proxy_dial_IPv6,omitempty"`
 	LightProxyDialFailed                          *int64                 `protobuf:"varint,195,opt,name=light_proxy_dial_failed,json=lightProxyDialFailed,proto3,oneof" json:"light_proxy_dial_failed,omitempty"`
+	TotalDomainPortForwardCountTcp                *int64                 `protobuf:"varint,196,opt,name=total_domain_port_forward_count_tcp,json=totalDomainPortForwardCountTcp,proto3,oneof" json:"total_domain_port_forward_count_tcp,omitempty"`
 	unknownFields                                 protoimpl.UnknownFields
 	sizeCache                                     protoimpl.SizeCache
 }
@@ -794,11 +795,18 @@ func (x *ServerTunnel) GetLightProxyDialFailed() int64 {
 	return 0
 }
 
+func (x *ServerTunnel) GetTotalDomainPortForwardCountTcp() int64 {
+	if x != nil && x.TotalDomainPortForwardCountTcp != nil {
+		return *x.TotalDomainPortForwardCountTcp
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_server_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa8H\n" +
+	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa3I\n" +
 	"\fServerTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
@@ -897,7 +905,8 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x19light_proxy_entry_tracker\x18\xc0\x01 \x01(\x03HXR\x16lightProxyEntryTracker\x88\x01\x01\x127\n" +
 	"\x15light_proxy_dial_IPv4\x18\xc1\x01 \x01(\x03HYR\x12lightProxyDialIPv4\x88\x01\x01\x127\n" +
 	"\x15light_proxy_dial_IPv6\x18\xc2\x01 \x01(\x03HZR\x12lightProxyDialIPv6\x88\x01\x01\x12;\n" +
-	"\x17light_proxy_dial_failed\x18\xc3\x01 \x01(\x03H[R\x14lightProxyDialFailed\x88\x01\x01B\x0e\n" +
+	"\x17light_proxy_dial_failed\x18\xc3\x01 \x01(\x03H[R\x14lightProxyDialFailed\x88\x01\x01\x12Q\n" +
+	"#total_domain_port_forward_count_tcp\x18\xc4\x01 \x01(\x03H\\R\x1etotalDomainPortForwardCountTcp\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
 	"\x14_inproxy_dial_paramsB\x1f\n" +
@@ -989,7 +998,8 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x1a_light_proxy_entry_trackerB\x18\n" +
 	"\x16_light_proxy_dial_IPv4B\x18\n" +
 	"\x16_light_proxy_dial_IPv6B\x1a\n" +
-	"\x18_light_proxy_dial_failedJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x18_light_proxy_dial_failedB&\n" +
+	"$_total_domain_port_forward_count_tcpJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_tunnel_proto_rawDescOnce sync.Once

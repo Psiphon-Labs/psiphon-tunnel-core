@@ -50,7 +50,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1164,11 +1163,15 @@ func IsIETFErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
-	// The target errors are of type qerr.ApplicationError[Code] and
-	// qerr.IdleTimeoutError, but these are not both exported by quic-go.
-	return strings.HasPrefix(errStr, "Application error 0x0") ||
-		errStr == "timeout: no recent network activity"
+
+	var applicationErr *ietf_quic.ApplicationError
+	if std_errors.As(err, &applicationErr) &&
+		applicationErr.ErrorCode == ietf_quic.ApplicationErrorCode(0) {
+		return true
+	}
+
+	var idleTimeoutErr *ietf_quic.IdleTimeoutError
+	return std_errors.As(err, &idleTimeoutErr)
 }
 
 // TODO: TLS handshake still completes even if 0-RTT is rejected, but currently we fail the QUIC connection anyway.
