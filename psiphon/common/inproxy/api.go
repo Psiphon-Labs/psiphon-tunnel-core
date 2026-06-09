@@ -451,10 +451,11 @@ type ClientOfferResponse struct {
 // reason, it should still send ProxyAnswerRequest with AnswerError
 // populated; the broker will signal the client to abort this connection.
 type ProxyAnswerRequest struct {
-	ConnectionID      ID                       `cbor:"1,keyasint,omitempty"`
-	ProxyAnswerSDP    WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
-	ICECandidateTypes ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
-	AnswerError       string                   `cbor:"5,keyasint,omitempty"`
+	ConnectionID         ID                       `cbor:"1,keyasint,omitempty"`
+	ProxyAnswerSDP       WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
+	ICECandidateTypes    ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
+	AnswerError          string                   `cbor:"5,keyasint,omitempty"`
+	ProxyDTLSFingerprint string                   `cbor:"6,keyasint,omitempty"`
 
 	// These fields are no longer used.
 	//
@@ -521,6 +522,11 @@ type BrokerServerReport struct {
 	ProxyIP                     string           `cbor:"10,keyasint,omitempty"`
 	ProxyMetrics                *ProxyMetrics    `cbor:"11,keyasint,omitempty"`
 	ProxyIsPriority             bool             `cbor:"12,keyasint,omitempty"`
+	ProxyDTLSFingerprint        string           `cbor:"13,keyasint,omitempty"`
+	ClientICERegion             string           `cbor:"14,keyasint,omitempty"`
+	ClientICEASN                string           `cbor:"15,keyasint,omitempty"`
+	ProxyICERegion              string           `cbor:"16,keyasint,omitempty"`
+	ProxyICEASN                 string           `cbor:"17,keyasint,omitempty"`
 
 	// These legacy fields are now sent in ProxyMetrics.
 	ProxyNATType          NATType          `cbor:"5,keyasint,omitempty"`
@@ -778,28 +784,28 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) ([]byte, common.LogFields, error) {
+	geoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, common.LogFields, error) {
 
 	// UseMediaStreams requires at least ProtocolVersion2.
 	if request.UseMediaStreams &&
 		request.Metrics.ProtocolVersion < ProtocolVersion2 {
 
-		return nil, nil, errors.Tracef(
+		return nil, nil, nil, errors.Tracef(
 			"invalid protocol version: %d", request.Metrics.ProtocolVersion)
 	}
 
 	if len(request.CommonCompartmentIDs) > maxCompartmentIDs {
-		return nil, nil, errors.Tracef(
+		return nil, nil, nil, errors.Tracef(
 			"invalid compartment IDs length: %d", len(request.CommonCompartmentIDs))
 	}
 
 	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
-		return nil, nil, errors.Tracef(
+		return nil, nil, nil, errors.Tracef(
 			"invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
 	if len(request.CommonCompartmentIDs) > 0 && len(request.PersonalCompartmentIDs) > 0 {
-		return nil, nil, errors.TraceNew("multiple compartment ID types")
+		return nil, nil, nil, errors.TraceNew("multiple compartment ID types")
 	}
 
 	// The client offer SDP may contain no ICE candidates.
@@ -833,7 +839,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 		allowPrivateIPAddressCandidates,
 		filterPrivateIPAddressCandidates)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, nil, nil, errors.Trace(err)
 	}
 
 	// The client's self-reported ICECandidateTypes are used instead of the
@@ -842,24 +848,24 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	// indistinguishable from host candidate types.
 
 	if !request.ICECandidateTypes.IsValid() {
-		return nil, nil, errors.Tracef(
+		return nil, nil, nil, errors.Tracef(
 			"invalid ICE candidate types: %v", request.ICECandidateTypes)
 	}
 
 	if request.Metrics == nil {
-		return nil, nil, errors.TraceNew("missing metrics")
+		return nil, nil, nil, errors.TraceNew("missing metrics")
 	}
 
 	logFields, err := request.Metrics.ValidateAndGetLogFields(
 		baseAPIParameterValidator, formatter, geoIPData)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, nil, nil, errors.Trace(err)
 	}
 
 	if request.TrafficShapingParameters != nil {
 		err := request.TrafficShapingParameters.Validate()
 		if err != nil {
-			return nil, nil, errors.Trace(err)
+			return nil, nil, nil, errors.Trace(err)
 		}
 	}
 
@@ -880,9 +886,15 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 	logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
+	if sdpMetrics.iceRegion != "" {
+		logFields["ice_region"] = sdpMetrics.iceRegion
+	}
+	if sdpMetrics.iceASN != "" {
+		logFields["ice_asn"] = sdpMetrics.iceASN
+	}
 	logFields["use_media_streams"] = request.UseMediaStreams
 
-	return filteredSDP, logFields, nil
+	return filteredSDP, sdpMetrics, logFields, nil
 }
 
 // Validate validates the that client has not specified excess traffic shaping
@@ -924,7 +936,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData,
-	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, common.LogFields, error) {
+	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, *webRTCSDPMetrics, common.LogFields, error) {
 
 	var filteredSDP []byte
 	var sdpMetrics *webRTCSDPMetrics
@@ -960,7 +972,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 			allowPrivateIPAddressCandidates,
 			filterPrivateIPAddressCandidates)
 		if err != nil {
-			return nil, nil, errors.Trace(err)
+			return nil, nil, nil, errors.Trace(err)
 		}
 	}
 
@@ -970,7 +982,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	// indistinguishable from host candidate types.
 
 	if !request.ICECandidateTypes.IsValid() {
-		return nil, nil, errors.Tracef(
+		return nil, nil, nil, errors.Tracef(
 			"invalid ICE candidate types: %v", request.ICECandidateTypes)
 	}
 
@@ -986,9 +998,15 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 		logFields["allowed_geoip_mismatches"] = sdpMetrics.allowedGeoIPMismatches
+		if sdpMetrics.iceRegion != "" {
+			logFields["ice_region"] = sdpMetrics.iceRegion
+		}
+		if sdpMetrics.iceASN != "" {
+			logFields["ice_asn"] = sdpMetrics.iceASN
+		}
 	}
 
-	return filteredSDP, logFields, nil
+	return filteredSDP, sdpMetrics, logFields, nil
 }
 
 // ValidateAndGetLogFields validates the ClientRelayedPacketRequest and returns
@@ -1062,6 +1080,21 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 	logFields["inproxy_client_nat_type"] = report.ClientNATType
 	logFields["inproxy_client_port_mapping_types"] = report.ClientPortMappingTypes
 	logFields["inproxy_proxy_is_priority"] = report.ProxyIsPriority
+	if report.ClientICERegion != "" {
+		logFields["inproxy_client_ice_region"] = report.ClientICERegion
+	}
+	if report.ClientICEASN != "" {
+		logFields["inproxy_client_ice_asn"] = report.ClientICEASN
+	}
+	if report.ProxyICERegion != "" {
+		logFields["inproxy_proxy_ice_region"] = report.ProxyICERegion
+	}
+	if report.ProxyICEASN != "" {
+		logFields["inproxy_proxy_ice_asn"] = report.ProxyICEASN
+	}
+	if report.ProxyDTLSFingerprint != "" {
+		logFields["inproxy_proxy_webrtc_dtls_fingerprint"] = report.ProxyDTLSFingerprint
+	}
 
 	// TODO:
 	// - log IPv4 vs. IPv6 information

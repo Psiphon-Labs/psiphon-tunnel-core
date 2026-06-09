@@ -582,6 +582,8 @@ const (
 	TLS_PROFILE_CHROME_112_PSK = "Chrome-112_PSK"
 	TLS_PROFILE_CHROME_120     = "Chrome-120"
 	TLS_PROFILE_CHROME_120_PQ  = "Chrome-120_PQ"
+	TLS_PROFILE_CHROME_131     = "Chrome-131"
+	TLS_PROFILE_CHROME_133     = "Chrome-133"
 	TLS_PROFILE_FIREFOX_55     = "Firefox-55"
 	TLS_PROFILE_FIREFOX_56     = "Firefox-56"
 	TLS_PROFILE_FIREFOX_65     = "Firefox-65"
@@ -607,6 +609,8 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_CHROME_112_PSK,
 	TLS_PROFILE_CHROME_120,
 	TLS_PROFILE_CHROME_120_PQ,
+	TLS_PROFILE_CHROME_131,
+	TLS_PROFILE_CHROME_133,
 	TLS_PROFILE_FIREFOX_55,
 	TLS_PROFILE_FIREFOX_56,
 	TLS_PROFILE_FIREFOX_65,
@@ -771,6 +775,49 @@ func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
 		l[label] = versions.PruneInvalid()
 	}
 	return l
+}
+
+// DTLS fingerprint constants. The mapping from these names to covert-dtls
+// fingerprint data is in inproxy/webrtc.go.
+
+const (
+	DTLS_FINGERPRINT_RANDOMIZED  = "DTLS-Randomized"
+	DTLS_FINGERPRINT_CHROME_138  = "DTLS-Chrome-138"
+	DTLS_FINGERPRINT_FIREFOX_148 = "DTLS-Firefox-148"
+)
+
+var SupportedDTLSFingerprints = DTLSFingerprints{
+	DTLS_FINGERPRINT_CHROME_138,
+	DTLS_FINGERPRINT_FIREFOX_148,
+	DTLS_FINGERPRINT_RANDOMIZED,
+}
+
+var legacyDTLSFingerprints = DTLSFingerprints{}
+
+func DTLSFingerprintIsRandomized(dtlsFingerprint string) bool {
+	return dtlsFingerprint == DTLS_FINGERPRINT_RANDOMIZED
+}
+
+type DTLSFingerprints []string
+
+func (fingerprints DTLSFingerprints) Validate() error {
+	for _, f := range fingerprints {
+		if !common.Contains(SupportedDTLSFingerprints, f) &&
+			!common.Contains(legacyDTLSFingerprints, f) {
+			return errors.Tracef("invalid DTLS fingerprint: %s", f)
+		}
+	}
+	return nil
+}
+
+func (fingerprints DTLSFingerprints) PruneInvalid() DTLSFingerprints {
+	q := make(DTLSFingerprints, 0)
+	for _, f := range fingerprints {
+		if common.Contains(SupportedDTLSFingerprints, f) {
+			q = append(q, f)
+		}
+	}
+	return q
 }
 
 const (

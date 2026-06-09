@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 /*
  * Copyright (c) 2017, Psiphon Inc.
  * All rights reserved.

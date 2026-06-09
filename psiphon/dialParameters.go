@@ -1444,7 +1444,7 @@ func MakeDialParameters(
 
 		if !isReplay || !replayInproxyWebRTC {
 
-			dialParams.InproxyWebRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p)
+			dialParams.InproxyWebRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p, false)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -1788,7 +1788,7 @@ func MakeDialParameters(
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 dialCustomHeaders,
 		BPFProgramInstructions:        dialParams.BPFProgramInstructions,
-		DeviceBinder:                  config.deviceBinder,
+		DeviceBinder:                  config.deviceBinder(),
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		ResolveIP:                     resolveIP,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,

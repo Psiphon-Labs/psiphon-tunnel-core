@@ -34,12 +34,13 @@ const (
 const (
 	extensionNextProtoNeg uint16 = 13172 // not IANA assigned. Removed by crypto/tls since Nov 2019
 
-	utlsExtensionPadding             uint16 = 21
-	utlsExtensionCompressCertificate uint16 = 27     // https://datatracker.ietf.org/doc/html/rfc8879#section-7.1
-	utlsExtensionApplicationSettings uint16 = 17513  // not IANA assigned
-	utlsFakeExtensionCustom          uint16 = 1234   // not IANA assigned, for ALPS
-	utlsExtensionECH                 uint16 = 0xfe0d // draft-ietf-tls-esni-17
-	utlsExtensionECHOuterExtensions  uint16 = 0xfd00 // draft-ietf-tls-esni-17
+	utlsExtensionPadding                uint16 = 21
+	utlsExtensionCompressCertificate    uint16 = 27     // https://datatracker.ietf.org/doc/html/rfc8879#section-7.1
+	utlsExtensionApplicationSettings    uint16 = 17513  // not IANA assigned
+	utlsExtensionApplicationSettingsNew uint16 = 17613  // not IANA assigned
+	utlsFakeExtensionCustom             uint16 = 1234   // not IANA assigned, for ALPS
+	utlsExtensionECH                    uint16 = 0xfe0d // draft-ietf-tls-esni-17
+	utlsExtensionECHOuterExtensions     uint16 = 0xfd00 // draft-ietf-tls-esni-17
 
 	// extensions with 'fake' prefix break connection, if server echoes them back
 	fakeExtensionEncryptThenMAC       uint16 = 22
@@ -85,6 +86,18 @@ const (
 	FakeCurveFFDHE4096 CurveID = 0x0102
 	FakeCurveFFDHE6144 CurveID = 0x0103
 	FakeCurveFFDHE8192 CurveID = 0x0104
+)
+
+const (
+	X25519Kyber768Draft00 CurveID = 0x6399
+
+	FakeCurveX25519Kyber512Draft00    CurveID = 0xfe30
+	FakeCurveX25519Kyber768Draft00Old CurveID = 0xfe31
+	FakeCurveP256Kyber768Draft00      CurveID = 0xfe32
+
+	X25519Kyber512Draft00    CurveID = FakeCurveX25519Kyber512Draft00
+	X25519Kyber768Draft00Old CurveID = FakeCurveX25519Kyber768Draft00Old
+	P256Kyber768Draft00      CurveID = FakeCurveP256Kyber768Draft00
 )
 
 // Other things
@@ -435,6 +448,8 @@ func (chs *ClientHelloSpec) ImportTLSClientHello(data map[string][]byte) error {
 			case utlsExtensionApplicationSettings:
 				// TODO: tlsfingerprint.io should record/provide application settings data
 				extWriter.(*ApplicationSettingsExtension).SupportedProtocols = []string{"h2"}
+			case utlsExtensionApplicationSettingsNew:
+				extWriter.(*ApplicationSettingsExtensionNew).SupportedProtocols = []string{"h2"}
 			case extensionPreSharedKey:
 				log.Printf("[Warning] PSK extension added without data")
 			default:
@@ -587,7 +602,7 @@ var (
 	HelloRandomizedNoALPN = ClientHelloID{helloRandomizedNoALPN, helloAutoVers, nil, nil}
 
 	// The rest will will parrot given browser.
-	HelloFirefox_Auto = HelloFirefox_120
+	HelloFirefox_Auto = HelloFirefox_148
 	HelloFirefox_55   = ClientHelloID{helloFirefox, "55", nil, nil}
 	HelloFirefox_56   = ClientHelloID{helloFirefox, "56", nil, nil}
 	HelloFirefox_63   = ClientHelloID{helloFirefox, "63", nil, nil}
@@ -596,8 +611,9 @@ var (
 	HelloFirefox_102  = ClientHelloID{helloFirefox, "102", nil, nil}
 	HelloFirefox_105  = ClientHelloID{helloFirefox, "105", nil, nil}
 	HelloFirefox_120  = ClientHelloID{helloFirefox, "120", nil, nil}
+	HelloFirefox_148  = ClientHelloID{helloFirefox, "148", nil, nil}
 
-	HelloChrome_Auto        = HelloChrome_120
+	HelloChrome_Auto        = HelloChrome_133
 	HelloChrome_58          = ClientHelloID{helloChrome, "58", nil, nil}
 	HelloChrome_62          = ClientHelloID{helloChrome, "62", nil, nil}
 	HelloChrome_70          = ClientHelloID{helloChrome, "70", nil, nil}
@@ -612,7 +628,6 @@ var (
 	// Chrome w/ PSK: Chrome start sending this ClientHello after doing TLS 1.3 handshake with the same server.
 	// Beta: PSK extension added. However, uTLS doesn't ship with full PSK support.
 	// Use at your own discretion.
-	HelloChrome_PSK_Auto             = HelloChrome_114_Padding_PSK_Shuf
 	HelloChrome_100_PSK              = ClientHelloID{helloChrome, "100_PSK", nil, nil}
 	HelloChrome_112_PSK_Shuf         = ClientHelloID{helloChrome, "112_PSK", nil, nil}
 	HelloChrome_114_Padding_PSK_Shuf = ClientHelloID{helloChrome, "114_PSK", nil, nil}
@@ -626,6 +641,10 @@ var (
 	HelloChrome_120 = ClientHelloID{helloChrome, "120", nil, nil}
 	// Chrome w/ Post-Quantum Key Agreement and Encrypted ClientHello
 	HelloChrome_120_PQ = ClientHelloID{helloChrome, "120_PQ", nil, nil}
+	// Chrome w/ ML-KEM curve
+	HelloChrome_131 = ClientHelloID{helloChrome, "131", nil, nil}
+	// Chrome w/ New ALPS codepoint
+	HelloChrome_133 = ClientHelloID{helloChrome, "133", nil, nil}
 
 	HelloIOS_Auto = HelloIOS_14
 	HelloIOS_11_1 = ClientHelloID{helloIOS, "111", nil, nil} // legacy "111" means 11.1
@@ -639,8 +658,9 @@ var (
 	HelloEdge_85   = ClientHelloID{helloEdge, "85", nil, nil}
 	HelloEdge_106  = ClientHelloID{helloEdge, "106", nil, nil}
 
-	HelloSafari_Auto = HelloSafari_16_0
+	HelloSafari_Auto = HelloSafari_26_3
 	HelloSafari_16_0 = ClientHelloID{helloSafari, "16.0", nil, nil}
+	HelloSafari_26_3 = ClientHelloID{helloSafari, "26.3", nil, nil}
 
 	Hello360_Auto = Hello360_7_5 // Hello360_11_0 seems to be incompatible with this library
 	Hello360_7_5  = ClientHelloID{hello360, "7.5", nil, nil}
@@ -666,6 +686,7 @@ type Weights struct {
 	Extensions_Append_Reneg                            float64
 	Extensions_Append_EMS                              float64
 	FirstKeyShare_Set_CurveP256                        float64
+	KeyShare_Append_RandomGroups                       float64
 	Extensions_Append_ALPS                             float64
 }
 
@@ -686,7 +707,8 @@ var DefaultWeights = Weights{
 	Extensions_Append_SCT:                              0.46,
 	Extensions_Append_Reneg:                            0.75,
 	Extensions_Append_EMS:                              0.77,
-	FirstKeyShare_Set_CurveP256:                        0.25,
+	FirstKeyShare_Set_CurveP256:                        0.00, // legacy setting
+	KeyShare_Append_RandomGroups:                       0.50,
 	Extensions_Append_ALPS:                             0.33,
 }
 

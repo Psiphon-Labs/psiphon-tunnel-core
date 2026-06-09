@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package rtp
 
 import (
 	"encoding/binary"
+	"io"
 	"time"
 )
 
@@ -13,7 +14,7 @@ const (
 	absCaptureTimeExtendedExtensionSize = 16
 )
 
-// AbsCaptureTimeExtension is a extension payload format in
+// AbsCaptureTimeExtension is a extension payload format in.
 // http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time
 // 0                   1                   2                   3
 // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -24,21 +25,53 @@ const (
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |  ... (56-63)  |
 // +-+-+-+-+-+-+-+-+
+// .
 type AbsCaptureTimeExtension struct {
 	Timestamp                   uint64
 	EstimatedCaptureClockOffset *int64
 }
 
+// MarshalSize returns the size of the AbsCaptureTimeExtension once marshaled.
+func (t AbsCaptureTimeExtension) MarshalSize() int {
+	if t.EstimatedCaptureClockOffset != nil {
+		return absCaptureTimeExtendedExtensionSize
+	}
+
+	return absCaptureTimeExtensionSize
+}
+
+// MarshalTo marshals the extension to the given buffer.
+// Returns io.ErrShortBuffer if buf is too small.
+func (t AbsCaptureTimeExtension) MarshalTo(buf []byte) (int, error) {
+	if t.EstimatedCaptureClockOffset != nil {
+		if len(buf) < absCaptureTimeExtendedExtensionSize {
+			return 0, io.ErrShortBuffer
+		}
+		binary.BigEndian.PutUint64(buf[0:8], t.Timestamp)
+		binary.BigEndian.PutUint64(buf[8:16], uint64(*t.EstimatedCaptureClockOffset)) // nolint: gosec // G115
+
+		return absCaptureTimeExtendedExtensionSize, nil
+	}
+	if len(buf) < absCaptureTimeExtensionSize {
+		return 0, io.ErrShortBuffer
+	}
+	binary.BigEndian.PutUint64(buf[0:8], t.Timestamp)
+
+	return absCaptureTimeExtensionSize, nil
+}
+
 // Marshal serializes the members to buffer.
 func (t AbsCaptureTimeExtension) Marshal() ([]byte, error) {
 	if t.EstimatedCaptureClockOffset != nil {
-		buf := make([]byte, 16)
+		buf := make([]byte, absCaptureTimeExtendedExtensionSize)
 		binary.BigEndian.PutUint64(buf[0:8], t.Timestamp)
-		binary.BigEndian.PutUint64(buf[8:16], uint64(*t.EstimatedCaptureClockOffset))
+		binary.BigEndian.PutUint64(buf[8:16], uint64(*t.EstimatedCaptureClockOffset)) // nolint: gosec // G115
+
 		return buf, nil
 	}
-	buf := make([]byte, 8)
+	buf := make([]byte, absCaptureTimeExtensionSize)
 	binary.BigEndian.PutUint64(buf[0:8], t.Timestamp)
+
 	return buf, nil
 }
 
@@ -49,9 +82,10 @@ func (t *AbsCaptureTimeExtension) Unmarshal(rawData []byte) error {
 	}
 	t.Timestamp = binary.BigEndian.Uint64(rawData[0:8])
 	if len(rawData) >= absCaptureTimeExtendedExtensionSize {
-		offset := int64(binary.BigEndian.Uint64(rawData[8:16]))
+		offset := int64(binary.BigEndian.Uint64(rawData[8:16])) // nolint: gosec // G115 false positive
 		t.EstimatedCaptureClockOffset = &offset
 	}
+
 	return nil
 }
 
@@ -75,6 +109,7 @@ func (t AbsCaptureTimeExtension) EstimatedCaptureClockOffsetDuration() *time.Dur
 	if negative {
 		duration = -duration
 	}
+
 	return &duration
 }
 
@@ -86,7 +121,10 @@ func NewAbsCaptureTimeExtension(captureTime time.Time) *AbsCaptureTimeExtension 
 }
 
 // NewAbsCaptureTimeExtensionWithCaptureClockOffset makes new AbsCaptureTimeExtension from time.Time and a clock offset.
-func NewAbsCaptureTimeExtensionWithCaptureClockOffset(captureTime time.Time, captureClockOffset time.Duration) *AbsCaptureTimeExtension {
+func NewAbsCaptureTimeExtensionWithCaptureClockOffset(
+	captureTime time.Time,
+	captureClockOffset time.Duration,
+) *AbsCaptureTimeExtension {
 	ns := captureClockOffset.Nanoseconds()
 	negative := false
 	if ns < 0 {
@@ -99,6 +137,7 @@ func NewAbsCaptureTimeExtensionWithCaptureClockOffset(captureTime time.Time, cap
 	if negative {
 		offset = -offset
 	}
+
 	return &AbsCaptureTimeExtension{
 		Timestamp:                   toNtpTime(captureTime),
 		EstimatedCaptureClockOffset: &offset,

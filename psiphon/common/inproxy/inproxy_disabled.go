@@ -64,7 +64,7 @@ type webRTCConfig struct {
 	ExcludeInterfaceName        string
 	WebRTCDialCoordinator       WebRTCDialCoordinator
 	ClientRootObfuscationSecret ObfuscationSecret
-	DoDTLSRandomization         bool
+	DTLSFingerprint             string
 	UseMediaStreams             bool
 	TrafficShapingParameters    *TrafficShapingParameters
 	ReliableTransport           bool
@@ -128,6 +128,8 @@ func GetQUICMaxPacketSizeAdjustment() int {
 type webRTCSDPMetrics struct {
 	iceCandidateCount      int
 	iceCandidateTypes      []ICECandidateType
+	iceRegion              string
+	iceASN                 string
 	hasIPv4                bool
 	hasIPv6                bool
 	hasPrivateIP           bool

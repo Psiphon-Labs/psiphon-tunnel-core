@@ -35,4 +35,7 @@ var (
 	errWrongChunkType           = errors.New("rtcp: wrong chunk type")
 	errBadStructMemberType      = errors.New("rtcp: struct contains unexpected member type")
 	errBadReadParameter         = errors.New("rtcp: cannot read into non-pointer")
+	errAppDefinedInvalidLength  = errors.New("rtcp: application defined type invalid length")
+	errAppDefinedDataTooLarge   = errors.New("rtcp: application defined data is too large")
+	errAppDefinedInvalidName    = errors.New("rtcp: application defined name must be 4 ASCII chars")
 )

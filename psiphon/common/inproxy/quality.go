@@ -20,6 +20,7 @@
 package inproxy
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"sync"
@@ -286,14 +287,19 @@ type ProxyQualityReporter struct {
 	reportQueue       *list.List
 	proxyIDQueueEntry map[ProxyQualityKey]*list.Element
 
-	brokerPublicKeys             atomic.Value
-	brokerRootObfuscationSecrets atomic.Value
-	requestDelay                 atomic.Int64
-	maxRequestEntries            atomic.Int64
-	requestTimeout               atomic.Int64
-	requestRetries               atomic.Int64
+	knownBrokers      atomic.Value
+	requestDelay      atomic.Int64
+	maxRequestEntries atomic.Int64
+	requestTimeout    atomic.Int64
+	requestRetries    atomic.Int64
 
 	signalReport chan struct{}
+}
+
+type proxyQualityKnownBrokers struct {
+	brokerPublicKeys             []SessionPublicKey
+	brokerRootObfuscationSecrets []ObfuscationSecret
+	brokerSpecHashes             [][]byte
 }
 
 // ProxyQualityBrokerRoundTripperMaker is a callback which creates a new
@@ -313,10 +319,21 @@ type proxyQualityReportQueueEntry struct {
 type serverBrokerClient struct {
 	publicKey             SessionPublicKey
 	rootObfuscationSecret ObfuscationSecret
+	brokerSpecHash        []byte
 	brokerInitiatorID     ID
 	sessions              *InitiatorSessions
 	roundTripper          RoundTripper
 	dialParams            common.APIParameters
+}
+
+func (b *serverBrokerClient) reset() {
+	b.sessions = nil
+	if b.roundTripper != nil {
+		// Close all network connections.
+		b.roundTripper.Close()
+	}
+	b.roundTripper = nil
+	b.dialParams = nil
 }
 
 // NewProxyQualityReporter creates a new ProxyQualityReporter.
@@ -340,6 +357,7 @@ func NewProxyQualityReporter(
 	serverSessionPrivateKey SessionPrivateKey,
 	brokerPublicKeys []SessionPublicKey,
 	brokerRootObfuscationSecrets []ObfuscationSecret,
+	brokerSpecHashes [][]byte,
 	roundTripperMaker ProxyQualityBrokerRoundTripperMaker) (
 	*ProxyQualityReporter, error) {
 
@@ -357,7 +375,8 @@ func NewProxyQualityReporter(
 		signalReport: make(chan struct{}, 1),
 	}
 
-	err := r.SetKnownBrokers(brokerPublicKeys, brokerRootObfuscationSecrets)
+	err := r.SetKnownBrokers(
+		brokerPublicKeys, brokerRootObfuscationSecrets, brokerSpecHashes)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -373,14 +392,19 @@ func NewProxyQualityReporter(
 // SetKnownBrokers updates the set of brokers to send to.
 func (r *ProxyQualityReporter) SetKnownBrokers(
 	brokerPublicKeys []SessionPublicKey,
-	brokerRootObfuscationSecrets []ObfuscationSecret) error {
+	brokerRootObfuscationSecrets []ObfuscationSecret,
+	brokerSpecHashes [][]byte) error {
 
-	if len(brokerPublicKeys) != len(brokerRootObfuscationSecrets) {
+	if len(brokerPublicKeys) != len(brokerRootObfuscationSecrets) ||
+		len(brokerPublicKeys) != len(brokerSpecHashes) {
 		return errors.TraceNew("invalid broker specs")
 	}
 
-	r.brokerPublicKeys.Store(brokerPublicKeys)
-	r.brokerRootObfuscationSecrets.Store(brokerRootObfuscationSecrets)
+	r.knownBrokers.Store(&proxyQualityKnownBrokers{
+		brokerPublicKeys:             brokerPublicKeys,
+		brokerRootObfuscationSecrets: brokerRootObfuscationSecrets,
+		brokerSpecHashes:             brokerSpecHashes,
+	})
 
 	return nil
 }
@@ -607,12 +631,13 @@ func (r *ProxyQualityReporter) sendToBrokers(
 	var retainBrokerClientsMutex sync.Mutex
 	retainBrokerClients := make(map[SessionPublicKey]struct{})
 
-	brokerPublicKeys := r.brokerPublicKeys.Load().([]SessionPublicKey)
-	brokerRootObfuscationSecrets := r.brokerRootObfuscationSecrets.Load().([]ObfuscationSecret)
+	knownBrokers := r.knownBrokers.Load().(*proxyQualityKnownBrokers)
 
 	establishedBrokerIDs := r.serverBrokerSessions.sessions.GetEstablishedKnownInitiatorIDs()
 
-	for i, brokerPublicKey := range brokerPublicKeys {
+	for i, brokerPublicKey := range knownBrokers.brokerPublicKeys {
+		brokerRootObfuscationSecret := knownBrokers.brokerRootObfuscationSecrets[i]
+		brokerSpecHash := knownBrokers.brokerSpecHashes[i]
 
 		// Get or create the brokerClient for brokerPublicKey.
 
@@ -631,7 +656,8 @@ func (r *ProxyQualityReporter) sendToBrokers(
 
 			brokerClient = &serverBrokerClient{
 				publicKey:             brokerPublicKey,
-				rootObfuscationSecret: brokerRootObfuscationSecrets[i],
+				rootObfuscationSecret: brokerRootObfuscationSecret,
+				brokerSpecHash:        brokerSpecHash,
 				brokerInitiatorID:     ID(initiatorID),
 			}
 
@@ -642,6 +668,18 @@ func (r *ProxyQualityReporter) sendToBrokers(
 			// brokerPublicKeys changes.
 
 			brokerClients[brokerPublicKey] = brokerClient
+
+		} else if !bytes.Equal(brokerClient.brokerSpecHash, brokerSpecHash) {
+
+			// Reset any retained transport and Noise session when the
+			// BrokerSpec for this public key changes. The next request will
+			// rebuild the round tripper from current tactics. This ensures
+			// that BrokerSpec change, such as new fronting specs, take
+			// effect soon after tactics reload.
+
+			brokerClient.reset()
+			brokerClient.rootObfuscationSecret = brokerRootObfuscationSecret
+			brokerClient.brokerSpecHash = brokerSpecHash
 		}
 
 		// Currently, brokers will only trust and allow proxy quality requests
@@ -669,12 +707,7 @@ func (r *ProxyQualityReporter) sendToBrokers(
 			// remaining brokerClient is still retained, for the cached
 			// ToCurve25519 conversion.
 
-			brokerClient.sessions = nil
-			if brokerClient.roundTripper != nil {
-				// Close all network connections.
-				brokerClient.roundTripper.Close()
-			}
-			brokerClient.roundTripper = nil
+			brokerClient.reset()
 
 			retainBrokerClientsMutex.Lock()
 			retainBrokerClients[brokerPublicKey] = struct{}{}
@@ -766,8 +799,7 @@ func (r *ProxyQualityReporter) sendToBrokers(
 
 	for brokerPublicKey, brokerClient := range brokerClients {
 		if _, ok := retainBrokerClients[brokerPublicKey]; !ok {
-			// Close all network connections.
-			brokerClient.roundTripper.Close()
+			brokerClient.reset()
 			delete(brokerClients, brokerPublicKey)
 		}
 	}

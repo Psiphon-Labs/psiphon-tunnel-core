@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"time"
 
@@ -115,10 +114,6 @@ type handshakeConfig struct {
 	ellipticCurves              []elliptic.Curve
 	insecureSkipHelloVerify     bool
 
-	// [Psiphon]
-	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
-	customClientHelloRandom func() [handshake.RandomBytesLength]byte
-
 	onFlightState func(flightVal, handshakeState)
 	log           logging.LeveledLogger
 	keyLogWriter  io.Writer
@@ -138,9 +133,6 @@ type flightConn interface {
 	setLocalEpoch(epoch uint16)
 	handleQueuedPackets(context.Context) error
 	sessionKey() []byte
-
-	// [Psiphon]
-	LocalAddr() net.Addr
 }
 
 func (c *handshakeConfig) writeKeyLog(label string, clientRandom, secret []byte) {
@@ -221,9 +213,7 @@ func (s *handshakeFSM) prepare(ctx context.Context, c flightConn) (handshakeStat
 		err = errFlight
 		a = &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}
 	} else {
-		// [Psiphon]
-		// Pass in dial context for GetDTLSSeed.
-		pkts, a, err = gen(ctx, c, s.state, s.cache, s.cfg)
+		pkts, a, err = gen(c, s.state, s.cache, s.cfg)
 		s.retransmit = retransmit
 	}
 	if a != nil {

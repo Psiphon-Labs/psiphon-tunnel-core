@@ -52,13 +52,22 @@ func NewSocksProxy(
 	tunneler Tunneler,
 	listenIP string) (proxy *SocksProxy, err error) {
 
-	listener, portInUse, err := makeLocalProxyListener(
-		listenIP, config.LocalSocksProxyPort)
-	if err != nil {
-		if portInUse {
-			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
+	var listener net.Listener
+	if config.UseUnixDomainSockets {
+		listener, err = makeLocalProxyUnixListener(config.LocalSocksProxyUnixPath)
+		if err != nil {
+			return nil, errors.Trace(err)
 		}
-		return nil, errors.Trace(err)
+	} else {
+		var portInUse bool
+		listener, portInUse, err = makeLocalProxyListener(
+			listenIP, config.LocalSocksProxyPort)
+		if err != nil {
+			if portInUse {
+				NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)
+			}
+			return nil, errors.Trace(err)
+		}
 	}
 	proxy = &SocksProxy{
 		config:                 config,
@@ -70,7 +79,11 @@ func NewSocksProxy(
 	}
 	proxy.serveWaitGroup.Add(1)
 	go proxy.serve()
-	NoticeListeningSocksProxyPort(proxy.listener.Addr().(*net.TCPAddr).Port)
+	if config.UseUnixDomainSockets {
+		NoticeListeningSocksProxyUnixPath(config.LocalSocksProxyUnixPath)
+	} else {
+		NoticeListeningSocksProxyPort(proxy.listener.Addr().(*net.TCPAddr).Port)
+	}
 	return proxy, nil
 }
 

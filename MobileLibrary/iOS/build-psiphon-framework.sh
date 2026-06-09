@@ -16,7 +16,7 @@ set -e -u -x
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.24.12"
+GO_VERSION_REQUIRED="1.26.3"
 
 # At this time, psiphon-tunnel-core doesn't support modules
 export GO111MODULE=off
@@ -115,7 +115,7 @@ cd "${TUNNEL_CORE_SRC_DIR}"
 BUILDINFOFILE="${BASE_DIR}/psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
-BUILDREV=$(git rev-parse --short HEAD)
+BUILDREV=$(git rev-parse --short=10 HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
 LDFLAGS="\

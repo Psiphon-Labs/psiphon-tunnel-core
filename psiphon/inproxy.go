@@ -22,7 +22,6 @@ package psiphon
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	std_errors "errors"
 	"fmt"
 	"io"
@@ -40,10 +39,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
-	"github.com/cespare/xxhash"
 )
 
 // InproxyBrokerClientManager manages an InproxyBrokerClientInstance, an
@@ -501,8 +499,15 @@ func NewInproxyBrokerClientInstance(
 				func(spec *parameters.InproxyBrokerSpec, dialParams *InproxyBrokerDialParameters) bool {
 					// Replay the successful broker spec, if present, by
 					// comparing its hash with that of the candidate.
-					return dialParams.LastUsedTimestamp.After(now.Add(-ttl)) &&
-						bytes.Equal(dialParams.LastUsedBrokerSpecHash, hashBrokerSpec(spec))
+					if !dialParams.LastUsedTimestamp.After(now.Add(-ttl)) {
+						return false
+					}
+					brokerSpecHash, err := spec.Hash()
+					if err != nil {
+						NoticeWarning("InproxyBrokerSpec.Hash failed: %v", errors.Trace(err))
+						return false
+					}
+					return bytes.Equal(dialParams.LastUsedBrokerSpecHash, brokerSpecHash)
 				})
 		if err != nil {
 			NoticeWarning("SelectCandidateWithNetworkReplayParameters failed: %v", errors.Trace(err))
@@ -1215,10 +1220,15 @@ func MakeInproxyBrokerDialParameters(
 
 	// Select new broker dial parameters
 
+	brokerSpecHash, err := brokerSpec.Hash()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	brokerDialParams := &InproxyBrokerDialParameters{
 		brokerSpec:             brokerSpec,
 		LastUsedTimestamp:      currentTimestamp,
-		LastUsedBrokerSpecHash: hashBrokerSpec(brokerSpec),
+		LastUsedBrokerSpecHash: brokerSpecHash,
 	}
 
 	// FrontedMeekDialParameters
@@ -1230,7 +1240,6 @@ func MakeInproxyBrokerDialParameters(
 	payloadSecure := true
 	skipVerify := false
 
-	var err error
 	brokerDialParams.FrontedHTTPDialParameters, err = makeFrontedMeekDialParameters(
 		config,
 		p,
@@ -1337,16 +1346,6 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	// Requires a reference to the InproxyBrokerRoundTripper.
 
 	return logFields
-}
-
-// hashBrokerSpec hashes the broker spec. The hash is used to detect when
-// broker spec tactics have changed.
-func hashBrokerSpec(spec *parameters.InproxyBrokerSpec) []byte {
-	var hash [8]byte
-	binary.BigEndian.PutUint64(
-		hash[:],
-		uint64(xxhash.Sum64String(fmt.Sprintf("%+v", spec))))
-	return hash[:]
 }
 
 // InproxyBrokerRoundTripper is a broker request round trip transport
@@ -1661,9 +1660,11 @@ func NewInproxyWebRTCDialInstance(
 	}
 
 	if isProxy && webRTCDialParameters == nil {
-		// Auto-generate STUN dial parameters. There's no replay in this case.
+		// Auto-generate WebRTC dial parameters. There's no replay in this
+		// case. The proxy DTLS fingerprint is selected later, after the
+		// client root obfuscation secret is received from the broker.
 		var err error
-		webRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p)
+		webRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p, true)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1759,8 +1760,24 @@ func (w *InproxyWebRTCDialInstance) ClientRootObfuscationSecret() inproxy.Obfusc
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) DoDTLSRandomization() bool {
-	return w.webRTCDialParameters.DoDTLSRandomization
+func (w *InproxyWebRTCDialInstance) ClientDTLSFingerprint() string {
+	return w.webRTCDialParameters.DTLSFingerprint
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) ProxyDTLSFingerprint(
+	clientRootObfuscationSecret inproxy.ObfuscationSecret) (string, error) {
+
+	p := w.config.GetParameters().Get()
+	defer p.Close()
+
+	isOffer := false
+	dtlsFingerprint, err := selectDTLSFingerprint(
+		p, clientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return dtlsFingerprint, nil
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -1811,9 +1828,10 @@ func (w *InproxyWebRTCDialInstance) STUNServerAddressSucceeded(RFC5780 bool, add
 	// between local client and proxy instances.
 
 	// Verify/extend the resolver cache entry for any resolved domain after a
-	// success.
+	// success. Use the split resolver, since STUN address resolution goes
+	// via the same in ResolveAddress (and thus its cache holds the entry).
 
-	resolver := w.config.GetResolver()
+	resolver := w.config.GetSplitResolver()
 	if resolver != nil {
 		resolver.VerifyCacheExtension(address)
 	}
@@ -1885,13 +1903,6 @@ func (w *InproxyWebRTCDialInstance) SetPortMappingProbe(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network, address string) (string, error) {
 
-	// Use the Psiphon resolver to resolve addresses.
-
-	r := w.config.GetResolver()
-	if r == nil {
-		return "", errors.TraceNew("missing resolver")
-	}
-
 	// Identify when the address to be resolved is one of the configured STUN
 	// servers, and, in those cases, use/replay any STUN dial parameters
 	// ResolveParameters; and record the resolved IP address for metrics.
@@ -1907,6 +1918,24 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 	var resolveParams *resolver.ResolveParameters
 	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
 		resolveParams = w.stunDialParameters.ResolveParameters
+	}
+
+	// Use the split resolver for STUN server resolves so that, in
+	// split-interface mode, the lookup goes via the downstream (ICE)
+	// interface; the upstream 2nd-hop dial uses the main resolver.
+	//
+	// Limitation: this assumes the only ICE-side resolves routed through
+	// ResolveAddress are the STUN server addresses. Any future ICE-side
+	// resolve (e.g. a TURN server) would silently route through the
+	// upstream resolver instead.
+	var r *resolver.Resolver
+	if isSTUNServerAddress || isSTUNServerAddressRFC5780 {
+		r = w.config.GetSplitResolver()
+	} else {
+		r = w.config.GetResolver()
+	}
+	if r == nil {
+		return "", errors.TraceNew("missing resolver")
 	}
 
 	resolved, err := r.ResolveAddress(
@@ -1933,7 +1962,7 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) UDPListen(ctx context.Context) (net.PacketConn, error) {
 
-	// Create a new inproxyUDPConn for use as the in-proxy STUN and/ord WebRTC
+	// Create a new inproxyUDPConn for use as the in-proxy STUN and/or WebRTC
 	// UDP socket.
 
 	conn, err := newInproxyUDPConn(ctx, w.config)
@@ -1955,8 +1984,11 @@ func (w *InproxyWebRTCDialInstance) UDPConn(
 	// Only IP address destinations are supported. ResolveIP is wired up only
 	// because NewUDPConn requires a non-nil resolver.
 
+	// In a split-interface in-proxy proxy configuration, the probe socket
+	// must be bound to the downstream (non-upstream) interface so that the
+	// active local address discovered here is the one used for ICE.
 	dialConfig := &DialConfig{
-		DeviceBinder:    w.config.deviceBinder,
+		DeviceBinder:    w.config.splitDeviceBinder(),
 		IPv6Synthesizer: w.config.IPv6Synthesizer,
 		ResolveIP: func(_ context.Context, hostname string) ([]net.IP, error) {
 			IP := net.ParseIP(hostname)
@@ -1978,15 +2010,19 @@ func (w *InproxyWebRTCDialInstance) UDPConn(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 
-	if w.config.deviceBinder == nil {
+	// Use Config.splitDeviceBinder, with wired up logging, not the public
+	// config.DeviceBinder; other tunnel-core dials do this indirectly via
+	// psiphon.DialConfig.
+	//
+	// In a split-interface in-proxy proxy configuration, WebRTC port
+	// mapping and other auxiliary sockets bind to the downstream
+	// (non-upstream) interface; splitDeviceBinder carries that.
+	deviceBinder := w.config.splitDeviceBinder()
+	if deviceBinder == nil {
 		return nil
 	}
 
-	// Use config.deviceBinder, with wired up logging, not
-	// config.DeviceBinder; other tunnel-core dials do this indirectly via
-	// psiphon.DialConfig.
-
-	_, err := w.config.deviceBinder.BindToDevice(fileDescriptor)
+	_, err := deviceBinder.BindToDevice(fileDescriptor)
 	return errors.Trace(err)
 }
 
@@ -2004,7 +2040,7 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 	// DNSResolverPreresolvedIPAddressCIDRs proxy tactics. In addition,
 	// replay the selected upstream dial tactics parameters.
 
-	splitUpstreamInterfaceName := w.config.InproxyProxySplitUpstreamInterfaceName
+	deviceBinder := w.config.deviceBinder()
 
 	dialer := net.Dialer{
 		Control: func(_, _ string, c syscall.RawConn) error {
@@ -2015,14 +2051,8 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 
 				setAdditionalSocketOptions(socketFD)
 
-				if w.config.deviceBinder != nil {
-					_, err := w.config.deviceBinder.BindToDevice(socketFD)
-					if err != nil {
-						controlErr = errors.Tracef("BindToDevice failed: %s", err)
-						return
-					}
-				} else if splitUpstreamInterfaceName != "" {
-					err := tun.BindToDevice(socketFD, splitUpstreamInterfaceName)
+				if deviceBinder != nil {
+					_, err := deviceBinder.BindToDevice(socketFD)
 					if err != nil {
 						controlErr = errors.Tracef("BindToDevice failed: %s", err)
 						return
@@ -2260,12 +2290,13 @@ type InproxyWebRTCDialParameters struct {
 	RootObfuscationSecret    inproxy.ObfuscationSecret
 	UseMediaStreams          bool
 	TrafficShapingParameters *inproxy.TrafficShapingParameters
-	DoDTLSRandomization      bool
+	DTLSFingerprint          string
 }
 
 // MakeInproxyWebRTCDialParameters generates new InproxyWebRTCDialParameters.
 func MakeInproxyWebRTCDialParameters(
-	p parameters.ParametersAccessor) (*InproxyWebRTCDialParameters, error) {
+	p parameters.ParametersAccessor,
+	isProxy bool) (*InproxyWebRTCDialParameters, error) {
 
 	rootObfuscationSecret, err := inproxy.GenerateRootObfuscationSecret()
 	if err != nil {
@@ -2295,14 +2326,83 @@ func MakeInproxyWebRTCDialParameters(
 		}
 	}
 
-	doDTLSRandomization := p.WeightedCoinFlip(parameters.InproxyDTLSRandomizationProbability)
+	// Clients select a DTLS fingerprint now. Proxies select later, once they
+	// receive the ClientRootObfuscationSecret.
+
+	var dtlsFingerprint string
+	if !isProxy {
+		isOffer := true
+		dtlsFingerprint, err = selectDTLSFingerprint(
+			p, rootObfuscationSecret, isOffer)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
 
 	return &InproxyWebRTCDialParameters{
 		RootObfuscationSecret:    rootObfuscationSecret,
 		UseMediaStreams:          useMediaStreams,
 		TrafficShapingParameters: trafficSharingParams,
-		DoDTLSRandomization:      doDTLSRandomization,
+		DTLSFingerprint:          dtlsFingerprint,
 	}, nil
+}
+
+// selectDTLSFingerprint selects a DTLS fingerprint following the same
+// two-tier pattern as selectTLSProfile: randomized fingerprints are selected
+// with probability InproxyDTLSFingerprintSelectRandomizedProbability, and
+// parrot (mimicry) fingerprints are selected otherwise.
+//
+// Clients and proxies select their replayable DTLS fingerprints
+// deterministically from the same client root obfuscation secret, using
+// distinct offer and answer contexts.
+//
+// Limitation: the proxy selects its DTLS fingerprint using its local
+// protocol.SupportedDTLSFingerprints and tactics parameters. If a client
+// replays the same ClientRootObfuscationSecret against a different proxy
+// whose SupportedDTLSFingerprints list has been upgraded, downgraded, or
+// reordered, the proxy's fingerprint choice will not be the same as on the
+// original dial, even though the PRNG seed is identical.
+func selectDTLSFingerprint(
+	p parameters.ParametersAccessor,
+	clientRootObfuscationSecret inproxy.ObfuscationSecret,
+	isOffer bool) (string, error) {
+
+	PRNG, err := inproxy.DeriveDTLSFingerprintPRNG(
+		clientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+
+	limitFingerprints := p.DTLSFingerprintsWithPRNG(
+		parameters.InproxyLimitDTLSFingerprints,
+		PRNG)
+
+	randomizedFingerprints := make([]string, 0)
+	parrotFingerprints := make([]string, 0)
+
+	for _, fp := range protocol.SupportedDTLSFingerprints {
+		if len(limitFingerprints) > 0 && !common.Contains(limitFingerprints, fp) {
+			continue
+		}
+		if protocol.DTLSFingerprintIsRandomized(fp) {
+			randomizedFingerprints = append(randomizedFingerprints, fp)
+		} else {
+			parrotFingerprints = append(parrotFingerprints, fp)
+		}
+	}
+
+	if len(randomizedFingerprints) > 0 &&
+		(len(parrotFingerprints) == 0 ||
+			PRNG.FlipWeightedCoin(
+				p.Float(parameters.InproxyDTLSFingerprintSelectRandomizedProbability))) {
+		return randomizedFingerprints[PRNG.Intn(len(randomizedFingerprints))], nil
+	}
+
+	if len(parrotFingerprints) == 0 {
+		return "", nil
+	}
+
+	return parrotFingerprints[PRNG.Intn(len(parrotFingerprints))], nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -2312,9 +2412,15 @@ func (dialParams *InproxyWebRTCDialParameters) GetMetrics() common.LogFields {
 	// higher level, and, for client in-proxy tunnel dials, is part of the
 	// main tunnel dial parameters.
 
-	// Currently, all WebRTC metrics are delivered via
-	// inproxy.ClientConn/WebRTCConn GetMetrics.
-	return common.LogFields{}
+	// All WebRTC metrics except inproxy_webrtc_dtls_fingerprint are
+	// delivered via inproxy.ClientConn/WebRTCConn GetMetrics.
+	logFields := common.LogFields{}
+
+	if dialParams.DTLSFingerprint != "" {
+		logFields["inproxy_webrtc_dtls_fingerprint"] = dialParams.DTLSFingerprint
+	}
+
+	return logFields
 }
 
 // InproxyNATStateManager manages the NAT-related network topology state for
@@ -2464,6 +2570,15 @@ type inproxyUDPConn struct {
 
 func newInproxyUDPConn(ctx context.Context, config *Config) (net.PacketConn, error) {
 
+	// Use Config.splitDeviceBinder, with wired up logging, not the public
+	// config.DeviceBinder; other tunnel-core dials do this indirectly via
+	// psiphon.DialConfig.
+	//
+	// In a split-interface in-proxy proxy configuration, this WebRTC/STUN
+	// mux socket must be bound to the downstream (non-upstream) interface
+	// so that STUN, ICE, and data channel traffic flow through it.
+	deviceBinder := config.splitDeviceBinder()
+
 	listen := &net.ListenConfig{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var controlErr error
@@ -2473,12 +2588,8 @@ func newInproxyUDPConn(ctx context.Context, config *Config) (net.PacketConn, err
 
 				setAdditionalSocketOptions(socketFD)
 
-				// Use config.deviceBinder, with wired up logging, not
-				// config.DeviceBinder; other tunnel-core dials do this
-				// indirectly via psiphon.DialConfig.
-
-				if config.deviceBinder != nil {
-					_, err := config.deviceBinder.BindToDevice(socketFD)
+				if deviceBinder != nil {
+					_, err := deviceBinder.BindToDevice(socketFD)
 					if err != nil {
 						controlErr = errors.Tracef("BindToDevice failed: %s", err)
 						return

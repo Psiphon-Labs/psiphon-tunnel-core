@@ -2456,7 +2456,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectBurstFields := runConfig.doBurstMonitor
 	expectTCPPortForwardDial := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest)
 	expectTCPDataTransfer := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest) && !expectTrafficFailure && !runConfig.doSplitTunnel
-	expectDomainPortForward := runConfig.doTunneledDomainRequest
+	expectDomainPortForward := runConfig.doTunneledDomainRequest && !expectTrafficFailure && !runConfig.doSplitTunnel
 	// Even with expectTrafficFailure, DNS port forwards will succeed
 	expectUDPDataTransfer := runConfig.doTunneledNTPRequest
 	expectQUICVersion := ""
@@ -3450,6 +3450,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_proxy_peak_upstream_bytes_per_second",
 			"inproxy_proxy_peak_downstream_bytes_per_second",
 			"inproxy_proxy_is_priority",
+			"inproxy_proxy_webrtc_dtls_fingerprint",
 
 			// These ProxyMetrics fields are not populated in this test:
 			// "inproxy_proxy_client_build_rev",
@@ -3463,7 +3464,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
 			"inproxy_broker_resolved_ip_address",
-			"inproxy_webrtc_randomize_dtls",
+			"inproxy_webrtc_dtls_fingerprint",
 			"inproxy_webrtc_use_media_streams",
 			"inproxy_webrtc_padded_messages_sent",
 			"inproxy_webrtc_padded_messages_received",
@@ -3656,6 +3657,19 @@ func checkExpectedServerTunnelLogFields(
 		if !checkTCPMetric(fields[name].(float64)) {
 			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
 		}
+	}
+
+	if fields["total_domain_port_forward_count_tcp"] == nil {
+		return fmt.Errorf("missing expected field 'total_domain_port_forward_count_tcp'")
+	}
+	if expectDomainPortForward {
+		if fields["total_domain_port_forward_count_tcp"].(float64) <= 0 {
+			return fmt.Errorf("unexpected total_domain_port_forward_count_tcp '%v'",
+				fields["total_domain_port_forward_count_tcp"])
+		}
+	} else if fields["total_domain_port_forward_count_tcp"].(float64) != 0 {
+		return fmt.Errorf("unexpected total_domain_port_forward_count_tcp '%v'",
+			fields["total_domain_port_forward_count_tcp"])
 	}
 
 	var checkUDPMetric func(float64) bool
@@ -5272,7 +5286,7 @@ func storePruneServerEntriesTest(
 		t.Fatalf("Commit failed: %s", err)
 	}
 
-	resolver := psiphon.NewResolver(clientConfig, true)
+	resolver := psiphon.NewResolver(clientConfig, nil)
 	defer resolver.Stop()
 	clientConfig.SetResolver(resolver)
 

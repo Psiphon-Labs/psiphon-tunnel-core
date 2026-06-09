@@ -147,7 +147,7 @@ func TestDuplicateSessionID(t *testing.T) {
 		t.Fatalf("Commit failed: %s", err)
 	}
 
-	resolver := psiphon.NewResolver(clientConfig, true)
+	resolver := psiphon.NewResolver(clientConfig, nil)
 	defer resolver.Stop()
 	clientConfig.SetResolver(resolver)
 

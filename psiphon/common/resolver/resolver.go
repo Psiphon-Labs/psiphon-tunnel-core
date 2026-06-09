@@ -29,6 +29,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -503,9 +504,10 @@ func (r *Resolver) MakeResolveParameters(
 // resolve the IP address of the host, selects an IP if there are multiple,
 // and returns a rejoined IP:port.
 //
-// IP address selection is random. When network input is set
-// to "ip4"/"tcp4"/"udp4" or "ip6"/"tcp6"/"udp6", selection is limited to
-// IPv4 or IPv6, respectively.
+// When network input is set to "ip4"/"tcp4"/"udp4" or
+// "ip6"/"tcp6"/"udp6", selection prefers a random IPv4 or IPv6 address,
+// respectively. If no preferred-family answer is available, selection falls
+// back to any random resolved IP.
 func (r *Resolver) ResolveAddress(
 	ctx context.Context,
 	networkID string,
@@ -521,15 +523,20 @@ func (r *Resolver) ResolveAddress(
 	if err != nil {
 		return "", errors.Trace(err)
 	}
+	if len(IPs) == 0 {
+		return "", errors.TraceNew("no IP address")
+	}
 
 	// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
 	permutedIndexes := prng.Perm(len(IPs))
 
-	index := 0
+	index := permutedIndexes[0]
 
+	// Prefer selecting IP from specified family, but don't fail if one is
+	// not found. Fall back to any IP as dial may succeed due to
+	// NAT64/464XLAT/etc.
 	switch network {
 	case "ip4", "tcp4", "udp4":
-		index = -1
 		for _, i := range permutedIndexes {
 			if IPs[i].To4() != nil {
 				index = i
@@ -537,17 +544,12 @@ func (r *Resolver) ResolveAddress(
 			}
 		}
 	case "ip6", "tcp6", "udp6":
-		index = -1
 		for _, i := range permutedIndexes {
 			if IPs[i].To4() == nil {
 				index = i
 				break
 			}
 		}
-	}
-
-	if index == -1 {
-		return "", errors.Tracef("no IP for network '%s'", network)
 	}
 
 	return net.JoinHostPort(IPs[index].String(), port), nil
@@ -1237,10 +1239,18 @@ func (r *Resolver) updateNetworkState(networkID string) {
 				host = systemServer
 				systemServer = net.JoinHostPort(systemServer, resolverDNSPort)
 			}
-			if net.ParseIP(host) == nil {
+
+			addr, err := netip.ParseAddr(host)
+
+			// Link-local DNS IPv6 servers are accepted only with a zone/scope ID.
+			if err != nil ||
+				addr.IsUnspecified() ||
+				addr.IsMulticast() ||
+				(addr.IsLinkLocalUnicast() && (addr.Is4() || addr.Zone() == "")) {
+
 				// Log warning and proceed without this DNS server.
 				r.networkConfig.logWarning(
-					errors.TraceNew("invalid DNS server IP address"))
+					errors.TraceNew("invalid DNS server address"))
 				continue
 			}
 			systemServers = append(systemServers, systemServer)
@@ -1349,8 +1359,8 @@ func (r *Resolver) newResolverConn(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		serverIP := net.ParseIP(serverIPStr)
-		if serverIP != nil && serverIP.To4() != nil {
+		serverIP, err := netip.ParseAddr(serverIPStr) // May have zone
+		if err == nil && serverIP.Is4() {
 			synthesized := r.networkConfig.IPv6Synthesize(serverIPStr)
 			if synthesized != "" && net.ParseIP(synthesized) != nil {
 				serverAddr = net.JoinHostPort(synthesized, port)

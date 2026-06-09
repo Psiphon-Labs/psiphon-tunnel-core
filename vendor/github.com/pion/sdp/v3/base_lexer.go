@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 )
 
@@ -21,6 +22,7 @@ func (e syntaxError) Error() string {
 	if e.i < 0 {
 		e.i = 0
 	}
+
 	return fmt.Sprintf("sdp: syntax error at pos %d: %s", e.i, strconv.QuoteToASCII(e.s[e.i:e.i+1]))
 }
 
@@ -38,6 +40,7 @@ func (l *baseLexer) unreadByte() error {
 		return errDocumentStart
 	}
 	l.pos--
+
 	return nil
 }
 
@@ -47,6 +50,7 @@ func (l *baseLexer) readByte() (byte, error) {
 	}
 	ch := l.value[l.pos]
 	l.pos++
+
 	return ch, nil
 }
 
@@ -64,7 +68,7 @@ func (l *baseLexer) nextLine() error {
 	}
 }
 
-func (l *baseLexer) readWhitespace() error {
+func (l *baseLexer) readWhitespace() error { //notlint:cyclop
 	for {
 		ch, err := l.readByte()
 		if errors.Is(err, io.EOF) {
@@ -78,7 +82,7 @@ func (l *baseLexer) readWhitespace() error {
 	}
 }
 
-func (l *baseLexer) readUint64Field() (i uint64, err error) {
+func (l *baseLexer) readUint64Field() (i uint64, err error) { //nolint:cyclop
 	for {
 		ch, err := l.readByte()
 		if errors.Is(err, io.EOF) && i > 0 {
@@ -91,6 +95,7 @@ func (l *baseLexer) readUint64Field() (i uint64, err error) {
 			if err := l.unreadByte(); err != nil {
 				return i, err
 			}
+
 			break
 		}
 
@@ -98,6 +103,7 @@ func (l *baseLexer) readUint64Field() (i uint64, err error) {
 			if err := l.readWhitespace(); err != nil {
 				return i, err
 			}
+
 			break
 		}
 
@@ -130,7 +136,7 @@ func (l *baseLexer) readUint64Field() (i uint64, err error) {
 	return i, nil
 }
 
-// Returns next field on this line or empty string if no more fields on line
+// Returns next field on this line or empty string if no more fields on line.
 func (l *baseLexer) readField() (string, error) {
 	start := l.pos
 	var stop int
@@ -147,6 +153,7 @@ func (l *baseLexer) readField() (string, error) {
 			if err := l.unreadByte(); err != nil {
 				return "", err
 			}
+
 			break
 		}
 
@@ -154,13 +161,28 @@ func (l *baseLexer) readField() (string, error) {
 			if err := l.readWhitespace(); err != nil {
 				return "", err
 			}
+
 			break
 		}
 	}
+
 	return l.value[start:stop], nil
 }
 
-// Returns symbols until line end
+func (l *lexer) readRequiredField() (string, error) {
+	field, err := l.readField()
+	if err != nil {
+		return "", err
+	}
+
+	if field == "" {
+		return "", errFieldMissing
+	}
+
+	return field, nil
+}
+
+// Returns symbols until line end.
 func (l *baseLexer) readLine() (string, error) {
 	start := l.pos
 	trim := 1
@@ -207,10 +229,5 @@ func isNewline(ch byte) bool { return ch == '\n' || ch == '\r' }
 func isWhitespace(ch byte) bool { return ch == ' ' || ch == '\t' }
 
 func anyOf(element string, data ...string) bool {
-	for _, v := range data {
-		if element == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(data, element)
 }

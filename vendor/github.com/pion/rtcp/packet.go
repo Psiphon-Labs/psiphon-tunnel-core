@@ -3,13 +3,15 @@
 
 package rtcp
 
-// Packet represents an RTCP packet, a protocol used for out-of-band statistics and control information for an RTP session
+// Packet represents an RTCP packet, a protocol used for out-of-band statistics
+// and control information for an RTP session.
 type Packet interface {
 	// DestinationSSRC returns an array of SSRC values that this packet refers to.
 	DestinationSSRC() []uint32
 
 	Marshal() ([]byte, error)
 	Unmarshal(rawPacket []byte) error
+	MarshalSize() int
 }
 
 // Unmarshal takes an entire udp datagram (which may consist of multiple RTCP packets) and
@@ -40,7 +42,7 @@ func Unmarshal(rawData []byte) ([]Packet, error) {
 	}
 }
 
-// Marshal takes an array of Packets and serializes them to a single buffer
+// Marshal takes an array of Packets and serializes them to a single buffer.
 func Marshal(packets []Packet) ([]byte, error) {
 	out := make([]byte, 0)
 	for _, p := range packets {
@@ -50,26 +52,29 @@ func Marshal(packets []Packet) ([]byte, error) {
 		}
 		out = append(out, data...)
 	}
+
 	return out, nil
 }
 
 // unmarshal is a factory which pulls the first RTCP packet from a bytestream,
 // and returns it's parsed representation, and the amount of data that was processed.
+//
+//nolint:cyclop
 func unmarshal(rawData []byte) (packet Packet, bytesprocessed int, err error) {
-	var h Header
+	var header Header
 
-	err = h.Unmarshal(rawData)
+	err = header.Unmarshal(rawData)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	bytesprocessed = int(h.Length+1) * 4
+	bytesprocessed = int(header.Length+1) * 4
 	if bytesprocessed > len(rawData) {
 		return nil, 0, errPacketTooShort
 	}
 	inPacket := rawData[:bytesprocessed]
 
-	switch h.Type {
+	switch header.Type {
 	case TypeSenderReport:
 		packet = new(SenderReport)
 
@@ -83,7 +88,7 @@ func unmarshal(rawData []byte) (packet Packet, bytesprocessed int, err error) {
 		packet = new(Goodbye)
 
 	case TypeTransportSpecificFeedback:
-		switch h.Count {
+		switch header.Count {
 		case FormatTLN:
 			packet = new(TransportLayerNack)
 		case FormatRRR:
@@ -97,7 +102,7 @@ func unmarshal(rawData []byte) (packet Packet, bytesprocessed int, err error) {
 		}
 
 	case TypePayloadSpecificFeedback:
-		switch h.Count {
+		switch header.Count {
 		case FormatPLI:
 			packet = new(PictureLossIndication)
 		case FormatSLI:
@@ -112,6 +117,9 @@ func unmarshal(rawData []byte) (packet Packet, bytesprocessed int, err error) {
 
 	case TypeExtendedReport:
 		packet = new(ExtendedReport)
+
+	case TypeApplicationDefined:
+		packet = new(ApplicationDefined)
 
 	default:
 		packet = new(RawPacket)

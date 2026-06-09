@@ -60,3 +60,15 @@ func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, erro
 	}
 	return listener, false, nil
 }
+
+// IsUnixDomainSocketsSupported reports whether the local proxies can listen on
+// Unix domain sockets on this platform, and whether abstract namespace sockets
+// (paths with a leading "@") are supported. On Android and Linux, both are
+// supported.
+func IsUnixDomainSocketsSupported() (supported, abstractSupported bool) {
+	return true, true
+}
+
+func makeLocalProxyUnixListener(path string) (net.Listener, error) {
+	return listenUnixProxySocket(path)
+}

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package codecs
@@ -12,6 +12,8 @@ var (
 	errTooManySpatialLayers = errors.New("too many spatial layers")
 	errUnhandledNALUType    = errors.New("NALU Type is unhandled")
 
-	// AV1 Errors
-	errIsKeyframeAndFragment = errors.New("bits Z and N are set. Not possible to have OBU be tail fragment and be keyframe")
+	// AV1 Errors.
+	errIsKeyframeAndFragment = errors.New(
+		"bits Z and N are set. Not possible to have OBU be tail fragment and be keyframe",
+	)
 )

@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.24.12" ]
+        go: [ "1.26.3" ]
         test-type: [ "detector", "coverage", "protobuf", "memory", "custom-build-tags", "code-vetting", "dependency-check" ]
 
     runs-on: ${{ matrix.os }}-latest
@@ -50,7 +50,6 @@ jobs:
       - name: Install coverage tools
         if: ${{ matrix.test-type == 'coverage' }}
         run: |
-          go install github.com/axw/gocov/gocov@latest
           go install github.com/modocache/gover@latest
           go install github.com/mattn/goveralls@latest
           go install golang.org/x/tools/cmd/cover@latest
@@ -82,6 +81,7 @@ jobs:
           go test -v -race ./psiphon/common/dsl
           go test -v -race ./psiphon/common/fragmentor
           go test -v -race ./psiphon/common/inproxy
+          go test -v -race ./psiphon/common/light
           go test -v -race ./psiphon/common/regen
           go test -v -race ./psiphon/common/monotime
           go test -v -race ./psiphon/common/obfuscator
@@ -118,6 +118,7 @@ jobs:
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
           go test -v -covermode=count -coverprofile=dsl.coverprofile ./psiphon/common/dsl
           go test -v -covermode=count -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
+          go test -v -covermode=count -coverprofile=light.coverprofile ./psiphon/common/light
           go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator

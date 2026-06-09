@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -85,10 +85,10 @@ func (c *Address) marshalInto(b []byte) []byte {
 func (c Address) marshalSize() (size int) {
 	size = len(c.Address)
 	if c.TTL != nil {
-		size += 1 + lenUint(uint64(*c.TTL))
+		size += 1 + lenUint(uint64(*c.TTL)) //nolint:gosec // G115
 	}
 	if c.Range != nil {
-		size += 1 + lenUint(uint64(*c.Range))
+		size += 1 + lenUint(uint64(*c.Range)) //nolint:gosec // G115
 	}
 
 	return
@@ -111,6 +111,7 @@ func (b Bandwidth) marshalInto(d []byte) []byte {
 		d = append(d, "X-"...)
 	}
 	d = append(append(d, b.Type...), ':')
+
 	return strconv.AppendUint(d, b.Bandwidth, 10)
 }
 
@@ -120,6 +121,7 @@ func (b Bandwidth) marshalSize() (size int) {
 	}
 
 	size += len(b.Type) + 1 + lenUint(b.Bandwidth)
+
 	return
 }
 
@@ -145,14 +147,14 @@ type Attribute struct {
 	Value string
 }
 
-// NewPropertyAttribute constructs a new attribute
+// NewPropertyAttribute constructs a new attribute.
 func NewPropertyAttribute(key string) Attribute {
 	return Attribute{
 		Key: key,
 	}
 }
 
-// NewAttribute constructs a new attribute
+// NewAttribute constructs a new attribute.
 func NewAttribute(key, value string) Attribute {
 	return Attribute{
 		Key:   key,

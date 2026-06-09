@@ -94,7 +94,7 @@ func TestServerEntryExchange(t *testing.T) {
 		t.Fatalf("Commit failed: %s", err)
 	}
 
-	resolver := NewResolver(config, true)
+	resolver := NewResolver(config, config.deviceBinder())
 	defer resolver.Stop()
 	config.SetResolver(resolver)
 

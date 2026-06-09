@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -65,6 +66,7 @@ var (
 	datastoreDSLLastUntunneledFetchTimeKey      = "dslLastUntunneledDiscoverTime"
 	datastoreDSLLastTunneledFetchTimeKey        = "dslLastTunneledDiscoverTime"
 	datastoreDSLLastActiveOSLsTimeKey           = "dslLastActiveOSLsTime"
+	datastoreStoredLightProxyKey                = "storedLightProxy"
 
 	datastoreServerEntryFetchGCThreshold = 10
 
@@ -3023,6 +3025,69 @@ func DSLStoreOSLState(ID dsl.OSLID, state []byte) error {
 func DSLDeleteOSLState(ID dsl.OSLID) error {
 	err := deleteBucketValue(datastoreDSLOSLStatesBucket, ID)
 	return errors.Trace(err)
+}
+
+// StoredLightProxy is the light proxy entry and tracker that is stored after
+// import for use in future sessions.
+type StoredLightProxy struct {
+	LightProxyEntry        []byte
+	LightProxyEntryTracker int64
+}
+
+// StoreLightProxy updates the latest stored light proxy.
+func StoreLightProxy(lightProxy *StoredLightProxy) bool {
+
+	// TODO: add a StoredLightProxy.TTL?
+
+	if lightProxy == nil {
+		NoticeWarning("StoreLightProxy failed: missing light proxy")
+		return false
+	}
+
+	// Ensure the proxy entry is valid before storing.
+	_, err := light.DecodeAndValidateProxyEntry(lightProxy.LightProxyEntry)
+	if err != nil {
+		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		return false
+	}
+
+	jsonLightProxy, err := json.Marshal(lightProxy)
+	if err != nil {
+		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		return false
+	}
+
+	err = SetKeyValue(datastoreStoredLightProxyKey, string(jsonLightProxy))
+	if err != nil {
+		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		return false
+	}
+
+	return true
+}
+
+// LoadLightProxy returns the latest stored light proxy, or nil if there is
+// none.
+func LoadLightProxy() *StoredLightProxy {
+
+	jsonLightProxy, err := GetKeyValue(datastoreStoredLightProxyKey)
+	if err != nil {
+		NoticeWarning("LoadLightProxy failed: %v", errors.Trace(err))
+		return nil
+	}
+
+	if jsonLightProxy == "" {
+		return nil
+	}
+
+	var lightProxy *StoredLightProxy
+	err = json.Unmarshal([]byte(jsonLightProxy), &lightProxy)
+	if err != nil {
+		NoticeWarning("LoadLightProxy failed: %v", errors.Trace(err))
+		return nil
+	}
+
+	return lightProxy
 }
 
 func setTimeKeyValue(key string, timevalue time.Time) error {

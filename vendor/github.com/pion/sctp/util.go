@@ -16,10 +16,11 @@ func padByte(in []byte, cnt int) []byte {
 		cnt = 0
 	}
 	padding := make([]byte, cnt)
+
 	return append(in, padding...)
 }
 
-// Serial Number Arithmetic (RFC 1982)
+// Serial Number Arithmetic (RFC 1982).
 func sna32LT(i1, i2 uint32) bool {
 	return (i1 < i2 && i2-i1 < 1<<31) || (i1 > i2 && i1-i2 > 1<<31)
 }

@@ -25,10 +25,13 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -602,4 +605,224 @@ func buildDirectoryTree(basePath, directoryName string) (*FileTree, error) {
 	}
 
 	return tree, nil
+}
+
+// stubDeviceBinder is a DeviceBinder that records the device name it would
+// bind to and returns it as the device info.
+type stubDeviceBinder struct{ name string }
+
+func (b *stubDeviceBinder) BindToDevice(int) (string, error) { return b.name, nil }
+
+func TestConfigDeviceBinderGetters(t *testing.T) {
+
+	host := &stubDeviceBinder{name: "host"}
+	upstream := &stubDeviceBinder{name: "upstream"}
+	downstream := &stubDeviceBinder{name: "downstream"}
+
+	// No split, no host binder: both getters return nil.
+	c := &Config{}
+	if c.deviceBinder() != nil {
+		t.Fatalf("deviceBinder: expected nil")
+	}
+	if c.splitDeviceBinder() != nil {
+		t.Fatalf("splitDeviceBinder: expected nil")
+	}
+
+	// No split, host binder set: both getters return the host binder.
+	c = &Config{hostDeviceBinder: host}
+	if c.deviceBinder() != host {
+		t.Fatalf("deviceBinder: expected host binder")
+	}
+	if c.splitDeviceBinder() != host {
+		t.Fatalf("splitDeviceBinder: expected fallback to host binder")
+	}
+
+	// Split mode: deviceBinder() returns upstream, splitDeviceBinder()
+	// returns downstream. hostDeviceBinder must be nil under the Commit
+	// validation in this mode, but the getter logic doesn't depend on
+	// that.
+	c = &Config{
+		splitInterface: &splitInterfaceState{
+			upstreamDeviceBinder:   upstream,
+			downstreamDeviceBinder: downstream,
+			upstreamInterfaceName:  "iface-up",
+		},
+	}
+	if c.deviceBinder() != upstream {
+		t.Fatalf("deviceBinder: expected upstream binder in split mode")
+	}
+	if c.splitDeviceBinder() != downstream {
+		t.Fatalf("splitDeviceBinder: expected downstream binder in split mode")
+	}
+	if c.splitInterfaceUpstreamInterfaceName() != "iface-up" {
+		t.Fatalf("splitInterfaceUpstreamInterfaceName: unexpected value %q",
+			c.splitInterfaceUpstreamInterfaceName())
+	}
+}
+
+func TestConfigGetSplitResolverFallback(t *testing.T) {
+
+	c := &Config{}
+
+	// Both nil to start.
+	if c.GetResolver() != nil {
+		t.Fatalf("GetResolver: expected nil before SetResolver")
+	}
+	if c.GetSplitResolver() != nil {
+		t.Fatalf("GetSplitResolver: expected nil before SetResolver/SetSplitResolver")
+	}
+
+	// Main set, split unset: GetSplitResolver falls back to the main one.
+	main := &resolver.Resolver{}
+	c.SetResolver(main)
+	if got := c.GetSplitResolver(); got != main {
+		t.Fatalf("GetSplitResolver: expected fallback to main resolver, got %p", got)
+	}
+
+	// Both set: GetSplitResolver returns the split one.
+	split := &resolver.Resolver{}
+	c.SetSplitResolver(split)
+	if got := c.GetSplitResolver(); got != split {
+		t.Fatalf("GetSplitResolver: expected split resolver, got %p", got)
+	}
+	if got := c.GetResolver(); got != main {
+		t.Fatalf("GetResolver: expected main resolver, got %p", got)
+	}
+}
+
+// newUnixSocketTestConfig returns a minimal committable Config configured to
+// use Unix domain sockets, for validation testing.
+func newUnixSocketTestConfig(t *testing.T) *Config {
+	dataRootDirectory, err := ioutil.TempDir("", "psiphon-uds-config-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dataRootDirectory) })
+
+	return &Config{
+		DataRootDirectory:       dataRootDirectory,
+		PropagationChannelId:    "ABCDEFGH",
+		SponsorId:               "12345678",
+		ClientVersion:           "1",
+		UseUnixDomainSockets:    true,
+		LocalSocksProxyUnixPath: filepath.Join(dataRootDirectory, "socks.sock"),
+		LocalHttpProxyUnixPath:  filepath.Join(dataRootDirectory, "http.sock"),
+	}
+}
+
+func TestUseUnixDomainSocketsValidation(t *testing.T) {
+
+	supported := runtime.GOOS == "darwin" || runtime.GOOS == "android" || runtime.GOOS == "linux"
+
+	t.Run("both paths set and valid", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		err := config.Commit(false)
+		if supported {
+			if err != nil {
+				t.Fatalf("expected success, got: %s", err)
+			}
+		} else {
+			if err == nil {
+				t.Fatalf("expected error on unsupported platform")
+			}
+		}
+	})
+
+	if !supported {
+		// The remaining cases assert path-specific validation behavior that
+		// is only reached on supported platforms.
+		return
+	}
+
+	t.Run("missing socks path with socks enabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = ""
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for missing LocalSocksProxyUnixPath")
+		}
+	})
+
+	t.Run("missing http path with http enabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalHttpProxyUnixPath = ""
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for missing LocalHttpProxyUnixPath")
+		}
+	})
+
+	t.Run("missing socks path but socks disabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = ""
+		config.DisableLocalSocksProxy = true
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("expected success when SOCKS proxy is disabled, got: %s", err)
+		}
+	})
+
+	t.Run("path too long", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = "/" + strings.Repeat("a", 200)
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for over-length path")
+		}
+	})
+
+	t.Run("relative path rejected", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = "socks.sock"
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for relative path")
+		}
+	})
+
+	t.Run("abstract namespace path", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalSocksProxyUnixPath = "@psiphon-socks"
+		config.LocalHttpProxyUnixPath = "@psiphon-http"
+		err := config.Commit(false)
+		if runtime.GOOS == "darwin" {
+			if err == nil {
+				t.Fatalf("expected error for abstract namespace socket on Darwin")
+			}
+		} else {
+			if err != nil {
+				t.Fatalf("expected success for abstract namespace socket, got: %s", err)
+			}
+		}
+	})
+
+	t.Run("disabled flag ignores paths", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.UseUnixDomainSockets = false
+		config.LocalSocksProxyUnixPath = ""
+		config.LocalHttpProxyUnixPath = ""
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("expected success when UseUnixDomainSockets is off, got: %s", err)
+		}
+	})
+
+	t.Run("identical paths with both proxies enabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalHttpProxyUnixPath = config.LocalSocksProxyUnixPath
+		err := config.Commit(false)
+		if err == nil {
+			t.Fatalf("expected error for identical enabled proxy paths")
+		}
+	})
+
+	t.Run("identical paths but one proxy disabled", func(t *testing.T) {
+		config := newUnixSocketTestConfig(t)
+		config.LocalHttpProxyUnixPath = config.LocalSocksProxyUnixPath
+		config.DisableLocalHTTPProxy = true
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("expected success when only one proxy is enabled, got: %s", err)
+		}
+	})
 }

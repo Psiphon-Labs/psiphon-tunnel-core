@@ -51,3 +51,15 @@ func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, erro
 	}
 	return listener, false, nil
 }
+
+// IsUnixDomainSocketsSupported reports whether the local proxies can listen on
+// Unix domain sockets on this platform, and whether abstract namespace sockets
+// (paths with a leading "@") are supported. On Darwin, Unix domain sockets are
+// supported but the abstract namespace is not.
+func IsUnixDomainSocketsSupported() (supported, abstractSupported bool) {
+	return true, false
+}
+
+func makeLocalProxyUnixListener(path string) (net.Listener, error) {
+	return listenUnixProxySocket(path)
+}

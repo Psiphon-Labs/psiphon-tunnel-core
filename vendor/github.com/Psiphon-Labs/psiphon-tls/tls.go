@@ -4,6 +4,18 @@
 
 // Package tls partially implements TLS 1.2, as specified in RFC 5246,
 // and TLS 1.3, as specified in RFC 8446.
+//
+// # FIPS 140-3 mode
+//
+// When the program is in [FIPS 140-3 mode], this package behaves as if only
+// SP 800-140C and SP 800-140D approved protocol versions, cipher suites,
+// signature algorithms, certificate public key types and sizes, and key
+// exchange and derivation algorithms were implemented. Others are silently
+// ignored and not negotiated, or rejected. This set may depend on the
+// algorithms supported by the FIPS 140-3 Go Cryptographic Module selected with
+// GOFIPS140, and may change across Go versions.
+//
+// [FIPS 140-3 mode]: https://go.dev/doc/security/fips140
 package tls
 
 // BUG(agl): The crypto/tls package only implements some countermeasures
@@ -12,7 +24,6 @@ package tls
 // https://www.imperialviolet.org/2013/02/04/luckythirteen.html.
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -22,13 +33,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-
-	// [Psiphon]
-	// "internal/godebug"
-
 	"net"
 	"os"
 	"strings"
+
+	"github.com/Psiphon-Labs/psiphon-tls/internal/fips140deps/godebug"
 )
 
 // Server returns a new TLS server side connection
@@ -37,9 +46,8 @@ import (
 // at least one certificate or else set GetCertificate.
 func Server(conn net.Conn, config *Config) *Conn {
 
-	// [Psiphon]
-	// Initialize traffic recording to facilitate playback in the case of
-	// passthrough.
+	// [Psiphon] Initialize traffic recording to facilitate playback in the
+	// case of passthrough.
 	if config.PassthroughAddress != "" {
 		conn = newRecorderConn(conn)
 	}
@@ -255,8 +263,7 @@ func LoadX509KeyPair(certFile, keyFile string) (Certificate, error) {
 	return X509KeyPair(certPEMBlock, keyPEMBlock)
 }
 
-// [Psiphon]
-// var x509keypairleaf = godebug.New("x509keypairleaf")
+var x509keypairleaf = godebug.New("x509keypairleaf")
 
 // X509KeyPair parses a public/private key pair from a pair of
 // PEM encoded data. On successful return, Certificate.Leaf will be populated.
@@ -318,13 +325,11 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 		return fail(err)
 	}
 
-	// [Psiphon] godebug is not supported, but we
-	// populate Leaf in X509KeyPair by default.
-	// if x509keypairleaf.Value() != "0" {
-	cert.Leaf = x509Cert
-	// } else {
-	// 	x509keypairleaf.IncNonDefault()
-	// }
+	if x509keypairleaf.Value() != "0" {
+		cert.Leaf = x509Cert
+	} else {
+		x509keypairleaf.IncNonDefault()
+	}
 
 	cert.PrivateKey, err = parsePrivateKey(keyDERBlock.Bytes)
 	if err != nil {
@@ -337,7 +342,7 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 		if !ok {
 			return fail(errors.New("tls: private key type does not match public key type"))
 		}
-		if pub.N.Cmp(priv.N) != 0 {
+		if !priv.PublicKey.Equal(pub) {
 			return fail(errors.New("tls: private key does not match public key"))
 		}
 	case *ecdsa.PublicKey:
@@ -345,7 +350,7 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 		if !ok {
 			return fail(errors.New("tls: private key type does not match public key type"))
 		}
-		if pub.X.Cmp(priv.X) != 0 || pub.Y.Cmp(priv.Y) != 0 {
+		if !priv.PublicKey.Equal(pub) {
 			return fail(errors.New("tls: private key does not match public key"))
 		}
 	case ed25519.PublicKey:
@@ -353,7 +358,7 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 		if !ok {
 			return fail(errors.New("tls: private key type does not match public key type"))
 		}
-		if !bytes.Equal(priv.Public().(ed25519.PublicKey), pub) {
+		if !priv.Public().(ed25519.PublicKey).Equal(pub) {
 			return fail(errors.New("tls: private key does not match public key"))
 		}
 	default:

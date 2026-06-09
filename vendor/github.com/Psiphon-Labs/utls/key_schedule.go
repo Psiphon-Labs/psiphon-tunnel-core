@@ -7,94 +7,27 @@ package tls
 import (
 	"crypto/ecdh"
 	"crypto/hmac"
+	"crypto/mlkem"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
 
-	"golang.org/x/crypto/cryptobyte"
-	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/Psiphon-Labs/utls/internal/mlkem768"
+	"github.com/Psiphon-Labs/utls/internal/tls13"
 )
 
 // This file contains the functions necessary to compute the TLS 1.3 key
 // schedule. See RFC 8446, Section 7.
 
-const (
-	resumptionBinderLabel         = "res binder"
-	clientEarlyTrafficLabel       = "c e traffic"
-	clientHandshakeTrafficLabel   = "c hs traffic"
-	serverHandshakeTrafficLabel   = "s hs traffic"
-	clientApplicationTrafficLabel = "c ap traffic"
-	serverApplicationTrafficLabel = "s ap traffic"
-	exporterLabel                 = "exp master"
-	resumptionLabel               = "res master"
-	trafficUpdateLabel            = "traffic upd"
-)
-
-// expandLabel implements HKDF-Expand-Label from RFC 8446, Section 7.1.
-func (c *cipherSuiteTLS13) expandLabel(secret []byte, label string, context []byte, length int) []byte {
-	var hkdfLabel cryptobyte.Builder
-	hkdfLabel.AddUint16(uint16(length))
-	hkdfLabel.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) {
-		b.AddBytes([]byte("tls13 "))
-		b.AddBytes([]byte(label))
-	})
-	hkdfLabel.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) {
-		b.AddBytes(context)
-	})
-	hkdfLabelBytes, err := hkdfLabel.Bytes()
-	if err != nil {
-		// Rather than calling BytesOrPanic, we explicitly handle this error, in
-		// order to provide a reasonable error message. It should be basically
-		// impossible for this to panic, and routing errors back through the
-		// tree rooted in this function is quite painful. The labels are fixed
-		// size, and the context is either a fixed-length computed hash, or
-		// parsed from a field which has the same length limitation. As such, an
-		// error here is likely to only be caused during development.
-		//
-		// NOTE: another reasonable approach here might be to return a
-		// randomized slice if we encounter an error, which would break the
-		// connection, but avoid panicking. This would perhaps be safer but
-		// significantly more confusing to users.
-		panic(fmt.Errorf("failed to construct HKDF label: %s", err))
-	}
-	out := make([]byte, length)
-	n, err := hkdf.Expand(c.hash.New, secret, hkdfLabelBytes).Read(out)
-	if err != nil || n != length {
-		panic("tls: HKDF-Expand-Label invocation failed unexpectedly")
-	}
-	return out
-}
-
-// deriveSecret implements Derive-Secret from RFC 8446, Section 7.1.
-func (c *cipherSuiteTLS13) deriveSecret(secret []byte, label string, transcript hash.Hash) []byte {
-	if transcript == nil {
-		transcript = c.hash.New()
-	}
-	return c.expandLabel(secret, label, transcript.Sum(nil), c.hash.Size())
-}
-
-// extract implements HKDF-Extract with the cipher suite hash.
-func (c *cipherSuiteTLS13) extract(newSecret, currentSecret []byte) []byte {
-	if newSecret == nil {
-		newSecret = make([]byte, c.hash.Size())
-	}
-	return hkdf.Extract(c.hash.New, newSecret, currentSecret)
-}
-
 // nextTrafficSecret generates the next traffic secret, given the current one,
 // according to RFC 8446, Section 7.2.
 func (c *cipherSuiteTLS13) nextTrafficSecret(trafficSecret []byte) []byte {
-	return c.expandLabel(trafficSecret, trafficUpdateLabel, nil, c.hash.Size())
+	return tls13.ExpandLabel(c.hash.New, trafficSecret, "traffic upd", nil, c.hash.Size())
 }
 
 // trafficKey generates traffic keys according to RFC 8446, Section 7.3.
 func (c *cipherSuiteTLS13) trafficKey(trafficSecret []byte) (key, iv []byte) {
-	key = c.expandLabel(trafficSecret, "key", nil, c.keyLen)
-	iv = c.expandLabel(trafficSecret, "iv", nil, aeadNonceLength)
+	key = tls13.ExpandLabel(c.hash.New, trafficSecret, "key", nil, c.keyLen)
+	iv = tls13.ExpandLabel(c.hash.New, trafficSecret, "iv", nil, aeadNonceLength)
 	return
 }
 
@@ -102,7 +35,7 @@ func (c *cipherSuiteTLS13) trafficKey(trafficSecret []byte) (key, iv []byte) {
 // to RFC 8446, Section 4.4.4. See sections 4.4 and 4.2.11.2 for the baseKey
 // selection.
 func (c *cipherSuiteTLS13) finishedHash(baseKey []byte, transcript hash.Hash) []byte {
-	finishedKey := c.expandLabel(baseKey, "finished", nil, c.hash.Size())
+	finishedKey := tls13.ExpandLabel(c.hash.New, baseKey, "finished", nil, c.hash.Size())
 	verifyData := hmac.New(c.hash.New, finishedKey)
 	verifyData.Write(transcript.Sum(nil))
 	return verifyData.Sum(nil)
@@ -110,98 +43,25 @@ func (c *cipherSuiteTLS13) finishedHash(baseKey []byte, transcript hash.Hash) []
 
 // exportKeyingMaterial implements RFC5705 exporters for TLS 1.3 according to
 // RFC 8446, Section 7.5.
-func (c *cipherSuiteTLS13) exportKeyingMaterial(masterSecret []byte, transcript hash.Hash) func(string, []byte, int) ([]byte, error) {
-	expMasterSecret := c.deriveSecret(masterSecret, exporterLabel, transcript)
+func (c *cipherSuiteTLS13) exportKeyingMaterial(s *tls13.MasterSecret, transcript hash.Hash) func(string, []byte, int) ([]byte, error) {
+	expMasterSecret := s.ExporterMasterSecret(transcript)
 	return func(label string, context []byte, length int) ([]byte, error) {
-		secret := c.deriveSecret(expMasterSecret, label, nil)
-		h := c.hash.New()
-		h.Write(context)
-		return c.expandLabel(secret, "exporter", h.Sum(nil), length), nil
+		return expMasterSecret.Exporter(label, context, length), nil
 	}
 }
 
-// [UTLS SECTION BEGIN]
-// The standard crypto/tls library only allows for a single curve to be used.
-// We need to support multiple curves to parrot TLS profiles such as Firefox.
-//
-//	type keySharePrivateKeys struct {
-//		curveID CurveID
-//		ecdhe   *ecdh.PrivateKey
-//		kyber   *mlkem768.DecapsulationKey
-//	}
 type keySharePrivateKeys struct {
-	ecdhe map[CurveID]*ecdh.PrivateKey
-	kyber map[CurveID]*mlkem768.DecapsulationKey
-}
+	curveID    CurveID
+	ecdhe      *ecdh.PrivateKey
+	mlkem      *mlkem.DecapsulationKey768
+	mlkemEcdhe *ecdh.PrivateKey // [uTLS] seperate ecdhe key for pq keyshare in line with Chrome, instead of reusing ecdhe key like stdlib
 
-func NewKeySharePrivateKeys() *keySharePrivateKeys {
-	return &keySharePrivateKeys{
-		ecdhe: make(map[CurveID]*ecdh.PrivateKey),
-		kyber: make(map[CurveID]*mlkem768.DecapsulationKey),
-	}
-}
-
-func (ks *keySharePrivateKeys) getEcdheKey(curveID CurveID) (*ecdh.PrivateKey, error) {
-	if ks.ecdhe == nil {
-		return nil, errors.New("tls: keySharePrivateKeys not initialized")
-	}
-	return ks.ecdhe[curveID], nil
-}
-
-func (ks *keySharePrivateKeys) setEcdheKey(curveID CurveID, key *ecdh.PrivateKey) error {
-	if ks.ecdhe == nil {
-		return errors.New("tls: keySharePrivateKeys not initialized")
-	}
-	ks.ecdhe[curveID] = key
-	return nil
-}
-
-func (ks *keySharePrivateKeys) getKyberKey(curveID CurveID) (*mlkem768.DecapsulationKey, error) {
-	if ks.kyber == nil {
-		return nil, errors.New("tls: keySharePrivateKeys not initialized")
-	}
-	return ks.kyber[curveID], nil
-}
-
-func (ks *keySharePrivateKeys) setKyberKey(curveID CurveID, key *mlkem768.DecapsulationKey) error {
-	if ks.kyber == nil {
-		return errors.New("tls: keySharePrivateKeys not initialized")
-	}
-	ks.kyber[curveID] = key
-	return nil
-}
-
-// [UTLS SECTION END]
-
-// kyberDecapsulate implements decapsulation according to Kyber Round 3.
-func kyberDecapsulate(dk *mlkem768.DecapsulationKey, c []byte) ([]byte, error) {
-	K, err := mlkem768.Decapsulate(dk, c)
-	if err != nil {
-		return nil, err
-	}
-	return kyberSharedSecret(K, c), nil
-}
-
-// kyberEncapsulate implements encapsulation according to Kyber Round 3.
-func kyberEncapsulate(ek []byte) (c, ss []byte, err error) {
-	c, ss, err = mlkem768.Encapsulate(ek)
-	if err != nil {
-		return nil, nil, err
-	}
-	return c, kyberSharedSecret(ss, c), nil
-}
-
-func kyberSharedSecret(K, c []byte) []byte {
-	// Package mlkem768 implements ML-KEM, which compared to Kyber removed a
-	// final hashing step. Compute SHAKE-256(K || SHA3-256(c), 32) to match Kyber.
-	// See https://words.filippo.io/mlkem768/#bonus-track-using-a-ml-kem-implementation-as-kyber-v3.
-	h := sha3.NewShake256()
-	h.Write(K)
-	ch := sha3.Sum256(c)
-	h.Write(ch[:])
-	out := make([]byte, 32)
-	h.Read(out)
-	return out
+	// [uTLS] ecdheFallback stores private keys for additional (non-preferred)
+	// key shares sent in the ClientHello. When a spec advertises multiple
+	// classical key shares (e.g. X25519 + P256 in Firefox profiles), only the
+	// first is stored in ecdhe. If the server selects a different curve,
+	// establishHandshakeKeys falls back to this map.
+	ecdheFallback map[CurveID]*ecdh.PrivateKey
 }
 
 const x25519PublicKeySize = 32

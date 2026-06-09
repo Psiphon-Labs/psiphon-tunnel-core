@@ -690,7 +690,12 @@ var uniqueUserParams = append(
 
 var connectedRequestParams = append(
 	[]requestParamSpec{
-		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_id", isAnyString, requestParamOptional},
+		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -700,6 +705,11 @@ var updateOnConnectedParamNames = append(
 	[]string{
 		"last_connected",
 		"establishment_duration",
+		"light_proxy_id",
+		"light_proxy_entry_tracker",
+		"light_proxy_dial_IPv4",
+		"light_proxy_dial_IPv6",
+		"light_proxy_dial_failed",
 	},
 	fragmentor.GetUpstreamMetricsNames()...)
 
@@ -1459,6 +1469,8 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_stun_server_RFC5780", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_randomize_dtls", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_dtls_fingerprint", isAnyString, requestParamOptional},
+	{"inproxy_proxy_webrtc_dtls_fingerprint", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_padded_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_padded_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_decoy_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
