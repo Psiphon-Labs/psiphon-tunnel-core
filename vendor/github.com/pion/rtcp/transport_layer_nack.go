@@ -14,7 +14,7 @@ import (
 type PacketBitmap uint16
 
 // NackPair is a wire-representation of a collection of
-// Lost RTP packets
+// Lost RTP packets.
 type NackPair struct {
 	// ID of lost packets
 	PacketID uint16
@@ -37,7 +37,7 @@ type TransportLayerNack struct {
 }
 
 // NackPairsFromSequenceNumbers generates a slice of NackPair from a list of SequenceNumbers
-// This handles generating the proper values for PacketID/LostPackets
+// This handles generating the proper values for PacketID/LostPackets.
 func NackPairsFromSequenceNumbers(sequenceNumbers []uint16) (pairs []NackPair) {
 	if len(sequenceNumbers) == 0 {
 		return []NackPair{}
@@ -50,12 +50,14 @@ func NackPairsFromSequenceNumbers(sequenceNumbers []uint16) (pairs []NackPair) {
 		if m-nackPair.PacketID > 16 {
 			pairs = append(pairs, *nackPair)
 			nackPair = &NackPair{PacketID: m}
+
 			continue
 		}
 
 		nackPair.LostPackets |= 1 << (m - nackPair.PacketID - 1)
 	}
 	pairs = append(pairs, *nackPair)
+
 	return
 }
 
@@ -79,13 +81,15 @@ func (n *NackPair) Range(f func(seqno uint16) bool) {
 	}
 }
 
-// PacketList returns a list of Nack'd packets that's referenced by a NackPair
+// PacketList returns a list of Nack'd packets that's referenced by a NackPair.
 func (n *NackPair) PacketList() []uint16 {
 	out := make([]uint16, 0, 17)
 	n.Range(func(seqno uint16) bool {
 		out = append(out, seqno)
+
 		return true
 	})
+
 	return out
 }
 
@@ -94,7 +98,7 @@ const (
 	nackOffset = 8
 )
 
-// Marshal encodes the TransportLayerNack in binary
+// Marshal encodes the TransportLayerNack in binary.
 func (p TransportLayerNack) Marshal() ([]byte, error) {
 	if len(p.Nacks)+tlnLength > math.MaxUint8 {
 		return nil, errTooManyReports
@@ -116,42 +120,44 @@ func (p TransportLayerNack) Marshal() ([]byte, error) {
 	return append(hData, rawPacket...), nil
 }
 
-// Unmarshal decodes the TransportLayerNack from binary
+// Unmarshal decodes the TransportLayerNack from binary.
 func (p *TransportLayerNack) Unmarshal(rawPacket []byte) error {
 	if len(rawPacket) < (headerLength + ssrcLength) {
 		return errPacketTooShort
 	}
 
-	var h Header
-	if err := h.Unmarshal(rawPacket); err != nil {
+	var header Header
+	if err := header.Unmarshal(rawPacket); err != nil {
 		return err
 	}
 
-	if len(rawPacket) < (headerLength + int(4*h.Length)) {
+	if len(rawPacket) < (headerLength + int(4*header.Length)) {
 		return errPacketTooShort
 	}
 
-	if h.Type != TypeTransportSpecificFeedback || h.Count != FormatTLN {
+	if header.Type != TypeTransportSpecificFeedback || header.Count != FormatTLN {
 		return errWrongType
 	}
 
 	// The FCI field MUST contain at least one and MAY contain more than one Generic NACK
-	if 4*h.Length <= nackOffset {
+	if 4*header.Length <= nackOffset {
 		return errBadLength
 	}
 
 	p.SenderSSRC = binary.BigEndian.Uint32(rawPacket[headerLength:])
 	p.MediaSSRC = binary.BigEndian.Uint32(rawPacket[headerLength+ssrcLength:])
-	for i := headerLength + nackOffset; i < (headerLength + int(h.Length*4)); i += 4 {
+	for i := headerLength + nackOffset; i < (headerLength + int(header.Length*4)); i += 4 {
 		p.Nacks = append(p.Nacks, NackPair{
 			binary.BigEndian.Uint16(rawPacket[i:]),
 			PacketBitmap(binary.BigEndian.Uint16(rawPacket[i+2:])),
 		})
 	}
+
 	return nil
 }
 
-func (p *TransportLayerNack) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (p *TransportLayerNack) MarshalSize() int {
 	return headerLength + nackOffset + (len(p.Nacks) * 4)
 }
 
@@ -160,7 +166,7 @@ func (p *TransportLayerNack) Header() Header {
 	return Header{
 		Count:  FormatTLN,
 		Type:   TypeTransportSpecificFeedback,
-		Length: uint16((p.len() / 4) - 1),
+		Length: uint16((p.MarshalSize() / 4) - 1), //nolint:gosec // G115
 	}
 }
 
@@ -171,6 +177,7 @@ func (p TransportLayerNack) String() string {
 	for _, i := range p.Nacks {
 		out += fmt.Sprintf("\t%d\t%b\n", i.PacketID, i.LostPackets)
 	}
+
 	return out
 }
 

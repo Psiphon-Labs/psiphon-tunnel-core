@@ -141,7 +141,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("SetParameters failed: %s", err)
 	}
 
-	resolver := NewResolver(clientConfig, true)
+	resolver := NewResolver(clientConfig, clientConfig.deviceBinder())
 	defer resolver.Stop()
 	clientConfig.SetResolver(resolver)
 

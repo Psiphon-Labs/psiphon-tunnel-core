@@ -39,7 +39,7 @@ var buildDate string
 // -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=`git config --get remote.origin.url`
 var buildRepo string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=`git rev-parse --short HEAD`
+// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=`git rev-parse --short=10 HEAD`
 var buildRev string
 
 // -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=`go version | perl -ne '/go version (.*?) / && print $1'`

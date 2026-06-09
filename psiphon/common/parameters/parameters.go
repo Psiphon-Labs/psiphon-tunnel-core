@@ -457,7 +457,9 @@ const (
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyClientRelayedPacketRequestTimeout"
 	InproxyClientDSLRequestTimeout                     = "InproxyClientDSLRequestTimeout"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
-	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
+	InproxyLimitDTLSFingerprintsProbability            = "InproxyLimitDTLSFingerprintsProbability"
+	InproxyLimitDTLSFingerprints                       = "InproxyLimitDTLSFingerprints"
+	InproxyDTLSFingerprintSelectRandomizedProbability  = "InproxyDTLSFingerprintSelectRandomizedProbability"
 	InproxyWebRTCMediaStreamsProbability               = "InproxyWebRTCMediaStreamsProbability"
 	InproxyWebRTCDataChannelTrafficShapingProbability  = "InproxyWebRTCDataChannelTrafficShapingProbability"
 	InproxyWebRTCDataChannelTrafficShapingParameters   = "InproxyWebRTCDataChannelTrafficShapingParameters"
@@ -583,6 +585,13 @@ const (
 	SSHChannelWindowSize                               = "SSHChannelWindowSize"
 	SSHPacketTunnelChannelWindowSize                   = "SSHPacketTunnelChannelWindowSize"
 	DisableServerEntriesReporter                       = "DisableServerEntriesReporter"
+	LightProxyDisable                                  = "LightProxyDisable"
+	LightProxyCustomHostNameRegexes                    = "LightProxyCustomHostNameRegexes"
+	LightProxyCustomHostNameProbability                = "LightProxyCustomHostNameProbability"
+	LightProxyUseRecommendedSNIProbability             = "LightProxyUseRecommendedSNIProbability"
+	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
+	LightProxyDialTimeout                              = "LightProxyDialTimeout"
+	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 
 	// Retired parameters
 
@@ -591,6 +600,7 @@ const (
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
 	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
 	DestinationBytesMetricsASN                = "DestinationBytesMetricsASN"
+	InproxyDTLSRandomizationProbability       = "InproxyDTLSRandomizationProbability"
 )
 
 const (
@@ -620,8 +630,8 @@ var defaultParameters = map[string]struct {
 	NetworkLatencyMultiplierMax:    {value: 3.0, minimum: 1.0},
 	NetworkLatencyMultiplierLambda: {value: 2.0, minimum: 0.001},
 
-	TacticsWaitPeriod:        {value: 10 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
-	TacticsRetryPeriod:       {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	TacticsWaitPeriod:        {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	TacticsRetryPeriod:       {value: 2 * time.Second, minimum: 1 * time.Millisecond},
 	TacticsRetryPeriodJitter: {value: 0.3, minimum: 0.0},
 	TacticsTimeout:           {value: 2 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
@@ -1113,6 +1123,9 @@ var defaultParameters = map[string]struct {
 	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
+	InproxyLimitDTLSFingerprintsProbability:            {value: 1.0, minimum: 0.0},
+	InproxyLimitDTLSFingerprints:                       {value: protocol.DTLSFingerprints{}},
+	InproxyDTLSFingerprintSelectRandomizedProbability:  {value: 0.25, minimum: 0.0},
 	InproxyWebRTCMediaStreamsProbability:               {value: 0.0, minimum: 0.0},
 	InproxyWebRTCDataChannelTrafficShapingProbability:  {value: 0.5, minimum: 0.0},
 	InproxyWebRTCDataChannelTrafficShapingParameters:   {value: InproxyTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
@@ -1249,6 +1262,14 @@ var defaultParameters = map[string]struct {
 	SSHPacketTunnelChannelWindowSize: {value: 0, minimum: 0},
 
 	DisableServerEntriesReporter: {value: false},
+
+	LightProxyDisable:                      {value: false},
+	LightProxyCustomHostNameRegexes:        {value: RegexStrings{}},
+	LightProxyCustomHostNameProbability:    {value: 0.0, minimum: 0.0},
+	LightProxyUseRecommendedSNIProbability: {value: 0.5, minimum: 0.0},
+	LightProxyTunnelInactiveThreshold:      {value: 30 * time.Second, minimum: 0 * time.Millisecond},
+	LightProxyDialTimeout:                  {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	LightProxyLimitDestinationAddresses:    {value: []string{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -2226,6 +2247,38 @@ func (p ParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUI
 	value := protocol.LabeledQUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
+}
+
+// DTLSFingerprints returns a protocol.DTLSFingerprints parameter value,
+// applying a probability gate as with TLSProfiles and QUICVersions.
+func (p ParametersAccessor) DTLSFingerprints(name string) protocol.DTLSFingerprints {
+	return p.DTLSFingerprintsWithPRNG(name, prng.DefaultPRNG())
+}
+
+// DTLSFingerprintsWithPRNG returns a protocol.DTLSFingerprints parameter
+// value, applying a probability gate as with TLSProfiles and QUICVersions.
+func (p ParametersAccessor) DTLSFingerprintsWithPRNG(name string, PRNG *prng.PRNG) protocol.DTLSFingerprints {
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !PRNG.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.DTLSFingerprints)
+				if ok {
+					value := make(protocol.DTLSFingerprints, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.DTLSFingerprints{}
+	p.snapshot.getValue(name, &value)
+	return value
 }
 
 // TransferURLs returns a TransferURLs parameter value.

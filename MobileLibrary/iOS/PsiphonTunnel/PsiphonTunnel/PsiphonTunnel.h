@@ -215,6 +215,20 @@ WWAN or vice versa or VPN state changed
  @param port  The port number.
  */
 - (void)onListeningHttpProxyPort:(NSInteger)port;
+/*!
+ Called when tunnel-core is listening for the local SOCKS proxy on a Unix
+ domain socket. Emitted instead of onListeningSocksProxyPort when
+ UseUnixDomainSockets is enabled.
+ @param path  The Unix domain socket path.
+ */
+- (void)onListeningSocksProxyUnixPath:(NSString * _Nonnull)path;
+/*!
+ Called when tunnel-core is listening for the local HTTP proxy on a Unix
+ domain socket. Emitted instead of onListeningHttpProxyPort when
+ UseUnixDomainSockets is enabled.
+ @param path  The Unix domain socket path.
+ */
+- (void)onListeningHttpProxyUnixPath:(NSString * _Nonnull)path;
 
 /*!
  Called when a error occurs when trying to utilize a configured upstream proxy.
@@ -330,6 +344,11 @@ followed by a tunnel-core shutdown.
  @param region The server region received.
  */
 - (void)onConnectedServerRegion:(NSString * _Nonnull)region;
+
+/*!
+ Called when a light proxy is available to use even when no tunnel is connected.
+ */
+- (void)onLightProxyAvailable;
 
 @end
 

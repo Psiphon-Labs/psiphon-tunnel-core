@@ -158,7 +158,9 @@ func runTestProcessSDP() error {
 
 	if prefilterCandidateCount == 0 ||
 		metrics.iceCandidateCount == prefilterCandidateCount ||
-		metrics.allowedGeoIPMismatches != 0 {
+		metrics.allowedGeoIPMismatches != 0 ||
+		metrics.iceRegion != "" ||
+		metrics.iceASN != "" {
 		return errors.TraceNew("unexpected SDP metrics")
 	}
 
@@ -194,7 +196,9 @@ func runTestProcessSDP() error {
 
 	if prefilterCandidateCount == 0 ||
 		metrics.iceCandidateCount != prefilterCandidateCount ||
-		metrics.allowedGeoIPMismatches == 0 {
+		metrics.allowedGeoIPMismatches == 0 ||
+		metrics.iceRegion != "BB" ||
+		metrics.iceASN != "2" {
 		return errors.TraceNew("unexpected SDP metrics")
 	}
 

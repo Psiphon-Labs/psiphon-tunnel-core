@@ -46,7 +46,9 @@ const omit = "omit"
 // PacketBuffer is initialized with. This function will
 // modify the PacketBuffer.bytes slice to exclude those
 // bytes that have been written into.
-func (b *packetBuffer) write(v interface{}) error { //nolint:gocognit
+//
+//nolint:gocognit,cyclop
+func (b *packetBuffer) write(v any) error {
 	value := reflect.ValueOf(v)
 
 	// Indirect is safe to call on non-pointers, and
@@ -67,7 +69,7 @@ func (b *packetBuffer) write(v interface{}) error { //nolint:gocognit
 			return errWrongMarshalSize
 		}
 		if value.CanInterface() {
-			binary.BigEndian.PutUint16(b.bytes, uint16(value.Uint()))
+			binary.BigEndian.PutUint16(b.bytes, uint16(value.Uint())) //nolint:gosec // G115
 		}
 		b.bytes = b.bytes[2:]
 	case reflect.Uint32:
@@ -75,7 +77,7 @@ func (b *packetBuffer) write(v interface{}) error { //nolint:gocognit
 			return errWrongMarshalSize
 		}
 		if value.CanInterface() {
-			binary.BigEndian.PutUint32(b.bytes, uint32(value.Uint()))
+			binary.BigEndian.PutUint32(b.bytes, uint32(value.Uint())) //nolint:gosec // G115
 		}
 		b.bytes = b.bytes[4:]
 	case reflect.Uint64:
@@ -117,6 +119,7 @@ func (b *packetBuffer) write(v interface{}) error { //nolint:gocognit
 	default:
 		return errBadStructMemberType
 	}
+
 	return nil
 }
 
@@ -124,7 +127,9 @@ func (b *packetBuffer) write(v interface{}) error { //nolint:gocognit
 // the structure passed as a parameter. This function will
 // modify the PacketBuffer.bytes slice to exclude those
 // bytes that have already been read.
-func (b *packetBuffer) read(v interface{}) error { //nolint:gocognit
+//
+//nolint:gocognit,cyclop
+func (b *packetBuffer) read(v any) error {
 	ptr := reflect.ValueOf(v)
 	if ptr.Kind() != reflect.Ptr {
 		return errBadReadParameter
@@ -187,7 +192,10 @@ func (b *packetBuffer) read(v interface{}) error { //nolint:gocognit
 			}
 			if value.Field(i).CanInterface() {
 				field := value.Field(i)
-				newFieldPtr := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())) //nolint:gosec // This is the only way to get a typed pointer to a structure's field
+				newFieldPtr := reflect.NewAt(
+					//nolint:gosec // This is the only way to get a typed pointer to a structure's field
+					field.Type(), unsafe.Pointer(field.UnsafeAddr()),
+				)
 				if err := b.read(newFieldPtr.Interface()); err != nil {
 					return err
 				}
@@ -203,25 +211,28 @@ func (b *packetBuffer) read(v interface{}) error { //nolint:gocognit
 	default:
 		return errBadStructMemberType
 	}
+
 	return nil
 }
 
 // Consumes `size` bytes and returns them as an
-// independent PacketBuffer
+// independent PacketBuffer.
 func (b *packetBuffer) split(size int) packetBuffer {
 	if size > len(b.bytes) {
 		size = len(b.bytes)
 	}
 	newBuffer := packetBuffer{bytes: b.bytes[:size]}
+
 	b.bytes = b.bytes[size:]
+
 	return newBuffer
 }
 
 // Returns the size that a structure will encode into.
 // This fuction doesn't check that Write() will succeed,
 // and may return unexpectedly large results for those
-// structures that Write() will fail on
-func wireSize(v interface{}) int {
+// structures that Write() will fail on.
+func wireSize(v any) int {
 	value := reflect.ValueOf(v)
 	// Indirect is safe to call on non-pointers, and
 	// will simply return the same value in such cases
@@ -254,5 +265,6 @@ func wireSize(v interface{}) int {
 	default:
 		size = int(value.Type().Size())
 	}
+
 	return size
 }

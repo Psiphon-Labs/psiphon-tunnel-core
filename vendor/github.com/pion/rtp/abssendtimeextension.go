@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package rtp
 
 import (
+	"io"
 	"time"
 )
 
@@ -15,6 +16,24 @@ const (
 // http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
 type AbsSendTimeExtension struct {
 	Timestamp uint64
+}
+
+// MarshalSize returns the size of the AbsSendTimeExtension once marshaled.
+func (t AbsSendTimeExtension) MarshalSize() int {
+	return absSendTimeExtensionSize
+}
+
+// MarshalTo marshals the extension to the given buffer.
+// Returns io.ErrShortBuffer if buf is too small.
+func (t AbsSendTimeExtension) MarshalTo(buf []byte) (int, error) {
+	if len(buf) < absSendTimeExtensionSize {
+		return 0, io.ErrShortBuffer
+	}
+	buf[0] = byte(t.Timestamp & 0xFF0000 >> 16)
+	buf[1] = byte(t.Timestamp & 0xFF00 >> 8)
+	buf[2] = byte(t.Timestamp & 0xFF)
+
+	return absSendTimeExtensionSize, nil
 }
 
 // Marshal serializes the members to buffer.
@@ -32,6 +51,7 @@ func (t *AbsSendTimeExtension) Unmarshal(rawData []byte) error {
 		return errTooSmall
 	}
 	t.Timestamp = uint64(rawData[0])<<16 | uint64(rawData[1])<<8 | uint64(rawData[2])
+
 	return nil
 }
 
@@ -58,7 +78,7 @@ func NewAbsSendTimeExtension(sendTime time.Time) *AbsSendTimeExtension {
 func toNtpTime(t time.Time) uint64 {
 	var s uint64
 	var f uint64
-	u := uint64(t.UnixNano())
+	u := uint64(t.UnixNano()) // nolint: gosec // G115 false positive
 	s = u / 1e9
 	s += 0x83AA7E80 // offset in seconds between unix epoch and ntp epoch
 	f = u % 1e9
@@ -77,5 +97,5 @@ func toTime(t uint64) time.Time {
 	s -= 0x83AA7E80
 	u := s*1e9 + f
 
-	return time.Unix(0, int64(u))
+	return time.Unix(0, int64(u)) // nolint: gosec // G115 false positive
 }

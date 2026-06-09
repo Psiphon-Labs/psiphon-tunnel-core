@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package sdp
@@ -33,6 +33,7 @@ func (t Timing) String() string {
 
 func (t Timing) marshalInto(b []byte) []byte {
 	b = append(strconv.AppendUint(b, t.StartTime, 10), ' ')
+
 	return strconv.AppendUint(b, t.StopTime, 10)
 }
 

@@ -101,6 +101,9 @@ type clientHelloMsg struct {
 
 	// [Psiphon] Seed is used to randomize the marshalled Client Hello.
 	marshalerPRNGSeed *prng.Seed
+
+	// extensions are only populated on the server-side of a handshake
+	extensions []uint16
 }
 
 func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
@@ -376,8 +379,7 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 
 func (m *clientHelloMsg) marshal() ([]byte, error) {
 
-	// [Psiphon]
-	// Randomize the Client Hello.
+	// [Psiphon] Randomize the Client Hello.
 	if m.marshalerPRNGSeed != nil {
 		return m.marshalRandomizedNoECH()
 	}
@@ -385,12 +387,10 @@ func (m *clientHelloMsg) marshal() ([]byte, error) {
 	return m.marshalMsg(false)
 }
 
-// [Psiphon]
+// [Psiphon] marshalRandomizedNoECH is a randomized variant of `marshalMsg(false)`.
+// The original Marshal is retained as-is to ease future merging.
 //
-// marshalRandomizedNoECH is a randomized variant of `marshalMsg(false)`. The original Marshal
-// is retained as-is to ease future merging.
-//
-// marshalRandomizedNoECH is idempotent given the same `clientHelloMsg.Seed`.
+// marshalRandomizedNoECH is not changed given the same `clientHelloMsg.Seed`.
 //
 // The offered cipher suites and algorithms are shuffled and truncated. Longer
 // lists are selected with higher probability. Extensions are shuffled.
@@ -854,6 +854,7 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 			return false
 		}
 		seenExts[extension] = true
+		m.extensions = append(m.extensions, extension)
 
 		switch extension {
 		case extensionServerName:
@@ -1046,6 +1047,10 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 				}
 				m.pskBinders = append(m.pskBinders, binder)
 			}
+		case extensionEncryptedClientHello:
+			if !extData.ReadBytes(&m.encryptedClientHello, len(extData)) {
+				return false
+			}
 		default:
 			// Ignore unknown extensions.
 			continue
@@ -1093,6 +1098,8 @@ func (m *clientHelloMsg) clone() *clientHelloMsg {
 		pskBinders:                       slices.Clone(m.pskBinders),
 		quicTransportParameters:          slices.Clone(m.quicTransportParameters),
 		encryptedClientHello:             slices.Clone(m.encryptedClientHello),
+		// [Psiphon] pointer copy; seed is immutable
+		marshalerPRNGSeed: m.marshalerPRNGSeed,
 	}
 }
 
@@ -1123,16 +1130,16 @@ type serverHelloMsg struct {
 	selectedGroup CurveID
 }
 
+// [Psiphon] Reorder ServerHello extensions to better match common
+// OpenSSL/BoringSSL emission order for mimicry and JA3S alignment.
+//
+// This intentionally diverges from upstream crypto/tls ordering.
+//
+// References:
+// - https://github.com/openssl/openssl/blob/2a5385511051d33be8d2b20d7669d8b1862fe510/ssl/statem/extensions.c#L119
+// - https://github.com/Psiphon-Labs/psiphon-tunnel-core/commit/995fc206a2f10ce4f5d53b4d80062319c104c313
 func (m *serverHelloMsg) marshal() ([]byte, error) {
 	var exts cryptobyte.Builder
-	if m.ocspStapling {
-		exts.AddUint16(extensionStatusRequest)
-		exts.AddUint16(0) // empty extension_data
-	}
-	if m.ticketSupported {
-		exts.AddUint16(extensionSessionTicket)
-		exts.AddUint16(0) // empty extension_data
-	}
 	if m.secureRenegotiationSupported {
 		exts.AddUint16(extensionRenegotiationInfo)
 		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
@@ -1141,8 +1148,20 @@ func (m *serverHelloMsg) marshal() ([]byte, error) {
 			})
 		})
 	}
-	if m.extendedMasterSecret {
-		exts.AddUint16(extensionExtendedMasterSecret)
+	if len(m.supportedPoints) > 0 {
+		exts.AddUint16(extensionSupportedPoints)
+		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+			exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddBytes(m.supportedPoints)
+			})
+		})
+	}
+	if m.ticketSupported {
+		exts.AddUint16(extensionSessionTicket)
+		exts.AddUint16(0) // empty extension_data
+	}
+	if m.ocspStapling {
+		exts.AddUint16(extensionStatusRequest)
 		exts.AddUint16(0) // empty extension_data
 	}
 	if len(m.alpnProtocol) > 0 {
@@ -1167,11 +1186,9 @@ func (m *serverHelloMsg) marshal() ([]byte, error) {
 			})
 		})
 	}
-	if m.supportedVersion != 0 {
-		exts.AddUint16(extensionSupportedVersions)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16(m.supportedVersion)
-		})
+	if m.extendedMasterSecret {
+		exts.AddUint16(extensionExtendedMasterSecret)
+		exts.AddUint16(0) // empty extension_data
 	}
 	if m.serverShare.group != 0 {
 		exts.AddUint16(extensionKeyShare)
@@ -1180,6 +1197,18 @@ func (m *serverHelloMsg) marshal() ([]byte, error) {
 			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 				exts.AddBytes(m.serverShare.data)
 			})
+		})
+	}
+	if m.selectedGroup != 0 {
+		exts.AddUint16(extensionKeyShare)
+		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+			exts.AddUint16(uint16(m.selectedGroup))
+		})
+	}
+	if m.supportedVersion != 0 {
+		exts.AddUint16(extensionSupportedVersions)
+		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+			exts.AddUint16(m.supportedVersion)
 		})
 	}
 	if m.selectedIdentityPresent {
@@ -1194,20 +1223,6 @@ func (m *serverHelloMsg) marshal() ([]byte, error) {
 		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 				exts.AddBytes(m.cookie)
-			})
-		})
-	}
-	if m.selectedGroup != 0 {
-		exts.AddUint16(extensionKeyShare)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16(uint16(m.selectedGroup))
-		})
-	}
-	if len(m.supportedPoints) > 0 {
-		exts.AddUint16(extensionSupportedPoints)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
-				exts.AddBytes(m.supportedPoints)
 			})
 		})
 	}
@@ -1385,6 +1400,7 @@ type encryptedExtensionsMsg struct {
 	quicTransportParameters []byte
 	earlyData               bool
 	echRetryConfigs         []byte
+	serverNameAck           bool
 }
 
 func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
@@ -1420,6 +1436,10 @@ func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
 					b.AddBytes(m.echRetryConfigs)
 				})
 			}
+			if m.serverNameAck {
+				b.AddUint16(extensionServerName)
+				b.AddUint16(0) // empty extension_data
+			}
 		})
 	})
 
@@ -1436,6 +1456,7 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 		return false
 	}
 
+	seenExts := make(map[uint16]bool)
 	for !extensions.Empty() {
 		var extension uint16
 		var extData cryptobyte.String
@@ -1443,6 +1464,11 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 			!extensions.ReadUint16LengthPrefixed(&extData) {
 			return false
 		}
+
+		if seenExts[extension] {
+			return false
+		}
+		seenExts[extension] = true
 
 		switch extension {
 		case extensionALPN:
@@ -1469,6 +1495,11 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 			if !extData.CopyBytes(m.echRetryConfigs) {
 				return false
 			}
+		case extensionServerName:
+			if len(extData) != 0 {
+				return false
+			}
+			m.serverNameAck = true
 		default:
 			// Ignore unknown extensions.
 			continue
@@ -2164,7 +2195,7 @@ func (m *certificateRequestMsg) unmarshal(data []byte) bool {
 		}
 		sigAndHashLen := uint16(data[0])<<8 | uint16(data[1])
 		data = data[2:]
-		if sigAndHashLen&1 != 0 {
+		if sigAndHashLen&1 != 0 || sigAndHashLen == 0 {
 			return false
 		}
 		if len(data) < int(sigAndHashLen) {

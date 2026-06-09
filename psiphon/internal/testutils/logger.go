@@ -27,6 +27,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
@@ -38,6 +39,7 @@ type TestLogger struct {
 	packetMetricsTimeout time.Duration
 	hasValidMetric       int32
 	hasInvalidMetric     int32
+	infoSampleRate       float64
 }
 
 func NewTestLogger() *TestLogger {
@@ -68,6 +70,14 @@ func NewTestLoggerWithMetricValidator(
 	return &TestLogger{
 		component:       component,
 		metricValidator: metricValidator,
+	}
+}
+
+func NewTestLoggerWithInfoSampling(
+	sampleRate float64) *TestLogger {
+
+	return &TestLogger{
+		infoSampleRate: sampleRate,
 	}
 }
 
@@ -169,6 +179,7 @@ func (logger *testLoggerTrace) log(priority, message string) {
 	if len(logger.logger.component) > 0 {
 		component = fmt.Sprintf("[%s]", logger.logger.component)
 	}
+	message = common.RedactIPAddressesString(message)
 	if len(logger.fields) == 0 {
 		fmt.Printf(
 			"[%s]%s %s: %s: %s\n",
@@ -199,6 +210,10 @@ func (logger *testLoggerTrace) Debug(args ...interface{}) {
 }
 
 func (logger *testLoggerTrace) Info(args ...interface{}) {
+	if logger.logger.infoSampleRate > 0 &&
+		!prng.FlipWeightedCoin(logger.logger.infoSampleRate) {
+		return
+	}
 	logger.log("INFO", fmt.Sprint(args...))
 }
 

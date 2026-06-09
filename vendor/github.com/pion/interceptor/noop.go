@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package interceptor
@@ -28,7 +28,8 @@ func (i *NoOp) BindLocalStream(_ *StreamInfo, writer RTPWriter) RTPWriter {
 // UnbindLocalStream is called when the Stream is removed. It can be used to clean up any data related to that track.
 func (i *NoOp) UnbindLocalStream(_ *StreamInfo) {}
 
-// BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
+// BindRemoteStream lets you modify any incoming RTP packets.
+// It is called once for per RemoteStream. The returned method
 // will be called once per rtp packet.
 func (i *NoOp) BindRemoteStream(_ *StreamInfo, reader RTPReader) RTPReader {
 	return reader

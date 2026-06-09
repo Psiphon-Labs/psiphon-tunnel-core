@@ -8,7 +8,8 @@ import (
 	"fmt"
 )
 
-// The RapidResynchronizationRequest packet informs the encoder about the loss of an undefined amount of coded video data belonging to one or more pictures
+// The RapidResynchronizationRequest packet informs the encoder about the loss of
+// an undefined amount of coded video data belonging to one or more pictures.
 type RapidResynchronizationRequest struct {
 	// SSRC of sender
 	SenderSSRC uint32
@@ -27,7 +28,7 @@ const (
 	rrrMediaOffset  = 4
 )
 
-// Marshal encodes the RapidResynchronizationRequest in binary
+// Marshal encodes the RapidResynchronizationRequest in binary.
 func (p RapidResynchronizationRequest) Marshal() ([]byte, error) {
 	/*
 	 * RRR does not require parameters.  Therefore, the length field MUST be
@@ -35,7 +36,7 @@ func (p RapidResynchronizationRequest) Marshal() ([]byte, error) {
 	 *
 	 * The semantics of this FB message is independent of the payload type.
 	 */
-	rawPacket := make([]byte, p.len())
+	rawPacket := make([]byte, p.MarshalSize())
 	packetBody := rawPacket[headerLength:]
 
 	binary.BigEndian.PutUint32(packetBody, p.SenderSSRC)
@@ -50,7 +51,7 @@ func (p RapidResynchronizationRequest) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the RapidResynchronizationRequest from binary
+// Unmarshal decodes the RapidResynchronizationRequest from binary.
 func (p *RapidResynchronizationRequest) Unmarshal(rawPacket []byte) error {
 	if len(rawPacket) < (headerLength + (ssrcLength * 2)) {
 		return errPacketTooShort
@@ -67,10 +68,12 @@ func (p *RapidResynchronizationRequest) Unmarshal(rawPacket []byte) error {
 
 	p.SenderSSRC = binary.BigEndian.Uint32(rawPacket[headerLength:])
 	p.MediaSSRC = binary.BigEndian.Uint32(rawPacket[headerLength+ssrcLength:])
+
 	return nil
 }
 
-func (p *RapidResynchronizationRequest) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (p *RapidResynchronizationRequest) MarshalSize() int {
 	return headerLength + rrrHeaderLength
 }
 

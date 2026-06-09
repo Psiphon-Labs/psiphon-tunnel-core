@@ -23,13 +23,14 @@ import (
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // :                         report blocks                         :
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type ExtendedReport struct {
 	SenderSSRC uint32 `fmt:"0x%X"`
 	Reports    []ReportBlock
 }
 
 // ReportBlock represents a single report within an ExtendedReport
-// packet
+// packet.
 type ReportBlock interface {
 	DestinationSSRC() []uint32
 	setupBlockHeader()
@@ -53,7 +54,7 @@ type XRHeader struct {
 	BlockLength  uint16
 }
 
-// BlockTypeType specifies the type of report in a report block
+// BlockTypeType specifies the type of report in a report block.
 type BlockTypeType uint8
 
 // Extended Report block types from RFC 3611.
@@ -67,7 +68,7 @@ const (
 	VoIPMetricsReportBlockType           = 7 // RFC 3611, section 4.7
 )
 
-// String converts the Extended report block types into readable strings
+// String converts the Extended report block types into readable strings.
 func (t BlockTypeType) String() string {
 	switch t {
 	case LossRLEReportBlockType:
@@ -85,6 +86,7 @@ func (t BlockTypeType) String() string {
 	case VoIPMetricsReportBlockType:
 		return "VoIPMetricsReportBlockType"
 	}
+
 	return fmt.Sprintf("invalid value %d", t)
 }
 
@@ -108,6 +110,7 @@ func (t BlockTypeType) String() string {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |          chunk n-1            |             chunk n           |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type rleReportBlock struct {
 	XRHeader
 	T        uint8  `encoding:"omit"`
@@ -146,7 +149,7 @@ type rleReportBlock struct {
 type Chunk uint16
 
 // LossRLEReportBlock is used to report information about packet
-// losses, as described in RFC 3611, section 4.1
+// losses, as described in RFC 3611, section 4.1.
 type LossRLEReportBlock rleReportBlock
 
 // DestinationSSRC returns an array of SSRC values that this report block refers to.
@@ -157,7 +160,7 @@ func (b *LossRLEReportBlock) DestinationSSRC() []uint32 {
 func (b *LossRLEReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = LossRLEReportBlockType
 	b.XRHeader.TypeSpecific = TypeSpecificField(b.T & 0x0F)
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *LossRLEReportBlock) unpackBlockHeader() {
@@ -165,7 +168,7 @@ func (b *LossRLEReportBlock) unpackBlockHeader() {
 }
 
 // DuplicateRLEReportBlock is used to report information about packet
-// duplication, as described in RFC 3611, section 4.1
+// duplication, as described in RFC 3611, section 4.1.
 type DuplicateRLEReportBlock rleReportBlock
 
 // DestinationSSRC returns an array of SSRC values that this report block refers to.
@@ -176,7 +179,7 @@ func (b *DuplicateRLEReportBlock) DestinationSSRC() []uint32 {
 func (b *DuplicateRLEReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = DuplicateRLEReportBlockType
 	b.XRHeader.TypeSpecific = TypeSpecificField(b.T & 0x0F)
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *DuplicateRLEReportBlock) unpackBlockHeader() {
@@ -186,7 +189,7 @@ func (b *DuplicateRLEReportBlock) unpackBlockHeader() {
 // ChunkType enumerates the three kinds of chunks described in RFC 3611 section 4.1.
 type ChunkType uint8
 
-// These are the valid values that ChunkType can assume
+// These are the valid values that ChunkType can assume.
 const (
 	RunLengthChunkType       = 0
 	BitVectorChunkType       = 1
@@ -197,21 +200,24 @@ func (c Chunk) String() string {
 	switch c.Type() {
 	case RunLengthChunkType:
 		runType, _ := c.RunType()
+
 		return fmt.Sprintf("[RunLength type=%d, length=%d]", runType, c.Value())
 	case BitVectorChunkType:
 		return fmt.Sprintf("[BitVector 0b%015b]", c.Value())
 	case TerminatingNullChunkType:
 		return "[TerminatingNull]"
 	}
+
 	return fmt.Sprintf("[0x%X]", uint16(c))
 }
 
-// Type returns the ChunkType that this Chunk represents
+// Type returns the ChunkType that this Chunk represents.
 func (c Chunk) Type() ChunkType {
 	if c == 0 {
 		return TerminatingNullChunkType
 	}
-	return ChunkType(c >> 15)
+
+	return ChunkType(c >> 15) //nolint:gosec // G115
 }
 
 // RunType returns the RunType that this Chunk represents. It is
@@ -220,10 +226,11 @@ func (c Chunk) RunType() (uint, error) {
 	if c.Type() != RunLengthChunkType {
 		return 0, errWrongChunkType
 	}
+
 	return uint((c >> 14) & 0x01), nil
 }
 
-// Value returns the value represented in this Chunk
+// Value returns the value represented in this Chunk.
 func (c Chunk) Value() uint {
 	switch c.Type() {
 	case RunLengthChunkType:
@@ -233,6 +240,7 @@ func (c Chunk) Value() uint {
 	case TerminatingNullChunkType:
 		return 0
 	}
+
 	return uint(c)
 }
 
@@ -257,6 +265,7 @@ func (c Chunk) Value() uint {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |       Receipt time of packet (end_seq - 1) mod 65536          |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type PacketReceiptTimesReportBlock struct {
 	XRHeader
 	T           uint8  `encoding:"omit"`
@@ -274,7 +283,7 @@ func (b *PacketReceiptTimesReportBlock) DestinationSSRC() []uint32 {
 func (b *PacketReceiptTimesReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = PacketReceiptTimesReportBlockType
 	b.XRHeader.TypeSpecific = TypeSpecificField(b.T & 0x0F)
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *PacketReceiptTimesReportBlock) unpackBlockHeader() {
@@ -294,6 +303,7 @@ func (b *PacketReceiptTimesReportBlock) unpackBlockHeader() {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |             NTP timestamp, least significant word             |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type ReceiverReferenceTimeReportBlock struct {
 	XRHeader
 	NTPTimestamp uint64
@@ -307,7 +317,7 @@ func (b *ReceiverReferenceTimeReportBlock) DestinationSSRC() []uint32 {
 func (b *ReceiverReferenceTimeReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = ReceiverReferenceTimeReportBlockType
 	b.XRHeader.TypeSpecific = 0
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *ReceiverReferenceTimeReportBlock) unpackBlockHeader() {
@@ -332,6 +342,7 @@ func (b *ReceiverReferenceTimeReportBlock) unpackBlockHeader() {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ block
 // :                               ...                             :   2
 // +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
+// .
 type DLRRReportBlock struct {
 	XRHeader
 	Reports []DLRRReport
@@ -350,13 +361,14 @@ func (b *DLRRReportBlock) DestinationSSRC() []uint32 {
 	for i, r := range b.Reports {
 		ssrc[i] = r.SSRC
 	}
+
 	return ssrc
 }
 
 func (b *DLRRReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = DLRRReportBlockType
 	b.XRHeader.TypeSpecific = 0
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *DLRRReportBlock) unpackBlockHeader() {
@@ -389,6 +401,7 @@ func (b *DLRRReportBlock) unpackBlockHeader() {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // | min_ttl_or_hl | max_ttl_or_hl |mean_ttl_or_hl | dev_ttl_or_hl |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type StatisticsSummaryReportBlock struct {
 	XRHeader
 	LossReports      bool              `encoding:"omit"`
@@ -411,10 +424,10 @@ type StatisticsSummaryReportBlock struct {
 }
 
 // TTLorHopLimitType encodes values for the ToH field in
-// a StatisticsSummaryReportBlock
+// a StatisticsSummaryReportBlock.
 type TTLorHopLimitType uint8
 
-// Values for TTLorHopLimitType
+// Values for TTLorHopLimitType.
 const (
 	ToHMissing = 0
 	ToHIPv4    = 1
@@ -430,6 +443,7 @@ func (t TTLorHopLimitType) String() string {
 	case ToHIPv6:
 		return "[ToH = IPv6]"
 	}
+
 	return "[ToH Flag is Invalid]"
 }
 
@@ -451,7 +465,7 @@ func (b *StatisticsSummaryReportBlock) setupBlockHeader() {
 		b.XRHeader.TypeSpecific |= 0x20
 	}
 	b.XRHeader.TypeSpecific |= TypeSpecificField((b.TTLorHopLimit & 0x03) << 3)
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *StatisticsSummaryReportBlock) unpackBlockHeader() {
@@ -486,6 +500,7 @@ func (b *StatisticsSummaryReportBlock) unpackBlockHeader() {
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |          JB maximum           |          JB abs max           |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// .
 type VoIPMetricsReportBlock struct {
 	XRHeader
 	SSRC           uint32 `fmt:"0x%X"`
@@ -520,7 +535,7 @@ func (b *VoIPMetricsReportBlock) DestinationSSRC() []uint32 {
 func (b *VoIPMetricsReportBlock) setupBlockHeader() {
 	b.XRHeader.BlockType = VoIPMetricsReportBlockType
 	b.XRHeader.TypeSpecific = 0
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *VoIPMetricsReportBlock) unpackBlockHeader() {
@@ -539,13 +554,18 @@ func (b *UnknownReportBlock) DestinationSSRC() []uint32 {
 }
 
 func (b *UnknownReportBlock) setupBlockHeader() {
-	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1)
+	b.XRHeader.BlockLength = uint16(wireSize(b)/4 - 1) //nolint:gosec // G115
 }
 
 func (b *UnknownReportBlock) unpackBlockHeader() {
 }
 
-// Marshal encodes the ExtendedReport in binary
+// MarshalSize returns the size of the packet once marshaled.
+func (x ExtendedReport) MarshalSize() int {
+	return wireSize(x)
+}
+
+// Marshal encodes the ExtendedReport in binary.
 func (x ExtendedReport) Marshal() ([]byte, error) {
 	for _, p := range x.Reports {
 		p.setupBlockHeader()
@@ -556,7 +576,7 @@ func (x ExtendedReport) Marshal() ([]byte, error) {
 	// RTCP Header
 	header := Header{
 		Type:   TypeExtendedReport,
-		Length: uint16(length / 4),
+		Length: uint16(length / 4), //nolint:gosec // G115
 	}
 	headerBuffer, err := header.Marshal()
 	if err != nil {
@@ -579,7 +599,9 @@ func (x ExtendedReport) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the ExtendedReport from binary
+// Unmarshal decodes the ExtendedReport from binary.
+//
+//nolint:cyclop
 func (x *ExtendedReport) Unmarshal(b []byte) error {
 	var header Header
 	if err := header.Unmarshal(b); err != nil {
@@ -641,10 +663,12 @@ func (x *ExtendedReport) Unmarshal(b []byte) error {
 
 // DestinationSSRC returns an array of SSRC values that this packet refers to.
 func (x *ExtendedReport) DestinationSSRC() []uint32 {
-	ssrc := make([]uint32, 0)
+	ssrc := make([]uint32, 0, len(x.Reports)+1)
+	ssrc = append(ssrc, x.SenderSSRC)
 	for _, p := range x.Reports {
 		ssrc = append(ssrc, p.DestinationSSRC()...)
 	}
+
 	return ssrc
 }
 

@@ -256,11 +256,15 @@ type WebRTCDialCoordinator interface {
 	// obfuscation/replay on both sides.
 	ClientRootObfuscationSecret() ObfuscationSecret
 
-	// DoDTLSRandomization indicates whether to perform DTLS
-	// Client/ServerHello randomization. DoDTLSRandomization is specified by
-	// clients, which may use a weighted coin flip or a replay to determine
-	// the value.
-	DoDTLSRandomization() bool
+	// ClientDTLSFingerprint returns the selected DTLS fingerprint name. New
+	// clients always select a fingerprint (Randomized, Chrome, Firefox,
+	// etc.).
+	ClientDTLSFingerprint() string
+
+	// ProxyDTLSFingerprint deterministically selects a DTLS fingerprint
+	// name from the specified client root obfuscation secret.
+	ProxyDTLSFingerprint(
+		ClientRootObfuscationSecret ObfuscationSecret) (string, error)
 
 	// UseMediaStreams indicates whether to use WebRTC media streams to tunnel
 	// traffic. When false, a WebRTC data channel is used to tunnel traffic.

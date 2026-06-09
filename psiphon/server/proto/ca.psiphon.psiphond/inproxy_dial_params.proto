@@ -35,7 +35,7 @@ message InproxyDialParams {
     optional string inproxy_connection_id = 28;
     optional int64 inproxy_dial_broker_offer_duration = 29;
     optional int64 inproxy_dial_failed_attempts_duration = 30;
-    optional int64 inproxy_dial_nat_disovery_duration = 31;
+    optional int64 inproxy_dial_nat_discovery_duration = 31;
     optional int64 inproxy_dial_webrtc_connection_duration = 32;
     optional int64 inproxy_dial_webrtc_ice_gathering_duration = 33;
     optional bool inproxy_matched_common_compartments = 34;
@@ -96,4 +96,10 @@ message InproxyDialParams {
     optional bool inproxy_webrtc_use_media_streams = 89;
     optional int64 inproxy_proxy_max_common_clients = 90;
     optional int64 inproxy_proxy_max_personal_clients = 91;
+    optional string inproxy_webrtc_dtls_fingerprint = 92;
+    optional string inproxy_proxy_webrtc_dtls_fingerprint = 93;
+    optional string inproxy_client_ice_region = 94;
+    optional string inproxy_client_ice_asn = 95;
+    optional string inproxy_proxy_ice_region = 96;
+    optional string inproxy_proxy_ice_asn = 97;
 }

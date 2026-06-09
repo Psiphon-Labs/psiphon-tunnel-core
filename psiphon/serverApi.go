@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -483,7 +484,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 // (truncated to an hour, as a privacy measure). As client clocks are
 // unreliable, the server returns new last_connected values for the client to
 // store and send next time it connects.
-func (serverContext *ServerContext) DoConnectedRequest() error {
+func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) error {
 
 	// Limitation: as currently implemented, the last_connected exchange isn't a
 	// distributed, atomic operation. When clients send the connected request,
@@ -524,6 +525,18 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
+
+	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	if lightProxyClient != nil {
+		metrics := lightProxyClient.GetMetrics()
+		params["light_proxy_id"] = metrics.ProxyID
+		params["light_proxy_entry_tracker"] = strconv.FormatInt(metrics.ProxyEntryTracker, 10)
+		params["light_proxy_dial_IPv4"] = strconv.FormatInt(metrics.DialIPv4Count, 10)
+		if metrics.HasIPv6 {
+			params["light_proxy_dial_IPv6"] = strconv.FormatInt(metrics.DialIPv6Count, 10)
+		}
+		params["light_proxy_dial_failed"] = strconv.FormatInt(metrics.DialFailedCount, 10)
+	}
 
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {

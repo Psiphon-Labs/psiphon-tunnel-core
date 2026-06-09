@@ -22,7 +22,7 @@ type State struct {
 	masterSecret              []byte
 	cipherSuite               CipherSuite // nil if a cipherSuite hasn't been chosen
 
-	srtpProtectionProfile atomic.Value // Negotiated SRTPProtectionProfile
+	srtpProtectionProfile SRTPProtectionProfile // Negotiated SRTPProtectionProfile
 	PeerCertificates      [][]byte
 	IdentityHint          []byte
 	SessionID             []byte
@@ -48,6 +48,12 @@ type State struct {
 
 	peerSupportedProtocols []string
 	NegotiatedProtocol     string
+}
+
+// [Psiphon] RemoteRandomBytes returns the random bytes from the remote
+// peer's Hello message. Used by Conjure to identify connections by seed.
+func (s *State) RemoteRandomBytes() [handshake.RandomBytesLength]byte {
+	return s.remoteRandom.RandomBytes
 }
 
 type serializedState struct {
@@ -87,7 +93,7 @@ func (s *State) serialize() *serializedState {
 		SequenceNumber:        atomic.LoadUint64(&s.localSequenceNumber[epoch]),
 		LocalRandom:           localRnd,
 		RemoteRandom:          remoteRnd,
-		SRTPProtectionProfile: uint16(s.getSRTPProtectionProfile()),
+		SRTPProtectionProfile: uint16(s.srtpProtectionProfile),
 		PeerCertificates:      s.PeerCertificates,
 		IdentityHint:          s.IdentityHint,
 		SessionID:             s.SessionID,
@@ -123,7 +129,7 @@ func (s *State) deserialize(serialized serializedState) {
 	s.cipherSuite = cipherSuiteForID(CipherSuiteID(serialized.CipherSuiteID), nil)
 
 	atomic.StoreUint64(&s.localSequenceNumber[epoch], serialized.SequenceNumber)
-	s.setSRTPProtectionProfile(SRTPProtectionProfile(serialized.SRTPProtectionProfile))
+	s.srtpProtectionProfile = SRTPProtectionProfile(serialized.SRTPProtectionProfile)
 
 	// Set remote certificate
 	s.PeerCertificates = serialized.PeerCertificates
@@ -213,24 +219,4 @@ func (s *State) getLocalEpoch() uint16 {
 		return localEpoch
 	}
 	return 0
-}
-
-func (s *State) setSRTPProtectionProfile(profile SRTPProtectionProfile) {
-	s.srtpProtectionProfile.Store(profile)
-}
-
-func (s *State) getSRTPProtectionProfile() SRTPProtectionProfile {
-	if val, ok := s.srtpProtectionProfile.Load().(SRTPProtectionProfile); ok {
-		return val
-	}
-
-	return 0
-}
-
-// [Psiphon]
-// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
-//
-// RemoteRandomBytes returns the random bytes from the client or server hello
-func (s *State) RemoteRandomBytes() [handshake.RandomBytesLength]byte {
-	return s.remoteRandom.RandomBytes
 }

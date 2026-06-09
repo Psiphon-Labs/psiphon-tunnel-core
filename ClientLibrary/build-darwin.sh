@@ -9,8 +9,8 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 # Note:
 #   clangwrap.sh needs to be updated when the Go version changes.
 #   The last version was:
-#   https://github.com/golang/go/blob/go1.24.12/misc/ios/clangwrap.sh
-GO_VERSION_REQUIRED="1.24.12"
+#   https://github.com/golang/go/blob/go1.26.3/misc/ios/clangwrap.sh
+GO_VERSION_REQUIRED="1.26.3"
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -77,7 +77,7 @@ prepare_build () {
 
   BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
   BUILDREPO=$(git config --get remote.origin.url)
-  BUILDREV=$(git rev-parse --short HEAD)
+  BUILDREV=$(git rev-parse --short=10 HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
   cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary

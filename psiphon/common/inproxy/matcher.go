@@ -23,7 +23,6 @@ import (
 	"context"
 	std_errors "errors"
 	"math"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -219,15 +218,20 @@ type MatchOffer struct {
 	NetworkProtocol             NetworkProtocol
 	DestinationAddress          string
 	DestinationServerID         string
+	ICERegion                   string
+	ICEASN                      string
 }
 
 // MatchAnswer is a proxy answer, the proxy's follow up to a matched
 // announcement, to be routed to the awaiting client offer.
 type MatchAnswer struct {
-	ProxyIP        string
-	ProxyID        ID
-	ConnectionID   ID
-	ProxyAnswerSDP WebRTCSessionDescription
+	ProxyIP              string
+	ProxyID              ID
+	ConnectionID         ID
+	ProxyAnswerSDP       WebRTCSessionDescription
+	ProxyDTLSFingerprint string
+	ICERegion            string
+	ICEASN               string
 }
 
 // MatchMetrics records statistics about the match queue state at the time a
@@ -510,7 +514,7 @@ func (m *Matcher) Announce(
 
 	announcementEntry := &announcementEntry{
 		ctx:          ctx,
-		limitIP:      getRateLimitIP(proxyIP),
+		limitIP:      common.GetRateLimitIP(proxyIP),
 		announcement: proxyAnnouncement,
 		offerChan:    make(chan *MatchOffer, 1),
 	}
@@ -572,7 +576,7 @@ func (m *Matcher) Offer(
 
 	offerEntry := &offerEntry{
 		ctx:        ctx,
-		limitIP:    getRateLimitIP(clientIP),
+		limitIP:    common.GetRateLimitIP(clientIP),
 		offer:      clientOffer,
 		answerChan: make(chan *answerInfo, 1),
 	}
@@ -1373,18 +1377,6 @@ func (m *Matcher) pendingAnswerKey(proxyID ID, connectionID ID) string {
 	// as a proxy may have multiple, concurrent pending answers.
 
 	return string(proxyID[:]) + string(connectionID[:])
-}
-
-func getRateLimitIP(strIP string) string {
-
-	IP := net.ParseIP(strIP)
-	if IP == nil || IP.To4() != nil {
-		return strIP
-	}
-
-	// With IPv6, individual users or sites are users commonly allocated a /64
-	// or /56, so rate limit by /56.
-	return IP.Mask(net.CIDRMask(56, 128)).String()
 }
 
 // announcementMultiQueue is a set of announcement queues, one per common or

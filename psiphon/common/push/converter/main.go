@@ -171,7 +171,7 @@ func convert(
 			return errors.Trace(err)
 		}
 		result, err := maker.MakePushPayloads(
-			minPadding, maxPadding, ttl, prioritizedServerEntries, 0)
+			minPadding, maxPadding, ttl, prioritizedServerEntries, push.PinnedEntries{}, 0)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -206,11 +206,12 @@ func convert(
 		return nil
 	}
 
-	_, err = push.ImportPushPayload(
+	_, _, err = push.ImportPushPayload(
 		obfuscationKey,
 		signaturePublicKey,
 		input,
-		importer)
+		importer,
+		nil)
 	if err != nil {
 		return errors.Trace(err)
 	}

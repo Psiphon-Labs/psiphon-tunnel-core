@@ -20,6 +20,8 @@
 package common
 
 import (
+	"slices"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
@@ -45,8 +47,16 @@ func NewStringLookup(list []string) StringLookup {
 		}
 		return StringLookup{lookup: lookup}
 	} else {
-		return StringLookup{list: append([]string(nil), list...)}
+		return StringLookup{list: slices.Clone(list)}
 	}
+}
+
+// Len returns the number of items in the list.
+func (lookup StringLookup) Len() int {
+	if lookup.lookup != nil {
+		return len(lookup.lookup)
+	}
+	return len(lookup.list)
 }
 
 // Contains indicates if the target is in the list.
@@ -95,6 +105,14 @@ func NewStringValueLookup[T any](
 	}
 
 	return lookup, nil
+}
+
+// Len returns the number of items in the list.
+func (lookup StringValueLookup[T]) Len() int {
+	if lookup.lookup != nil {
+		return len(lookup.lookup)
+	}
+	return len(lookup.keys)
 }
 
 // Get returns the value for the given key, if found.

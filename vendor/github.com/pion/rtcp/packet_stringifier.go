@@ -32,10 +32,12 @@ baseline implementation that works well in the majority of cases.
 */
 func stringify(p Packet) string {
 	value := reflect.Indirect(reflect.ValueOf(p))
+
 	return formatField(value.Type().String(), "", p, "")
 }
 
-func formatField(name string, format string, f interface{}, indent string) string { //nolint:gocognit
+//nolint:gocognit,cyclop
+func formatField(name string, format string, f any, indent string) string {
 	out := indent
 	value := reflect.ValueOf(f)
 
@@ -59,6 +61,7 @@ func formatField(name string, format string, f interface{}, indent string) strin
 	// uses it)
 	if stringMethod := value.MethodByName("String"); !isPacket && stringMethod.IsValid() {
 		out += fmt.Sprintf("%s: %s\n", name, stringMethod.Call([]reflect.Value{}))
+
 		return out
 	}
 
@@ -77,7 +80,8 @@ func formatField(name string, format string, f interface{}, indent string) strin
 	case reflect.Slice:
 		childKind := value.Type().Elem().Kind()
 		_, hasStringMethod := value.Type().Elem().MethodByName("String")
-		if hasStringMethod || childKind == reflect.Struct || childKind == reflect.Ptr || childKind == reflect.Interface || childKind == reflect.Slice {
+		if hasStringMethod || childKind == reflect.Struct || childKind == reflect.Ptr ||
+			childKind == reflect.Interface || childKind == reflect.Slice {
 			out += fmt.Sprintf("%s:\n", name)
 			for i := 0; i < value.Len(); i++ {
 				childName := fmt.Sprint(i)
@@ -91,6 +95,7 @@ func formatField(name string, format string, f interface{}, indent string) strin
 					out += formatField(childName, format, value.Index(i).Interface(), indent+"\t")
 				}
 			}
+
 			return out
 		}
 
@@ -102,5 +107,6 @@ func formatField(name string, format string, f interface{}, indent string) strin
 			out += fmt.Sprintf("%s: "+format+"\n", name, value.Interface())
 		}
 	}
+
 	return out
 }

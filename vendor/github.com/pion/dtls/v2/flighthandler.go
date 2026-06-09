@@ -13,10 +13,7 @@ import (
 type flightParser func(context.Context, flightConn, *State, *handshakeCache, *handshakeConfig) (flightVal, *alert.Alert, error)
 
 // Generate flights
-//
-// [Psiphon]
-// Pass in dial context for GetDTLSSeed.
-type flightGenerator func(context.Context, flightConn, *State, *handshakeCache, *handshakeConfig) ([]*packet, *alert.Alert, error)
+type flightGenerator func(flightConn, *State, *handshakeCache, *handshakeConfig) ([]*packet, *alert.Alert, error)
 
 func (f flightVal) getFlightParser() (flightParser, error) {
 	switch f {

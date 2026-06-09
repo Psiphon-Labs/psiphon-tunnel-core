@@ -343,6 +343,20 @@ func ParseDNSQuestion(request []byte) (string, error) {
 	return "", nil
 }
 
+// GetRateLimitIP returns the IP address key to use for rate limiting. IPv6
+// addresses are rate limited by /56.
+func GetRateLimitIP(strIP string) string {
+
+	IP := net.ParseIP(strIP)
+	if IP == nil || IP.To4() != nil {
+		return strIP
+	}
+
+	// With IPv6, individual users or sites are commonly allocated a /64
+	// or /56, so rate limit by /56.
+	return IP.Mask(net.CIDRMask(56, 128)).String()
+}
+
 // WriteTimeoutUDPConn sets write deadlines before each UDP packet write.
 //
 // Generally, a UDP packet write doesn't block. However, Go's

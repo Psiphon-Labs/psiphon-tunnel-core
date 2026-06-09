@@ -271,7 +271,7 @@ func fetchTactics(
 	// adjusted by tactics in a new network context, and so clients
 	// with very slow connections must be accomodated. This long
 	// timeout will not entirely block the beginning of tunnel
-	// establishment, which beings after the shorter TacticsWaitPeriod.
+	// establishment, which begins after the shorter TacticsWaitPeriod.
 	//
 	// Using controller.establishCtx will cancel FetchTactics
 	// if tunnel establishment completes first.

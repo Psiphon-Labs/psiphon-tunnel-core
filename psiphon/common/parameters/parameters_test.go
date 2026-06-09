@@ -235,6 +235,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("LivenessTestSpecs returned %+v expected %+v", g, v)
 			}
+		case protocol.DTLSFingerprints:
+			g := p.Get().DTLSFingerprints(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("DTLSFingerprints returned %+v expected %+v", g, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}

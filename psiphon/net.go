@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -43,6 +44,76 @@ import (
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
+
+// listenUnixProxySocket creates a Unix domain socket listener for a local
+// proxy, safely handling the case where a socket file already exists at the
+// path.
+//
+// For abstract namespace sockets (paths with a leading "@"), there is no
+// filesystem entry, so it simply listens.
+//
+// For filesystem sockets, it attempts to listen first. If the path is already
+// in use, it removes the path and retries only when the path is confirmed to
+// be a stale socket: the path must be a socket file and a test dial must fail
+// with ECONNREFUSED (confirming no listener is bound to it). An active socket
+// is never unlinked. In that case an "address already in use" error is
+// returned
+func listenUnixProxySocket(path string) (net.Listener, error) {
+
+	if strings.HasPrefix(path, "@") {
+		listener, err := net.Listen("unix", path)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return listener, nil
+	}
+
+	listener, err := net.Listen("unix", path)
+	if err == nil {
+		return listener, nil
+	}
+	if !IsAddressInUseError(err) {
+		return nil, errors.Trace(err)
+	}
+
+	// The path is in use. Only remove it if it is a confirmed stale socket.
+
+	fileInfo, statErr := os.Lstat(path)
+	if statErr != nil {
+		// Could not stat the path; surface the original listen error.
+		return nil, errors.Trace(err)
+	}
+	if fileInfo.Mode()&os.ModeSocket == 0 {
+		// Not a socket; never remove arbitrary files.
+		return nil, errors.Tracef(
+			"local proxy Unix socket path is an existing non-socket file: %s", path)
+	}
+
+	// Test dial to determine whether the socket is active or stale. A
+	// successful dial means another listener is bound; do not unlink it.
+	testConn, dialErr := net.DialTimeout("unix", path, 100*time.Millisecond)
+	if dialErr == nil {
+		testConn.Close()
+		return nil, errors.Trace(err)
+	}
+
+	// Only ECONNREFUSED reliably indicates a stale socket with no listener.
+	// Any other error (EACCES/EPERM, timeout, etc.) does not prove staleness,
+	// so do not remove the path; return the original bind error.
+	if !std_errors.Is(dialErr, syscall.ECONNREFUSED) {
+		return nil, errors.Trace(err)
+	}
+
+	// Stale socket: remove it and retry.
+	if removeErr := os.Remove(path); removeErr != nil {
+		return nil, errors.Trace(removeErr)
+	}
+	listener, err = net.Listen("unix", path)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return listener, nil
+}
 
 // DialConfig contains parameters to determine the behavior
 // of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
@@ -340,11 +411,11 @@ func WaitForNetworkConnectivity(
 	}
 }
 
-// New Resolver creates a new resolver using the specified config.
-// useBindToDevice indicates whether to apply config.BindToDevice, when it
-// exists; set useBindToDevice to false when the resolve doesn't need to be
-// excluded from any VPN routing.
-func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
+// NewResolver creates a new resolver using the specified config.
+// deviceBinder, when non-nil, is applied to the resolver's UDP DNS sockets;
+// pass nil when the resolve doesn't need to be excluded from any VPN
+// routing.
+func NewResolver(config *Config, deviceBinder DeviceBinder) *resolver.Resolver {
 
 	p := config.GetParameters().Get()
 
@@ -359,8 +430,8 @@ func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 		networkConfig.GetDNSServers = config.DNSServerGetter.GetDNSServers
 	}
 
-	if useBindToDevice && config.DeviceBinder != nil {
-		networkConfig.BindToDevice = config.DeviceBinder.BindToDevice
+	if deviceBinder != nil {
+		networkConfig.BindToDevice = deviceBinder.BindToDevice
 		networkConfig.AllowDefaultResolverWithBindToDevice =
 			config.AllowDefaultDNSResolverWithBindToDevice
 	}

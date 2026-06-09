@@ -11,7 +11,9 @@ import (
 // SDESType is the item type used in the RTCP SDES control packet.
 type SDESType uint8
 
-// RTP SDES item types registered with IANA. See: https://www.iana.org/assignments/rtp-parameters/rtp-parameters.xhtml#rtp-parameters-5
+// RTP SDES item types registered with IANA.
+// See: https://www.iana.org/assignments/rtp-parameters/rtp-parameters.xhtml#rtp-parameters-5
+// .
 const (
 	SDESEnd      SDESType = iota // end of SDES list                RFC 3550, 6.5
 	SDESCNAME                    // canonical name                  RFC 3550, 6.5.1
@@ -24,6 +26,7 @@ const (
 	SDESPrivate                  // private extensions              RFC 3550, 6.5.8  (not implemented)
 )
 
+//nolint:cyclop
 func (s SDESType) String() string {
 	switch s {
 	case SDESEnd:
@@ -77,7 +80,7 @@ func NewCNAMESourceDescription(ssrc uint32, cname string) *SourceDescription {
 	}
 }
 
-// Marshal encodes the SourceDescription in binary
+// Marshal encodes the SourceDescription in binary.
 func (s SourceDescription) Marshal() ([]byte, error) {
 	/*
 	 *         0                   1                   2                   3
@@ -97,7 +100,7 @@ func (s SourceDescription) Marshal() ([]byte, error) {
 	 *        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 	 */
 
-	rawPacket := make([]byte, s.len())
+	rawPacket := make([]byte, s.MarshalSize())
 	packetBody := rawPacket[headerLength:]
 
 	chunkOffset := 0
@@ -123,7 +126,7 @@ func (s SourceDescription) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the SourceDescription from binary
+// Unmarshal decodes the SourceDescription from binary.
 func (s *SourceDescription) Unmarshal(rawPacket []byte) error {
 	/*
 	 *         0                   1                   2                   3
@@ -143,12 +146,12 @@ func (s *SourceDescription) Unmarshal(rawPacket []byte) error {
 	 *        +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
 	 */
 
-	var h Header
-	if err := h.Unmarshal(rawPacket); err != nil {
+	var header Header
+	if err := header.Unmarshal(rawPacket); err != nil {
 		return err
 	}
 
-	if h.Type != TypeSourceDescription {
+	if header.Type != TypeSourceDescription {
 		return errWrongType
 	}
 
@@ -162,38 +165,40 @@ func (s *SourceDescription) Unmarshal(rawPacket []byte) error {
 		i += chunk.len()
 	}
 
-	if len(s.Chunks) != int(h.Count) {
+	if len(s.Chunks) != int(header.Count) {
 		return errInvalidHeader
 	}
 
 	return nil
 }
 
-func (s *SourceDescription) len() int {
+// MarshalSize returns the size of the packet once marshaled.
+func (s *SourceDescription) MarshalSize() int {
 	chunksLength := 0
 	for _, c := range s.Chunks {
 		chunksLength += c.len()
 	}
+
 	return headerLength + chunksLength
 }
 
 // Header returns the Header associated with this packet.
 func (s *SourceDescription) Header() Header {
 	return Header{
-		Count:  uint8(len(s.Chunks)),
+		Count:  uint8(len(s.Chunks)), //nolint:gosec // G115
 		Type:   TypeSourceDescription,
-		Length: uint16((s.len() / 4) - 1),
+		Length: uint16((s.MarshalSize() / 4) - 1), //nolint:gosec // G115
 	}
 }
 
-// A SourceDescriptionChunk contains items describing a single RTP source
+// A SourceDescriptionChunk contains items describing a single RTP source.
 type SourceDescriptionChunk struct {
 	// The source (ssrc) or contributing source (csrc) identifier this packet describes
 	Source uint32
 	Items  []SourceDescriptionItem
 }
 
-// Marshal encodes the SourceDescriptionChunk in binary
+// Marshal encodes the SourceDescriptionChunk in binary.
 func (s SourceDescriptionChunk) Marshal() ([]byte, error) {
 	/*
 	 *  +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
@@ -212,19 +217,19 @@ func (s SourceDescriptionChunk) Marshal() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		rawPacket = append(rawPacket, data...)
+		rawPacket = append(rawPacket, data...) //nolint:makezero
 	}
 
 	// The list of items in each chunk MUST be terminated by one or more null octets
-	rawPacket = append(rawPacket, uint8(SDESEnd))
+	rawPacket = append(rawPacket, uint8(SDESEnd)) //nolint:makezero
 
 	// additional null octets MUST be included if needed to pad until the next 32-bit boundary
-	rawPacket = append(rawPacket, make([]byte, getPadding(len(rawPacket)))...)
+	rawPacket = append(rawPacket, make([]byte, getPadding(len(rawPacket)))...) //nolint:makezero
 
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the SourceDescriptionChunk from binary
+// Unmarshal decodes the SourceDescriptionChunk from binary.
 func (s *SourceDescriptionChunk) Unmarshal(rawPacket []byte) error {
 	/*
 	 *  +=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
@@ -251,7 +256,7 @@ func (s *SourceDescriptionChunk) Unmarshal(rawPacket []byte) error {
 			return err
 		}
 		s.Items = append(s.Items, it)
-		i += it.len()
+		i += it.Len()
 	}
 
 	return errPacketTooShort
@@ -260,7 +265,7 @@ func (s *SourceDescriptionChunk) Unmarshal(rawPacket []byte) error {
 func (s SourceDescriptionChunk) len() int {
 	chunkLen := sdesSourceLen
 	for _, it := range s.Items {
-		chunkLen += it.len()
+		chunkLen += it.Len()
 	}
 	chunkLen += sdesTypeLen // for terminating null octet
 
@@ -280,7 +285,8 @@ type SourceDescriptionItem struct {
 	Text string
 }
 
-func (s SourceDescriptionItem) len() int {
+// Len returns the length of the SourceDescriptionItem when encoded as binary.
+func (s SourceDescriptionItem) Len() int {
 	/*
 	 *   0                   1                   2                   3
 	 *   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -291,7 +297,7 @@ func (s SourceDescriptionItem) len() int {
 	return sdesTypeLen + sdesOctetCountLen + len([]byte(s.Text))
 }
 
-// Marshal encodes the SourceDescriptionItem in binary
+// Marshal encodes the SourceDescriptionItem in binary.
 func (s SourceDescriptionItem) Marshal() ([]byte, error) {
 	/*
 	 *   0                   1                   2                   3
@@ -316,12 +322,12 @@ func (s SourceDescriptionItem) Marshal() ([]byte, error) {
 	}
 	rawPacket[sdesOctetCountOffset] = uint8(octetCount)
 
-	rawPacket = append(rawPacket, txtBytes...)
+	rawPacket = append(rawPacket, txtBytes...) //nolint:makezero
 
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the SourceDescriptionItem from binary
+// Unmarshal decodes the SourceDescriptionItem from binary.
 func (s *SourceDescriptionItem) Unmarshal(rawPacket []byte) error {
 	/*
 	 *   0                   1                   2                   3
@@ -354,6 +360,7 @@ func (s *SourceDescription) DestinationSSRC() []uint32 {
 	for i, v := range s.Chunks {
 		out[i] = v.Source
 	}
+
 	return out
 }
 
@@ -362,5 +369,6 @@ func (s *SourceDescription) String() string {
 	for _, c := range s.Chunks {
 		out += fmt.Sprintf("\t%x: %s\n", c.Source, c.Items)
 	}
+
 	return out
 }

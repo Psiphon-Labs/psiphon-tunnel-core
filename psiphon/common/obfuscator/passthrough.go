@@ -52,7 +52,12 @@ const (
 func MakeTLSPassthroughMessage(
 	useTimeFactor bool, obfuscatedKey string) ([]byte, error) {
 
-	passthroughKey, err := derivePassthroughKey(useTimeFactor, 0, obfuscatedKey)
+	var timeNow int64
+	if useTimeFactor {
+		timeNow = time.Now().Unix()
+	}
+
+	passthroughKey, err := derivePassthroughKey(useTimeFactor, timeNow, 0, obfuscatedKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -103,10 +108,14 @@ func VerifyTLSPassthroughMessage(
 
 		match := false
 
+		// Use the same "now" time for each period check so that time elapsed
+		// for derivePassthroughKey calls won't cause a period skip.
+		timeNow := time.Now().Unix()
+
 		for _, timePeriodShift := range []int64{-1, 0, 1} {
 
 			passthroughKey, err := derivePassthroughKey(
-				useTimeFactor, timePeriodShift, obfuscatedKey)
+				useTimeFactor, timeNow, timePeriodShift, obfuscatedKey)
 			if err != nil {
 				// derivePassthroughKey is not expected to fail.
 				// TODO: log error
@@ -127,7 +136,7 @@ func VerifyTLSPassthroughMessage(
 		return match
 	}
 
-	passthroughKey, err := derivePassthroughKey(false, 0, obfuscatedKey)
+	passthroughKey, err := derivePassthroughKey(false, 0, 0, obfuscatedKey)
 	if err != nil {
 		return false
 	}
@@ -146,7 +155,7 @@ func VerifyTLSPassthroughMessage(
 var timePeriodSeconds = int64(TLS_PASSTHROUGH_TIME_PERIOD / time.Second)
 
 func derivePassthroughKey(
-	useTimeFactor bool, timePeriodShift int64, obfuscatedKey string) ([]byte, error) {
+	useTimeFactor bool, timeNow int64, timePeriodShift int64, obfuscatedKey string) ([]byte, error) {
 
 	secret := []byte(obfuscatedKey)
 
@@ -170,7 +179,7 @@ func derivePassthroughKey(
 		// differences at time boundaries. We assume that the server always or never
 		// sets useTimeFactor.
 
-		roundedTimePeriod := (time.Now().Unix() +
+		roundedTimePeriod := (timeNow +
 			(timePeriodSeconds / 2) +
 			timePeriodSeconds*timePeriodShift) / timePeriodSeconds
 

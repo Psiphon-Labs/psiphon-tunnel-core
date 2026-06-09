@@ -23,6 +23,8 @@ import (
 type CompoundPacket []Packet
 
 // Validate returns an error if this is not an RFC-compliant CompoundPacket.
+//
+//nolint:cyclop
 func (c CompoundPacket) Validate() error {
 	if len(c) == 0 {
 		return errEmptyCompound
@@ -72,7 +74,7 @@ func (c CompoundPacket) Validate() error {
 	return errMissingCNAME
 }
 
-// CNAME returns the CNAME that *must* be present in every CompoundPacket
+// CNAME returns the CNAME that *must* be present in every CompoundPacket.
 func (c CompoundPacket) CNAME() (string, error) {
 	var err error
 
@@ -97,6 +99,7 @@ func (c CompoundPacket) CNAME() (string, error) {
 			}
 		}
 	}
+
 	return "", errMissingCNAME
 }
 
@@ -107,7 +110,18 @@ func (c CompoundPacket) Marshal() ([]byte, error) {
 	}
 
 	p := []Packet(c)
+
 	return Marshal(p)
+}
+
+// MarshalSize returns the size of the packet once marshaled.
+func (c CompoundPacket) MarshalSize() int {
+	l := 0
+	for _, p := range c {
+		l += p.MarshalSize()
+	}
+
+	return l
 }
 
 // Unmarshal decodes a CompoundPacket from binary.
@@ -148,5 +162,6 @@ func (c CompoundPacket) String() string {
 		}
 	}
 	out = strings.TrimSuffix(strings.ReplaceAll(out, "\n", "\n\t"), "\t")
+
 	return out
 }

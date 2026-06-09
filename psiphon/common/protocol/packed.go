@@ -856,7 +856,19 @@ func init() {
 
 		{177, "dsl_prioritized_tunnel_protocol", nil},
 
-		// Next key value = 178
+		// Specs: server.inproxyDialParams
+
+		{178, "inproxy_webrtc_dtls_fingerprint", nil},
+
+		// Specs: server.connectedRequestParams
+
+		{179, "light_proxy_id", unpaddedBase64Converter},
+		{180, "light_proxy_entry_tracker", intConverter},
+		{181, "light_proxy_dial_IPv4", intConverter},
+		{182, "light_proxy_dial_IPv6", intConverter},
+		{183, "light_proxy_dial_failed", intConverter},
+
+		// Next key value = 184
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

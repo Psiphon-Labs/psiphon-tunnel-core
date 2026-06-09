@@ -47,7 +47,7 @@ const (
 	delayOffset           = 20
 )
 
-// Marshal encodes the ReceptionReport in binary
+// Marshal encodes the ReceptionReport in binary.
 func (r ReceptionReport) Marshal() ([]byte, error) {
 	/*
 	 *  0                   1                   2                   3
@@ -90,7 +90,7 @@ func (r ReceptionReport) Marshal() ([]byte, error) {
 	return rawPacket, nil
 }
 
-// Unmarshal decodes the ReceptionReport from binary
+// Unmarshal decodes the ReceptionReport from binary.
 func (r *ReceptionReport) Unmarshal(rawPacket []byte) error {
 	if len(rawPacket) < receptionReportLength {
 		return errPacketTooShort

@@ -27,8 +27,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
+	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/pprof"
 	"sync"
@@ -37,15 +40,19 @@ import (
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
 	"github.com/axiomhq/hyperloglog"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -98,6 +105,7 @@ type Controller struct {
 	packetTunnelTransport                   *PacketTunnelTransport
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
+	splitResolver                           *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
 	tlsClientSessionCache                   utls.ClientSessionCache
 	quicTLSClientSessionCache               tls.ClientSessionCache
@@ -117,6 +125,13 @@ type Controller struct {
 	currentNetworkMutex      sync.Mutex
 	currentNetworkCtx        context.Context
 	currentNetworkCancelFunc context.CancelFunc
+
+	lightProxyClient                    atomic.Value
+	lightProxyReplay                    atomic.Value
+	lightProxyTunnelInactiveThreshold   atomic.Int64
+	lightProxyDialTimeout               atomic.Int64
+	lightProxyLimitDestinationAddresses atomic.Value
+	signalLightProxyTestFetch           chan struct{}
 }
 
 // NewController initializes a new controller.
@@ -214,7 +229,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	controller.untunneledDialConfig = &DialConfig{
 		UpstreamProxyURL: controller.config.UpstreamProxyURL,
 		CustomHeaders:    controller.config.CustomHeaders,
-		DeviceBinder:     controller.config.deviceBinder,
+		DeviceBinder:     controller.config.deviceBinder(),
 		IPv6Synthesizer:  controller.config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
 			// Note: when domain fronting would be used for untunneled dials a
@@ -255,6 +270,35 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 		controller.packetTunnelClient = packetTunnelClient
 		controller.packetTunnelTransport = packetTunnelTransport
+	}
+
+	if config.EnableLightProxy {
+
+		if config.LightProxyTestFetchAddress != "" {
+			controller.signalLightProxyTestFetch = make(chan struct{}, 1)
+		}
+
+		var err error
+
+		if len(config.LightProxyEntry) > 0 {
+			err = controller.initLightProxy(
+				config.LightProxyEntry,
+				config.LightProxyEntryTracker)
+		} else {
+
+			lightProxy := LoadLightProxy()
+			if lightProxy != nil {
+				err = controller.initLightProxy(
+					lightProxy.LightProxyEntry,
+					lightProxy.LightProxyEntryTracker)
+			}
+		}
+
+		if err != nil {
+			NoticeWarning(
+				"light proxy init failed: %v", errors.Trace(err))
+			// Continue without a light proxy
+		}
 	}
 
 	// Initialize shared in-proxy broker clients to be used for all in-proxy
@@ -334,9 +378,20 @@ func (controller *Controller) Run(ctx context.Context) {
 	// domain concurrently.
 	//
 	// config.SetResolver makes this resolver available to MakeDialParameters.
-	controller.resolver = NewResolver(controller.config, true)
+	controller.resolver = NewResolver(controller.config, controller.config.deviceBinder())
 	defer controller.resolver.Stop()
 	controller.config.SetResolver(controller.resolver)
+
+	// In split-interface mode, also initialize a second resolver bound to
+	// the split (downstream) interface. This is used for ICE/STUN-side
+	// hostname resolves so that STUN server domains, etc., are resolved
+	// over the same interface their connections will traverse. Each
+	// resolver has its own cache (per resolver instance).
+	if controller.config.splitInterface != nil {
+		controller.splitResolver = NewResolver(controller.config, controller.config.splitDeviceBinder())
+		defer controller.splitResolver.Stop()
+		controller.config.SetSplitResolver(controller.splitResolver)
+	}
 
 	// Maintain a cache of steering IPs to be applied to dials. A steering IP
 	// is an alternate dial IP; for example, steering IPs may be specified by
@@ -344,21 +399,25 @@ func (controller *Controller) Run(ctx context.Context) {
 	controller.steeringIPCache.Flush()
 
 	// TODO: IPv6 support
+	// listenIP is not used when the local proxies listen on Unix domain
+	// sockets, so the listen interface resolution is skipped in that case.
 	var listenIP string
-	if controller.config.ListenInterface == "" {
-		listenIP = "127.0.0.1"
-	} else if controller.config.ListenInterface == "any" {
-		listenIP = "0.0.0.0"
-	} else {
-		IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
-		if err == nil && IPv4Address == nil {
-			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+	if !controller.config.UseUnixDomainSockets {
+		if controller.config.ListenInterface == "" {
+			listenIP = "127.0.0.1"
+		} else if controller.config.ListenInterface == "any" {
+			listenIP = "0.0.0.0"
+		} else {
+			IPv4Address, _, err := common.GetInterfaceIPAddresses(controller.config.ListenInterface)
+			if err == nil && IPv4Address == nil {
+				err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
+			}
+			if err != nil {
+				NoticeError("error getting listener IP: %v", errors.Trace(err))
+				return
+			}
+			listenIP = IPv4Address.String()
 		}
-		if err != nil {
-			NoticeError("error getting listener IP: %v", errors.Trace(err))
-			return
-		}
-		listenIP = IPv4Address.String()
 	}
 
 	// The controller run may include client tunnel establishment, in-proxy
@@ -406,6 +465,11 @@ func (controller *Controller) Run(ctx context.Context) {
 		controller.runWaitGroup.Add(1)
 		go controller.runTunnels()
 
+		if controller.config.LightProxyTestFetchAddress != "" {
+			controller.runWaitGroup.Add(1)
+			go controller.lightProxyTestFetcher()
+		}
+
 		if controller.packetTunnelClient != nil {
 			controller.packetTunnelClient.Start()
 		}
@@ -448,7 +512,9 @@ func (controller *Controller) Run(ctx context.Context) {
 			runTunneledDSLFetcher(
 				controller.runCtx,
 				controller.config,
-				controller.getNextActiveTunnel,
+				func() *Tunnel {
+					return controller.getNextActiveTunnel(0)
+				},
 				controller.signalTunneledDSLFetch)
 		}()
 	}
@@ -570,7 +636,7 @@ func (controller *Controller) getCurrentNetworkContext() context.Context {
 // TerminateNextActiveTunnel terminates the active tunnel, which will initiate
 // establishment of a new tunnel.
 func (controller *Controller) TerminateNextActiveTunnel() {
-	tunnel := controller.getNextActiveTunnel()
+	tunnel := controller.getNextActiveTunnel(0)
 	if tunnel != nil {
 		controller.SignalTunnelFailure(tunnel)
 		NoticeInfo("terminated tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
@@ -640,6 +706,8 @@ func (controller *Controller) ImportExchangePayload(payload string) bool {
 // overall goal is establish _any_ connection.
 func (controller *Controller) ImportPushPayload(payload []byte) bool {
 
+	var lightProxyEntries []*push.LightProxyEntry
+
 	importer := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
@@ -662,17 +730,42 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		return nil
 	}
 
-	n, err := push.ImportPushPayload(
+	lightProxyImporter := func(
+		proxyEntry []byte,
+		proxyEntryTracker int64) error {
+
+		if len(proxyEntry) == 0 {
+			return errors.TraceNew("missing light proxy entry")
+		}
+
+		lightProxyEntries = append(lightProxyEntries, &push.LightProxyEntry{
+			ProxyEntry:        append([]byte(nil), proxyEntry...),
+			ProxyEntryTracker: proxyEntryTracker,
+		})
+
+		return nil
+	}
+
+	n, nLightProxy, err := push.ImportPushPayload(
 		controller.config.PushPayloadObfuscationKey,
 		controller.config.PushPayloadSignaturePublicKey,
 		payload,
-		importer)
+		importer,
+		lightProxyImporter)
 
 	if err != nil {
-		NoticeWarning("push payload: %d imported, %v", n, err)
+		NoticeWarning(
+			"push payload: %d server entries, %d light proxy entries imported, %v",
+			n,
+			nLightProxy,
+			err)
 	} else {
-		NoticeInfo("push payload: %d imported", n)
+		NoticeInfo(
+			"push payload: %d server entries, %d light proxy entries imported",
+			n,
+			nLightProxy)
 	}
+	importOK := err == nil
 
 	if n > 0 {
 		select {
@@ -681,7 +774,28 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		}
 	}
 
-	return err == nil
+	if importOK && len(lightProxyEntries) > 0 {
+
+		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
+
+		ok := StoreLightProxy(&StoredLightProxy{
+			LightProxyEntry:        lightProxyEntry.ProxyEntry,
+			LightProxyEntryTracker: lightProxyEntry.ProxyEntryTracker,
+		})
+		if !ok {
+			importOK = false
+		} else {
+			lightProxyErr := controller.initLightProxy(
+				lightProxyEntry.ProxyEntry,
+				lightProxyEntry.ProxyEntryTracker)
+			if lightProxyErr != nil {
+				NoticeWarning("light proxy init failed: %v", errors.Trace(lightProxyErr))
+				importOK = false
+			}
+		}
+	}
+
+	return importOK
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
@@ -729,7 +843,7 @@ fetcherLoop:
 
 			// Pick any active tunnel and make the next fetch attempt. If there's
 			// no active tunnel, the untunneledDialConfig will be used.
-			tunnel := controller.getNextActiveTunnel()
+			tunnel := controller.getNextActiveTunnel(0)
 
 			err := fetcher(
 				controller.runCtx,
@@ -818,7 +932,7 @@ downloadLoop:
 
 			// Pick any active tunnel and make the next download attempt. If there's
 			// no active tunnel, the untunneledDialConfig will be used.
-			tunnel := controller.getNextActiveTunnel()
+			tunnel := controller.getNextActiveTunnel(0)
 
 			err := DownloadUpgrade(
 				controller.runCtx,
@@ -1023,9 +1137,9 @@ loop:
 		// logged if there's no active tunnel, as that's not an unexpected
 		// condition.
 		reported := false
-		tunnel := controller.getNextActiveTunnel()
+		tunnel := controller.getNextActiveTunnel(0)
 		if tunnel != nil {
-			err := tunnel.serverContext.DoConnectedRequest()
+			err := tunnel.serverContext.DoConnectedRequest(controller)
 			if err == nil {
 				reported = true
 			} else {
@@ -1080,6 +1194,7 @@ func (controller *Controller) signalConnectedReporter() {
 // is regardless of how many tunnels are presently active -- meaning
 // that if an active tunnel was established and lost the controller
 // is left running (to re-establish).
+// The timeout takes effect regardless of light proxy configuration.
 func (controller *Controller) establishTunnelWatcher() {
 	defer controller.runWaitGroup.Done()
 
@@ -1507,17 +1622,36 @@ func (controller *Controller) terminateAllTunnels() {
 }
 
 // getNextActiveTunnel returns the next tunnel from the pool of active
-// tunnels. Currently, tunnel selection order is simple round-robin.
-func (controller *Controller) getNextActiveTunnel() (tunnel *Tunnel) {
+// tunnels. Currently, tunnel selection order is simple round-robin. When
+// readInactiveThreshold is greater than zero, tunnels without recent read
+// activity are skipped.
+func (controller *Controller) getNextActiveTunnel(
+	readInactiveThreshold time.Duration) (tunnel *Tunnel) {
+
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	if len(controller.tunnels) == 0 {
 		return nil
 	}
-	tunnel = controller.tunnels[controller.nextTunnel]
-	controller.nextTunnel =
-		(controller.nextTunnel + 1) % len(controller.tunnels)
-	return tunnel
+
+	if readInactiveThreshold <= 0 {
+		tunnel = controller.tunnels[controller.nextTunnel]
+		controller.nextTunnel =
+			(controller.nextTunnel + 1) % len(controller.tunnels)
+		return tunnel
+	}
+
+	for i := 0; i < len(controller.tunnels); i++ {
+		tunnel = controller.tunnels[controller.nextTunnel]
+		controller.nextTunnel =
+			(controller.nextTunnel + 1) % len(controller.tunnels)
+
+		if tunnel.GetReadInactiveDuration() <= readInactiveThreshold {
+			return tunnel
+		}
+	}
+
+	return nil
 }
 
 // isActiveTunnelServerEntry is used to check if there's already
@@ -1553,9 +1687,423 @@ func (controller *Controller) getTunnelPoolSize() int {
 	return controller.tunnelPoolSize
 }
 
+func (controller *Controller) triggerLightProxyTestFetch() {
+
+	if controller.config.LightProxyTestFetchAddress == "" {
+		return
+	}
+	if controller.lightProxyClient.Load() == nil {
+		return
+	}
+
+	select {
+	case controller.signalLightProxyTestFetch <- struct{}{}:
+	default:
+	}
+}
+
+func (controller *Controller) lightProxyTestFetcher() {
+	defer controller.runWaitGroup.Done()
+
+	for {
+		select {
+		case <-controller.signalLightProxyTestFetch:
+		case <-controller.runCtx.Done():
+			NoticeInfo("exiting light proxy test fetcher")
+			return
+		}
+
+		_ = controller.lightProxyTestFetch()
+	}
+}
+
+func (controller *Controller) lightProxyTestFetch() (retErr error) {
+
+	// Perform a test fetch through the light proxy. triggerLightProxyTestFetch
+	// is called when initially connecting or reconnecting, so there will often
+	// be no tunnel yet when controller.Dial is called.
+	//
+	// The test target is assumed to be a TCP HTTPS server.
+	// LightProxyTestFetchAddress should include a port. Only the raw body is
+	// fetched, without redirects, and non-200 response codes are not
+	// considered to be errors.
+
+	const (
+		requestTimeout = 5 * time.Second
+		maxBodyBytes   = 64 * 1024
+		maxHeaderBytes = 16 * 1024
+	)
+
+	var usedLightProxy atomic.Bool
+	responseBytes := int64(0)
+
+	defer func() {
+		NoticeInfo(
+			"light proxy test fetch: usedLightProxy: %v, response bytes: %d, err: %v",
+			usedLightProxy.Load(), responseBytes, retErr)
+	}()
+
+	testURL := url.URL{
+		Scheme: "https",
+		Host:   controller.config.LightProxyTestFetchAddress,
+		Path:   "",
+	}
+
+	transport := &http.Transport{
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: maxHeaderBytes,
+		DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+			// controller.runCtx.Done will interrupt controller.Dial; and
+			// controller.Dial's light proxy path uses controller.lightProxyDialTimeout.
+			conn, err := controller.Dial(address, nil)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			if _, ok := conn.(*lightProxyConn); ok {
+				usedLightProxy.Store(true)
+			}
+			return conn, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	requestCtx, cancel := context.WithTimeout(
+		controller.runCtx,
+		time.Duration(controller.lightProxyDialTimeout.Load())+requestTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(
+		requestCtx, http.MethodGet, testURL.String(), nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer response.Body.Close()
+
+	responseBytes, err = io.Copy(
+		io.Discard,
+		io.LimitReader(response.Body, maxBodyBytes))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func (controller *Controller) initLightProxy(
+	proxyEntry []byte,
+	proxyEntryTracker int64) error {
+
+	if controller.config.DisableTunnels {
+		return nil
+	}
+
+	p := controller.config.GetParameters().Get()
+	defer p.Close()
+
+	// Clients must set EnableLightProxy in the config. The LightProxyDisable
+	// tactics parameter functions as a remote override, and is only checked
+	// here, so newly fetched tactics changes won't take effect until the
+	// next session.
+
+	enableLightProxy := controller.config.EnableLightProxy &&
+		!p.Bool(parameters.LightProxyDisable)
+
+	if !enableLightProxy {
+		NoticeInfo("Light proxy disabled: skipping proxy entry")
+		return nil
+	}
+
+	tcpDialer := NewTCPDialer(controller.untunneledDialConfig)
+
+	tlsDialer := func(
+		ctx context.Context,
+		underlyingConn net.Conn,
+		tlsProfile string,
+		randomizedTLSProfileSeed *prng.Seed,
+		sni string,
+		passthroughMessage []byte,
+		verifyPin string,
+		verifyServerName string) (net.Conn, error) {
+
+		return CustomTLSDial(
+			ctx,
+			"tcp",
+			underlyingConn.RemoteAddr().String(),
+			&CustomTLSConfig{
+				Parameters: controller.config.GetParameters(),
+				Dial: func(context.Context, string, string) (net.Conn, error) {
+					return underlyingConn, nil
+				},
+				UseDialAddrSNI:           false,
+				SNIServerName:            sni,
+				VerifyServerName:         verifyServerName,
+				VerifyPins:               []string{verifyPin},
+				VerifyPinsOnly:           true,
+				TLSProfile:               tlsProfile,
+				RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+				PassthroughMessage:       passthroughMessage,
+				ClientSessionCache: common.WrapUtlsClientSessionCache(
+					controller.tlsClientSessionCache,
+					underlyingConn.RemoteAddr().String()),
+			})
+	}
+
+	client, err := light.NewClient(&light.ClientConfig{
+		Logger: NoticeCommonLogger(false),
+		TCPDialer: func(ctx context.Context, addr string) (net.Conn, error) {
+			return tcpDialer(ctx, "tcp", addr)
+		},
+		TLSDialer:         tlsDialer,
+		SponsorID:         controller.config.SponsorId,
+		ClientPlatform:    controller.config.ClientPlatform,
+		ClientBuildRev:    buildinfo.GetBuildInfo().BuildRev,
+		DeviceRegion:      controller.config.DeviceRegion,
+		SessionID:         controller.config.SessionID,
+		ProxyEntryTracker: proxyEntryTracker,
+		ProxyEntry:        proxyEntry,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	controller.lightProxyClient.Store(client)
+	controller.lightProxyReplay.Store(lightReplay{})
+
+	// Use this tunnel liveness target when deciding whether to fallback to
+	// light proxy. This value remains set for the session.
+	controller.lightProxyTunnelInactiveThreshold.Store(
+		int64(p.Duration(parameters.LightProxyTunnelInactiveThreshold)))
+
+	controller.lightProxyDialTimeout.Store(
+		int64(p.Duration(parameters.LightProxyDialTimeout)))
+
+	lightProxyLimitLookup := common.NewStringLookup(
+		p.Strings(parameters.LightProxyLimitDestinationAddresses))
+
+	controller.lightProxyLimitDestinationAddresses.Store(
+		&lightProxyLimitLookup)
+
+	NoticeLightProxyAvailable()
+
+	return nil
+}
+
+type lightReplay struct {
+	TLSProfile               string
+	RandomizedTLSProfileSeed *prng.Seed
+	SNI                      string
+}
+
+func (controller *Controller) dialLightProxy(
+	ctx context.Context,
+	lightClient *light.Client,
+	remoteAddr string) (net.Conn, error) {
+
+	replay, _ := controller.lightProxyReplay.Load().(lightReplay)
+
+	isReplay := replay.TLSProfile != "" && replay.SNI != ""
+	if !isReplay {
+
+		// Limitation: if SelectTLSProfile selects a CustomTLSProfile, the TLS
+		// profile reported to the proxy will be "unknown".
+
+		p := controller.config.GetParameters().Get()
+		tlsProfile, _, randomizedTLSProfileSeed, err := SelectTLSProfile(false, true, false, "", p)
+		if err != nil {
+			p.Close()
+			return nil, errors.Trace(err)
+		}
+		SNI := selectLightProxySNI(lightClient, p)
+		p.Close()
+
+		replay = lightReplay{
+			TLSProfile:               tlsProfile,
+			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+			SNI:                      SNI,
+		}
+	}
+
+	logFields := common.LogFields{"isReplay": isReplay}
+
+	conn, err := lightClient.Dial(
+		ctx,
+		logFields,
+		GetNetworkType(controller.config.GetNetworkID()),
+		replay.TLSProfile,
+		replay.RandomizedTLSProfileSeed,
+		replay.SNI,
+		remoteAddr)
+	if err != nil {
+		if ctx.Err() == nil {
+			controller.lightProxyReplay.Store(lightReplay{})
+		}
+		return nil, errors.Trace(err)
+	}
+
+	// Simple session-only replay: reuse the last SNI and TLS
+	// profile/randomized seed that successfully dialed. Concurrent
+	// successful dials may clobber this value, but every stored value
+	// succeeded.
+
+	controller.lightProxyReplay.Store(replay)
+
+	return conn, nil
+}
+
+func selectLightProxySNI(
+	lightClient *light.Client, p parameters.ParametersAccessor) string {
+
+	// Prefer light proxy entry recommended regex SNI, then recommended SNI,
+	// then light proxy custom hostname tactic.
+
+	recommendedRegexSNI := lightClient.GetRecommendedSNIRegex()
+	recommendedSNI := lightClient.GetRecommendedSNI()
+
+	if (recommendedRegexSNI != "" || recommendedSNI != "") &&
+		p.WeightedCoinFlip(parameters.LightProxyUseRecommendedSNIProbability) {
+
+		if recommendedRegexSNI != "" {
+			SNI, err := regen.GenerateString(recommendedRegexSNI)
+			if err != nil {
+				NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
+				SNI = values.GetHostName()
+			}
+			return SNI
+		}
+		return recommendedSNI
+	}
+
+	if p.WeightedCoinFlip(parameters.LightProxyCustomHostNameProbability) {
+		regexStrings := p.RegexStrings(parameters.LightProxyCustomHostNameRegexes)
+		if len(regexStrings) == 0 {
+			return values.GetHostName()
+		}
+		choice := prng.Intn(len(regexStrings))
+		SNI, err := regen.GenerateString(regexStrings[choice])
+		if err != nil {
+			NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
+			SNI = values.GetHostName()
+		}
+		return SNI
+	}
+
+	return values.GetHostName()
+}
+
+type lightProxyDialResult struct {
+	conn net.Conn
+	err  error
+}
+
+const lightProxyTunnelRacePollInterval = 50 * time.Millisecond
+
+func (controller *Controller) dialLightProxyRace(
+	lightClient *light.Client,
+	remoteAddr string,
+	downstreamConn net.Conn,
+	readInactiveThreshold time.Duration) (net.Conn, *Tunnel, error) {
+
+	// Initiate a light proxy dial and run a race between that dial and any
+	// concurrent tunnel dial. This allows for selecting the tunnel if it's
+	// just about to connect, or if the read inactive test passes as a
+	// connected tunnel was simply idle.
+
+	dialTimeout := time.Duration(
+		controller.lightProxyDialTimeout.Load())
+
+	lightDialCtx, cancel := context.WithTimeout(
+		controller.runCtx, dialTimeout)
+	defer cancel()
+
+	lightResult := make(chan lightProxyDialResult)
+	var lightDialWaitGroup sync.WaitGroup
+
+	lightDialWaitGroup.Add(1)
+	go func() {
+		defer lightDialWaitGroup.Done()
+
+		conn, err := controller.dialLightProxy(
+			lightDialCtx, lightClient, remoteAddr)
+		lightResult <- lightProxyDialResult{conn: conn, err: err}
+	}()
+	defer lightDialWaitGroup.Wait()
+
+	cancelLightDial := func() {
+		cancel()
+		result := <-lightResult
+		if result.conn != nil {
+			_ = result.conn.Close()
+		}
+	}
+
+	// Simply poll for an active tunnel with a recent read. The getNextActiveTunnel
+	// call is inexpensive, while a signal on either new tunnel established
+	// or existing tunnel reads data is complex.
+	ticker := time.NewTicker(lightProxyTunnelRacePollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case result := <-lightResult:
+
+			if result.err == nil {
+				// Close downstreamConn when the light conn is closed. See
+				// Controller.Dial and TunneledConn.
+				return &lightProxyConn{
+					Conn:           result.conn,
+					downstreamConn: downstreamConn,
+				}, nil, nil
+			}
+
+			return nil, nil, errors.Trace(result.err)
+
+		case <-ticker.C:
+			tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
+			if tunnel != nil {
+				cancelLightDial()
+				return nil, tunnel, nil
+			}
+
+		case <-controller.runCtx.Done():
+			cancelLightDial()
+			return nil, nil, errors.Trace(controller.runCtx.Err())
+		}
+	}
+}
+
+type lightProxyConn struct {
+	net.Conn
+	downstreamConn net.Conn
+}
+
+func (conn *lightProxyConn) Close() error {
+	if conn.downstreamConn != nil {
+		_ = conn.downstreamConn.Close()
+	}
+
+	return conn.Conn.Close()
+}
+
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port forward failure, for the purpose of monitoring tunnel health.
+//
+// When a light proxy is available, active tunnel selection includes a
+// recent-read liveness check and when no live tunnel is available, a light
+// proxy dial is raced against polling for a live tunnel. The light proxy path
+// doesn't support split tunnel.
 //
 // When split tunnel mode is enabled, the connection may be untunneled,
 // depending on GeoIP classification of the destination.
@@ -1567,9 +2115,56 @@ func (controller *Controller) getTunnelPoolSize() int {
 func (controller *Controller) Dial(
 	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
 
-	tunnel := controller.getNextActiveTunnel()
+	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
+
+	readInactiveThreshold := time.Duration(
+		controller.lightProxyTunnelInactiveThreshold.Load())
+
+	tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
 	if tunnel == nil {
-		return nil, errors.TraceNew("no active tunnels")
+
+		lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+		if lightProxyClient != nil {
+
+			limitDestinationAddresses, _ :=
+				controller.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
+
+			if (limitDestinationAddresses == nil ||
+				limitDestinationAddresses.Len() == 0 ||
+				limitDestinationAddresses.Contains(remoteAddr)) &&
+
+				// In test fetch mode, only the test address is routed through
+				// light proxy.
+				(controller.config.LightProxyTestFetchAddress == "" ||
+					remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
+				var lightConn net.Conn
+				lightConn, tunnel, err = controller.dialLightProxyRace(
+					lightProxyClient,
+					remoteAddr,
+					downstreamConn,
+					readInactiveThreshold)
+				if err != nil && controller.runCtx.Err() == nil {
+					NoticeWarning(
+						"light proxy dial failed: %v", errors.Trace(err))
+				}
+
+				if lightConn != nil {
+					return lightConn, nil
+				}
+				// Drop through with tunnel returned from dialLightProxyRace.
+			}
+		}
+
+		if tunnel == nil {
+			// The final fallback is the Controller.Dial behavior when there
+			// is no light proxy configured and readInactiveThreshold is 0.
+			tunnel = controller.getNextActiveTunnel(0)
+		}
+
+		if tunnel == nil {
+			return nil, errors.TraceNew("no active tunnels")
+		}
 	}
 
 	if !tunnel.config.IsSplitTunnelEnabled() {
@@ -1953,6 +2548,11 @@ func (controller *Controller) startEstablishing() {
 	}
 	NoticeInfo("start establishing")
 
+	active, _ := controller.numTunnels()
+	if active == 0 && controller.config.LightProxyTestFetchAddress != "" {
+		controller.triggerLightProxyTestFetch()
+	}
+
 	// establishStartTime is used to calculate and report the client's tunnel
 	// establishment duration. Establishment duration should include all
 	// initialization in launchEstablishing and establishCandidateGenerator,
@@ -2265,7 +2865,9 @@ func (controller *Controller) launchEstablishing() {
 	// lists) with the original; the contents of these slices don't change
 	// past this point. The rate limiter should not be used by
 	// serverEntriesReporter, but is cleared just in case.
-	if !disableServerEntriesReporter {
+	if disableServerEntriesReporter {
+		NoticeInfo("skip server entries reporter")
+	} else {
 		copyConstraints := *controller.protocolSelectionConstraints
 		copyConstraints.inproxyClientDialRateLimiter = nil
 		controller.signalServerEntriesReporter(
@@ -2491,6 +3093,9 @@ func (controller *Controller) stopEstablishing() {
 
 	// Similarly, establishment generates the bulk of domain resolves.
 	emitDNSMetrics(controller.resolver)
+	if controller.splitResolver != nil {
+		emitDNSMetrics(controller.splitResolver)
+	}
 }
 
 func (controller *Controller) resetServerEntryIterationMetrics() {
@@ -3427,7 +4032,7 @@ func (controller *Controller) runInproxyProxy() {
 		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
-		ExcludeInterfaceName:                 controller.config.InproxyProxySplitUpstreamInterfaceName,
+		ExcludeInterfaceName:                 controller.config.splitInterfaceUpstreamInterfaceName(),
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
 		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,

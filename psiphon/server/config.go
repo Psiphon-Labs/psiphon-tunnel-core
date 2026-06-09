@@ -869,13 +869,23 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		// edge-to-server hop, so it must be enabled or else this
 		// configuration will not work. There is no FRONTED QUIC listener at
 		// all; see TunnelServer.Run.
-		if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
-			_, ok := config.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_FRONTED_MEEK]
+		//
+		// There is an equivalent constraint for INPROXY-WEBRTC-FRONTED
+		// variants: for INPROXY FRONTED QUIC and HTTP, the INPROXY FRONTED
+		// HTTPS listener is always used.
+
+		if protocol.TunnelProtocolUsesFrontedMeekNonHTTPS(tunnelProtocol) {
+			requiredTunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
+			if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+				requiredTunnelProtocol = protocol.TunnelProtocolPlusInproxyWebRTC(
+					requiredTunnelProtocol)
+			}
+			_, ok := config.TunnelProtocolPorts[requiredTunnelProtocol]
 			if !ok {
 				return nil, errors.Tracef(
 					"Tunnel protocol %s requires %s to be enabled",
 					tunnelProtocol,
-					protocol.TUNNEL_PROTOCOL_FRONTED_MEEK)
+					requiredTunnelProtocol)
 			}
 		}
 

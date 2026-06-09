@@ -46,10 +46,8 @@ type Conn struct {
 	// zero or one.
 	handshakes      int
 	extMasterSecret bool
-
 	// [Psiphon]
 	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello
-
 	didResume        bool // whether this connection was a session resumption
 	didHRR           bool // whether a HelloRetryRequest was sent/received
 	cipherSuite      uint16
@@ -103,7 +101,7 @@ type Conn struct {
 	// clientProtocol is the negotiated ALPN protocol.
 	clientProtocol string
 
-	utls utlsConnExtraFields // [uTLS] used for extensive things such as ALPS, PSK, etc.
+	utls utlsConnExtraFields // [UTLS] used for extensive things such as ALPS, PSK, etc
 
 	// input/output
 	in, out   halfConn
@@ -754,7 +752,7 @@ func (c *Conn) readRecordOrCCS(expectChangeCipherSpec bool) error {
 		// 5, a server can send a ChangeCipherSpec before its ServerHello, when
 		// c.vers is still unset. That's not useful though and suspicious if the
 		// server then selects a lower protocol version, so don't allow that.
-		if c.vers == VersionTLS13 {
+		if c.vers == VersionTLS13 && !handshakeComplete {
 			return c.retryReadRecord(expectChangeCipherSpec)
 		}
 		if !expectChangeCipherSpec {
@@ -1162,22 +1160,22 @@ func (c *Conn) unmarshalHandshakeMessage(data []byte, transcript transcriptHash)
 		}
 	case typeFinished:
 		m = new(finishedMsg)
-	// [uTLS] Commented out typeEncryptedExtensions to force
+	// [uTLS] Commented typeEncryptedExtensions to force
 	// utlsHandshakeMessageType to handle it
 	// case typeEncryptedExtensions:
-	// m = new(encryptedExtensionsMsg)
+	// 	m = new(encryptedExtensionsMsg)
 	case typeEndOfEarlyData:
 		m = new(endOfEarlyDataMsg)
 	case typeKeyUpdate:
 		m = new(keyUpdateMsg)
 	default:
-		// [UTLS SECTION BEGIN]
+		// [UTLS SECTION BEGINS]
 		var err error
 		m, err = c.utlsHandshakeMessageType(data[0]) // see u_conn.go
 		if err == nil {
 			break
 		}
-		// [UTLS SECTION END]
+		// [UTLS SECTION ENDS]
 		return nil, c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
 	}
 
@@ -1622,16 +1620,6 @@ func (c *Conn) handshakeContext(ctx context.Context) (ret error) {
 	return c.handshakeErr
 }
 
-// [Psiphon]
-// ConnectionMetrics returns basic metrics about the connection.
-func (c *Conn) ConnectionMetrics() ConnectionMetrics {
-	c.handshakeMutex.Lock()
-	defer c.handshakeMutex.Unlock()
-	var metrics ConnectionMetrics
-	metrics.ClientSentTicket = c.clientSentTicket
-	return metrics
-}
-
 // ConnectionState returns basic TLS details about the connection.
 func (c *Conn) ConnectionState() ConnectionState {
 	c.handshakeMutex.Lock()
@@ -1639,7 +1627,7 @@ func (c *Conn) ConnectionState() ConnectionState {
 	return c.connectionStateLocked()
 }
 
-// var tlsunsafeekm = godebug.New("tlsunsafeekm") // [UTLS] unsupported
+// var tlsunsafeekm = godebug.New("tlsunsafeekm") // [uTLS] unsupportted
 
 func (c *Conn) connectionStateLocked() ConnectionState {
 	var state ConnectionState
@@ -1668,20 +1656,20 @@ func (c *Conn) connectionStateLocked() ConnectionState {
 		state.ekm = noEKMBecauseRenegotiation
 	} else if c.vers != VersionTLS13 && !c.extMasterSecret {
 		state.ekm = func(label string, context []byte, length int) ([]byte, error) {
-			// [UTLS SECTION BEGIN]
-			// Disable unsupported godebug package
+			// [uTLS SECTION START]
+			// Disabling unsupported godebug package
 			// if tlsunsafeekm.Value() == "1" {
 			// 	tlsunsafeekm.IncNonDefault()
 			// 	return c.ekm(label, context, length)
 			// }
+			// [uTLS SECTION END]
 			return noEKMBecauseNoEMS(label, context, length)
-			// [UTLS SECTION END]
 		}
 	} else {
 		state.ekm = c.ekm
 	}
 	state.ECHAccepted = c.echAccepted
-	// [UTLS SECTION BEGIN]
+	// [UTLS SECTION START]
 	c.utlsConnectionStateLocked(&state)
 	// [UTLS SECTION END]
 	return state
@@ -1712,4 +1700,13 @@ func (c *Conn) VerifyHostname(host string) error {
 		return errors.New("tls: handshake did not verify certificate chain")
 	}
 	return c.peerCertificates[0].VerifyHostname(host)
+}
+
+// [Psiphon] ConnectionMetrics returns basic metrics about the connection.
+func (c *Conn) ConnectionMetrics() ConnectionMetrics {
+	c.handshakeMutex.Lock()
+	defer c.handshakeMutex.Unlock()
+	var metrics ConnectionMetrics
+	metrics.ClientSentTicket = c.clientSentTicket
+	return metrics
 }
