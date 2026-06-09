@@ -74,6 +74,10 @@ func configureClientInterface(_ *ClientConfig, _ string) error {
 	return errors.Trace(errUnsupported)
 }
 
+func IsBindToDeviceSupported() bool {
+	return false
+}
+
 func BindToDevice(_ int, _ string) error {
 	return errors.Trace(errUnsupported)
 }

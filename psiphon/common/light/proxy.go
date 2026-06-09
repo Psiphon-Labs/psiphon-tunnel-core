@@ -28,12 +28,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/time/rate"
 )
@@ -59,27 +61,29 @@ const (
 
 // ProxyConfig specifies the configuration of a light proxy.
 type ProxyConfig struct {
-	Protocol                string   `json:",omitempty"`
-	ProviderID              string   `json:",omitempty"`
-	ListenAddresses         []string `json:",omitempty"`
-	DialAddressIPv4         string   `json:",omitempty"`
-	DialAddressIPv6         string   `json:",omitempty"`
-	ObfuscationKey          string   `json:",omitempty"`
-	TLSCertificate          []byte   `json:",omitempty"`
-	TLSPrivateKey           []byte   `json:",omitempty"`
-	PassthroughAddress      string   `json:",omitempty"`
-	AllowedDestinations     []string `json:",omitempty"`
-	InactivityTimeout       string   `json:",omitempty"`
-	UpstreamDialTimeout     string   `json:",omitempty"`
-	RelayBufferSize         int      `json:",omitempty"`
-	PerIPRateLimitQuantity  *int     `json:",omitempty"`
-	PerIPRateLimitInterval  string   `json:",omitempty"`
-	PerIPMaxConcurrent      *int     `json:",omitempty"`
-	MaxConcurrent           *int     `json:",omitempty"`
-	DialFallbackDelay       string   `json:",omitempty"`
-	DNSResolverCacheMaxSize *int     `json:",omitempty"`
-	DNSResolverCacheTTL     string   `json:",omitempty"`
-	EnableDebugLogs         bool     `json:",omitempty"`
+	Protocol                     string   `json:",omitempty"`
+	ProviderID                   string   `json:",omitempty"`
+	ListenAddresses              []string `json:",omitempty"`
+	DialAddressIPv4              string   `json:",omitempty"`
+	DialAddressIPv6              string   `json:",omitempty"`
+	ObfuscationKey               string   `json:",omitempty"`
+	TLSCertificate               []byte   `json:",omitempty"`
+	TLSPrivateKey                []byte   `json:",omitempty"`
+	PassthroughAddress           string   `json:",omitempty"`
+	AllowedDestinations          []string `json:",omitempty"`
+	InactivityTimeout            string   `json:",omitempty"`
+	UpstreamDialTimeout          string   `json:",omitempty"`
+	RelayBufferSize              int      `json:",omitempty"`
+	PerIPRateLimitQuantity       *int     `json:",omitempty"`
+	PerIPRateLimitInterval       string   `json:",omitempty"`
+	PerIPMaxConcurrent           *int     `json:",omitempty"`
+	MaxConcurrent                *int     `json:",omitempty"`
+	DialFallbackDelay            string   `json:",omitempty"`
+	DNSResolverCacheMaxSize      *int     `json:",omitempty"`
+	DNSResolverCacheTTL          string   `json:",omitempty"`
+	SplitUpstreamInterfaceName   string   `json:",omitempty"`
+	SplitDownstreamInterfaceName string   `json:",omitempty"`
+	EnableDebugLogs              bool     `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -137,6 +141,9 @@ type Proxy struct {
 	perIPMaxConcurrent    int
 	maxConcurrent         int
 	dialFallbackDelay     time.Duration
+
+	listenConfig *net.ListenConfig
+	dialer       *net.Dialer
 
 	limitsMutex                sync.Mutex
 	perIPConcurrentConnections map[string]int
@@ -282,6 +289,42 @@ func NewProxy(
 		}
 	}
 
+	listenConfig := &net.ListenConfig{}
+	dialer := &net.Dialer{}
+
+	splitInterfaceMode := config.SplitUpstreamInterfaceName != "" ||
+		config.SplitDownstreamInterfaceName != ""
+	if splitInterfaceMode {
+		if !tun.IsBindToDeviceSupported() {
+			return nil, errors.TraceNew("split interface is not supported")
+		}
+		if config.SplitUpstreamInterfaceName != "" &&
+			config.SplitDownstreamInterfaceName == config.SplitUpstreamInterfaceName {
+			return nil, errors.TraceNew(
+				"SplitDownstreamInterfaceName must differ from SplitUpstreamInterfaceName")
+		}
+
+		upstreamInterfaceName := config.SplitUpstreamInterfaceName
+		downstreamInterfaceName := config.SplitDownstreamInterfaceName
+		if upstreamInterfaceName == "" {
+			upstreamInterfaceName = common.FindInterfaceExcluding(downstreamInterfaceName)
+		}
+		if downstreamInterfaceName == "" {
+			downstreamInterfaceName = common.FindInterfaceExcluding(upstreamInterfaceName)
+		}
+		if upstreamInterfaceName == "" {
+			return nil, errors.TraceNew(
+				"unable to determine upstream interface; set SplitUpstreamInterfaceName")
+		}
+		if downstreamInterfaceName == "" {
+			return nil, errors.TraceNew(
+				"unable to determine downstream interface; set SplitDownstreamInterfaceName")
+		}
+
+		listenConfig.Control = makeBindToDeviceControl(downstreamInterfaceName)
+		dialer.Control = makeBindToDeviceControl(upstreamInterfaceName)
+	}
+
 	// Initialize the DNS resolver and optional cache following the pattern in
 	// psiphon/server.sshClient.getDNSResolver. See additional comments in
 	// that function.
@@ -300,7 +343,19 @@ func NewProxy(
 	// avoid any cases where Go's resolver fails over to the cgo-based
 	// resolver while will consume an OS thread.
 
-	dnsResolver := &net.Resolver{PreferGo: true}
+	dnsResolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, address)
+			return conn, errors.Trace(err)
+		},
+	}
+
+	// Route hostname lookups performed by the dialer itself, which happens
+	// when PassthroughAddress is a hostname, through dnsResolver to ensure
+	// dialer.Control is applied. Limitation: currently this doesn't use the
+	// DNS cache.
+	dialer.Resolver = dnsResolver
 
 	var dnsCache *lrucache.Cache
 	if dnsResolverCacheMaxSize > 0 && dnsResolverCacheTTL > 0 {
@@ -356,6 +411,8 @@ func NewProxy(
 		maxConcurrent:      maxConcurrent,
 		dnsResolver:        dnsResolver,
 		dnsCache:           dnsCache,
+		listenConfig:       listenConfig,
+		dialer:             dialer,
 		dialFallbackDelay:  dialFallbackDelay,
 
 		perIPConcurrentConnections: make(map[string]int),
@@ -366,6 +423,7 @@ func NewProxy(
 	}
 
 	tlsConfig.PassthroughAddress = config.PassthroughAddress
+	tlsConfig.PassthroughDialer = proxy.dialer.Dial
 
 	tlsConfig.PassthroughVerifyMessage = func(message []byte) bool {
 		return obfuscator.VerifyTLSPassthroughMessage(
@@ -424,7 +482,6 @@ func (proxy *Proxy) Resume() {
 func (proxy *Proxy) Run(ctx context.Context) error {
 
 	// Future enhancement: use psiphon/server.newTCPListenerWithBPF.
-	listenConfig := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(proxy.config.ListenAddresses))
 	closeListeners := func() {
 		for _, listener := range listeners {
@@ -433,7 +490,7 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 	}
 
 	for _, listenAddress := range proxy.config.ListenAddresses {
-		listener, err := listenConfig.Listen(
+		listener, err := proxy.listenConfig.Listen(
 			context.Background(), "tcp", listenAddress)
 		if err != nil {
 			closeListeners()
@@ -690,7 +747,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	upstreamDNSCached = cached
 	completedUpstreamDNS = time.Now().UTC()
 
-	upstreamConn, err := netDialParallel(dialCtx, proxy.dialFallbackDelay, upstreamAddrs)
+	upstreamConn, err := netDialParallel(
+		dialCtx, proxy.dialFallbackDelay, upstreamAddrs, proxy.dialer)
 	if err != nil {
 		err = common.RedactNetError(err)
 		return errors.Trace(err)
@@ -868,6 +926,26 @@ func (proxy *Proxy) resolve(
 	}
 
 	return addrs, cached, nil
+}
+
+func makeBindToDeviceControl(interfaceName string) func(string, string, syscall.RawConn) error {
+	return func(_, _ string, c syscall.RawConn) error {
+		var controlErr error
+		err := c.Control(func(fd uintptr) {
+			err := tun.BindToDevice(int(fd), interfaceName)
+			if err != nil {
+				controlErr = errors.Tracef("BindToDevice failed: %v", err)
+				return
+			}
+		})
+		if controlErr != nil {
+			return errors.Trace(controlErr)
+		}
+		if err != nil {
+			return errors.Trace(err)
+		}
+		return nil
+	}
 }
 
 // redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from

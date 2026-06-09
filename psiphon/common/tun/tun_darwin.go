@@ -452,7 +452,18 @@ func configureClientInterface(
 	return nil
 }
 
-// BindToDevice binds a socket to the specified interface.
+func IsBindToDeviceSupported() bool {
+	return true
+}
+
+// BindToDevice binds a socket to the specified interface on Darwin.
+//
+// Sets both IP_BOUND_IF and IPV6_BOUND_IF unconditionally. Go may create
+// AF_INET, AF_INET6 dual-stack, or AF_INET6 v6-only sockets depending on
+// the dial target. Rather than probing the socket family, both options
+// are attempted unconditionally; the option that doesn't apply to the
+// socket's address family fails harmlessly. At least one must succeed
+// for the bind to be successful.
 func BindToDevice(fd int, deviceName string) error {
 
 	netInterface, err := net.InterfaceByName(deviceName)
@@ -460,13 +471,14 @@ func BindToDevice(fd int, deviceName string) error {
 		return errors.Trace(err)
 	}
 
-	// IP_BOUND_IF definition from <netinet/in.h>
+	ipv4Err := syscall.SetsockoptInt(
+		fd, syscall.IPPROTO_IP, syscall.IP_BOUND_IF, netInterface.Index)
+	ipv6Err := syscall.SetsockoptInt(
+		fd, syscall.IPPROTO_IPV6, syscall.IPV6_BOUND_IF, netInterface.Index)
 
-	const IP_BOUND_IF = 25
-
-	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, IP_BOUND_IF, netInterface.Index)
-	if err != nil {
-		return errors.Trace(err)
+	if ipv4Err != nil && ipv6Err != nil {
+		return errors.Tracef(
+			"BindToDevice failed: IPv4=%v, IPv6=%v", ipv4Err, ipv6Err)
 	}
 
 	return nil

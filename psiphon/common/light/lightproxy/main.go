@@ -64,6 +64,8 @@ func main() {
 	var recommendedMaxTLSPadding int
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
+	var splitUpstreamInterfaceName string
+	var splitDownstreamInterfaceName string
 	var destination string
 	var workerCount int
 	var minSleepDuration time.Duration
@@ -154,6 +156,18 @@ func main() {
 		"generate passthrough address")
 
 	flag.StringVar(
+		&splitUpstreamInterfaceName,
+		"splitUpstreamInterface",
+		"",
+		"generate split upstream interface name; optional")
+
+	flag.StringVar(
+		&splitDownstreamInterfaceName,
+		"splitDownstreamInterface",
+		"",
+		"generate split downstream interface name; optional")
+
+	flag.StringVar(
 		&destination,
 		"destination",
 		"",
@@ -227,6 +241,9 @@ func main() {
 			if err != nil {
 				return errors.Trace(err)
 			}
+
+			config.SplitUpstreamInterfaceName = splitUpstreamInterfaceName
+			config.SplitDownstreamInterfaceName = splitDownstreamInterfaceName
 
 			configJSON, err := json.MarshalIndent(config, "", "  ")
 			if err != nil {

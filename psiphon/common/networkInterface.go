@@ -96,3 +96,27 @@ func GetRoutableInterfaceIPAddresses() (net.IP, net.IP, error) {
 	}
 	return nil, nil, errors.TraceNew("no candidate interfaces found")
 }
+
+// FindInterfaceExcluding returns the name of the first non-loopback, up
+// interface that has at least one address and whose name does not match
+// excludeName.
+func FindInterfaceExcluding(excludeName string) string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Name == excludeName {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil || len(addrs) == 0 {
+			continue
+		}
+		return iface.Name
+	}
+	return ""
+}

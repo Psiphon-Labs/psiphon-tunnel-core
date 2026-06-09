@@ -956,6 +956,12 @@ type Config struct {
 	// determined by PassthroughKey.
 	PassthroughAddress string
 
+	// [Psiphon] PassthroughDialer optionally specifies the dial function used
+	// to connect to PassthroughAddress. When nil, net.Dial is used.
+	//
+	// The PassthroughDialer is expected to dial a TCP endpoint.
+	PassthroughDialer func(network, address string) (net.Conn, error)
+
 	// [Psiphon] PassthroughVerifyMessage must be set when passthrough mode is
 	// enabled. The function must return true for valid passthrough messages
 	// and false otherwise.
@@ -1122,6 +1128,7 @@ func (c *Config) Clone() *Config {
 		GetClientHelloRandom:           c.GetClientHelloRandom,
 		UseObfuscatedSessionTickets:    c.UseObfuscatedSessionTickets,
 		PassthroughAddress:             c.PassthroughAddress,
+		PassthroughDialer:              c.PassthroughDialer,
 		PassthroughVerifyMessage:       c.PassthroughVerifyMessage,
 		PassthroughHistoryAddNew:       c.PassthroughHistoryAddNew,
 		PassthroughLogInvalidMessage:   c.PassthroughLogInvalidMessage,

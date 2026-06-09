@@ -26,13 +26,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1682,8 +1680,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	splitInterfaceMode := config.InproxyProxySplitUpstreamInterfaceName != "" ||
 		config.InproxyProxySplitDownstreamInterfaceName != ""
-	if splitInterfaceMode && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
-		return errors.TraceNew("InproxyProxySplit{Upstream,Downstream}InterfaceName is only supported on Linux and Windows")
+	if splitInterfaceMode && !tun.IsBindToDeviceSupported() {
+		return errors.TraceNew("split interface is not supported")
 	}
 	if splitInterfaceMode && config.DeviceBinder != nil {
 		return errors.TraceNew("InproxyProxySplit{Upstream,Downstream}InterfaceName cannot be used with DeviceBinder")
@@ -1865,20 +1863,18 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		upstreamInterfaceName := config.InproxyProxySplitUpstreamInterfaceName
 		downstreamInterfaceName := config.InproxyProxySplitDownstreamInterfaceName
 		if upstreamInterfaceName == "" {
-			upstreamInterfaceName = findInterfaceExcluding(downstreamInterfaceName)
+			upstreamInterfaceName = common.FindInterfaceExcluding(downstreamInterfaceName)
 		}
 		if downstreamInterfaceName == "" {
-			downstreamInterfaceName = findInterfaceExcluding(upstreamInterfaceName)
+			downstreamInterfaceName = common.FindInterfaceExcluding(upstreamInterfaceName)
 		}
 		if upstreamInterfaceName == "" {
 			return errors.TraceNew(
-				"unable to determine upstream interface for split-interface in-proxy proxy; " +
-					"set InproxyProxySplitUpstreamInterfaceName")
+				"unable to determine upstream interface; set InproxyProxySplitUpstreamInterfaceName")
 		}
 		if downstreamInterfaceName == "" {
 			return errors.TraceNew(
-				"unable to determine downstream interface for split-interface in-proxy proxy; " +
-					"set InproxyProxySplitDownstreamInterfaceName")
+				"unable to determine downstream interface; set InproxyProxySplitDownstreamInterfaceName")
 		}
 
 		config.splitInterface = &splitInterfaceState{
@@ -4475,32 +4471,6 @@ func (b *interfaceDeviceBinder) BindToDevice(fileDescriptor int) (string, error)
 		return "", errors.Trace(err)
 	}
 	return b.interfaceName, nil
-}
-
-// findInterfaceExcluding returns the name of the first non-loopback, up
-// interface that has at least one address and whose name does not match
-// excludeName. It is the best-effort fallback used to fill in the
-// counterpart interface in a split-interface in-proxy proxy configuration
-// when only one of the upstream/downstream interface names is set.
-func findInterfaceExcluding(excludeName string) string {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range interfaces {
-		if iface.Name == excludeName {
-			continue
-		}
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil || len(addrs) == 0 {
-			continue
-		}
-		return iface.Name
-	}
-	return ""
 }
 
 const unknownNetworkID = "UNKNOWN"

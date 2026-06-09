@@ -435,6 +435,10 @@ func configureClientInterface(
 	return nil
 }
 
+func IsBindToDeviceSupported() bool {
+	return true
+}
+
 // BindToDevice binds a socket to the specified interface.
 func BindToDevice(fd int, deviceName string) error {
 	err := syscall.BindToDevice(fd, deviceName)
