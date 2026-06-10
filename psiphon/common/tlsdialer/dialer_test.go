@@ -430,7 +430,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -516,7 +516,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -541,7 +541,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -556,7 +556,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// Session ticket incapable TLS 1.2 profiles should not be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(true, false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(true, false, false, "", "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -571,7 +571,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// Only TLS 1.3 profiles should be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", params.Get())
+		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -587,7 +587,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// session ticket capable.
 
 	for i := 0; i < numSelections; i++ {
-		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", params.Get())
+		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", "", params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}

@@ -406,7 +406,7 @@ func Dial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", p)
+		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", "", p)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -770,28 +770,92 @@ func IsConnUsingHTTP2(conn net.Conn) bool {
 	return false
 }
 
+// TLSProfileSupportsTLS13 indicates whether the specified TLS profile is
+// supported and capable of negotiating TLS 1.3.
+//
+// TLS_PROFILE_RANDOMIZED, which generates a ClientHello that may negotiate
+// either TLS 1.2 or TLS 1.3, is reported as capable.
+func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
+
+	if !common.Contains(protocol.SupportedTLSProfiles, tlsProfile) {
+		return false, errors.TraceNew("unsupported TLS profile")
+	}
+
+	if protocol.TLSProfileIsRandomized(tlsProfile) {
+		return true, nil
+	}
+
+	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
+		parameters.MakeNilParametersAccessor(), tlsProfile)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	tlsVersion, err := getClientHelloVersion(
+		utlsClientHelloID, utlsClientHelloSpec)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	return tlsVersion == protocol.TLS_VERSION_13, nil
+}
+
 // SelectTLSProfile picks and returns a TLS profile at random from the
 // available candidates along with its version and a newly generated PRNG seed
 // if the profile is randomized, i.e. protocol.TLSProfileIsRandomized is true,
 // which should be used when generating a randomized TLS ClientHello.
+//
+// When preferredTLSProfile is set, it is attempted first. If the preferred
+// profile is unknown, disabled, incompatible with the requested constraints,
+// or fails the TLS version requirement, random selection is used as fallback.
 func SelectTLSProfile(
 	requireTLS12SessionTickets bool,
 	requireTLS13Support bool,
 	isFronted bool,
 	frontingProviderID string,
+	preferredTLSProfile string,
 	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
 
+	preferred := preferredTLSProfile
+
 	for i := 0; i < 1000; i++ {
-		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err = selectTLSProfile(requireTLS12SessionTickets, isFronted, frontingProviderID, p)
+
+		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err =
+			selectTLSProfile(
+				requireTLS12SessionTickets,
+				isFronted,
+				frontingProviderID,
+				preferred,
+				p)
 		if err != nil {
 			return "", "", nil, errors.Trace(err)
 		}
+		if tlsProfile == "" {
+			if preferred != "" {
+				// The preferred profile is unknown, disabled, or incompatible
+				// with the constraints; fall back to random selection.
+				preferred = ""
+				continue
+			}
+			if requireTLS13Support {
+				continue
+			}
+			return "", "", nil, nil
+		}
 
 		if requireTLS13Support && tlsVersion != protocol.TLS_VERSION_13 {
+
 			// Continue picking profiles at random until an eligible one is
 			// chosen. It is okay to loop in this way because the probability of
 			// selecting a TLS 1.3 profile is high enough that it should not
 			// take too many iterations until one is chosen.
+			//
+			// A preferred non-random profile always produces the same TLS
+			// version, so fall back to random selection.
+
+			if preferred != "" && !protocol.TLSProfileIsRandomized(preferred) {
+				preferred = ""
+			}
 			continue
 		}
 
@@ -808,6 +872,7 @@ func selectTLSProfile(
 	requireTLS12SessionTickets bool,
 	isFronted bool,
 	frontingProviderID string,
+	preferredTLSProfile string,
 	p parameters.ParametersAccessor) (tlsProfile string, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
@@ -884,7 +949,14 @@ func selectTLSProfile(
 		}
 	}
 
-	if len(randomizedTLSProfiles) > 0 &&
+	if preferredTLSProfile != "" {
+		if common.Contains(randomizedTLSProfiles, preferredTLSProfile) ||
+			common.Contains(parrotTLSProfiles, preferredTLSProfile) {
+			tlsProfile = preferredTLSProfile
+		} else {
+			return "", "", nil, nil
+		}
+	} else if len(randomizedTLSProfiles) > 0 &&
 		(len(parrotTLSProfiles) == 0 ||
 			p.WeightedCoinFlip(parameters.SelectRandomizedTLSProfileProbability)) {
 

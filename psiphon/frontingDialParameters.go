@@ -195,7 +195,7 @@ func makeFrontedMeekDialParameters(
 	frontedMeekDialParams.TLSProfile,
 		frontedMeekDialParams.TLSVersion,
 		frontedMeekDialParams.RandomizedTLSProfileSeed,
-		err = tlsdialer.SelectTLSProfile(requireTLS12SessionTickets, requireTLS13Support, isFronted, frontedMeekDialParams.FrontingProviderID, p)
+		err = tlsdialer.SelectTLSProfile(requireTLS12SessionTickets, requireTLS13Support, isFronted, frontedMeekDialParams.FrontingProviderID, "", p)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

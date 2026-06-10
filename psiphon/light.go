@@ -169,7 +169,14 @@ func makeLightDialParameters(
 	p := config.GetParameters().Get()
 	defer p.Close()
 
-	tlsProfile, _, randomizedTLSProfileSeed, err := tlsdialer.SelectTLSProfile(false, true, false, "", p)
+	recommendedTLSProfile := lightClient.GetRecommendedTLSProfile()
+	if recommendedTLSProfile != "" &&
+		!prng.FlipWeightedCoin(lightClient.GetRecommendedTLSProfileProbability()) {
+		recommendedTLSProfile = ""
+	}
+
+	tlsProfile, _, randomizedTLSProfileSeed, err :=
+		tlsdialer.SelectTLSProfile(false, true, false, "", recommendedTLSProfile, p)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -252,7 +259,7 @@ func selectLightProxySNI(
 	recommendedSNI := lightClient.GetRecommendedSNI()
 
 	if (recommendedRegexSNI != "" || recommendedSNI != "") &&
-		p.WeightedCoinFlip(parameters.LightProxyUseRecommendedSNIProbability) {
+		prng.FlipWeightedCoin(lightClient.GetRecommendedSNIProbability()) {
 
 		if recommendedRegexSNI != "" {
 			SNI, err := regen.GenerateString(recommendedRegexSNI)

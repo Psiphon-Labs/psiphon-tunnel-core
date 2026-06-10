@@ -185,6 +185,24 @@ func (client *Client) GetRecommendedSNIRegex() string {
 	return client.proxyEntry.RecommendedSNIRegex
 }
 
+// GetRecommendedSNIProbability returns the recommended SNI probability
+// included in the proxy entry.
+func (client *Client) GetRecommendedSNIProbability() float64 {
+	return client.proxyEntry.RecommendedSNIProbability
+}
+
+// GetRecommendedTLSProfile returns the recommended TLS profile included in
+// the proxy entry, if any.
+func (client *Client) GetRecommendedTLSProfile() string {
+	return client.proxyEntry.RecommendedTLSProfile
+}
+
+// GetRecommendedTLSProfileProbability returns the recommended TLS profile
+// probability included in the proxy entry.
+func (client *Client) GetRecommendedTLSProfileProbability() float64 {
+	return client.proxyEntry.RecommendedTLSProfileProbability
+}
+
 // GetRecommendedFragmentClientHelloProbability returns the recommended
 // FragmentClientHello probability included in the proxy entry.
 func (client *Client) GetRecommendedFragmentClientHelloProbability() float64 {

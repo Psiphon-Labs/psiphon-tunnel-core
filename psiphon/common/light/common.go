@@ -54,6 +54,9 @@ type ProxyEntry struct {
 	RecommendedTLSPaddingProbability          float64 `cbor:"10,keyasint,omitempty"`
 	RecommendedMinTLSPadding                  int     `cbor:"11,keyasint,omitempty"`
 	RecommendedMaxTLSPadding                  int     `cbor:"12,keyasint,omitempty"`
+	RecommendedSNIProbability                 float64 `cbor:"13,keyasint,omitempty"`
+	RecommendedTLSProfile                     string  `cbor:"14,keyasint,omitempty"`
+	RecommendedTLSProfileProbability          float64 `cbor:"15,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -109,10 +112,16 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 		proxyEntry.RecommendedFragmentClientHelloProbability,
 		proxyEntry.RecommendedTLSPaddingProbability,
 		proxyEntry.RecommendedMinTLSPadding,
-		proxyEntry.RecommendedMaxTLSPadding)
+		proxyEntry.RecommendedMaxTLSPadding,
+		proxyEntry.RecommendedSNIProbability,
+		proxyEntry.RecommendedTLSProfileProbability)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	// Do not validate RecommendedTLSProfile here. Future proxy entries may
+	// recommend profiles not present in this client's SupportedTLSProfiles;
+	// callers must fall back when the recommendation is unknown.
 
 	return proxyEntry, nil
 }
@@ -121,7 +130,9 @@ func validateRecommendedTLSSettings(
 	fragmentClientHelloProbability float64,
 	tlsPaddingProbability float64,
 	minTLSPadding int,
-	maxTLSPadding int) error {
+	maxTLSPadding int,
+	sniProbability float64,
+	tlsProfileProbability float64) error {
 
 	if !(fragmentClientHelloProbability >= 0.0 &&
 		fragmentClientHelloProbability <= 1.0) {
@@ -131,6 +142,14 @@ func validateRecommendedTLSSettings(
 	if !(tlsPaddingProbability >= 0.0 &&
 		tlsPaddingProbability <= 1.0) {
 		return errors.TraceNew("invalid recommended TLS padding probability")
+	}
+
+	if !(sniProbability >= 0.0 && sniProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended SNI probability")
+	}
+
+	if !(tlsProfileProbability >= 0.0 && tlsProfileProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS profile probability")
 	}
 
 	if minTLSPadding < 0 ||

@@ -588,13 +588,13 @@ const (
 	LightProxyDisableFallback                          = "LightProxyDisableFallback"
 	LightProxyCustomHostNameRegexes                    = "LightProxyCustomHostNameRegexes"
 	LightProxyCustomHostNameProbability                = "LightProxyCustomHostNameProbability"
-	LightProxyUseRecommendedSNIProbability             = "LightProxyUseRecommendedSNIProbability"
 	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 
 	// Retired parameters
 
+	LightProxyUseRecommendedSNIProbability    = "LightProxyUseRecommendedSNIProbability"
 	LightProxyDisable                         = "LightProxyDisable"
 	ReplayRandomizedTLSProfile                = "ReplayRandomizedTLSProfile"
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"

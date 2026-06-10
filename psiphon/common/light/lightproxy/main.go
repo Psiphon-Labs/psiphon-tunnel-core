@@ -58,6 +58,9 @@ func main() {
 	var dialAddressIPv6 string
 	var recommendedSNI string
 	var recommendedSNIRegex string
+	var recommendedSNIProbability float64
+	var recommendedTLSProfile string
+	var recommendedTLSProfileProbability float64
 	var recommendedFragmentClientHelloProbability float64
 	var recommendedTLSPaddingProbability float64
 	var recommendedMinTLSPadding int
@@ -119,6 +122,24 @@ func main() {
 		"recommendedSNIRegex",
 		"",
 		"generate recommended SNI regex; optional")
+
+	flag.Float64Var(
+		&recommendedSNIProbability,
+		"recommendedSNIProbability",
+		0.0,
+		"generate recommended SNI probability; optional")
+
+	flag.StringVar(
+		&recommendedTLSProfile,
+		"recommendedTLSProfile",
+		"",
+		"generate recommended TLS profile; optional")
+
+	flag.Float64Var(
+		&recommendedTLSProfileProbability,
+		"recommendedTLSProfileProbability",
+		0.0,
+		"generate recommended TLS profile probability; optional")
 
 	flag.Float64Var(
 		&recommendedFragmentClientHelloProbability,
@@ -232,6 +253,9 @@ func main() {
 				dialAddressIPv6,
 				recommendedSNI,
 				recommendedSNIRegex,
+				recommendedSNIProbability,
+				recommendedTLSProfile,
+				recommendedTLSProfileProbability,
 				recommendedFragmentClientHelloProbability,
 				recommendedTLSPaddingProbability,
 				recommendedMinTLSPadding,
