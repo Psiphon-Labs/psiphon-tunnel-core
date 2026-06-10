@@ -1212,10 +1212,6 @@ func MakeInproxyBrokerDialParameters(
 	brokerSpec *parameters.InproxyBrokerSpec,
 	tlsCache utls.ClientSessionCache) (*InproxyBrokerDialParameters, error) {
 
-	if config.UseUpstreamProxy() {
-		return nil, errors.TraceNew("upstream proxy unsupported")
-	}
-
 	currentTimestamp := time.Now()
 
 	// Select new broker dial parameters

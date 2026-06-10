@@ -1426,6 +1426,7 @@ var baseDialParams = []requestParamSpec{
 	{"unique_candidate_estimate", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidates_moved_to_front", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"first_fronted_meek_candidate", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"tunnel_personal_light_proxy_id", isAnyString, requestParamOptional},
 }
 
 var inproxyDialParams = []requestParamSpec{

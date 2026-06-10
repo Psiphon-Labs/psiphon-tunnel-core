@@ -659,7 +659,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		t.Fatal("unexpected stored light proxy")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient == nil {
 		t.Fatal("missing initialized light proxy client")
 	}
@@ -758,7 +758,7 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		t.Fatal("push payload import succeeded despite light proxy store failure")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		t.Fatal("light proxy client was initialized despite store failure")
 	}
@@ -836,7 +836,7 @@ func TestControllerImportPushPayloadInvalidLightProxyNotStored(t *testing.T) {
 		t.Fatal("invalid light proxy was stored")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		t.Fatal("invalid light proxy client was initialized")
 	}

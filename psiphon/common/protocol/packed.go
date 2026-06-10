@@ -868,7 +868,11 @@ func init() {
 		{182, "light_proxy_dial_IPv6", intConverter},
 		{183, "light_proxy_dial_failed", intConverter},
 
-		// Next key value = 184
+		// Specs: server.baseDialParams
+
+		{184, "tunnel_personal_light_proxy_id", unpaddedBase64Converter},
+
+		// Next key value = 185
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

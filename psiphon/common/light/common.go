@@ -285,7 +285,6 @@ func decodeNetworkType(encodedNetworkType uint8) string {
 var tlsProfileToCode = map[string]uint8{
 
 	// When protocol.SupportedTLSProfiles changes this table must be updated.
-	// TODO: add a corresponding  note next to protocol.SupportedTLSProfiles.
 
 	protocol.TLS_PROFILE_IOS_111:        1,
 	protocol.TLS_PROFILE_IOS_121:        2,
@@ -309,6 +308,8 @@ var tlsProfileToCode = map[string]uint8{
 	protocol.TLS_PROFILE_FIREFOX_99:     20,
 	protocol.TLS_PROFILE_FIREFOX_105:    21,
 	protocol.TLS_PROFILE_RANDOMIZED:     22,
+	protocol.TLS_PROFILE_CHROME_131:     23,
+	protocol.TLS_PROFILE_CHROME_133:     24,
 }
 
 var codeToTLSProfile = map[uint8]string{
@@ -334,6 +335,8 @@ var codeToTLSProfile = map[uint8]string{
 	20: protocol.TLS_PROFILE_FIREFOX_99,
 	21: protocol.TLS_PROFILE_FIREFOX_105,
 	22: protocol.TLS_PROFILE_RANDOMIZED,
+	23: protocol.TLS_PROFILE_CHROME_131,
+	24: protocol.TLS_PROFILE_CHROME_133,
 }
 
 func encodeTLSProfile(tlsProfile string) uint8 {

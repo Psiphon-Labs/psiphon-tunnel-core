@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/networkid"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -676,7 +677,7 @@ type Config struct {
 	// more than two eligible interfaces; setting both fields explicitly is
 	// recommended.
 	//
-	// Supported on Linux and Windows, and cannot be used with DeviceBinder.
+	// Cannot be used with DeviceBinder.
 	// On Windows, interface names must match the FriendlyName that Go
 	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
 	// / IPV6_UNICAST_IF, which is semantically "route via interface X"
@@ -830,10 +831,18 @@ type Config struct {
 	// this expensive scan can improve datastore performance on slower devices.
 	DisableServerEntriesReporter *bool `json:",omitempty"`
 
-	// EnableLightProxy enables using a light proxy as fallback if a tunnel is
-	// not available to tunnel traffic. When a light proxy is used, neither
-	// EgressRegion nor any SplitTunnel configuration is applied.
-	EnableLightProxy bool `json:",omitempty"`
+	// EnableLightProxyFallback enables using a light proxy as fallback if a
+	// tunnel is not available to tunnel traffic. When a light proxy is used,
+	// neither EgressRegion nor any SplitTunnel configuration is applied.
+	EnableLightProxyFallback bool `json:",omitempty"`
+
+	// EnablePersonalLightProxyTunnels enables using LightProxyEntry as a
+	// first hop for Psiphon tunnel establishment. This mode is similar to
+	// in-proxy personal pairing with the LightProxyEntry taking the place of
+	// InproxyClientPersonalCompartmentID as the "access token". This mode
+	// uses only the configured LightProxyEntry and does not use
+	// push-imported or stored light proxies.
+	EnablePersonalLightProxyTunnels bool `json:",omitempty"`
 
 	// LightProxyEntry is an optional encoded light proxy entry.
 	LightProxyEntry []byte `json:",omitempty"`
@@ -943,6 +952,13 @@ type Config struct {
 	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
 	// nil, this parameter is ignored.
 	UpgradeDownloadUrl string `json:",omitempty"`
+
+	// EnableLightProxy enables using a light proxy as fallback if a tunnel is
+	// not available to tunnel traffic. When a light proxy is used, neither
+	// EgressRegion nor any SplitTunnel configuration is applied.
+	//
+	// Deprecated: Use EnableLightProxyFallback.
+	EnableLightProxy bool `json:",omitempty"`
 
 	//
 	// The following parameters are for testing purposes.
@@ -1338,6 +1354,12 @@ type Config struct {
 	inproxyMustUpgradePosted int32
 
 	serverEntryIterationMetricsUpdater atomic.Value
+
+	lightProxyClient                    atomic.Value
+	lightProxyDialParams                atomic.Value
+	lightProxyTunnelInactiveThreshold   atomic.Int64
+	lightProxyDialTimeout               atomic.Int64
+	lightProxyLimitDestinationAddresses atomic.Value
 }
 
 // TacticsAppliedReceiver specifies the interface for a component that is
@@ -1577,6 +1599,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		config.InproxyReducedMaxCommonClients = config.InproxyReducedMaxClients
 	}
 
+	if config.EnableLightProxy {
+		config.EnableLightProxyFallback = true
+	}
+
 	// Supply default values.
 
 	// Create datastore directory.
@@ -1760,14 +1786,53 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("build does not enable required in-proxy functionality")
 	}
 
-	if config.EnableLightProxy {
+	if config.EnableLightProxyFallback && config.EnablePersonalLightProxyTunnels {
+
+		// Light proxy fallback and personal light proxy tunnel modes are mutually
+		// exclusive for now, as each case requires light proxies with different configs and
+		// allowed destinations.
+		return errors.TraceNew(
+			"EnableLightProxyFallback is incompatible with EnablePersonalLightProxyTunnels")
+	}
+
+	if config.EnableLightProxyFallback {
 
 		if config.DisableTunnels {
-			return errors.TraceNew("EnableLightProxy is incompatible with DisableTunnels")
+			return errors.TraceNew(
+				"EnableLightProxyFallback is incompatible with DisableTunnels")
 		}
 
 		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
-			return errors.TraceNew("EnableLightProxy is incompatible with disabled local proxies")
+			return errors.TraceNew(
+				"EnableLightProxyFallback is incompatible with disabled local proxies")
+		}
+	}
+
+	if config.EnablePersonalLightProxyTunnels {
+
+		if config.DisableTunnels {
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels is incompatible with DisableTunnels")
+		}
+
+		if len(config.InproxyClientPersonalCompartmentID) > 0 {
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels is incompatible with in-proxy personal pairing")
+		}
+
+		if len(config.LightProxyEntry) == 0 {
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels requires LightProxyEntry")
+		}
+
+		if config.LightProxyLimitDestinationAddresses != nil {
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels is incompatible with destination limits")
+		}
+
+		if config.LightProxyTestFetchAddress != "" {
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels is incompatible with LightProxyTestFetchAddress")
 		}
 	}
 
@@ -2223,10 +2288,10 @@ func (config *Config) GetUpgradeDownloadFilename() string {
 	return filepath.Join(config.GetPsiphonDataDirectory(), UpgradeDownloadFilename)
 }
 
-// UseUpstreamProxy indicates if an upstream proxy has been
-// configured.
+// UseUpstreamProxy indicates if tunnel establishment uses an upstream proxy or
+// personal light proxy tunnel first hop.
 func (config *Config) UseUpstreamProxy() bool {
-	return config.UpstreamProxyURL != ""
+	return config.UpstreamProxyURL != "" || config.EnablePersonalLightProxyTunnels
 }
 
 // GetNetworkID returns the current network ID. When NetworkIDGetter
@@ -2283,6 +2348,52 @@ func (config *Config) GetServerEntryIterationMetricsUpdater() func(movedToFront 
 		return updater.(func(int))
 	}
 	return nil
+}
+
+func (config *Config) SetLightProxy(
+	client *light.Client,
+	dialParams *lightDialParameters,
+	tunnelInactiveThreshold time.Duration,
+	dialTimeout time.Duration,
+	limitDestinationAddresses *common.StringLookup) {
+
+	config.lightProxyClient.Store(client)
+	config.lightProxyDialParams.Store(dialParams)
+	config.lightProxyTunnelInactiveThreshold.Store(int64(tunnelInactiveThreshold))
+	config.lightProxyDialTimeout.Store(int64(dialTimeout))
+	// Caller must not pass nil or else atomic.Value.Store will panic.
+	config.lightProxyLimitDestinationAddresses.Store(limitDestinationAddresses)
+}
+
+func (config *Config) GetLightProxyClient() *light.Client {
+	client, _ := config.lightProxyClient.Load().(*light.Client)
+	return client
+}
+
+func (config *Config) GetLightProxyDialParameters() *lightDialParameters {
+	dialParams, _ := config.lightProxyDialParams.Load().(*lightDialParameters)
+	if dialParams == nil {
+		return &lightDialParameters{}
+	}
+	return dialParams
+}
+
+func (config *Config) SetLightProxyDialParameters(dialParams *lightDialParameters) {
+	config.lightProxyDialParams.Store(dialParams)
+}
+
+func (config *Config) GetLightProxyTunnelInactiveThreshold() time.Duration {
+	return time.Duration(config.lightProxyTunnelInactiveThreshold.Load())
+}
+
+func (config *Config) GetLightProxyDialTimeout() time.Duration {
+	return time.Duration(config.lightProxyDialTimeout.Load())
+}
+
+func (config *Config) GetLightProxyLimitDestinationAddresses() *common.StringLookup {
+	limitDestinationAddresses, _ :=
+		config.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
+	return limitDestinationAddresses
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {

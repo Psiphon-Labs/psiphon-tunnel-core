@@ -718,6 +718,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "DSLPrioritizedTunnelProtocol", dialParams.DSLPrioritizedTunnelProtocol)
 		}
 
+		if dialParams.TunnelLightProxyID != "" {
+			args = append(args, "tunnelPersonalLightProxyID", dialParams.TunnelLightProxyID)
+		}
+
 	}
 
 	singletonNoticeLogger.outputNotice(

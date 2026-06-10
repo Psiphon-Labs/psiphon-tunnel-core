@@ -41,7 +41,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -527,7 +526,7 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		metrics := lightProxyClient.GetMetrics()
 		params["light_proxy_id"] = metrics.ProxyID
@@ -1476,6 +1475,10 @@ func getBaseAPIParameters(
 		serverEntryCount := GetLastServerEntryCount()
 		if serverEntryCount >= 0 {
 			params["server_entry_count"] = strconv.Itoa(serverEntryCount)
+		}
+
+		if dialParams.TunnelLightProxyID != "" {
+			params["tunnel_personal_light_proxy_id"] = dialParams.TunnelLightProxyID
 		}
 
 	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {

@@ -200,6 +200,8 @@ type DialParameters struct {
 	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters `json:",omitempty"`
 	inproxyConn                    atomic.Value                 `json:"-"`
 
+	TunnelLightProxyID string `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -1622,7 +1624,7 @@ func MakeDialParameters(
 
 	// Initialize upstream proxy.
 
-	if config.UseUpstreamProxy() {
+	if config.UseUpstreamProxy() && config.UpstreamProxyURL != "" {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := common.SafeParseURL(config.UpstreamProxyURL)
 		if err == nil {
@@ -1883,6 +1885,27 @@ func MakeDialParameters(
 		// dialTunnel.
 
 		dialParams.dialConfig.CustomDialer = makeInproxyTCPDialer(config, dialParams)
+	}
+
+	if !isTactics &&
+		config.EnablePersonalLightProxyTunnels &&
+		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+
+		// Future enhancements:
+		//
+		// - Unlike in-proxy, the light proxy may be used to proxy non-tunnel
+		//   connections including tactics (excluded here for now), RSL/OSL,
+		//   and untunneled DSL. Consider wiring up these cases.
+		//
+		// - Persist lightDialParameters in DialParameters for tunnel light
+		//   proxy dials. Will need to clear if LightProxyEntry changes.
+
+		lightProxyClient := config.GetLightProxyClient()
+		if lightProxyClient != nil {
+			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics().ProxyID
+		}
+
+		dialParams.dialConfig.CustomDialer = makeLightProxyTunnelTCPDialer(config, dialParams)
 	}
 
 	return dialParams, nil
