@@ -953,6 +953,7 @@ func init() {
 		{45, "localSource", nil},
 		{46, "localTimestamp", nil},
 		{47, "isLocalDerivedTag", nil},
+		{48, "allowUpstreamProxy", nil},
 	}
 
 	for _, spec := range packedServerEntryFieldSpecs {

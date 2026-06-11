@@ -692,6 +692,7 @@ func MakeDialParameters(
 		// are subject to blocking.
 		source := dialParams.ServerEntry.LocalSource
 		if !protocol.AllowServerEntrySourceWithUpstreamProxy(source) &&
+			!dialParams.ServerEntry.AllowUpstreamProxy &&
 			!p.Bool(parameters.UpstreamProxyAllowAllServerEntrySources) {
 
 			NoticeSkipServerEntry(
