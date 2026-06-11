@@ -1054,6 +1054,12 @@ func getUTLSClientHelloID(
 		return utls.HelloRandomized, nil, nil
 	}
 
+	if p.IsNil() {
+		return utls.ClientHelloID{},
+			nil,
+			errors.Tracef("unknown TLS profile: %s", tlsProfile)
+	}
+
 	// utls.HelloCustom with a utls.ClientHelloSpec is used for
 	// CustomTLSProfiles.
 
