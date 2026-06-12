@@ -808,19 +808,23 @@ func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
 // When preferredTLSProfile is set, it is attempted first. If the preferred
 // profile is unknown, disabled, incompatible with the requested constraints,
 // or fails the TLS version requirement, random selection is used as fallback.
+//
+// If SelectTLSProfile can't find a TLS profile that matches the input
+// constraints, including tactics parameters such as LimitTLSProfiles and
+// DisableFrontingProviderTLSProfiles, it returns an error.
 func SelectTLSProfile(
 	requireTLS12SessionTickets bool,
 	requireTLS13Support bool,
 	isFronted bool,
 	frontingProviderID string,
 	preferredTLSProfile string,
-	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
+	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
 
 	preferred := preferredTLSProfile
 
 	for i := 0; i < 1000; i++ {
 
-		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err =
+		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err :=
 			selectTLSProfile(
 				requireTLS12SessionTickets,
 				isFronted,
@@ -837,10 +841,10 @@ func SelectTLSProfile(
 				preferred = ""
 				continue
 			}
-			if requireTLS13Support {
-				continue
-			}
-			return "", "", nil, nil
+
+			// If no profile can be selected and that's not due to a preferred
+			// choice, looping won't produce a different result.
+			break
 		}
 
 		if requireTLS13Support && tlsVersion != protocol.TLS_VERSION_13 {
@@ -859,8 +863,9 @@ func SelectTLSProfile(
 			continue
 		}
 
-		return
+		return tlsProfile, tlsVersion, randomizedTLSProfileSeed, nil
 	}
+
 	return "", "", nil, errors.TraceNew("Failed to select a TLS profile")
 }
 
@@ -873,7 +878,7 @@ func selectTLSProfile(
 	isFronted bool,
 	frontingProviderID string,
 	preferredTLSProfile string,
-	p parameters.ParametersAccessor) (tlsProfile string, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
+	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -948,6 +953,9 @@ func selectTLSProfile(
 			}
 		}
 	}
+
+	var tlsProfile, tlsVersion string
+	var randomizedTLSProfileSeed *prng.Seed
 
 	if preferredTLSProfile != "" {
 		if common.Contains(randomizedTLSProfiles, preferredTLSProfile) ||

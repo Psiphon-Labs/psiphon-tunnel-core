@@ -2051,7 +2051,7 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	return p.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
-			p.config.UseUpstreamProxy(),
+			p.config.TunnelDialsUseUpstreamProxy(),
 			p.initialLimitTunnelProtocols,
 			p.limitTunnelDialPortNumbers,
 			p.limitQUICVersions,
@@ -2064,7 +2064,7 @@ func (p *protocolSelectionConstraints) isCandidate(
 
 	return len(serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.config.UseUpstreamProxy(),
+		p.config.TunnelDialsUseUpstreamProxy(),
 		p.limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
@@ -2108,7 +2108,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 
 	return serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.config.UseUpstreamProxy(),
+		p.config.TunnelDialsUseUpstreamProxy(),
 		p.getLimitTunnelProtocols(connectTunnelCount),
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,

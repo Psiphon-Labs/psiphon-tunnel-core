@@ -2377,9 +2377,12 @@ func (config *Config) GetUpgradeDownloadFilename() string {
 	return filepath.Join(config.GetPsiphonDataDirectory(), UpgradeDownloadFilename)
 }
 
-// UseUpstreamProxy indicates if tunnel establishment uses an upstream proxy or
-// personal light proxy tunnel first hop.
-func (config *Config) UseUpstreamProxy() bool {
+// TunnelDialsUseUpstreamProxy indicates if tunnel establishment uses an
+// upstream proxy or personal light proxy tunnel first hop.
+//
+// Other network operations use UpstreamProxyURL directly and do not use
+// personal light proxy tunnel mode.
+func (config *Config) TunnelDialsUseUpstreamProxy() bool {
 	return config.UpstreamProxyURL != "" || config.EnablePersonalLightProxyTunnels
 }
 

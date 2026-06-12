@@ -668,7 +668,7 @@ func MakeDialParameters(
 		}
 	}
 
-	if config.UseUpstreamProxy() {
+	if config.TunnelDialsUseUpstreamProxy() {
 
 		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
 		// called via selectProtocol, will filter out protocols such that will not
@@ -916,10 +916,6 @@ func MakeDialParameters(
 			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, "", p)
 		if err != nil {
 			return nil, errors.Trace(err)
-		}
-
-		if dialParams.TLSProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
-			return nil, errors.TraceNew("required TLS profile not found")
 		}
 
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
@@ -1625,7 +1621,7 @@ func MakeDialParameters(
 
 	// Initialize upstream proxy.
 
-	if config.UseUpstreamProxy() && config.UpstreamProxyURL != "" {
+	if config.TunnelDialsUseUpstreamProxy() && config.UpstreamProxyURL != "" {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := common.SafeParseURL(config.UpstreamProxyURL)
 		if err == nil {
@@ -1905,6 +1901,11 @@ func MakeDialParameters(
 		if lightProxyClient != nil {
 			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics().ProxyID
 		}
+
+		// When CustomDialer is set, other dialConfig parameters such as
+		// UpstreamProxyURL are ignored. However, initLightProxy/dialLightProxy
+		// use controller.untunneledDialConfig, and UpstreamProxyURL is wired
+		// up that way, indirectly.
 
 		dialParams.dialConfig.CustomDialer = makeLightProxyTunnelTCPDialer(config, dialParams)
 	}

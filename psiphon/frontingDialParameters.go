@@ -200,10 +200,6 @@ func makeFrontedMeekDialParameters(
 		return nil, errors.Trace(err)
 	}
 
-	if frontedMeekDialParams.TLSProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
-		return nil, errors.TraceNew("required TLS profile not found")
-	}
-
 	frontedMeekDialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 		parameters.NoDefaultTLSSessionIDProbability)
 

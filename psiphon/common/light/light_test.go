@@ -750,3 +750,23 @@ func (r *testProxyEventReceiver) WarningLog(_ string, message string) {
 func (r *testProxyEventReceiver) ErrorLog(_ string, message string) {
 	fmt.Printf("[ErrorLog] %s\n", message)
 }
+
+func TestEncodeTLSProfile(t *testing.T) {
+
+	if encodeTLSProfile("unknown-tls-profile") != 0 {
+		t.Error("unexpected unknown TLS profile encoding")
+	}
+
+	for _, tlsProfile := range protocol.SupportedTLSProfiles {
+
+		encoded := encodeTLSProfile(tlsProfile)
+
+		if encoded == 0 {
+			t.Error("unexpected supported TLS profile encoding")
+		}
+
+		if decodeTLSProfile(encoded) != tlsProfile {
+			t.Error("unexpected supported TLS profile decoding")
+		}
+	}
+}
