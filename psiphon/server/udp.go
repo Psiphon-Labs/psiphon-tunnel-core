@@ -233,7 +233,7 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			// forward counter and closes the LRU existing UDP port forward
 			// when already at the limit.
 
-			mux.sshClient.establishedPortForward(portForwardTypeUDP, mux.portForwardLRU)
+			mux.sshClient.establishedPortForward(portForwardTypeUDP, mux.portForwardLRU, false)
 			// Can't defer sshClient.closedPortForward() here;
 			// relayDownstream will call sshClient.closedPortForward()
 

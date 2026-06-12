@@ -88,6 +88,12 @@ type PsiphonTunnel struct {
 	HTTPProxyPort int
 	// The port on which the SOCKS proxy is running
 	SOCKSProxyPort int
+	// The Unix domain socket path on which the HTTP proxy is listening, when
+	// UseUnixDomainSockets is enabled
+	HTTPProxyUnixPath string
+	// The Unix domain socket path on which the SOCKS proxy is listening, when
+	// UseUnixDomainSockets is enabled
+	SOCKSProxyUnixPath string
 }
 
 // ParametersDelta allows for fine-grained modification of parameters.Parameters.
@@ -174,6 +180,10 @@ func StartTunnel(
 			} else if event.Type == "ListeningSocksProxyPort" {
 				port := event.Data["port"].(float64)
 				tunnel.SOCKSProxyPort = int(port)
+			} else if event.Type == "ListeningHttpProxyUnixPath" {
+				tunnel.HTTPProxyUnixPath = event.Data["path"].(string)
+			} else if event.Type == "ListeningSocksProxyUnixPath" {
+				tunnel.SOCKSProxyUnixPath = event.Data["path"].(string)
 			} else if event.Type == "EstablishTunnelTimeout" {
 				select {
 				case erroredCh <- ErrTimeout:

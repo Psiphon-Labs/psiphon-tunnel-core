@@ -71,7 +71,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
-	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/wlynxg/anet v0.0.5
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.48.0

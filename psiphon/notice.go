@@ -792,6 +792,20 @@ func NoticeListeningHttpProxyPort(port int) {
 		"port", port)
 }
 
+// NoticeListeningSocksProxyUnixPath is the Unix domain socket path for the listening local SOCKS proxy
+func NoticeListeningSocksProxyUnixPath(path string) {
+	singletonNoticeLogger.outputNotice(
+		"ListeningSocksProxyUnixPath", 0,
+		"path", path)
+}
+
+// NoticeListeningHttpProxyUnixPath is the Unix domain socket path for the listening local HTTP proxy
+func NoticeListeningHttpProxyUnixPath(path string) {
+	singletonNoticeLogger.outputNotice(
+		"ListeningHttpProxyUnixPath", 0,
+		"path", path)
+}
+
 // NoticeClientUpgradeAvailable is an available client upgrade, as per the handshake. The
 // client should download and install an upgrade.
 func NoticeClientUpgradeAvailable(version string) {

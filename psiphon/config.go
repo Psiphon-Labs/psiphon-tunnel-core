@@ -179,6 +179,34 @@ type Config struct {
 	// DisableLocalHTTPProxy disables running the local HTTP proxy.
 	DisableLocalHTTPProxy bool `json:",omitempty"`
 
+	// UseUnixDomainSockets indicates that the local SOCKS and HTTP proxies
+	// should listen on Unix domain sockets instead of TCP. When enabled, the
+	// TCP listeners are not created and LocalSocksProxyPort/LocalHttpProxyPort
+	// are ignored. This is intended for intra-application IPC where all
+	// components share a trust boundary (for example, Android processes with
+	// the same UID, or iOS app extensions that share an App Group container).
+	// When enabled, LocalSocksProxyUnixPath and LocalHttpProxyUnixPath must be
+	// set for each proxy that is not disabled.
+	//
+	// Note: the HTTP proxy's URL proxy M3U8 rewrite feature is not supported
+	// when listening on a Unix domain socket, as it requires an IP:port to
+	// construct rewritten URLs.
+	UseUnixDomainSockets bool `json:",omitempty"`
+
+	// LocalSocksProxyUnixPath specifies the Unix domain socket path for the
+	// local SOCKS proxy, used when UseUnixDomainSockets is enabled. The path
+	// must be an absolute path that all participating processes can access. On
+	// Android and Linux, a path with a leading "@" specifies a socket in the
+	// abstract namespace, which has no filesystem entry.
+	LocalSocksProxyUnixPath string `json:",omitempty"`
+
+	// LocalHttpProxyUnixPath specifies the Unix domain socket path for the
+	// local HTTP proxy, used when UseUnixDomainSockets is enabled. The path
+	// must be an absolute path that all participating processes can access. On
+	// Android and Linux, a path with a leading "@" specifies a socket in the
+	// abstract namespace, which has no filesystem entry.
+	LocalHttpProxyUnixPath string `json:",omitempty"`
+
 	// NetworkLatencyMultiplier is a multiplier that is to be applied to
 	// default network event timeouts. Set this to tune performance for
 	// slow networks.
@@ -1715,6 +1743,67 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if config.InproxyProxySplitUpstreamInterfaceName != "" &&
 		config.InproxyProxySplitDownstreamInterfaceName == config.InproxyProxySplitUpstreamInterfaceName {
 		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName must differ from InproxyProxySplitUpstreamInterfaceName")
+	}
+
+	if config.UseUnixDomainSockets {
+
+		unixSocketsSupported, abstractSocketsSupported := IsUnixDomainSocketsSupported()
+		if !unixSocketsSupported {
+			return errors.TraceNew("UseUnixDomainSockets is not supported on this platform")
+		}
+
+		// validateUnixSocketPath checks that a Unix domain socket path is set
+		// and within the platform sockaddr_un length limit. The tightest
+		// limit, Darwin's 104-byte sun_path (including the NUL terminator,
+		// leaving 103 usable bytes), is applied on all supported platforms.
+		// Linux and Android allow a slightly larger 108-byte sun_path, so
+		// applying the Darwin limit everywhere is safe and avoids a
+		// per-platform value. A leading "@" specifies an abstract namespace
+		// socket, which is not supported on all platforms (for example,
+		// Darwin).
+		validateUnixSocketPath := func(name, path string) error {
+			if path == "" {
+				return errors.Tracef("missing %s", name)
+			}
+			if len(path) > 103 {
+				return errors.Tracef("%s exceeds maximum length", name)
+			}
+			if strings.HasPrefix(path, "@") {
+				if !abstractSocketsSupported {
+					return errors.Tracef("%s abstract namespace socket is not supported on this platform", name)
+				}
+			} else if !filepath.IsAbs(path) {
+				// Filesystem paths must be absolute. A relative path binds
+				// relative to the process working directory, which is fragile
+				// for IPC across processes that may have different working
+				// directories.
+				return errors.Tracef("%s must be an absolute path", name)
+			}
+			return nil
+		}
+
+		if !config.DisableLocalSocksProxy {
+			if err := validateUnixSocketPath(
+				"LocalSocksProxyUnixPath", config.LocalSocksProxyUnixPath); err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		if !config.DisableLocalHTTPProxy {
+			if err := validateUnixSocketPath(
+				"LocalHttpProxyUnixPath", config.LocalHttpProxyUnixPath); err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		// When both local proxies are enabled, they must listen on distinct
+		// paths; otherwise one proxy's listener would bind the shared path and
+		// the other would be unreachable.
+		if !config.DisableLocalSocksProxy && !config.DisableLocalHTTPProxy &&
+			config.LocalSocksProxyUnixPath == config.LocalHttpProxyUnixPath {
+			return errors.TraceNew(
+				"LocalSocksProxyUnixPath and LocalHttpProxyUnixPath must differ")
+		}
 	}
 
 	if config.InproxyEnableProxy {

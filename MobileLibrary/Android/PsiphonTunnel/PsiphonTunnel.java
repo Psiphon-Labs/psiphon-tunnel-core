@@ -112,6 +112,8 @@ public class PsiphonTunnel {
         default void onHttpProxyPortInUse(int port) {}
         default void onListeningSocksProxyPort(int port) {}
         default void onListeningHttpProxyPort(int port) {}
+        default void onListeningSocksProxyUnixPath(String path) {}
+        default void onListeningHttpProxyUnixPath(String path) {}
         default void onUpstreamProxyError(String message) {}
         default void onConnecting() {}
         default void onConnected() {}
@@ -909,6 +911,10 @@ public class PsiphonTunnel {
             } else if (noticeType.equals("ListeningHttpProxyPort")) {
                 int port = notice.getJSONObject("data").getInt("port");
                 mHostService.onListeningHttpProxyPort(port);
+            } else if (noticeType.equals("ListeningSocksProxyUnixPath")) {
+                mHostService.onListeningSocksProxyUnixPath(notice.getJSONObject("data").getString("path"));
+            } else if (noticeType.equals("ListeningHttpProxyUnixPath")) {
+                mHostService.onListeningHttpProxyUnixPath(notice.getJSONObject("data").getString("path"));
             } else if (noticeType.equals("UpstreamProxyError")) {
                 diagnostic = false;
                 mHostService.onUpstreamProxyError(notice.getJSONObject("data").getString("message"));

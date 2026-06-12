@@ -107,4 +107,5 @@ message ServerTunnel {
     optional int64 light_proxy_dial_IPv4  = 193;
     optional int64 light_proxy_dial_IPv6  = 194;
     optional int64 light_proxy_dial_failed  = 195;
+    optional int64 total_domain_port_forward_count_tcp = 196;
 }

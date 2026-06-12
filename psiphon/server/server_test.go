@@ -2501,7 +2501,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectBurstFields := runConfig.doBurstMonitor
 	expectTCPPortForwardDial := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest)
 	expectTCPDataTransfer := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest) && !expectTrafficFailure && !runConfig.doSplitTunnel
-	expectDomainPortForward := runConfig.doTunneledDomainRequest
+	expectDomainPortForward := runConfig.doTunneledDomainRequest && !expectTrafficFailure && !runConfig.doSplitTunnel
 	// Even with expectTrafficFailure, DNS port forwards will succeed
 	expectUDPDataTransfer := runConfig.doTunneledNTPRequest
 	expectQUICVersion := ""
@@ -3717,6 +3717,19 @@ func checkExpectedServerTunnelLogFields(
 		if !checkTCPMetric(fields[name].(float64)) {
 			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
 		}
+	}
+
+	if fields["total_domain_port_forward_count_tcp"] == nil {
+		return fmt.Errorf("missing expected field 'total_domain_port_forward_count_tcp'")
+	}
+	if expectDomainPortForward {
+		if fields["total_domain_port_forward_count_tcp"].(float64) <= 0 {
+			return fmt.Errorf("unexpected total_domain_port_forward_count_tcp '%v'",
+				fields["total_domain_port_forward_count_tcp"])
+		}
+	} else if fields["total_domain_port_forward_count_tcp"].(float64) != 0 {
+		return fmt.Errorf("unexpected total_domain_port_forward_count_tcp '%v'",
+			fields["total_domain_port_forward_count_tcp"])
 	}
 
 	var checkUDPMetric func(float64) bool
