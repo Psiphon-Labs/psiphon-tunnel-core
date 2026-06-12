@@ -32,6 +32,8 @@ github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a h1:vRP
 github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a/go.mod h1:Hr9BTdONt074FS0Y1jd1g9f6jmIVRrYfc7He0elh/DI=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878 h1:cZs+MSkBCXOXxUjFzknZVQlYQ2no/sxAXbvWLeCgA6I=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304 h1:fHcKNmus53W75IYiZn0qAzmSihgZAQ2c3jJSjeWaHOs=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1 h1:zD7JvZCV8gjvtI0AZmE81Ffc/v7A+qwU1/YfUmN/Flk=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1/go.mod h1:rONdWgPMbFjyyBai7gB1IBF4pT9r4l0GyiDst5XR1SY=
 github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b h1:+ZY9z5ojDzZ9Xfn+whJ6N1yRcY8nGaXb3GTckz9iTfI=
