@@ -28,12 +28,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/time/rate"
 )
@@ -47,9 +49,10 @@ const (
 	defaultRelayBufferSize          = 8192
 	rateLimiterReapHistoryFrequency = 300 * time.Second
 	rateLimiterMaxCacheEntries      = 1000000
-	defaultRateLimitQuantity        = 100000
-	defaultRateLimitInterval        = 1 * time.Minute
-	defaultMaxConcurrent            = 50000
+	defaultPerIPRateLimitQuantity   = 100000
+	defaultPerIPRateLimitInterval   = 1 * time.Minute
+	defaultPerIPMaxConcurrent       = 50000
+	defaultMaxConcurrent            = 1000000
 	defaultDialFallbackDelay        = 300 * time.Millisecond
 	defaultDNSResolverCacheMaxSize  = 256
 	defaultDNSResolverCacheTTL      = 10 * time.Second
@@ -58,26 +61,29 @@ const (
 
 // ProxyConfig specifies the configuration of a light proxy.
 type ProxyConfig struct {
-	Protocol                string   `json:",omitempty"`
-	ProviderID              string   `json:",omitempty"`
-	ListenAddresses         []string `json:",omitempty"`
-	DialAddressIPv4         string   `json:",omitempty"`
-	DialAddressIPv6         string   `json:",omitempty"`
-	ObfuscationKey          string   `json:",omitempty"`
-	TLSCertificate          []byte   `json:",omitempty"`
-	TLSPrivateKey           []byte   `json:",omitempty"`
-	PassthroughAddress      string   `json:",omitempty"`
-	AllowedDestinations     []string `json:",omitempty"`
-	InactivityTimeout       string   `json:",omitempty"`
-	UpstreamDialTimeout     string   `json:",omitempty"`
-	RelayBufferSize         int      `json:",omitempty"`
-	RateLimitQuantity       *int     `json:",omitempty"`
-	RateLimitInterval       string   `json:",omitempty"`
-	MaxConcurrent           *int     `json:",omitempty"`
-	DialFallbackDelay       string   `json:",omitempty"`
-	DNSResolverCacheMaxSize *int     `json:",omitempty"`
-	DNSResolverCacheTTL     string   `json:",omitempty"`
-	EnableDebugLogs         bool     `json:",omitempty"`
+	Protocol                     string   `json:",omitempty"`
+	ProviderID                   string   `json:",omitempty"`
+	ListenAddresses              []string `json:",omitempty"`
+	DialAddressIPv4              string   `json:",omitempty"`
+	DialAddressIPv6              string   `json:",omitempty"`
+	ObfuscationKey               string   `json:",omitempty"`
+	TLSCertificate               []byte   `json:",omitempty"`
+	TLSPrivateKey                []byte   `json:",omitempty"`
+	PassthroughAddress           string   `json:",omitempty"`
+	AllowedDestinations          []string `json:",omitempty"`
+	InactivityTimeout            string   `json:",omitempty"`
+	UpstreamDialTimeout          string   `json:",omitempty"`
+	RelayBufferSize              int      `json:",omitempty"`
+	PerIPRateLimitQuantity       *int     `json:",omitempty"`
+	PerIPRateLimitInterval       string   `json:",omitempty"`
+	PerIPMaxConcurrent           *int     `json:",omitempty"`
+	MaxConcurrent                *int     `json:",omitempty"`
+	DialFallbackDelay            string   `json:",omitempty"`
+	DNSResolverCacheMaxSize      *int     `json:",omitempty"`
+	DNSResolverCacheTTL          string   `json:",omitempty"`
+	SplitUpstreamInterfaceName   string   `json:",omitempty"`
+	SplitDownstreamInterfaceName string   `json:",omitempty"`
+	EnableDebugLogs              bool     `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -132,12 +138,17 @@ type Proxy struct {
 	relayBufferPool       sync.Pool
 	rateLimitQuantity     int
 	rateLimitInterval     time.Duration
+	perIPMaxConcurrent    int
 	maxConcurrent         int
 	dialFallbackDelay     time.Duration
 
-	limitsMutex           sync.Mutex
-	concurrentConnections map[string]int
-	rateLimiters          *lrucache.Cache
+	listenConfig *net.ListenConfig
+	dialer       *net.Dialer
+
+	limitsMutex                sync.Mutex
+	perIPConcurrentConnections map[string]int
+	rateLimiters               *lrucache.Cache
+	concurrentConnections      int
 
 	dnsResolver *net.Resolver
 	dnsCache    *lrucache.Cache
@@ -221,24 +232,30 @@ func NewProxy(
 		relayBufferSize = config.RelayBufferSize
 	}
 
-	if (config.RateLimitQuantity != nil) != (config.RateLimitInterval != "") ||
-		(config.RateLimitQuantity != nil && *config.RateLimitQuantity < 0) ||
+	if (config.PerIPRateLimitQuantity != nil) != (config.PerIPRateLimitInterval != "") ||
+		(config.PerIPRateLimitQuantity != nil && *config.PerIPRateLimitQuantity < 0) ||
+		(config.PerIPMaxConcurrent != nil && *config.PerIPMaxConcurrent < 0) ||
 		(config.MaxConcurrent != nil && *config.MaxConcurrent < 0) {
 		return nil, errors.TraceNew("invalid limits")
 	}
 
-	rateLimitQuantity := defaultRateLimitQuantity
-	if config.RateLimitQuantity != nil {
-		rateLimitQuantity = *config.RateLimitQuantity
+	rateLimitQuantity := defaultPerIPRateLimitQuantity
+	if config.PerIPRateLimitQuantity != nil {
+		rateLimitQuantity = *config.PerIPRateLimitQuantity
 	}
 
-	rateLimitInterval := defaultRateLimitInterval
-	if config.RateLimitInterval != "" {
+	rateLimitInterval := defaultPerIPRateLimitInterval
+	if config.PerIPRateLimitInterval != "" {
 		var err error
-		rateLimitInterval, err = time.ParseDuration(config.RateLimitInterval)
+		rateLimitInterval, err = time.ParseDuration(config.PerIPRateLimitInterval)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	perIPMaxConcurrent := defaultPerIPMaxConcurrent
+	if config.PerIPMaxConcurrent != nil {
+		perIPMaxConcurrent = *config.PerIPMaxConcurrent
 	}
 
 	maxConcurrent := defaultMaxConcurrent
@@ -272,6 +289,42 @@ func NewProxy(
 		}
 	}
 
+	listenConfig := &net.ListenConfig{}
+	dialer := &net.Dialer{}
+
+	splitInterfaceMode := config.SplitUpstreamInterfaceName != "" ||
+		config.SplitDownstreamInterfaceName != ""
+	if splitInterfaceMode {
+		if !tun.IsBindToDeviceSupported() {
+			return nil, errors.TraceNew("split interface is not supported")
+		}
+		if config.SplitUpstreamInterfaceName != "" &&
+			config.SplitDownstreamInterfaceName == config.SplitUpstreamInterfaceName {
+			return nil, errors.TraceNew(
+				"SplitDownstreamInterfaceName must differ from SplitUpstreamInterfaceName")
+		}
+
+		upstreamInterfaceName := config.SplitUpstreamInterfaceName
+		downstreamInterfaceName := config.SplitDownstreamInterfaceName
+		if upstreamInterfaceName == "" {
+			upstreamInterfaceName = common.FindInterfaceExcluding(downstreamInterfaceName)
+		}
+		if downstreamInterfaceName == "" {
+			downstreamInterfaceName = common.FindInterfaceExcluding(upstreamInterfaceName)
+		}
+		if upstreamInterfaceName == "" {
+			return nil, errors.TraceNew(
+				"unable to determine upstream interface; set SplitUpstreamInterfaceName")
+		}
+		if downstreamInterfaceName == "" {
+			return nil, errors.TraceNew(
+				"unable to determine downstream interface; set SplitDownstreamInterfaceName")
+		}
+
+		listenConfig.Control = makeBindToDeviceControl(downstreamInterfaceName)
+		dialer.Control = makeBindToDeviceControl(upstreamInterfaceName)
+	}
+
 	// Initialize the DNS resolver and optional cache following the pattern in
 	// psiphon/server.sshClient.getDNSResolver. See additional comments in
 	// that function.
@@ -290,7 +343,19 @@ func NewProxy(
 	// avoid any cases where Go's resolver fails over to the cgo-based
 	// resolver while will consume an OS thread.
 
-	dnsResolver := &net.Resolver{PreferGo: true}
+	dnsResolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, address)
+			return conn, errors.Trace(err)
+		},
+	}
+
+	// Route hostname lookups performed by the dialer itself, which happens
+	// when PassthroughAddress is a hostname, through dnsResolver to ensure
+	// dialer.Control is applied. Limitation: currently this doesn't use the
+	// DNS cache.
+	dialer.Resolver = dnsResolver
 
 	var dnsCache *lrucache.Cache
 	if dnsResolverCacheMaxSize > 0 && dnsResolverCacheTTL > 0 {
@@ -340,13 +405,17 @@ func NewProxy(
 			b := make([]byte, relayBufferSize)
 			return &b
 		}},
-		rateLimitQuantity:     rateLimitQuantity,
-		rateLimitInterval:     rateLimitInterval,
-		dnsResolver:           dnsResolver,
-		dnsCache:              dnsCache,
-		maxConcurrent:         maxConcurrent,
-		dialFallbackDelay:     dialFallbackDelay,
-		concurrentConnections: make(map[string]int),
+		rateLimitQuantity:  rateLimitQuantity,
+		rateLimitInterval:  rateLimitInterval,
+		perIPMaxConcurrent: perIPMaxConcurrent,
+		maxConcurrent:      maxConcurrent,
+		dnsResolver:        dnsResolver,
+		dnsCache:           dnsCache,
+		listenConfig:       listenConfig,
+		dialer:             dialer,
+		dialFallbackDelay:  dialFallbackDelay,
+
+		perIPConcurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
 			0,
 			rateLimiterReapHistoryFrequency,
@@ -354,6 +423,7 @@ func NewProxy(
 	}
 
 	tlsConfig.PassthroughAddress = config.PassthroughAddress
+	tlsConfig.PassthroughDialer = proxy.dialer.Dial
 
 	tlsConfig.PassthroughVerifyMessage = func(message []byte) bool {
 		return obfuscator.VerifyTLSPassthroughMessage(
@@ -412,7 +482,6 @@ func (proxy *Proxy) Resume() {
 func (proxy *Proxy) Run(ctx context.Context) error {
 
 	// Future enhancement: use psiphon/server.newTCPListenerWithBPF.
-	listenConfig := &net.ListenConfig{}
 	listeners := make([]net.Listener, 0, len(proxy.config.ListenAddresses))
 	closeListeners := func() {
 		for _, listener := range listeners {
@@ -421,7 +490,7 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 	}
 
 	for _, listenAddress := range proxy.config.ListenAddresses {
-		listener, err := listenConfig.Listen(
+		listener, err := proxy.listenConfig.Listen(
 			context.Background(), "tcp", listenAddress)
 		if err != nil {
 			closeListeners()
@@ -500,6 +569,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	completedTCP := time.Now().UTC()
 	var completedTLS time.Time
 	var clientSNI string
+	var tlsClientHelloFragmented bool
+	var tlsClientHelloPadding int
 	var tlsDidResume bool
 	bytesCounter := &bytesCounter{}
 	var completedLightHeader time.Time
@@ -561,6 +632,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			DestinationAddress:        normalizedDestinationAddress,
 			TLSProfile:                tlsProfile,
 			SNI:                       clientSNI,
+			TLSClientHelloFragmented:  tlsClientHelloFragmented,
+			TLSClientHelloPadding:     tlsClientHelloPadding,
 			TLSDidResume:              tlsDidResume,
 			ClientTCPDuration:         clientTCPDuration,
 			ClientTLSDuration:         clientTLSDuration,
@@ -608,6 +681,9 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
 
 	err = tlsConn.Handshake()
+	connectionMetrics := tlsConn.ConnectionMetrics()
+	tlsClientHelloFragmented = connectionMetrics.ClientHelloFragmented
+	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -671,7 +747,8 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	upstreamDNSCached = cached
 	completedUpstreamDNS = time.Now().UTC()
 
-	upstreamConn, err := netDialParallel(dialCtx, proxy.dialFallbackDelay, upstreamAddrs)
+	upstreamConn, err := netDialParallel(
+		dialCtx, proxy.dialFallbackDelay, upstreamAddrs, proxy.dialer)
 	if err != nil {
 		err = common.RedactNetError(err)
 		return errors.Trace(err)
@@ -757,36 +834,36 @@ func (proxy *Proxy) applyRateLimit(limitIP string) error {
 
 func (proxy *Proxy) takeMaxConcurrent(limitIP string) error {
 
-	if proxy.maxConcurrent <= 0 {
-		return nil
-	}
-
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[limitIP]
-	if count >= proxy.maxConcurrent {
+	if proxy.maxConcurrent > 0 && proxy.concurrentConnections >= proxy.maxConcurrent {
 		return errors.TraceNew("max concurrent exceeded")
 	}
-	proxy.concurrentConnections[limitIP] = count + 1
+	proxy.concurrentConnections += 1
+
+	count := proxy.perIPConcurrentConnections[limitIP]
+	if proxy.perIPMaxConcurrent > 0 && count >= proxy.perIPMaxConcurrent {
+		proxy.concurrentConnections -= 1
+		return errors.TraceNew("max per IP concurrent exceeded")
+	}
+	proxy.perIPConcurrentConnections[limitIP] = count + 1
 
 	return nil
 }
 
 func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
 
-	if proxy.maxConcurrent <= 0 {
-		return
-	}
-
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	count := proxy.concurrentConnections[limitIP] - 1
+	proxy.concurrentConnections -= 1
+
+	count := proxy.perIPConcurrentConnections[limitIP] - 1
 	if count <= 0 {
-		delete(proxy.concurrentConnections, limitIP)
+		delete(proxy.perIPConcurrentConnections, limitIP)
 	} else {
-		proxy.concurrentConnections[limitIP] = count
+		proxy.perIPConcurrentConnections[limitIP] = count
 	}
 }
 
@@ -849,6 +926,26 @@ func (proxy *Proxy) resolve(
 	}
 
 	return addrs, cached, nil
+}
+
+func makeBindToDeviceControl(interfaceName string) func(string, string, syscall.RawConn) error {
+	return func(_, _ string, c syscall.RawConn) error {
+		var controlErr error
+		err := c.Control(func(fd uintptr) {
+			err := tun.BindToDevice(int(fd), interfaceName)
+			if err != nil {
+				controlErr = errors.Tracef("BindToDevice failed: %v", err)
+				return
+			}
+		})
+		if controlErr != nil {
+			return errors.Trace(controlErr)
+		}
+		if err != nil {
+			return errors.Trace(err)
+		}
+		return nil
+	}
 }
 
 // redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from

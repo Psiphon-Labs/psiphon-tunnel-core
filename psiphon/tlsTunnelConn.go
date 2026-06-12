@@ -27,14 +27,15 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 )
 
 // TLSTunnelConfig specifies the behavior of a TLSTunnelConn.
 type TLSTunnelConfig struct {
 
-	// CustomTLSConfig is the parameters that will be used to esablish a new
-	// TLS connection with CustomTLSDial.
-	CustomTLSConfig *CustomTLSConfig
+	// TLSConfig is the parameters that will be used to establish a new TLS
+	// connection with tlsdialer.Dial.
+	TLSConfig *tlsdialer.Config
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated session
 	// tickets.
@@ -73,21 +74,21 @@ func DialTLSTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	tlsConfig := &CustomTLSConfig{
-		Parameters:                    tlsTunnelConfig.CustomTLSConfig.Parameters,
+	tlsConfig := &tlsdialer.Config{
+		Parameters:                    tlsTunnelConfig.TLSConfig.Parameters,
 		Dial:                          NewTCPDialer(dialConfig),
-		DialAddr:                      tlsTunnelConfig.CustomTLSConfig.DialAddr,
-		SNIServerName:                 tlsTunnelConfig.CustomTLSConfig.SNIServerName,
-		VerifyServerName:              tlsTunnelConfig.CustomTLSConfig.VerifyServerName,
-		VerifyPins:                    tlsTunnelConfig.CustomTLSConfig.VerifyPins,
-		SkipVerify:                    tlsTunnelConfig.CustomTLSConfig.SkipVerify,
-		TLSProfile:                    tlsTunnelConfig.CustomTLSConfig.TLSProfile,
-		NoDefaultTLSSessionID:         tlsTunnelConfig.CustomTLSConfig.NoDefaultTLSSessionID,
-		RandomizedTLSProfileSeed:      tlsTunnelConfig.CustomTLSConfig.RandomizedTLSProfileSeed,
+		DialAddr:                      tlsTunnelConfig.TLSConfig.DialAddr,
+		SNIServerName:                 tlsTunnelConfig.TLSConfig.SNIServerName,
+		VerifyServerName:              tlsTunnelConfig.TLSConfig.VerifyServerName,
+		VerifyPins:                    tlsTunnelConfig.TLSConfig.VerifyPins,
+		SkipVerify:                    tlsTunnelConfig.TLSConfig.SkipVerify,
+		TLSProfile:                    tlsTunnelConfig.TLSConfig.TLSProfile,
+		NoDefaultTLSSessionID:         tlsTunnelConfig.TLSConfig.NoDefaultTLSSessionID,
+		RandomizedTLSProfileSeed:      tlsTunnelConfig.TLSConfig.RandomizedTLSProfileSeed,
 		TLSPadding:                    tlsPadding,
 		TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
-		FragmentClientHello:           tlsTunnelConfig.CustomTLSConfig.FragmentClientHello,
-		ClientSessionCache:            tlsTunnelConfig.CustomTLSConfig.ClientSessionCache,
+		FragmentClientHello:           tlsTunnelConfig.TLSConfig.FragmentClientHello,
+		ClientSessionCache:            tlsTunnelConfig.TLSConfig.ClientSessionCache,
 	}
 
 	if tlsTunnelConfig.UseObfuscatedSessionTickets {
@@ -107,9 +108,9 @@ func DialTLSTunnel(
 	}
 	tlsConfig.PassthroughMessage = passthroughMessage
 
-	tlsDialer := NewCustomTLSDialer(tlsConfig)
+	tlsDialer := tlsdialer.NewDialer(tlsConfig)
 
-	// As DialAddr is set in the CustomTLSConfig, no address is required here.
+	// As DialAddr is set in the tlsdialer.Config, no address is required here.
 	conn, err := tlsDialer(ctx, "tcp", "")
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -122,8 +123,8 @@ func DialTLSTunnel(
 }
 
 // tlsTunnelTLSPadding returns the padding length to apply with the TLS padding
-// extension to the TLS conn established with NewCustomTLSDialer. See
-// CustomTLSConfig.TLSPadding for details.
+// extension to the TLS conn established with tlsdialer.NewDialer. See
+// tlsdialer.Config.TLSPadding for details.
 func tlsTunnelTLSPadding(
 	tlsOSSHApplyTrafficShaping bool,
 	tlsOSSHMinTLSPadding int,

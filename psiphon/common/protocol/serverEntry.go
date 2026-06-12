@@ -95,6 +95,7 @@ type ServerEntry struct {
 	InproxyMeekPort                     int      `json:"inproxyMeekPort,omitempty"`
 	InproxyTlsOSSHPort                  int      `json:"inproxyTlsOSSHPort,omitempty"`
 	InproxyShadowsocksPort              int      `json:"inproxyShadowsocksPort,omitempty"`
+	AllowUpstreamProxy                  bool     `json:"allowUpstreamProxy,omitempty"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about

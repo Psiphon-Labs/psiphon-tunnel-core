@@ -278,8 +278,10 @@ func StartTunnel(
 
 	// Future enhancement: rework ClientLibrary to have an asynchronous Start
 	// with support for callbacks, and then enable light tunnel mode.
-	if config.EnableLightProxy {
-		return nil, errors.TraceNew("EnableLightProxy is not supported")
+	if config.EnableLightProxy ||
+		config.EnableLightProxyFallback ||
+		config.EnablePersonalLightProxyTunnels {
+		return nil, errors.TraceNew("light proxy modes are not supported")
 	}
 
 	// config.Commit must be called before calling config.SetParameters

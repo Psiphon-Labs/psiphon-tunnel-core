@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
@@ -198,6 +199,8 @@ type DialParameters struct {
 	InproxySTUNDialParameters      *InproxySTUNDialParameters   `json:",omitempty"`
 	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters `json:",omitempty"`
 	inproxyConn                    atomic.Value                 `json:"-"`
+
+	TunnelLightProxyID string `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
@@ -665,7 +668,7 @@ func MakeDialParameters(
 		}
 	}
 
-	if config.UseUpstreamProxy() {
+	if config.TunnelDialsUseUpstreamProxy() {
 
 		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
 		// called via selectProtocol, will filter out protocols such that will not
@@ -689,6 +692,7 @@ func MakeDialParameters(
 		// are subject to blocking.
 		source := dialParams.ServerEntry.LocalSource
 		if !protocol.AllowServerEntrySourceWithUpstreamProxy(source) &&
+			!dialParams.ServerEntry.AllowUpstreamProxy &&
 			!p.Bool(parameters.UpstreamProxyAllowAllServerEntrySources) {
 
 			NoticeSkipServerEntry(
@@ -905,14 +909,13 @@ func MakeDialParameters(
 		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
 			dialParams.ConjureAPIRegistration
 
-		dialParams.TLSProfile, dialParams.TLSVersion, dialParams.RandomizedTLSProfileSeed, err = SelectTLSProfile(
-			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, p)
+		dialParams.TLSProfile,
+			dialParams.TLSVersion,
+			dialParams.RandomizedTLSProfileSeed,
+			err = tlsdialer.SelectTLSProfile(
+			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, "", p)
 		if err != nil {
 			return nil, errors.Trace(err)
-		}
-
-		if dialParams.TLSProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
-			return nil, errors.TraceNew("required TLS profile not found")
 		}
 
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
@@ -1618,7 +1621,7 @@ func MakeDialParameters(
 
 	// Initialize upstream proxy.
 
-	if config.UseUpstreamProxy() {
+	if config.TunnelDialsUseUpstreamProxy() && config.UpstreamProxyURL != "" {
 		// Note: UpstreamProxyURL will be validated in the dial
 		proxyURL, err := common.SafeParseURL(config.UpstreamProxyURL)
 		if err == nil {
@@ -1881,6 +1884,32 @@ func MakeDialParameters(
 		dialParams.dialConfig.CustomDialer = makeInproxyTCPDialer(config, dialParams)
 	}
 
+	if !isTactics &&
+		config.EnablePersonalLightProxyTunnels &&
+		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+
+		// Future enhancements:
+		//
+		// - Unlike in-proxy, the light proxy may be used to proxy non-tunnel
+		//   connections including tactics (excluded here for now), RSL/OSL,
+		//   and untunneled DSL. Consider wiring up these cases.
+		//
+		// - Persist lightDialParameters in DialParameters for tunnel light
+		//   proxy dials. Will need to clear if LightProxyEntry changes.
+
+		lightProxyClient := config.GetLightProxyClient()
+		if lightProxyClient != nil {
+			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics().ProxyID
+		}
+
+		// When CustomDialer is set, other dialConfig parameters such as
+		// UpstreamProxyURL are ignored. However, initLightProxy/dialLightProxy
+		// use controller.untunneledDialConfig, and UpstreamProxyURL is wired
+		// up that way, indirectly.
+
+		dialParams.dialConfig.CustomDialer = makeLightProxyTunnelTCPDialer(config, dialParams)
+	}
+
 	return dialParams, nil
 }
 
@@ -1901,7 +1930,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 	// term reference to TLSTunnelConfig.Parameters.
 
 	return &TLSTunnelConfig{
-		CustomTLSConfig: &CustomTLSConfig{
+		TLSConfig: &tlsdialer.Config{
 			Parameters:               config.GetParameters(),
 			DialAddr:                 dialParams.DirectDialAddress,
 			SNIServerName:            dialParams.TLSOSSHSNIServerName,

@@ -143,9 +143,9 @@ func NewInproxyProxyQualityBrokerRoundTripper(
 	// The following wires up simplified domain fronted requests, including
 	// the basic, distinct dial/SNI and host header values. Certificate
 	// validation based on FrontingSpec parameters, including pins, includes
-	// a subset of the functionality from psiphon.CustomTLSDial.
+	// a subset of the functionality from tlsdialer.Dial.
 	//
-	// psiphon.DialMeek/CustomTLSDial features omitted here include dial
+	// psiphon.DialMeek/tlsdialer.Dial features omitted here include dial
 	// parameter replay, the QUIC transport, and obfuscation techniques
 	// including custom DNS resolution, SNI transforms, utls TLS
 	// fingerprints, and TCP and TLS fragmentation, TLS padding, and other

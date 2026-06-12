@@ -331,6 +331,13 @@ func startLightTestProxy(
 		proxyIPv6Address,
 		"example.org",
 		"",
+		0.5,
+		protocol.TLS_PROFILE_CHROME_133,
+		0.5,
+		0,
+		0,
+		0,
+		0,
 		[]string{allowedWebServerAddress},
 		allowedWebServerAddress)
 	if err != nil {
@@ -552,6 +559,13 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0.0,
+		"",
+		0.0,
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {
@@ -564,6 +578,13 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0.0,
+		"",
+		0.0,
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {
@@ -647,7 +668,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		t.Fatal("unexpected stored light proxy")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient == nil {
 		t.Fatal("missing initialized light proxy client")
 	}
@@ -668,6 +689,13 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		"",
 		"example.org",
 		"",
+		0.0,
+		"",
+		0.0,
+		0,
+		0,
+		0,
+		0,
 		[]string{"example.com:443"},
 		"example.com:443")
 	if err != nil {
@@ -742,7 +770,7 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		t.Fatal("push payload import succeeded despite light proxy store failure")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		t.Fatal("light proxy client was initialized despite store failure")
 	}
@@ -820,7 +848,7 @@ func TestControllerImportPushPayloadInvalidLightProxyNotStored(t *testing.T) {
 		t.Fatal("invalid light proxy was stored")
 	}
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		t.Fatal("invalid light proxy client was initialized")
 	}

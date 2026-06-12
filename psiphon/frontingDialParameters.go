@@ -14,6 +14,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
@@ -194,13 +195,9 @@ func makeFrontedMeekDialParameters(
 	frontedMeekDialParams.TLSProfile,
 		frontedMeekDialParams.TLSVersion,
 		frontedMeekDialParams.RandomizedTLSProfileSeed,
-		err = SelectTLSProfile(requireTLS12SessionTickets, requireTLS13Support, isFronted, frontedMeekDialParams.FrontingProviderID, p)
+		err = tlsdialer.SelectTLSProfile(requireTLS12SessionTickets, requireTLS13Support, isFronted, frontedMeekDialParams.FrontingProviderID, "", p)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-
-	if frontedMeekDialParams.TLSProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
-		return nil, errors.TraceNew("required TLS profile not found")
 	}
 
 	frontedMeekDialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
@@ -410,7 +407,7 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 		NetworkLatencyMultiplier: f.NetworkLatencyMultiplier,
 		AdditionalHeaders:        config.MeekAdditionalHeaders,
 
-		// CustomTLSDial will use the resolved IP address as the session key.
+		// tlsdialer.Dial will use the resolved IP address as the session key.
 		TLSClientSessionCache: common.WrapUtlsClientSessionCache(tlsCache, common.TLS_NULL_SESSION_KEY),
 	}
 

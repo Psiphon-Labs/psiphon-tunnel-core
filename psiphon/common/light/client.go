@@ -55,6 +55,8 @@ type TLSDialer func(
 	tlsProfile string,
 	randomizedTLSProfileSeed *prng.Seed,
 	sni string,
+	fragmentClientHello bool,
+	tlsPadding int,
 	passthroughMessage []byte,
 	verifyPin string,
 	verifyServerName string) (net.Conn, error)
@@ -183,6 +185,48 @@ func (client *Client) GetRecommendedSNIRegex() string {
 	return client.proxyEntry.RecommendedSNIRegex
 }
 
+// GetRecommendedSNIProbability returns the recommended SNI probability
+// included in the proxy entry.
+func (client *Client) GetRecommendedSNIProbability() float64 {
+	return client.proxyEntry.RecommendedSNIProbability
+}
+
+// GetRecommendedTLSProfile returns the recommended TLS profile included in
+// the proxy entry, if any.
+func (client *Client) GetRecommendedTLSProfile() string {
+	return client.proxyEntry.RecommendedTLSProfile
+}
+
+// GetRecommendedTLSProfileProbability returns the recommended TLS profile
+// probability included in the proxy entry.
+func (client *Client) GetRecommendedTLSProfileProbability() float64 {
+	return client.proxyEntry.RecommendedTLSProfileProbability
+}
+
+// GetRecommendedFragmentClientHelloProbability returns the recommended
+// FragmentClientHello probability included in the proxy entry.
+func (client *Client) GetRecommendedFragmentClientHelloProbability() float64 {
+	return client.proxyEntry.RecommendedFragmentClientHelloProbability
+}
+
+// GetRecommendedTLSPaddingProbability returns the recommended TLS padding
+// probability included in the proxy entry.
+func (client *Client) GetRecommendedTLSPaddingProbability() float64 {
+	return client.proxyEntry.RecommendedTLSPaddingProbability
+}
+
+// GetRecommendedMinTLSPadding returns the recommended minimum TLS padding
+// included in the proxy entry.
+func (client *Client) GetRecommendedMinTLSPadding() int {
+	return client.proxyEntry.RecommendedMinTLSPadding
+}
+
+// GetRecommendedMaxTLSPadding returns the recommended maximum TLS padding
+// included in the proxy entry.
+func (client *Client) GetRecommendedMaxTLSPadding() int {
+	return client.proxyEntry.RecommendedMaxTLSPadding
+}
+
 func (client *Client) GetMetrics() *ClientMetrics {
 	return &ClientMetrics{
 		ProxyID:           client.proxyID,
@@ -205,6 +249,8 @@ func (client *Client) Dial(
 	tlsProfile string,
 	randomizedTLSProfileSeed *prng.Seed,
 	sni string,
+	fragmentClientHello bool,
+	tlsPadding int,
 	destinationAddress string) (retConn *ClientConn, retErr error) {
 
 	// Start at 1 to distinguish from the zero value the proxy will record if
@@ -230,7 +276,7 @@ func (client *Client) Dial(
 	// Log once per connection. If the dial fails, log accumulated fields
 	// here. Otherwise, log on Close.
 	defer func() {
-		if retErr != nil && ctx.Err() == context.Canceled {
+		if retErr != nil && ctx.Err() != context.Canceled {
 			client.dialFailedCount.Add(1)
 			logFields["error"] = retErr.Error()
 			client.config.Logger.WithTraceFields(
@@ -317,6 +363,8 @@ func (client *Client) Dial(
 		tlsProfile,
 		randomizedTLSProfileSeed,
 		sni,
+		fragmentClientHello,
+		tlsPadding,
 		passthroughMessage,
 		client.verifyPin,
 		client.proxyEntry.VerifyServerName)
