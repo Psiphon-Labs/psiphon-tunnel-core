@@ -444,7 +444,7 @@ func NewProxy(
 
 		// See comments in psiphon/server.TLSTunnelServer.makeTLSTunnelConfig.
 		strictMode := true
-		TTL := obfuscator.TLS_PASSTHROUGH_TIME_PERIOD
+		TTL := obfuscator.TLS_PASSTHROUGH_HISTORY_TTL
 
 		ok, logFields := proxy.obfuscatorSeedHistory.AddNewWithTTL(
 			strictMode,
