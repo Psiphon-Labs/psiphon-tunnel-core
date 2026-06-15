@@ -258,6 +258,10 @@ func (f *Fetcher) Run(ctx context.Context) error {
 	var prioritizeTunnelProtocols []string
 	for _, v := range versionedTags {
 
+		if v == nil {
+			return errors.TraceNew("unexpected nil versioned server entry tag")
+		}
+
 		hasServerEntry := f.config.DatastoreHasServerEntry(
 			v.Tag,
 			int(v.Version),

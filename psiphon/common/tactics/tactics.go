@@ -755,6 +755,12 @@ func (server *Server) initLookups() {
 // flagged fields.
 func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
 
+	// Scope fields are updated by initLookups, so synchronize access.
+	//
+	// Potential future enhancement: store a snapshot in an atomic.Value?
+	server.ReloadableFile.RLock()
+	defer server.ReloadableFile.RUnlock()
+
 	scope := server.filterGeoIPScope
 
 	if server.filterRegionScopes != nil {
@@ -1505,10 +1511,6 @@ func HandleTacticsPayload(
 	//   reload on the server
 	// - old and new tactics should both be valid
 
-	if payload == nil {
-		return nil, errors.TraceNew("unexpected nil payload")
-	}
-
 	record, err := getStoredTacticsRecord(storer, networkID)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1880,6 +1882,10 @@ func applyTacticsPayload(
 	payload *Payload) (bool, error) {
 
 	newTactics := false
+
+	if payload == nil {
+		return newTactics, errors.TraceNew("unexpected nil payload")
+	}
 
 	if payload.Tag == "" {
 		return newTactics, errors.TraceNew("invalid tag")

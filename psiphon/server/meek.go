@@ -596,11 +596,14 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	if len(server.support.Config.MeekProhibitedHeaders) > 0 {
 		for _, header := range server.support.Config.MeekProhibitedHeaders {
-			value := request.Header.Get(header)
-			if header != "" {
+			if header == "" {
+				continue
+			}
+			values := request.Header.Values(header)
+			if len(values) > 0 {
 				log.WithTraceFields(LogFields{
 					"header": header,
-					"value":  value,
+					"value":  values[0],
 				}).Warning("prohibited meek header")
 				server.handleError(responseWriter, request)
 				return
@@ -1882,7 +1885,7 @@ func (server *MeekServer) makeMeekHTTPNormalizerListener() *transforms.HTTPNorma
 			},
 		}
 		cookies := request.Cookies()
-		if len(rawCookies) == 0 {
+		if len(cookies) == 0 {
 			return nil, errors.Tracef("invalid cookies: %s", string(rawCookies))
 		}
 

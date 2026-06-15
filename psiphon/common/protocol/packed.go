@@ -904,6 +904,10 @@ func init() {
 	//
 	// - local-only fields are also packed, to allow for future use of packed
 	//   encodings in the local datastore.
+	//
+	// Known limitation: sshShadowsocksPort, sshShadowsocksKey,
+	// disableShadowsocksPrefix, and inproxyShadowsocksPort are not assigned
+	// packed field keys and fall through to UnrecognizedFields.
 
 	packedServerEntryFieldSpecs := []packSpec{
 		{1, "tag", base64Converter},

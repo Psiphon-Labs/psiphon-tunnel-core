@@ -32,10 +32,10 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/florianl/go-nfqueue"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	cache "github.com/patrickmn/go-cache"
 )
 
 func IsSupported() bool {
@@ -43,8 +43,9 @@ func IsSupported() bool {
 }
 
 const (
-	defaultSocketMark   = 0x70736970 // "PSIP"
-	appliedSpecCacheTTL = 1 * time.Minute
+	defaultSocketMark          = 0x70736970 // "PSIP"
+	appliedSpecCacheTTL        = 1 * time.Minute
+	appliedSpecCacheMaxEntries = 100000
 )
 
 // Manipulator is a SYN-ACK packet manipulator.
@@ -92,14 +93,16 @@ type Manipulator struct {
 	nfqueue            *nfqueue.Nfqueue
 	compiledSpecsMutex sync.Mutex
 	compiledSpecs      map[string]*compiledSpec
-	appliedSpecCache   *cache.Cache
+	appliedSpecCache   *lrucache.Cache
 }
 
 // NewManipulator creates a new Manipulator.
 func NewManipulator(config *Config) (*Manipulator, error) {
 
 	m := &Manipulator{
-		config: config,
+		config:       config,
+		injectIPv4FD: -1,
+		injectIPv6FD: -1,
 	}
 
 	err := m.SetSpecs(config.Specs)
@@ -110,7 +113,10 @@ func NewManipulator(config *Config) (*Manipulator, error) {
 	// To avoid memory exhaustion, do not retain unconsumed appliedSpecCache
 	// entries for a longer time than it may reasonably take to complete the TCP
 	// handshake.
-	m.appliedSpecCache = cache.New(appliedSpecCacheTTL, appliedSpecCacheTTL/2)
+	m.appliedSpecCache = lrucache.NewWithLRU(
+		appliedSpecCacheTTL,
+		appliedSpecCacheTTL/2,
+		appliedSpecCacheMaxEntries)
 
 	return m, nil
 }
@@ -153,7 +159,7 @@ func (m *Manipulator) Start() (retErr error) {
 		return errors.Trace(err)
 	}
 	defer func() {
-		if retErr != nil {
+		if retErr != nil && m.injectIPv4FD >= 0 {
 			syscall.Close(m.injectIPv4FD)
 		}
 	}()
@@ -169,16 +175,19 @@ func (m *Manipulator) Start() (retErr error) {
 	}
 
 	m.injectIPv6FD, err = syscall.Socket(syscall.AF_INET6, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
-	if err != nil && !m.config.AllowNoIPv6NetworkConfiguration {
-		return errors.Trace(err)
+	if err != nil {
+		m.injectIPv6FD = -1
+		if !m.config.AllowNoIPv6NetworkConfiguration {
+			return errors.Trace(err)
+		}
 	}
 	defer func() {
-		if retErr != nil {
+		if retErr != nil && m.injectIPv6FD >= 0 {
 			syscall.Close(m.injectIPv6FD)
 		}
 	}()
 
-	if m.injectIPv6FD != 0 {
+	if m.injectIPv6FD >= 0 {
 		err = syscall.SetsockoptInt(m.injectIPv6FD, syscall.IPPROTO_IPV6, syscall.IP_HDRINCL, 1)
 		if err != nil {
 			// There's no AllowNoIPv6NetworkConfiguration in this case: if we can
@@ -259,7 +268,7 @@ func (m *Manipulator) Start() (retErr error) {
 }
 
 // Stop halts packet manipulation, frees resources, and restores networking
-// state.
+// state. A Manipulator instance cannot be restarted after Stop.
 func (m *Manipulator) Stop() {
 
 	m.mutex.Lock()
@@ -291,13 +300,19 @@ func (m *Manipulator) Stop() {
 
 	m.nfqueue.Close()
 
-	syscall.Close(m.injectIPv4FD)
+	if m.injectIPv4FD >= 0 {
+		syscall.Close(m.injectIPv4FD)
+	}
 
-	if m.injectIPv6FD != 0 {
+	if m.injectIPv6FD >= 0 {
 		syscall.Close(m.injectIPv6FD)
 	}
 
 	m.configureIPTables(false)
+
+	// Intentionally leave m.runContext non-nil so restart fails. Don't reset
+	// fields read by the handleInterceptedPacket, which may dangle due to
+	// lack of exit synchronization.
 }
 
 // SetSpecs installs a new set of packet transformation Spec values, replacing
@@ -441,7 +456,7 @@ func (m *Manipulator) setAppliedSpecName(
 			specName:  specName,
 			extraData: extraData,
 		},
-		cache.DefaultExpiration)
+		lrucache.DefaultExpiration)
 }
 
 func (m *Manipulator) getSocketMark() int {
@@ -454,6 +469,10 @@ func (m *Manipulator) getSocketMark() int {
 func (m *Manipulator) handleInterceptedPacket(attr nfqueue.Attribute) int {
 
 	if attr.PacketID == nil || attr.Payload == nil {
+		if attr.PacketID != nil {
+			// Set verdict to avoid queue backlog.
+			m.nfqueue.SetVerdict(*attr.PacketID, nfqueue.NfAccept)
+		}
 		m.config.Logger.WithTrace().Warning("missing nfqueue data")
 		return 0
 	}
@@ -499,10 +518,17 @@ func (m *Manipulator) handleInterceptedPacket(attr nfqueue.Attribute) int {
 		return 0
 	}
 
+	_, _, injectFD, sockAddr := m.getPacketAddressInfo(packet)
+	if injectFD < 0 {
+		m.setAppliedSpecName(packet, "", extraData)
+		m.nfqueue.SetVerdict(*attr.PacketID, nfqueue.NfAccept)
+		return 0
+	}
+
 	m.setAppliedSpecName(packet, spec.name, extraData)
 	m.nfqueue.SetVerdict(*attr.PacketID, nfqueue.NfDrop)
 
-	err = m.injectPackets(packet, spec)
+	err = m.injectPackets(packet, spec, injectFD, sockAddr)
 	if err != nil {
 		m.config.Logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("inject packets failed")
@@ -597,12 +623,14 @@ func (m *Manipulator) getCompiledSpec(
 	return spec, extraData, nil
 }
 
-func (m *Manipulator) injectPackets(interceptedPacket gopacket.Packet, spec *compiledSpec) error {
+func (m *Manipulator) injectPackets(
+	interceptedPacket gopacket.Packet,
+	spec *compiledSpec,
+	injectFD int,
+	sockAddr syscall.Sockaddr) error {
 
 	// A sockAddr parameter with dstIP (but not port) set appears to be required
 	// even with the IP_HDRINCL socket option.
-
-	_, _, injectFD, sockAddr := m.getPacketAddressInfo(interceptedPacket)
 
 	injectPackets, err := spec.apply(interceptedPacket)
 	if err != nil {

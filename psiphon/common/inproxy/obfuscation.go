@@ -316,7 +316,7 @@ func deobfuscateSessionPacket(
 	timestamp := int64(0)
 	if replayHistory != nil {
 		timestamp, n = binary.Varint(plaintext[offset:])
-		if timestamp == 0 && n <= 0 {
+		if timestamp == 0 || n <= 0 {
 			return nil, NewDeobfuscationAnomoly(
 				errors.TraceNew("invalid timestamp"))
 		}
@@ -328,7 +328,7 @@ func deobfuscateSessionPacket(
 			errors.TraceNew("invalid padding size"))
 	}
 	offset += n
-	if len(plaintext[offset:]) < int(paddingSize) {
+	if paddingSize > uint64(len(plaintext[offset:])) {
 		return nil, NewDeobfuscationAnomoly(
 			errors.TraceNew("invalid padding"))
 	}

@@ -2173,6 +2173,9 @@ func unwrapSessionPacket(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	if sessionPacket == nil {
+		return nil, errors.TraceNew("missing session packet")
+	}
 
 	return sessionPacket, nil
 }
