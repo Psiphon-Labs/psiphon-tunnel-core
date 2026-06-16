@@ -3648,7 +3648,12 @@ func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPor
 var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
-		{"establishment_duration", isIntString, requestParamOptional}},
+		{"establishment_duration", isIntString, requestParamOptional},
+		{"light_proxy_id", isAnyString, requestParamOptional},
+		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
