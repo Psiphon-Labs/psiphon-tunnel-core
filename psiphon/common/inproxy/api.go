@@ -786,6 +786,10 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, common.LogFields, error) {
 
+	if request.Metrics == nil {
+		return nil, nil, nil, errors.TraceNew("missing metrics")
+	}
+
 	// UseMediaStreams requires at least ProtocolVersion2.
 	if request.UseMediaStreams &&
 		request.Metrics.ProtocolVersion < ProtocolVersion2 {
@@ -850,10 +854,6 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	if !request.ICECandidateTypes.IsValid() {
 		return nil, nil, nil, errors.Tracef(
 			"invalid ICE candidate types: %v", request.ICECandidateTypes)
-	}
-
-	if request.Metrics == nil {
-		return nil, nil, nil, errors.TraceNew("missing metrics")
 	}
 
 	logFields, err := request.Metrics.ValidateAndGetLogFields(
@@ -923,6 +923,12 @@ func (params *TrafficShapingParameters) Validate() error {
 		params.MinDecoySize > params.MaxDecoySize ||
 		params.MaxDecoySize > maxDecoySize {
 		return errors.TraceNew("invalid decoy size")
+	}
+
+	if math.IsNaN(params.DecoyMessageProbability) ||
+		params.DecoyMessageProbability < 0.0 ||
+		params.DecoyMessageProbability > 1.0 {
+		return errors.TraceNew("invalid decoy message probability")
 	}
 
 	return nil

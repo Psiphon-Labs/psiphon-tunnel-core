@@ -261,6 +261,11 @@ func ImportPushPayload(
 			errors.TraceNew("missing server entry importer")
 	}
 	for _, prioritizedServerEntry := range payload.PrioritizedServerEntries {
+		if prioritizedServerEntry == nil {
+			return importedServerEntries, importedLightProxyEntries,
+				errors.TraceNew("missing server entry")
+		}
+
 		err := serverEntryImporter(
 			prioritizedServerEntry.ServerEntryFields,
 			prioritizedServerEntry.Source,

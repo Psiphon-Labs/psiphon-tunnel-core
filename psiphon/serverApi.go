@@ -41,11 +41,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/fxamacker/cbor/v2"
@@ -526,7 +526,7 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
 
-	lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
+	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
 		metrics := lightProxyClient.GetMetrics()
 		params["light_proxy_id"] = metrics.ProxyID
@@ -1477,6 +1477,10 @@ func getBaseAPIParameters(
 			params["server_entry_count"] = strconv.Itoa(serverEntryCount)
 		}
 
+		if dialParams.TunnelLightProxyID != "" {
+			params["tunnel_personal_light_proxy_id"] = dialParams.TunnelLightProxyID
+		}
+
 	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {
 
 		if dialParams.DialConnMetrics != nil {
@@ -1564,8 +1568,8 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 	// timeout which is the same as SSH API requests: if the tunnel has stalled then SSH keep
 	// alives will cause the tunnel to close.
 
-	dialer := NewCustomTLSDialer(
-		&CustomTLSConfig{
+	dialer := tlsdialer.NewDialer(
+		&tlsdialer.Config{
 			Parameters:              tunnel.config.GetParameters(),
 			Dial:                    tunneledDialer,
 			VerifyLegacyCertificate: certificate,

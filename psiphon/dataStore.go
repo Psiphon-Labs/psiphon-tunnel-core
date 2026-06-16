@@ -782,7 +782,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			// excludeIntensive and excludeInproxt are handled higher up.
 			if len(serverEntry.GetSupportedProtocols(
 				conditionallyEnabledComponents{},
-				config.UseUpstreamProxy(),
+				config.TunnelDialsUseUpstreamProxy(),
 				limitTunnelProtocols,
 				limitTunnelDialPortNumbers,
 				limitQUICVersions,

@@ -95,6 +95,7 @@ type ServerEntry struct {
 	InproxyMeekPort                     int      `json:"inproxyMeekPort,omitempty"`
 	InproxyTlsOSSHPort                  int      `json:"inproxyTlsOSSHPort,omitempty"`
 	InproxyShadowsocksPort              int      `json:"inproxyShadowsocksPort,omitempty"`
+	AllowUpstreamProxy                  bool     `json:"allowUpstreamProxy,omitempty"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -242,11 +243,26 @@ func (fields ServerEntryFields) GetConfigurationVersion() int {
 	if !ok {
 		return 0
 	}
-	configurationVersionFloat, ok := configurationVersion.(float64)
-	if !ok {
+
+	// Handle different possible JSON/CBOR decode types.
+	configurationVersionInt := 0
+	switch value := configurationVersion.(type) {
+	case float64:
+		configurationVersionInt = int(value)
+	case int:
+		configurationVersionInt = value
+	case int64:
+		configurationVersionInt = int(value)
+	case uint64:
+		configurationVersionInt = int(value)
+	default:
 		return 0
 	}
-	return int(configurationVersionFloat)
+
+	if configurationVersionInt < 0 {
+		return 0
+	}
+	return configurationVersionInt
 }
 
 func (fields ServerEntryFields) GetLocalSource() string {
@@ -336,6 +352,9 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 	if err != nil {
 		return errors.Trace(err)
 	}
+	if len(decodedPublicKey) != ed25519.PublicKeySize {
+		return errors.Tracef("invalid public key length: %d", len(decodedPublicKey))
+	}
 
 	publicKeyDigest := sha256.Sum256(decodedPublicKey)
 	publicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
@@ -343,6 +362,9 @@ func (fields ServerEntryFields) AddSignature(publicKey, privateKey string) error
 	decodedPrivateKey, err := base64.StdEncoding.DecodeString(privateKey)
 	if err != nil {
 		return errors.Trace(err)
+	}
+	if len(decodedPrivateKey) != ed25519.PrivateKeySize {
+		return errors.Tracef("invalid private key length: %d", len(decodedPrivateKey))
 	}
 
 	signature := ed25519.Sign(decodedPrivateKey, marshaledFields)
@@ -405,6 +427,10 @@ func (fields ServerEntryFields) VerifySignature(publicKey string) error {
 
 	if !bytes.Equal(expectedPublicKeyID, publicKeyID) {
 		return errors.TraceNew("unexpected public key ID")
+	}
+
+	if len(decodedPublicKey) != ed25519.PublicKeySize {
+		return errors.Tracef("invalid public key length: %d", len(decodedPublicKey))
 	}
 
 	copyFields.RemoveUnsignedFields()

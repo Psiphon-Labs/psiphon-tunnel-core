@@ -86,6 +86,12 @@ func TestIsBogon(t *testing.T) {
 	if !IsBogon(net.ParseIP("fc00::")) {
 		t.Errorf("unexpected non-bogon")
 	}
+	if !IsBogon(net.ParseIP("198.18.0.1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if IsBogon(net.ParseIP("192.18.0.1")) {
+		t.Errorf("unexpected bogon")
+	}
 }
 
 func BenchmarkIsBogon(b *testing.B) {

@@ -592,6 +592,9 @@ const (
 	TLS_PROFILE_RANDOMIZED     = "Randomized-v2"
 )
 
+// When SupportedTLSProfiles is updated, common/light.tlsProfileToCode must be
+// updated.
+
 var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_IOS_111,
 	TLS_PROFILE_IOS_121,

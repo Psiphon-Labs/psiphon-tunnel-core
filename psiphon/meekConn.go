@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
@@ -108,7 +109,7 @@ type MeekConfig struct {
 	//
 	// As with the other modes, MeekMode[Wrapped]PlaintextRoundTrip supports
 	// HTTP/2 with utls, and integration with DialParameters for replay --
-	// which are not otherwise implemented if using just CustomTLSDialer and
+	// which are not otherwise implemented if using just tlsdialer.NewDialer and
 	// net.http.
 	Mode MeekMode
 
@@ -137,7 +138,7 @@ type MeekConfig struct {
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
-	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
+	// TLSProfile specifies the value for tlsdialer.Config.TLSProfile for all
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
@@ -157,12 +158,12 @@ type MeekConfig struct {
 	LegacyPassthrough bool
 
 	// NoDefaultTLSSessionID specifies the value for
-	// CustomTLSConfig.NoDefaultTLSSessionID for all underlying TLS connections
+	// tlsdialer.Config.NoDefaultTLSSessionID for all underlying TLS connections
 	// created by this meek connection.
 	NoDefaultTLSSessionID bool
 
 	// RandomizedTLSProfileSeed specifies the value for
-	// CustomTLSConfig.RandomizedTLSProfileSeed for all underlying TLS
+	// tlsdialer.Config.RandomizedTLSProfileSeed for all underlying TLS
 	// connections created by this meek connection.
 	RandomizedTLSProfileSeed *prng.Seed
 
@@ -496,7 +497,7 @@ func DialMeek(
 
 		scheme = "https"
 
-		tlsConfig := &CustomTLSConfig{
+		tlsConfig := &tlsdialer.Config{
 			Parameters:                    meekConfig.Parameters,
 			DialAddr:                      meekConfig.DialAddress,
 			Dial:                          NewTCPDialer(dialConfig),
@@ -536,7 +537,7 @@ func DialMeek(
 			tlsConfig.PassthroughMessage = passthroughMessage
 		}
 
-		tlsDialer := NewCustomTLSDialer(tlsConfig)
+		tlsDialer := tlsdialer.NewDialer(tlsConfig)
 
 		// Pre-dial one TLS connection in order to inspect the negotiated
 		// application protocol. Then we create an HTTP/2 or HTTP/1.1 transport
@@ -572,7 +573,7 @@ func DialMeek(
 		// may be interrupted. Subsequent dials are made within the meek round trip
 		// request context.
 
-		// As DialAddr is set in the CustomTLSConfig, no address is required here.
+		// As DialAddr is set in the tlsdialer.Config, no address is required here.
 		preConn, err := tlsDialer(ctx, "tcp", "")
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -580,7 +581,7 @@ func DialMeek(
 
 		meek.connManager = newMeekUnderlyingConnManager(preConn, tlsDialer, nil)
 
-		if IsTLSConnUsingHTTP2(preConn) {
+		if tlsdialer.IsConnUsingHTTP2(preConn) {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DiagnosticID)
 			transport = &http2.Transport{
 				DialTLSContext: func(

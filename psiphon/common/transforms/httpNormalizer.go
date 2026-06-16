@@ -52,6 +52,27 @@ const (
 
 var ErrPassthroughActive = std_errors.New("passthrough")
 
+func equalHTTPHeaderName(s []byte, t string) bool {
+	// Similar to net/http/internal/ascii.EqualFold.
+	if len(s) != len(t) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		si := s[i]
+		ti := t[i]
+		if 'A' <= si && si <= 'Z' {
+			si += 'a' - 'A'
+		}
+		if 'A' <= ti && ti <= 'Z' {
+			ti += 'a' - 'A'
+		}
+		if si != ti {
+			return false
+		}
+	}
+	return true
+}
+
 // HTTPNormalizer wraps a net.Conn, intercepting Read calls, and normalizes any
 // HTTP requests that are read. The HTTP request components preceeding the body
 // are normalized; i.e. the Request-Line and headers.
@@ -271,7 +292,7 @@ func (t *HTTPNormalizer) Read(buffer []byte) (int, error) {
 			err = nil
 			var logFields map[string]interface{}
 
-			if t.validateMeekCookie != nil && t.ValidateMeekCookieResult == nil && bytes.Equal(k, []byte(cookieHeader)) {
+			if t.validateMeekCookie != nil && t.ValidateMeekCookieResult == nil && equalHTTPHeaderName(k, cookieHeader) {
 				t.ValidateMeekCookieResult, err = t.validateMeekCookie(v)
 				if err != nil {
 					err = errors.TraceMsg(err, "invalid meek cookie")
@@ -279,7 +300,7 @@ func (t *HTTPNormalizer) Read(buffer []byte) (int, error) {
 			}
 
 			if err == nil {
-				if bytes.Equal(k, []byte(contentLengthHeader)) {
+				if equalHTTPHeaderName(k, contentLengthHeader) {
 					var cl uint64
 					cl, err = strconv.ParseUint(string(v), 10, 63)
 					if err != nil {
@@ -296,7 +317,7 @@ func (t *HTTPNormalizer) Read(buffer []byte) (int, error) {
 
 					// TODO/perf: consider using map, but array may be faster
 					// and use less mem.
-					if bytes.Equal(k, []byte(h)) {
+					if equalHTTPHeaderName(k, h) {
 
 						err = errors.TraceNew("prohibited header")
 						logFields = map[string]interface{}{
@@ -321,7 +342,7 @@ func (t *HTTPNormalizer) Read(buffer []byte) (int, error) {
 			for _, h := range t.preserveHeaders {
 				// TODO/perf: consider using map, but array may be faster and
 				// use less mem.
-				if bytes.Equal(k, []byte(h)) {
+				if equalHTTPHeaderName(k, h) {
 					// TODO: if there are multiple preserved headers with the
 					// same key, then the last header parsed will be the
 					// preserved value. Consider if this is the desired
@@ -436,12 +457,12 @@ func (t *HTTPNormalizer) Read(buffer []byte) (int, error) {
 
 		t.state = httpNormalizerReadBody
 
-		totalReqBytes := len(header) + int(*t.contentLength)
-		t.copyRemain = uint64(totalReqBytes)
+		headerLen := uint64(len(header))
+		t.copyRemain = headerLen + *t.contentLength
 
 		bytesOfBodyRead := t.b.Len() - len(header)
 
-		if bytesOfBodyRead > totalReqBytes-len(header) {
+		if uint64(bytesOfBodyRead) > *t.contentLength {
 			t.readRemain = 0
 		} else {
 			t.readRemain = *t.contentLength - uint64(bytesOfBodyRead)

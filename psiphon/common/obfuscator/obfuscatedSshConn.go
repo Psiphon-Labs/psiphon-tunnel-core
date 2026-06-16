@@ -894,6 +894,10 @@ func getSSHPacketPrefix(buffer []byte) (int, int, int, int, error) {
 	}
 
 	paddingLength := int(buffer[SSH_PACKET_PREFIX_LENGTH-1])
+	if paddingLength >= packetLength {
+		return 0, 0, 0, 0, errors.TraceNew("invalid SSH packet padding length")
+	}
+
 	payloadLength := packetLength - paddingLength - 1
 	messageLength := SSH_PACKET_PREFIX_LENGTH + packetLength - 1
 
