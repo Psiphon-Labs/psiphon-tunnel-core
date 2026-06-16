@@ -253,6 +253,14 @@ github.com/google/uuid
 # github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 ## explicit
 github.com/grafov/m3u8
+# github.com/huin/goupnp v1.3.0
+## explicit; go 1.14
+github.com/huin/goupnp
+github.com/huin/goupnp/dcps/internetgateway2
+github.com/huin/goupnp/httpu
+github.com/huin/goupnp/scpd
+github.com/huin/goupnp/soap
+github.com/huin/goupnp/ssdp
 # github.com/josharian/native v1.1.1-0.20230202152459-5c7d0dd6ab86
 ## explicit; go 1.13
 github.com/josharian/native
