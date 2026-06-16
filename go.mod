@@ -48,6 +48,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/google/gopacket v1.1.19
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
+	github.com/huin/goupnp v1.3.0
 	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 	github.com/miekg/dns v1.1.56
 	github.com/minio/crc64nvme v1.1.1
