@@ -280,8 +280,10 @@ type Config struct {
 
 	// GatewayLookupFunc returns the machine's gateway (home router) IP and
 	// this machine's own IP on the LAN reached through that gateway. It is
-	// used as the destination for UPnP/NAT-PMP/PCP queries. It must be
-	// non-nil. See also Client.SetGatewayLookupFunc.
+	// used as the destination for UPnP/NAT-PMP/PCP queries. If nil, the
+	// client has no gateway lookup and Probe reports no port mapping services
+	// (ErrGatewayRange); a lookup may be supplied later via
+	// Client.SetGatewayLookupFunc.
 	//
 	// This replaces Tailscale's built-in netmon.LikelyHomeRouterIP so that
 	// the caller can supply an interface-aware lookup (e.g. for split-
@@ -314,9 +316,6 @@ type Config struct {
 // NewClient constructs a new portmapping [Client] from c. It will panic if any
 // required parameters are omitted.
 func NewClient(c Config) *Client {
-	if c.GatewayLookupFunc == nil {
-		panic("nil GatewayLookupFunc")
-	}
 	ret := &Client{
 		logf:         c.Logf,
 		control:      bindToDeviceControl(c.BindToDevice),
@@ -437,7 +436,9 @@ func (c *Client) SetLocalPort(localPort uint16) {
 }
 
 func (c *Client) gatewayAndSelfIP() (gw, myIP netip.Addr, ok bool) {
-	gw, myIP, ok = c.ipAndGateway()
+	if c.ipAndGateway != nil {
+		gw, myIP, ok = c.ipAndGateway()
+	}
 	if !ok {
 		gw = netip.Addr{}
 		myIP = netip.Addr{}
