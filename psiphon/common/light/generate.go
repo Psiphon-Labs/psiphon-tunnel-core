@@ -37,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
@@ -47,8 +48,15 @@ import (
 // listenAddresses specifies the network addresses the proxy is to listen on.
 // dialAddressIPv4 and an optional dialAddressIPv6 are the values,
 // distributed in the proxy entry, which the client will connect to.
-// recommendedSNI and recommendedSNIRegex are optional SNI selection hints
-// distributed in the proxy entry.
+// recommendedSNI, recommendedSNIRegex, and recommendedSNIProbability are
+// optional SNI selection hints distributed in the proxy entry.
+//
+// recommendedTLSProfile and recommendedTLSProfileProbability are optional TLS
+// profile selection hints distributed in the proxy entry.
+//
+// recommendedFragmentClientHelloProbability, recommendedTLSPaddingProbability,
+// recommendedMinTLSPadding, and recommendedMaxTLSPadding are optional TLS
+// traffic-shaping recommendations distributed in the proxy entry.
 //
 // allowedDestinations is a list of network addresses, host and post, that the
 // proxy will connect to. Only destinations on this list are allowed, and at
@@ -63,6 +71,13 @@ func Generate(
 	dialAddressIPv6 string,
 	recommendedSNI string,
 	recommendedSNIRegex string,
+	recommendedSNIProbability float64,
+	recommendedTLSProfile string,
+	recommendedTLSProfileProbability float64,
+	recommendedFragmentClientHelloProbability float64,
+	recommendedTLSPaddingProbability float64,
+	recommendedMinTLSPadding int,
+	recommendedMaxTLSPadding int,
 	allowedDestinations []string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
@@ -96,6 +111,34 @@ func Generate(
 		_, err := regen.GenerateString(recommendedSNIRegex)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
+		}
+	}
+
+	err = validateRecommendedTLSSettings(
+		recommendedFragmentClientHelloProbability,
+		recommendedTLSPaddingProbability,
+		recommendedMinTLSPadding,
+		recommendedMaxTLSPadding,
+		recommendedSNIProbability,
+		recommendedTLSProfileProbability)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
+	if recommendedTLSProfile != "" {
+		if !common.Contains(protocol.SupportedTLSProfiles, recommendedTLSProfile) {
+			return nil, nil, errors.TraceNew("invalid recommended TLS profile")
+		}
+
+		// Light protocol requires TLS 1.3.
+		supportsTLS13, err := tlsdialer.TLSProfileSupportsTLS13(
+			recommendedTLSProfile)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		if !supportsTLS13 {
+			return nil, nil, errors.TraceNew(
+				"recommended TLS profile does not support TLS 1.3")
 		}
 	}
 
@@ -136,14 +179,21 @@ func Generate(
 	// of the obfuscation key.
 
 	entry := ProxyEntry{
-		Protocol:            LIGHT_PROTOCOL_TLS,
-		DialAddressIPv4:     dialAddressIPv4,
-		DialAddressIPv6:     dialAddressIPv6,
-		RecommendedSNI:      recommendedSNI,
-		RecommendedSNIRegex: recommendedSNIRegex,
-		ObfuscationKey:      obfuscationKeyBytes,
-		VerifyPin:           verifyPin,
-		VerifyServerName:    verifyServerName,
+		Protocol:                                  LIGHT_PROTOCOL_TLS,
+		DialAddressIPv4:                           dialAddressIPv4,
+		DialAddressIPv6:                           dialAddressIPv6,
+		RecommendedSNI:                            recommendedSNI,
+		RecommendedSNIRegex:                       recommendedSNIRegex,
+		RecommendedSNIProbability:                 recommendedSNIProbability,
+		RecommendedTLSProfile:                     recommendedTLSProfile,
+		RecommendedTLSProfileProbability:          recommendedTLSProfileProbability,
+		RecommendedFragmentClientHelloProbability: recommendedFragmentClientHelloProbability,
+		RecommendedTLSPaddingProbability:          recommendedTLSPaddingProbability,
+		RecommendedMinTLSPadding:                  recommendedMinTLSPadding,
+		RecommendedMaxTLSPadding:                  recommendedMaxTLSPadding,
+		ObfuscationKey:                            obfuscationKeyBytes,
+		VerifyPin:                                 verifyPin,
+		VerifyServerName:                          verifyServerName,
 	}
 
 	// There is currently no signature. See SignedProxyEntry comment.

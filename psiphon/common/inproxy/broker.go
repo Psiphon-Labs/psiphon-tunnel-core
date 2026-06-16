@@ -272,6 +272,9 @@ func NewBrokerLoggedEvent(err error) *BrokerLoggedEvent {
 }
 
 func (e *BrokerLoggedEvent) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
 	return e.err.Error()
 }
 
@@ -1801,17 +1804,14 @@ func (b *Broker) handleClientDSL(
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["request_size"] = requestSize
 		logFields["response_size"] = responseSize
-		loggedError := false
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
-			loggedError = true
 		} else if dslRelayErr != nil {
 			logFields["error"] = dslRelayErr.Error()
-			loggedError = true
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
-		if loggedError {
+		if retErr != nil {
 			retErr = NewBrokerLoggedEvent(retErr)
 		}
 	}()

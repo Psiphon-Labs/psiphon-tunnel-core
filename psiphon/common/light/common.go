@@ -36,19 +36,27 @@ import (
 )
 
 const (
-	proxyIDSize = 16
+	proxyIDSize              = 16
+	maxRecommendedTLSPadding = 65535
 )
 
 // ProxyEntry is the proxy connection information distributed to clients.
 type ProxyEntry struct {
-	Protocol            string `cbor:"1,keyasint,omitempty"`
-	DialAddressIPv4     string `cbor:"2,keyasint,omitempty"`
-	RecommendedSNI      string `cbor:"3,keyasint,omitempty"`
-	ObfuscationKey      []byte `cbor:"4,keyasint,omitempty"`
-	VerifyPin           []byte `cbor:"5,keyasint,omitempty"`
-	VerifyServerName    string `cbor:"6,keyasint,omitempty"`
-	DialAddressIPv6     string `cbor:"7,keyasint,omitempty"`
-	RecommendedSNIRegex string `cbor:"8,keyasint,omitempty"`
+	Protocol                                  string  `cbor:"1,keyasint,omitempty"`
+	DialAddressIPv4                           string  `cbor:"2,keyasint,omitempty"`
+	RecommendedSNI                            string  `cbor:"3,keyasint,omitempty"`
+	ObfuscationKey                            []byte  `cbor:"4,keyasint,omitempty"`
+	VerifyPin                                 []byte  `cbor:"5,keyasint,omitempty"`
+	VerifyServerName                          string  `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6                           string  `cbor:"7,keyasint,omitempty"`
+	RecommendedSNIRegex                       string  `cbor:"8,keyasint,omitempty"`
+	RecommendedFragmentClientHelloProbability float64 `cbor:"9,keyasint,omitempty"`
+	RecommendedTLSPaddingProbability          float64 `cbor:"10,keyasint,omitempty"`
+	RecommendedMinTLSPadding                  int     `cbor:"11,keyasint,omitempty"`
+	RecommendedMaxTLSPadding                  int     `cbor:"12,keyasint,omitempty"`
+	RecommendedSNIProbability                 float64 `cbor:"13,keyasint,omitempty"`
+	RecommendedTLSProfile                     string  `cbor:"14,keyasint,omitempty"`
+	RecommendedTLSProfileProbability          float64 `cbor:"15,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -100,7 +108,57 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 		return nil, errors.TraceNew("missing TLS verify pin")
 	}
 
+	err = validateRecommendedTLSSettings(
+		proxyEntry.RecommendedFragmentClientHelloProbability,
+		proxyEntry.RecommendedTLSPaddingProbability,
+		proxyEntry.RecommendedMinTLSPadding,
+		proxyEntry.RecommendedMaxTLSPadding,
+		proxyEntry.RecommendedSNIProbability,
+		proxyEntry.RecommendedTLSProfileProbability)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Do not validate RecommendedTLSProfile here. Future proxy entries may
+	// recommend profiles not present in this client's SupportedTLSProfiles;
+	// callers must fall back when the recommendation is unknown.
+
 	return proxyEntry, nil
+}
+
+func validateRecommendedTLSSettings(
+	fragmentClientHelloProbability float64,
+	tlsPaddingProbability float64,
+	minTLSPadding int,
+	maxTLSPadding int,
+	sniProbability float64,
+	tlsProfileProbability float64) error {
+
+	if !(fragmentClientHelloProbability >= 0.0 &&
+		fragmentClientHelloProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended FragmentClientHello probability")
+	}
+
+	if !(tlsPaddingProbability >= 0.0 &&
+		tlsPaddingProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS padding probability")
+	}
+
+	if !(sniProbability >= 0.0 && sniProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended SNI probability")
+	}
+
+	if !(tlsProfileProbability >= 0.0 && tlsProfileProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS profile probability")
+	}
+
+	if minTLSPadding < 0 ||
+		maxTLSPadding < minTLSPadding ||
+		maxTLSPadding > maxRecommendedTLSPadding {
+		return errors.TraceNew("invalid recommended TLS padding range")
+	}
+
+	return nil
 }
 
 // ConnectionStats are the proxy connection stats reported to
@@ -126,6 +184,8 @@ type ConnectionStats struct {
 	DestinationAddress        string
 	TLSProfile                string
 	SNI                       string
+	TLSClientHelloFragmented  bool
+	TLSClientHelloPadding     int
 	TLSDidResume              bool
 	ClientTCPDuration         time.Duration
 	ClientTLSDuration         time.Duration
@@ -244,7 +304,6 @@ func decodeNetworkType(encodedNetworkType uint8) string {
 var tlsProfileToCode = map[string]uint8{
 
 	// When protocol.SupportedTLSProfiles changes this table must be updated.
-	// TODO: add a corresponding  note next to protocol.SupportedTLSProfiles.
 
 	protocol.TLS_PROFILE_IOS_111:        1,
 	protocol.TLS_PROFILE_IOS_121:        2,
@@ -268,6 +327,8 @@ var tlsProfileToCode = map[string]uint8{
 	protocol.TLS_PROFILE_FIREFOX_99:     20,
 	protocol.TLS_PROFILE_FIREFOX_105:    21,
 	protocol.TLS_PROFILE_RANDOMIZED:     22,
+	protocol.TLS_PROFILE_CHROME_131:     23,
+	protocol.TLS_PROFILE_CHROME_133:     24,
 }
 
 var codeToTLSProfile = map[uint8]string{
@@ -293,6 +354,8 @@ var codeToTLSProfile = map[uint8]string{
 	20: protocol.TLS_PROFILE_FIREFOX_99,
 	21: protocol.TLS_PROFILE_FIREFOX_105,
 	22: protocol.TLS_PROFILE_RANDOMIZED,
+	23: protocol.TLS_PROFILE_CHROME_131,
+	24: protocol.TLS_PROFILE_CHROME_133,
 }
 
 func encodeTLSProfile(tlsProfile string) uint8 {

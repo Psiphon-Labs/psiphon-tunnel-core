@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package tlsdialer
 
 import (
 	"crypto/rand"

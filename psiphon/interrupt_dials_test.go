@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 )
 
 func TestInterruptDials(t *testing.T) {
@@ -83,10 +84,10 @@ func TestInterruptDials(t *testing.T) {
 	}
 
 	makeDialers["TLS"] = func(string) common.Dialer {
-		// Cast CustomTLSDialer to common.Dialer.
+		// Cast tlsdialer.NewDialer to common.Dialer.
 		return func(context context.Context, network, addr string) (net.Conn, error) {
-			return interruptDialsNewCustomTLSDialer(
-				&CustomTLSConfig{
+			return interruptDialsNewTLSDialer(
+				&tlsdialer.Config{
 					Parameters: params,
 					Dial: interruptDialsNewTCPDialer(
 						&DialConfig{ResolveIP: resolveIP}),
@@ -96,7 +97,7 @@ func TestInterruptDials(t *testing.T) {
 	}
 
 	dialGoroutineFunctionNames := []string{
-		"interruptDialsNewTCPDialer", "interruptDialsNewCustomTLSDialer"}
+		"interruptDialsNewTCPDialer", "interruptDialsNewTLSDialer"}
 
 	for dialerName, makeDialer := range makeDialers {
 		for _, doTimeout := range []bool{true, false} {
@@ -118,8 +119,8 @@ func interruptDialsNewTCPDialer(config *DialConfig) common.Dialer {
 	return NewTCPDialer(config)
 }
 
-func interruptDialsNewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
-	return NewCustomTLSDialer(config)
+func interruptDialsNewTLSDialer(config *tlsdialer.Config) common.Dialer {
+	return tlsdialer.NewDialer(config)
 }
 
 func runInterruptDials(

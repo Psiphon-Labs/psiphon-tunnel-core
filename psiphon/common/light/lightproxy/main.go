@@ -32,13 +32,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/sync/errgroup"
@@ -57,8 +58,17 @@ func main() {
 	var dialAddressIPv6 string
 	var recommendedSNI string
 	var recommendedSNIRegex string
+	var recommendedSNIProbability float64
+	var recommendedTLSProfile string
+	var recommendedTLSProfileProbability float64
+	var recommendedFragmentClientHelloProbability float64
+	var recommendedTLSPaddingProbability float64
+	var recommendedMinTLSPadding int
+	var recommendedMaxTLSPadding int
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
+	var splitUpstreamInterfaceName string
+	var splitDownstreamInterfaceName string
 	var destination string
 	var workerCount int
 	var minSleepDuration time.Duration
@@ -113,6 +123,48 @@ func main() {
 		"",
 		"generate recommended SNI regex; optional")
 
+	flag.Float64Var(
+		&recommendedSNIProbability,
+		"recommendedSNIProbability",
+		0.0,
+		"generate recommended SNI probability; optional")
+
+	flag.StringVar(
+		&recommendedTLSProfile,
+		"recommendedTLSProfile",
+		"",
+		"generate recommended TLS profile; optional")
+
+	flag.Float64Var(
+		&recommendedTLSProfileProbability,
+		"recommendedTLSProfileProbability",
+		0.0,
+		"generate recommended TLS profile probability; optional")
+
+	flag.Float64Var(
+		&recommendedFragmentClientHelloProbability,
+		"recommendedFragmentClientHelloProbability",
+		0.0,
+		"generate recommended FragmentClientHello probability; optional")
+
+	flag.Float64Var(
+		&recommendedTLSPaddingProbability,
+		"recommendedTLSPaddingProbability",
+		0.0,
+		"generate recommended TLS padding probability; optional")
+
+	flag.IntVar(
+		&recommendedMinTLSPadding,
+		"recommendedMinTLSPadding",
+		0,
+		"generate recommended minimum TLS padding; optional")
+
+	flag.IntVar(
+		&recommendedMaxTLSPadding,
+		"recommendedMaxTLSPadding",
+		0,
+		"generate recommended maximum TLS padding; optional")
+
 	flag.Var(
 		&allowedDestinations,
 		"allowedDestination",
@@ -123,6 +175,18 @@ func main() {
 		"passthroughAddress",
 		"",
 		"generate passthrough address")
+
+	flag.StringVar(
+		&splitUpstreamInterfaceName,
+		"splitUpstreamInterface",
+		"",
+		"generate split upstream interface name; optional")
+
+	flag.StringVar(
+		&splitDownstreamInterfaceName,
+		"splitDownstreamInterface",
+		"",
+		"generate split downstream interface name; optional")
 
 	flag.StringVar(
 		&destination,
@@ -189,11 +253,21 @@ func main() {
 				dialAddressIPv6,
 				recommendedSNI,
 				recommendedSNIRegex,
+				recommendedSNIProbability,
+				recommendedTLSProfile,
+				recommendedTLSProfileProbability,
+				recommendedFragmentClientHelloProbability,
+				recommendedTLSPaddingProbability,
+				recommendedMinTLSPadding,
+				recommendedMaxTLSPadding,
 				[]string(allowedDestinations),
 				passthroughAddress)
 			if err != nil {
 				return errors.Trace(err)
 			}
+
+			config.SplitUpstreamInterfaceName = splitUpstreamInterfaceName
+			config.SplitDownstreamInterfaceName = splitDownstreamInterfaceName
 
 			configJSON, err := json.MarshalIndent(config, "", "  ")
 			if err != nil {
@@ -327,11 +401,13 @@ func runTestLightProxy(
 		tlsProfile string,
 		randomizedTLSProfileSeed *prng.Seed,
 		sni string,
+		fragmentClientHello bool,
+		tlsPadding int,
 		passthroughMessage []byte,
 		verifyPin string,
 		verifyServerName string) (net.Conn, error) {
 
-		customTLSConfig := &psiphon.CustomTLSConfig{
+		tlsConfig := &tlsdialer.Config{
 			Parameters: params,
 			Dial: func(context.Context, string, string) (net.Conn, error) {
 				return underlyingConn, nil
@@ -343,20 +419,22 @@ func runTestLightProxy(
 			VerifyPinsOnly:           true,
 			TLSProfile:               tlsProfile,
 			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+			FragmentClientHello:      fragmentClientHello,
+			TLSPadding:               tlsPadding,
 			PassthroughMessage:       passthroughMessage,
 		}
 
 		if tlsClientSessionCache != nil {
-			customTLSConfig.ClientSessionCache = common.WrapUtlsClientSessionCache(
+			tlsConfig.ClientSessionCache = common.WrapUtlsClientSessionCache(
 				tlsClientSessionCache,
 				underlyingConn.RemoteAddr().String())
 		}
 
-		return psiphon.CustomTLSDial(
+		return tlsdialer.Dial(
 			ctx,
 			"tcp",
 			underlyingConn.RemoteAddr().String(),
-			customTLSConfig)
+			tlsConfig)
 	}
 
 	infoLogSampleRate := float64(10) / float64(workerCount)
@@ -418,7 +496,7 @@ func lightProxyTestFetch(
 		DisableKeepAlives: true,
 		DialContext: func(dialCtx context.Context, _, address string) (net.Conn, error) {
 			conn, err := lightClient.Dial(
-				dialCtx, nil, "UNKNOWN", "Chrome-120", nil, "", address)
+				dialCtx, nil, "UNKNOWN", protocol.TLS_PROFILE_CHROME_133, nil, "", false, 0, address)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -489,7 +567,9 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
 		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
-		`destination: %s, tlsProfile: %s, sni: %s, tlsDidResume: %t, ` +
+		`destination: %s, tlsProfile: %s, sni: %s, ` +
+		`tlsClientHelloFragmented: %t, tlsClientHelloPadding: %d, ` +
+		`tlsDidResume: %t, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
@@ -511,6 +591,8 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.DestinationAddress,
 		stats.TLSProfile,
 		stats.SNI,
+		stats.TLSClientHelloFragmented,
+		stats.TLSClientHelloPadding,
 		stats.TLSDidResume,
 		stats.ClientTCPDuration,
 		stats.ClientTLSDuration,

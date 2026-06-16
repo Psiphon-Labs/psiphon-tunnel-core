@@ -90,6 +90,10 @@ func configureClientInterface(_ *ClientConfig, _ string) error {
 	return errors.Trace(errUnsupported)
 }
 
+func IsBindToDeviceSupported() bool {
+	return true
+}
+
 // BindToDevice binds a socket to the specified interface on Windows.
 // deviceName must match the interface FriendlyName that Go exposes as
 // net.Interface.Name.

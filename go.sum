@@ -32,10 +32,10 @@ github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a h1:vRP
 github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a/go.mod h1:Hr9BTdONt074FS0Y1jd1g9f6jmIVRrYfc7He0elh/DI=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878 h1:cZs+MSkBCXOXxUjFzknZVQlYQ2no/sxAXbvWLeCgA6I=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304 h1:fHcKNmus53W75IYiZn0qAzmSihgZAQ2c3jJSjeWaHOs=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1 h1:zD7JvZCV8gjvtI0AZmE81Ffc/v7A+qwU1/YfUmN/Flk=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1/go.mod h1:rONdWgPMbFjyyBai7gB1IBF4pT9r4l0GyiDst5XR1SY=
-github.com/Psiphon-Labs/utls v1.1.1-0.20260423193914-69eb96d02588 h1:LlvUAE1YX65jG+nFJtbTWvaj3qTgMkaa3wpn6ys0p40=
-github.com/Psiphon-Labs/utls v1.1.1-0.20260423193914-69eb96d02588/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
 github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b h1:+ZY9z5ojDzZ9Xfn+whJ6N1yRcY8nGaXb3GTckz9iTfI=
 github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
 github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa h1:LHTHcTQiSGT7VVbI0o4wBRNQIgn917usHWOd6VAffYI=
@@ -298,8 +298,6 @@ github.com/vishvananda/netlink v1.2.1-beta.2/go.mod h1:twkDnbuQxJYemMlGd4JFIcuhg
 github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae/go.mod h1:DD4vA1DwXk04H54A1oHXtwZmA0grkVMdPxx/VGLCah0=
 github.com/vishvananda/netns v0.0.4 h1:Oeaw1EM2JMxD51g9uhtC0D7erkIjgmj8+JZc26m1YX8=
 github.com/vishvananda/netns v0.0.4/go.mod h1:SpkAiCQRtJ6TvvxPnOSyH3BMl6unz3xZlaprSwhNNJM=
-github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78 h1:9sreu9e9KOihf2Y0NbpyfWhd1XFDcL4GTkPYL4IvMrg=
-github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78/go.mod h1:HazXTRLhXFyq80TQp7PUXi6BKE6mS+ydEdzEqNBKopQ=
 github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=
 github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
