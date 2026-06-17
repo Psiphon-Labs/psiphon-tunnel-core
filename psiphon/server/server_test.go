@@ -60,6 +60,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
@@ -1322,7 +1323,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		keyID := []byte{0x00, 0x00, 0x00, 0x01}
 		proxyProtocolHeaderMACKey = append(
-			keyID, prng.Bytes(proxyProtocolHeaderMACKeySize)...)
+			keyID, prng.Bytes(proxyheader.ProxyProtocolHeaderMACKeySize)...)
 		serverConfig["ProxyProtocolHeaderMACKeys"] = map[string]string{
 			sponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
 	} else if runConfig.doReplaceProxyProtocolHeader {
@@ -2308,9 +2309,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			validateProxyProtocolHeader.Store(func(header *proxyproto.Header) error {
 				wireHeader, _ := header.Format()
 				timestamp, sourceIP, destinationIP, destinationPort, err :=
-					verifyProxyProtocolHeader(
-						proxyProtocolHeaderMACKey[:proxyProtocolHeaderKeyIDSize],
-						proxyProtocolHeaderMACKey[proxyProtocolHeaderKeyIDSize:],
+					proxyheader.VerifyProxyProtocolHeader(
+						proxyProtocolHeaderMACKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
+						proxyProtocolHeaderMACKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
 						wireHeader)
 				if err != nil {
 					return errors.Trace(err)
@@ -5876,10 +5877,14 @@ func startLightProxy(
 		0,
 		0,
 		[]string{allowedDestination},
+		nil,
+		nil,
 		allowedDestination)
 	if err != nil {
 		return nil, "", nil, errors.Trace(err)
 	}
+
+	proxyConfig.AllowBogons = true
 
 	receiver := &lightProxyEventReceiver{
 		listening: make(chan struct{}),

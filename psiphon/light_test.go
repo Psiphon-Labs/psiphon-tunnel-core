@@ -339,10 +339,14 @@ func startLightTestProxy(
 		0,
 		0,
 		[]string{allowedWebServerAddress},
+		nil,
+		nil,
 		allowedWebServerAddress)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
+
+	proxyConfig.AllowBogons = true
 
 	receiver := newTestLightProxyEventReceiver()
 	proxy, err := light.NewProxy(
@@ -567,6 +571,8 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		0,
 		0,
 		[]string{"example.com:443"},
+		nil,
+		nil,
 		"example.com:443")
 	if err != nil {
 		t.Fatal(errors.Trace(err))
@@ -586,6 +592,8 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		0,
 		0,
 		[]string{"example.com:443"},
+		nil,
+		nil,
 		"example.com:443")
 	if err != nil {
 		t.Fatal(errors.Trace(err))
@@ -697,6 +705,8 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		0,
 		0,
 		[]string{"example.com:443"},
+		nil,
+		nil,
 		"example.com:443")
 	if err != nil {
 		t.Fatal(errors.Trace(err))
