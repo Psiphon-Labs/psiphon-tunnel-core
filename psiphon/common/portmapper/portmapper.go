@@ -894,7 +894,13 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 	}
 }
 
-//go:generate go run tailscale.com/cmd/addlicense -file pmpresultcode_string.go go run golang.org/x/tools/cmd/stringer -type=pmpResultCode -trimprefix=pmpCode
+// pmpresultcode_string.go is generated from pmpResultCode with
+// golang.org/x/tools/cmd/stringer (-type=pmpResultCode -trimprefix=pmpCode).
+// It rarely needs regenerating; if the constants change, run stringer manually
+// (e.g. with -mod=mod) and re-apply the Psiphon file header. The upstream
+// code-generation directive was removed because it referenced Tailscale
+// tooling that this fork no longer vendors and would overwrite the Psiphon
+// header.
 
 type pmpResultCode uint16
 
