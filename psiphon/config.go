@@ -1975,7 +1975,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 				&interfaceDeviceBinder{interfaceName: upstreamInterfaceName}),
 			downstreamDeviceBinder: newLoggingDeviceBinder(
 				&interfaceDeviceBinder{interfaceName: downstreamInterfaceName}),
-			upstreamInterfaceName: upstreamInterfaceName,
+			upstreamInterfaceName:   upstreamInterfaceName,
+			downstreamInterfaceName: downstreamInterfaceName,
 		}
 	}
 
@@ -4509,9 +4510,10 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 // bind sites. upstreamInterfaceName is the resolved name, exposed for call
 // sites that need it as a string (e.g., ICE gathering exclusion).
 type splitInterfaceState struct {
-	upstreamDeviceBinder   DeviceBinder
-	downstreamDeviceBinder DeviceBinder
-	upstreamInterfaceName  string
+	upstreamDeviceBinder    DeviceBinder
+	downstreamDeviceBinder  DeviceBinder
+	upstreamInterfaceName   string
+	downstreamInterfaceName string
 }
 
 // deviceBinder returns the default DeviceBinder for dials. In
@@ -4545,6 +4547,18 @@ func (config *Config) splitDeviceBinder() DeviceBinder {
 func (config *Config) splitInterfaceUpstreamInterfaceName() string {
 	if config.splitInterface != nil {
 		return config.splitInterface.upstreamInterfaceName
+	}
+	return ""
+}
+
+// splitInterfaceDownstreamInterfaceName returns the resolved downstream
+// (ICE-facing) interface name in split-interface mode, or "" otherwise. It
+// is the interface that splitDeviceBinder binds port mapping and other
+// downstream sockets to, and is used to target port mapping gateway
+// discovery at that interface rather than the system default route.
+func (config *Config) splitInterfaceDownstreamInterfaceName() string {
+	if config.splitInterface != nil {
+		return config.splitInterface.downstreamInterfaceName
 	}
 	return ""
 }

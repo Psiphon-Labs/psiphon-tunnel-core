@@ -158,10 +158,6 @@ func DialClient(
 		return nil, errors.TraceNew("unexpected DialNetworkProtocol")
 	}
 
-	// Reset and configure port mapper component, as required. See
-	// initPortMapper comment.
-	initPortMapper(config.WebRTCDialCoordinator)
-
 	// Future improvements:
 	//
 	// - The broker connection and session, when not already established,

@@ -231,6 +231,7 @@ type testWebRTCDialCoordinator struct {
 	portMappingProbe                *PortMappingProbe
 	setPortMappingTypes             func(PortMappingTypes)
 	bindToDevice                    func(int) error
+	bindToDeviceInterfaceName       string
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitPortMappingTimeout   time.Duration
@@ -445,7 +446,19 @@ func (t *testWebRTCDialCoordinator) UDPConn(_ context.Context, network, remoteAd
 func (t *testWebRTCDialCoordinator) BindToDevice(fileDescriptor int) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	if t.bindToDevice == nil {
+		// No device binding configured; take no action, matching the
+		// WebRTCDialCoordinator.BindToDevice contract. The forked port mapper
+		// invokes BindToDevice on all platforms, so this must be nil-safe.
+		return nil
+	}
 	return errors.Trace(t.bindToDevice(fileDescriptor))
+}
+
+func (t *testWebRTCDialCoordinator) BindToDeviceInterfaceName() string {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.bindToDeviceInterfaceName
 }
 
 func (t *testWebRTCDialCoordinator) ProxyUpstreamDial(ctx context.Context, network, address string) (net.Conn, error) {

@@ -812,10 +812,6 @@ func (p *Proxy) doNetworkDiscovery(
 		return
 	}
 
-	// Reset and configure port mapper component, as required. See
-	// initPortMapper comment.
-	initPortMapper(webRTCCoordinator)
-
 	// Gather local network NAT/port mapping metrics and configuration before
 	// sending any announce requests. NAT topology metrics are used by the
 	// Broker to optimize client and in-proxy matching. Unlike the client, we
