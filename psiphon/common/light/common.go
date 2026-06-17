@@ -32,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -168,36 +169,38 @@ func validateRecommendedTLSSettings(
 // header was not read successfully, and the proxy's phase-completed
 // timestamps will be zero values when the phase was not completed.
 type ConnectionStats struct {
-	ProxyID                   string
-	ProxyProviderID           string
-	ProxyGeoIPData            common.GeoIPData
-	ProxyConnectionNum        int64
-	ClientGeoIPData           common.GeoIPData
-	SponsorID                 string
-	ClientPlatform            string
-	ClientBuildRev            string
-	DeviceRegion              string
-	SessionID                 string
-	ProxyEntryTracker         int64
-	NetworkType               string
-	ClientConnectionNum       int64
-	DestinationAddress        string
-	TLSProfile                string
-	SNI                       string
-	TLSClientHelloFragmented  bool
-	TLSClientHelloPadding     int
-	TLSDidResume              bool
-	ClientTCPDuration         time.Duration
-	ClientTLSDuration         time.Duration
-	ProxyCompletedTCP         time.Time
-	ProxyCompletedTLS         time.Time
-	ProxyCompletedLightHeader time.Time
-	ProxyCompletedUpstreamDNS time.Time
-	ProxyCompletedUpstreamTCP time.Time
-	UpstreamDNSCached         bool
-	BytesRead                 int64
-	BytesWritten              int64
-	Failure                   string
+	ProxyID                     string
+	ProxyProviderID             string
+	ProxyGeoIPData              common.GeoIPData
+	ProxyConnectionNum          int64
+	ClientGeoIPData             common.GeoIPData
+	SponsorID                   string
+	ClientPlatform              string
+	ClientBuildRev              string
+	DeviceRegion                string
+	SessionID                   string
+	ProxyEntryTracker           int64
+	NetworkType                 string
+	ClientConnectionNum         int64
+	DestinationAddress          string
+	TLSProfile                  string
+	SNI                         string
+	TLSClientHelloFragmented    bool
+	TLSClientHelloPadding       int
+	TLSDidResume                bool
+	ClientTCPDuration           time.Duration
+	ClientTLSDuration           time.Duration
+	ProxyCompletedTCP           time.Time
+	ProxyCompletedTLS           time.Time
+	ProxyCompletedLightHeader   time.Time
+	ProxyCompletedUpstreamDNS   time.Time
+	ProxyCompletedUpstreamTCP   time.Time
+	UpstreamDNSCached           bool
+	ProxyProtocolHeaderAdded    bool
+	ProxyProtocolHeaderReplaced bool
+	BytesRead                   int64
+	BytesWritten                int64
+	Failure                     string
 }
 
 // makeProxyID derives a unique proxy ID from a proxy's dial address and
@@ -206,6 +209,49 @@ func makeProxyID(dialAddress, obfuscationKey string) string {
 	h := hmac.New(sha256.New, []byte(obfuscationKey))
 	h.Write([]byte(dialAddress))
 	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
+}
+
+type proxyProtocolHeaderConfig struct {
+	macKey                     []byte
+	targetDestinationAddresses common.StringLookup
+}
+
+func prepareProxyProtocolHeaderConfigs(
+	proxyProtocolHeaderMACKeys map[string]string,
+	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
+) (map[string]proxyProtocolHeaderConfig, error) {
+
+	proxyProtocolHeaderConfigs := make(map[string]proxyProtocolHeaderConfig)
+	for sponsorID, base64Value := range proxyProtocolHeaderMACKeys {
+		value, err := base64.StdEncoding.DecodeString(base64Value)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if len(value) != proxyheader.ProxyProtocolHeaderKeyIDSize+proxyheader.ProxyProtocolHeaderMACKeySize {
+			return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
+		}
+		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig{macKey: value}
+	}
+
+	for sponsorID, targets := range proxyProtocolHeaderTargetDestinationAddresses {
+		proxyProtocolHeaderConfig, ok := proxyProtocolHeaderConfigs[sponsorID]
+		if !ok {
+			return nil, errors.TraceNew("missing ProxyProtocolHeaderMACKey entry")
+		}
+		normalizedTargets := make([]string, 0, len(targets))
+		for _, target := range targets {
+			normalizedTarget, err := normalizeDestinationAddress(target)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			normalizedTargets = append(normalizedTargets, normalizedTarget)
+		}
+		proxyProtocolHeaderConfig.targetDestinationAddresses =
+			common.NewStringLookup(normalizedTargets)
+		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig
+	}
+
+	return proxyProtocolHeaderConfigs, nil
 }
 
 type bytesCounter struct {

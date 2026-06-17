@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"golang.org/x/crypto/nacl/box"
@@ -603,7 +604,7 @@ type Config struct {
 	//
 	// There is one MAC key per configured sponsor ID, and each key is a
 	// base64-encoded concatenation of the key ID and key value
-	// (see makeProxyProtocolHeader).
+	// (see proxyheader.MakeProxyProtocolHeader).
 	ProxyProtocolHeaderMACKeys map[string]string `json:",omitempty"`
 
 	sshBeginHandshakeTimeout                       time.Duration
@@ -1018,7 +1019,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			if err != nil {
 				return nil, errors.Tracef("invalid ProxyProtocolHeaderMACKeys value: %v", err)
 			}
-			if len(value) != proxyProtocolHeaderKeyIDSize+proxyProtocolHeaderMACKeySize {
+			if len(value) != proxyheader.ProxyProtocolHeaderKeyIDSize+proxyheader.ProxyProtocolHeaderMACKeySize {
 				return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
 			}
 			config.proxyProtocolHeaderMACKeys[sponsorID] = value

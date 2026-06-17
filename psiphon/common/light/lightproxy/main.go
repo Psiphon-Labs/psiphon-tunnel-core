@@ -261,6 +261,8 @@ func main() {
 				recommendedMinTLSPadding,
 				recommendedMaxTLSPadding,
 				[]string(allowedDestinations),
+				nil,
+				nil,
 				passthroughAddress)
 			if err != nil {
 				return errors.Trace(err)
@@ -573,6 +575,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
+		`proxyProtocolHeaderAdded: %t, proxyProtocolHeaderReplaced: %t, ` +
 		`bytesRead: %d, bytesWritten: %d, ` +
 		`failure: %s` + "\n"
 
@@ -602,6 +605,8 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.ProxyCompletedUpstreamDNS.Format(time.RFC3339Nano),
 		stats.ProxyCompletedUpstreamTCP.Format(time.RFC3339Nano),
 		stats.UpstreamDNSCached,
+		stats.ProxyProtocolHeaderAdded,
+		stats.ProxyProtocolHeaderReplaced,
 		stats.BytesRead,
 		stats.BytesWritten,
 		stats.Failure)
