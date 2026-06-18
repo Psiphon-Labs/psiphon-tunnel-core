@@ -20,7 +20,7 @@ require (
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Inc/uds-ipc v1.0.1
-	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
+	github.com/Psiphon-Labs/bolt v0.0.0-20260623211331-1f8b367910d7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464

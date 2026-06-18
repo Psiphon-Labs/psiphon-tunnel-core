@@ -88,13 +88,10 @@ func getDelegatedInterface(ifIndex int) (int, error) {
 	// https://github.com/apple/darwin-xnu/blob/2ff845c2e033bd0ff64b5b6aa6063a1f8f65aa32/bsd/sys/sockio.h#L264
 	const SIOCGIFDELEGATE = 0xc020699d
 
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		uintptr(fd),
-		uintptr(SIOCGIFDELEGATE),
-		uintptr(unsafe.Pointer(&ifr)))
-	if errno != 0 {
-		return 0, errno
+	// Use golang.org/x/sys/unix (libSystem-backed) instead of syscall.Syscall,
+	// which makes a direct SVC kernel trap prohibited on Apple platforms.
+	if err := unix.IoctlPointer(fd, SIOCGIFDELEGATE, unsafe.Pointer(&ifr)); err != nil {
+		return 0, err
 	}
 	return int(ifr.ifr_delegated), nil
 }
