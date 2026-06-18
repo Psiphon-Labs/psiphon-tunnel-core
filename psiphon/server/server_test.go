@@ -5876,6 +5876,7 @@ func startLightProxy(
 		0,
 		0,
 		0,
+		0,
 		[]string{allowedDestination},
 		nil,
 		nil,

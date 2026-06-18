@@ -65,6 +65,7 @@ func main() {
 	var recommendedTLSPaddingProbability float64
 	var recommendedMinTLSPadding int
 	var recommendedMaxTLSPadding int
+	var proxyEntryTTL time.Duration
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
 	var splitUpstreamInterfaceName string
@@ -165,6 +166,12 @@ func main() {
 		0,
 		"generate recommended maximum TLS padding; optional")
 
+	flag.DurationVar(
+		&proxyEntryTTL,
+		"proxyEntryTTL",
+		0,
+		"generate proxy entry TTL; optional; 0 means no expiry")
+
 	flag.Var(
 		&allowedDestinations,
 		"allowedDestination",
@@ -260,6 +267,7 @@ func main() {
 				recommendedTLSPaddingProbability,
 				recommendedMinTLSPadding,
 				recommendedMaxTLSPadding,
+				proxyEntryTTL,
 				[]string(allowedDestinations),
 				nil,
 				nil,

@@ -24,6 +24,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"math"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -58,6 +59,7 @@ type ProxyEntry struct {
 	RecommendedSNIProbability                 float64 `cbor:"13,keyasint,omitempty"`
 	RecommendedTLSProfile                     string  `cbor:"14,keyasint,omitempty"`
 	RecommendedTLSProfileProbability          float64 `cbor:"15,keyasint,omitempty"`
+	TTLSeconds                                int64   `cbor:"16,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -118,6 +120,11 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 		proxyEntry.RecommendedTLSProfileProbability)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if proxyEntry.TTLSeconds < 0 ||
+		proxyEntry.TTLSeconds > int64(math.MaxInt64/time.Second) {
+		return nil, errors.TraceNew("invalid TTL")
 	}
 
 	// Do not validate RecommendedTLSProfile here. Future proxy entries may

@@ -278,6 +278,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 				config.LightProxyEntryTracker)
 		} else {
 
+			// LoadLightProxy will enforce the light proxy entry TTL, if any,
+			// and will not return an expired light proxy. After this point,
+			// the TTL is not enforced in the middle of the session.
+
 			lightProxy := LoadLightProxy()
 			if lightProxy != nil {
 				err = initLightProxy(
