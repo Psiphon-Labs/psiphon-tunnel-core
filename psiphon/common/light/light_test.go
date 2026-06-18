@@ -227,6 +227,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		recommendedTLSPaddingProbability,
 		recommendedMinTLSPadding,
 		recommendedMaxTLSPadding,
+		0,
 		[]string{echoAddress},
 		proxyProtocolHeaderMACKeys,
 		proxyProtocolHeaderTargetDestinationAddresses,

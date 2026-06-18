@@ -24,6 +24,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -338,6 +339,7 @@ func startLightTestProxy(
 		0,
 		0,
 		0,
+		0,
 		[]string{allowedWebServerAddress},
 		nil,
 		nil,
@@ -556,6 +558,8 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 	}
 	defer os.RemoveAll(dataRoot)
 
+	const lightProxyEntryTTL = 1 * time.Hour
+
 	_, lightProxyEntry, err := light.Generate(
 		prng.HexString(8),
 		[]string{"127.0.0.1:1"},
@@ -570,6 +574,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		0,
 		0,
 		0,
+		lightProxyEntryTTL,
 		[]string{"example.com:443"},
 		nil,
 		nil,
@@ -591,6 +596,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		0,
 		0,
 		0,
+		lightProxyEntryTTL,
 		[]string{"example.com:443"},
 		nil,
 		nil,
@@ -675,10 +681,41 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 
 		t.Fatal("unexpected stored light proxy")
 	}
+	if storedLightProxy.Expires.IsZero() ||
+		!storedLightProxy.Expires.After(time.Now().UTC()) {
+		t.Fatal("unexpected stored light proxy expiry")
+	}
 
 	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient == nil {
 		t.Fatal("missing initialized light proxy client")
+	}
+
+	expiredLightProxy, err := json.Marshal(
+		&StoredLightProxy{
+			LightProxyEntry:        storedLightProxy.LightProxyEntry,
+			LightProxyEntryTracker: storedLightProxy.LightProxyEntryTracker,
+			Expires:                time.Now().UTC().Add(-1 * time.Second),
+		})
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	err = SetKeyValue(datastoreStoredLightProxyKey, string(expiredLightProxy))
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	lightProxy := LoadLightProxy()
+	if lightProxy != nil {
+		t.Fatal("expired light proxy loaded")
+	}
+
+	lightProxyValue, err := GetKeyValue(datastoreStoredLightProxyKey)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	if lightProxyValue != "" {
+		t.Fatal("expired light proxy not deleted")
 	}
 }
 
@@ -700,6 +737,7 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		0.0,
 		"",
 		0.0,
+		0,
 		0,
 		0,
 		0,
