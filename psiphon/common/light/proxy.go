@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/time/rate"
@@ -61,29 +62,32 @@ const (
 
 // ProxyConfig specifies the configuration of a light proxy.
 type ProxyConfig struct {
-	Protocol                     string   `json:",omitempty"`
-	ProviderID                   string   `json:",omitempty"`
-	ListenAddresses              []string `json:",omitempty"`
-	DialAddressIPv4              string   `json:",omitempty"`
-	DialAddressIPv6              string   `json:",omitempty"`
-	ObfuscationKey               string   `json:",omitempty"`
-	TLSCertificate               []byte   `json:",omitempty"`
-	TLSPrivateKey                []byte   `json:",omitempty"`
-	PassthroughAddress           string   `json:",omitempty"`
-	AllowedDestinations          []string `json:",omitempty"`
-	InactivityTimeout            string   `json:",omitempty"`
-	UpstreamDialTimeout          string   `json:",omitempty"`
-	RelayBufferSize              int      `json:",omitempty"`
-	PerIPRateLimitQuantity       *int     `json:",omitempty"`
-	PerIPRateLimitInterval       string   `json:",omitempty"`
-	PerIPMaxConcurrent           *int     `json:",omitempty"`
-	MaxConcurrent                *int     `json:",omitempty"`
-	DialFallbackDelay            string   `json:",omitempty"`
-	DNSResolverCacheMaxSize      *int     `json:",omitempty"`
-	DNSResolverCacheTTL          string   `json:",omitempty"`
-	SplitUpstreamInterfaceName   string   `json:",omitempty"`
-	SplitDownstreamInterfaceName string   `json:",omitempty"`
-	EnableDebugLogs              bool     `json:",omitempty"`
+	Protocol                                      string              `json:",omitempty"`
+	ProviderID                                    string              `json:",omitempty"`
+	ListenAddresses                               []string            `json:",omitempty"`
+	DialAddressIPv4                               string              `json:",omitempty"`
+	DialAddressIPv6                               string              `json:",omitempty"`
+	ObfuscationKey                                string              `json:",omitempty"`
+	TLSCertificate                                []byte              `json:",omitempty"`
+	TLSPrivateKey                                 []byte              `json:",omitempty"`
+	PassthroughAddress                            string              `json:",omitempty"`
+	AllowedDestinations                           []string            `json:",omitempty"`
+	InactivityTimeout                             string              `json:",omitempty"`
+	UpstreamDialTimeout                           string              `json:",omitempty"`
+	RelayBufferSize                               int                 `json:",omitempty"`
+	PerIPRateLimitQuantity                        *int                `json:",omitempty"`
+	PerIPRateLimitInterval                        string              `json:",omitempty"`
+	PerIPMaxConcurrent                            *int                `json:",omitempty"`
+	MaxConcurrent                                 *int                `json:",omitempty"`
+	DialFallbackDelay                             string              `json:",omitempty"`
+	DNSResolverCacheMaxSize                       *int                `json:",omitempty"`
+	DNSResolverCacheTTL                           string              `json:",omitempty"`
+	SplitUpstreamInterfaceName                    string              `json:",omitempty"`
+	SplitDownstreamInterfaceName                  string              `json:",omitempty"`
+	ProxyProtocolHeaderMACKeys                    map[string]string   `json:",omitempty"`
+	ProxyProtocolHeaderTargetDestinationAddresses map[string][]string `json:",omitempty"`
+	AllowBogons                                   bool                `json:",omitempty"`
+	EnableDebugLogs                               bool                `json:",omitempty"`
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -124,23 +128,24 @@ type LookupGeoIP func(IP string) common.GeoIPData
 
 // Proxy is a lightweight proxy.
 type Proxy struct {
-	config                *ProxyConfig
-	lookupGeoIP           LookupGeoIP
-	eventReceiver         ProxyEventReceiver
-	ID                    string
-	proxyGeoIPData        common.GeoIPData
-	tlsConfig             *tls.Config
-	obfuscatorSeedHistory *obfuscator.SeedHistory
-	allowedDestinations   common.StringLookup
-	inactivityTimeout     time.Duration
-	upstreamDialTimeout   time.Duration
-	relayBufferSize       int
-	relayBufferPool       sync.Pool
-	rateLimitQuantity     int
-	rateLimitInterval     time.Duration
-	perIPMaxConcurrent    int
-	maxConcurrent         int
-	dialFallbackDelay     time.Duration
+	config                     *ProxyConfig
+	lookupGeoIP                LookupGeoIP
+	eventReceiver              ProxyEventReceiver
+	ID                         string
+	proxyGeoIPData             common.GeoIPData
+	tlsConfig                  *tls.Config
+	obfuscatorSeedHistory      *obfuscator.SeedHistory
+	allowedDestinations        common.StringLookup
+	proxyProtocolHeaderConfigs map[string]proxyProtocolHeaderConfig
+	inactivityTimeout          time.Duration
+	upstreamDialTimeout        time.Duration
+	relayBufferSize            int
+	relayBufferPool            sync.Pool
+	rateLimitQuantity          int
+	rateLimitInterval          time.Duration
+	perIPMaxConcurrent         int
+	maxConcurrent              int
+	dialFallbackDelay          time.Duration
 
 	listenConfig *net.ListenConfig
 	dialer       *net.Dialer
@@ -197,9 +202,6 @@ func NewProxy(
 		return nil, errors.TraceNew("missing passthrough address")
 	}
 
-	if len(config.AllowedDestinations) == 0 {
-		return nil, errors.TraceNew("missing allowed destinations")
-	}
 	normalizedAllowedDestinations := make([]string, len(config.AllowedDestinations))
 	for i, address := range config.AllowedDestinations {
 		var err error
@@ -207,6 +209,13 @@ func NewProxy(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	proxyProtocolHeaderConfigs, err := prepareProxyProtocolHeaderConfigs(
+		config.ProxyProtocolHeaderMACKeys,
+		config.ProxyProtocolHeaderTargetDestinationAddresses)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	inactivityTimeout := defaultInactivityTimeout
@@ -390,17 +399,18 @@ func NewProxy(
 	}
 
 	proxy := &Proxy{
-		config:                config,
-		lookupGeoIP:           lookupGeoIP,
-		eventReceiver:         newRedactingProxyEventReceiver(eventReceiver),
-		ID:                    makeProxyID(config.DialAddressIPv4, config.ObfuscationKey),
-		proxyGeoIPData:        proxyGeoIPData,
-		tlsConfig:             tlsConfig,
-		obfuscatorSeedHistory: obfuscator.NewSeedHistory(nil),
-		allowedDestinations:   common.NewStringLookup(normalizedAllowedDestinations),
-		inactivityTimeout:     inactivityTimeout,
-		upstreamDialTimeout:   upstreamDialTimeout,
-		relayBufferSize:       relayBufferSize,
+		config:                     config,
+		lookupGeoIP:                lookupGeoIP,
+		eventReceiver:              newRedactingProxyEventReceiver(eventReceiver),
+		ID:                         makeProxyID(config.DialAddressIPv4, config.ObfuscationKey),
+		proxyGeoIPData:             proxyGeoIPData,
+		tlsConfig:                  tlsConfig,
+		obfuscatorSeedHistory:      obfuscator.NewSeedHistory(nil),
+		allowedDestinations:        common.NewStringLookup(normalizedAllowedDestinations),
+		proxyProtocolHeaderConfigs: proxyProtocolHeaderConfigs,
+		inactivityTimeout:          inactivityTimeout,
+		upstreamDialTimeout:        upstreamDialTimeout,
+		relayBufferSize:            relayBufferSize,
 		relayBufferPool: sync.Pool{New: func() any {
 			b := make([]byte, relayBufferSize)
 			return &b
@@ -575,10 +585,13 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	bytesCounter := &bytesCounter{}
 	var completedLightHeader time.Time
 	var header *lightHeader
+	var sponsorID string
 	var normalizedDestinationAddress string
 	var completedUpstreamDNS time.Time
 	var completedUpstreamTCP time.Time
 	var upstreamDNSCached bool
+	var proxyProtocolHeaderAdded bool
+	var proxyProtocolHeaderReplaced bool
 
 	connectionNum := proxy.connectionNumber.Add(1)
 
@@ -586,15 +599,12 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	// failures after this point.
 	defer func() {
 
-		var sponsorID, clientPlatform, clientBuildRev string
+		var clientPlatform, clientBuildRev string
 		var deviceRegion, sessionID, networkType, tlsProfile string
 		var proxyEntryTracker, clientConnectionNum int64
 		var clientTCPDuration, clientTLSDuration time.Duration
 
 		if header != nil {
-			// The sponsor ID is uppercase by convention; the case lost in
-			// header binary encoding.
-			sponsorID = strings.ToUpper(hex.EncodeToString(header.SponsorID))
 			clientPlatform = decodeClientPlatform(header.ClientPlatform)
 			clientBuildRev = hex.EncodeToString(header.ClientBuildRev)
 			deviceRegion = header.DeviceRegion
@@ -616,36 +626,38 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		// destination" case.
 
 		stats := &ConnectionStats{
-			ProxyID:                   proxy.ID,
-			ProxyProviderID:           proxy.config.ProviderID,
-			ProxyGeoIPData:            proxy.proxyGeoIPData,
-			ProxyConnectionNum:        connectionNum,
-			ClientGeoIPData:           geoIPData,
-			SponsorID:                 sponsorID,
-			ClientPlatform:            clientPlatform,
-			ClientBuildRev:            clientBuildRev,
-			DeviceRegion:              deviceRegion,
-			SessionID:                 sessionID,
-			ProxyEntryTracker:         proxyEntryTracker,
-			NetworkType:               networkType,
-			ClientConnectionNum:       clientConnectionNum,
-			DestinationAddress:        normalizedDestinationAddress,
-			TLSProfile:                tlsProfile,
-			SNI:                       clientSNI,
-			TLSClientHelloFragmented:  tlsClientHelloFragmented,
-			TLSClientHelloPadding:     tlsClientHelloPadding,
-			TLSDidResume:              tlsDidResume,
-			ClientTCPDuration:         clientTCPDuration,
-			ClientTLSDuration:         clientTLSDuration,
-			ProxyCompletedTCP:         completedTCP,
-			ProxyCompletedTLS:         completedTLS,
-			ProxyCompletedLightHeader: completedLightHeader,
-			ProxyCompletedUpstreamDNS: completedUpstreamDNS,
-			ProxyCompletedUpstreamTCP: completedUpstreamTCP,
-			UpstreamDNSCached:         upstreamDNSCached,
-			BytesRead:                 bytesCounter.bytesRead.Load(),
-			BytesWritten:              bytesCounter.bytesWritten.Load(),
-			Failure:                   failure,
+			ProxyID:                     proxy.ID,
+			ProxyProviderID:             proxy.config.ProviderID,
+			ProxyGeoIPData:              proxy.proxyGeoIPData,
+			ProxyConnectionNum:          connectionNum,
+			ClientGeoIPData:             geoIPData,
+			SponsorID:                   sponsorID,
+			ClientPlatform:              clientPlatform,
+			ClientBuildRev:              clientBuildRev,
+			DeviceRegion:                deviceRegion,
+			SessionID:                   sessionID,
+			ProxyEntryTracker:           proxyEntryTracker,
+			NetworkType:                 networkType,
+			ClientConnectionNum:         clientConnectionNum,
+			DestinationAddress:          normalizedDestinationAddress,
+			TLSProfile:                  tlsProfile,
+			SNI:                         clientSNI,
+			TLSClientHelloFragmented:    tlsClientHelloFragmented,
+			TLSClientHelloPadding:       tlsClientHelloPadding,
+			TLSDidResume:                tlsDidResume,
+			ClientTCPDuration:           clientTCPDuration,
+			ClientTLSDuration:           clientTLSDuration,
+			ProxyCompletedTCP:           completedTCP,
+			ProxyCompletedTLS:           completedTLS,
+			ProxyCompletedLightHeader:   completedLightHeader,
+			ProxyCompletedUpstreamDNS:   completedUpstreamDNS,
+			ProxyCompletedUpstreamTCP:   completedUpstreamTCP,
+			UpstreamDNSCached:           upstreamDNSCached,
+			ProxyProtocolHeaderAdded:    proxyProtocolHeaderAdded,
+			ProxyProtocolHeaderReplaced: proxyProtocolHeaderReplaced,
+			BytesRead:                   bytesCounter.bytesRead.Load(),
+			BytesWritten:                bytesCounter.bytesWritten.Load(),
+			Failure:                     failure,
 		}
 
 		// The event receiver assumes ownership of stats; do not access after
@@ -706,6 +718,10 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		return errors.Trace(err)
 	}
 
+	// The sponsor ID is uppercase by convention; the case lost in header
+	// binary encoding.
+	sponsorID = strings.ToUpper(hex.EncodeToString(header.SponsorID))
+
 	unassociateAfter()
 
 	completedLightHeader = time.Now().UTC()
@@ -731,12 +747,17 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !proxy.allowedDestinations.Contains(normalizedDestinationAddress) {
+	if proxy.allowedDestinations.Len() > 0 &&
+		!proxy.allowedDestinations.Contains(normalizedDestinationAddress) {
+
 		return errors.TraceNew("disallowed destination")
 	}
 
 	dialCtx, dialCancel := context.WithTimeout(ctx, proxy.upstreamDialTimeout)
 	defer dialCancel()
+
+	// In addition to resolving domains, proxy.resolve also enforces the
+	// IsBogon check against direct or indirect (resolved) bogon IP dials.
 
 	upstreamAddrs, cached, err := proxy.resolve(dialCtx, normalizedDestinationAddress)
 	if err != nil {
@@ -757,21 +778,75 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 
 	completedUpstreamTCP = time.Now().UTC()
 
-	// TODO: optionally send PROXY protocol header to destination. See
-	// addProxyProtocolHeader in psiphon/server.sshClient.handleTCPChannel.
+	defer upstreamConn.Close()
+
+	unassociateAfter = context.AfterFunc(handleCtx, func() {
+		// Interrupt relay (or PROXY protocol read).
+		lightConn.Close()
+		upstreamConn.Close()
+	})
+	defer unassociateAfter()
+
+	proxyProtocolHeaderConfig, addProxyProtocolHeader :=
+		proxy.proxyProtocolHeaderConfigs[sponsorID]
+	if addProxyProtocolHeader {
+		addProxyProtocolHeader =
+			proxyProtocolHeaderConfig.targetDestinationAddresses.Contains(
+				normalizedDestinationAddress)
+	}
+
+	if addProxyProtocolHeader {
+
+		// Add the PROXY protocol header with the original client IP, using a
+		// MAC to authenticate the header values. Any existing PROXY protocol
+		// header will be replaced with this new header.
+		//
+		// Limitation: AddOrReplaceProxyProtocolHeader attempts to first read
+		// any PROXY protocol sent by the client, and as a result is not
+		// compatible with server-first network protocols. See also the PROXY
+		// v1/v2 signature limitations in
+		// proxyheader.AddOrReplaceProxyProtocolHeader.
+
+		sourceTCPAddr, ok := conn.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			return errors.TraceNew("unexpected client address type")
+		}
+
+		upstreamTCPAddr, ok := upstreamConn.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			return errors.TraceNew("unexpected upstream address type")
+		}
+
+		macKey := proxyProtocolHeaderConfig.macKey
+		wireHeader, err := proxyheader.MakeProxyProtocolHeader(
+			macKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
+			macKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
+			sourceTCPAddr.IP,
+			upstreamTCPAddr.IP,
+			upstreamTCPAddr.Port)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		_, replaced, err := proxyheader.AddOrReplaceProxyProtocolHeader(
+			lightConn,
+			upstreamConn,
+			wireHeader)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if replaced {
+			proxyProtocolHeaderReplaced = true
+		} else {
+			proxyProtocolHeaderAdded = true
+		}
+	}
 
 	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
 		relayBuffer := proxy.relayBufferPool.Get().(*[]byte)
 		defer proxy.relayBufferPool.Put(relayBuffer)
 		return common.CopyBuffer(dst, src, *relayBuffer)
 	}
-
-	unassociateAfter = context.AfterFunc(handleCtx, func() {
-		// Interrupt relay.
-		lightConn.Close()
-		upstreamConn.Close()
-	})
-	defer unassociateAfter()
 
 	relayWaitGroup := new(sync.WaitGroup)
 
@@ -886,6 +961,11 @@ func (proxy *Proxy) resolve(
 
 	IP := net.ParseIP(host)
 	if IP != nil {
+
+		if !proxy.config.AllowBogons && common.IsBogon(IP) {
+			return addrs, false, errors.TraceNew("IP is bogon")
+		}
+
 		return netIPAddrs(IP, port), false, nil
 	}
 
@@ -913,6 +993,15 @@ func (proxy *Proxy) resolve(
 		if err != nil {
 			err = common.RedactNetError(err)
 			return addrs, false, errors.Trace(err)
+		}
+
+		// Perform the bogon check here so it doesn't need to be repeated for
+		// cached values.
+
+		for _, ipAddr := range ipAddrs {
+			if !proxy.config.AllowBogons && common.IsBogon(ipAddr.IP) {
+				return addrs, false, errors.TraceNew("IP is bogon")
+			}
 		}
 
 		addrs = netPartitionAddrs(ipAddrs, port)

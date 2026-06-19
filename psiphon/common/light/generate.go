@@ -51,17 +51,23 @@ import (
 // recommendedSNI, recommendedSNIRegex, and recommendedSNIProbability are
 // optional SNI selection hints distributed in the proxy entry.
 //
-// recommendedTLSProfile and recommendedTLSProfileProbability are optional TLS
-// profile selection hints distributed in the proxy entry.
-//
-// recommendedFragmentClientHelloProbability, recommendedTLSPaddingProbability,
-// recommendedMinTLSPadding, and recommendedMaxTLSPadding are optional TLS
+// recommendedTLSProfile, recommendedTLSProfileProbability,
+// recommendedFragmentClientHelloProbability,
+// recommendedTLSPaddingProbability, recommendedMinTLSPadding, and
+// recommendedMaxTLSPadding are optional TLS traffic appearance and
 // traffic-shaping recommendations distributed in the proxy entry.
 //
+// proxyEntryTTL is an optional value distributed in the proxy entry which
+// indicates how long to store and use the proxy entry. The zero value means
+// no TTL/no expiry. The TTL is encoded at second granularity.
+//
 // allowedDestinations is a list of network addresses, host and post, that the
-// proxy will connect to. Only destinations on this list are allowed, and at
-// least one destination must be specified. This list is not distributed in
-// the proxy entry.
+// proxy will connect to. Only destinations on this list are allowed; when
+// empty, any destination is allowed. This list is not distributed in the proxy
+// entry.
+//
+// proxyProtocolHeaderMACKeys/proxyProtocolHeaderTargetDestinationAddresses
+// enable adding PROXY protocol headers to upstream connections.
 //
 // passthroughAddress is a psiphon-tls PassthroughAddress and is required.
 func Generate(
@@ -78,7 +84,10 @@ func Generate(
 	recommendedTLSPaddingProbability float64,
 	recommendedMinTLSPadding int,
 	recommendedMaxTLSPadding int,
+	proxyEntryTTL time.Duration,
 	allowedDestinations []string,
+	proxyProtocolHeaderMACKeys map[string]string,
+	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
 	if len(listenAddresses) == 0 {
@@ -125,6 +134,11 @@ func Generate(
 		return nil, nil, errors.Trace(err)
 	}
 
+	if proxyEntryTTL < 0 ||
+		(proxyEntryTTL > 0 && proxyEntryTTL < time.Second) {
+		return nil, nil, errors.TraceNew("invalid proxy entry TTL")
+	}
+
 	if recommendedTLSProfile != "" {
 		if !common.Contains(protocol.SupportedTLSProfiles, recommendedTLSProfile) {
 			return nil, nil, errors.TraceNew("invalid recommended TLS profile")
@@ -142,8 +156,11 @@ func Generate(
 		}
 	}
 
-	if len(allowedDestinations) == 0 {
-		return nil, nil, errors.TraceNew("missing allowed destinations")
+	_, err = prepareProxyProtocolHeaderConfigs(
+		proxyProtocolHeaderMACKeys,
+		proxyProtocolHeaderTargetDestinationAddresses)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
 	}
 
 	// Required: see comment in NewProxy.
@@ -163,16 +180,18 @@ func Generate(
 	}
 
 	config := &ProxyConfig{
-		Protocol:            LIGHT_PROTOCOL_TLS,
-		ProviderID:          providerID,
-		ListenAddresses:     append([]string(nil), listenAddresses...),
-		DialAddressIPv4:     dialAddressIPv4,
-		DialAddressIPv6:     dialAddressIPv6,
-		ObfuscationKey:      obfuscationKey,
-		TLSCertificate:      cert,
-		TLSPrivateKey:       privateKey,
-		PassthroughAddress:  passthroughAddress,
-		AllowedDestinations: allowedDestinations,
+		Protocol:                   LIGHT_PROTOCOL_TLS,
+		ProviderID:                 providerID,
+		ListenAddresses:            append([]string(nil), listenAddresses...),
+		DialAddressIPv4:            dialAddressIPv4,
+		DialAddressIPv6:            dialAddressIPv6,
+		ObfuscationKey:             obfuscationKey,
+		TLSCertificate:             cert,
+		TLSPrivateKey:              privateKey,
+		PassthroughAddress:         passthroughAddress,
+		AllowedDestinations:        allowedDestinations,
+		ProxyProtocolHeaderMACKeys: proxyProtocolHeaderMACKeys,
+		ProxyProtocolHeaderTargetDestinationAddresses: proxyProtocolHeaderTargetDestinationAddresses,
 	}
 
 	// To minimize size, the entry uses the more compact byte representation
@@ -191,6 +210,7 @@ func Generate(
 		RecommendedTLSPaddingProbability:          recommendedTLSPaddingProbability,
 		RecommendedMinTLSPadding:                  recommendedMinTLSPadding,
 		RecommendedMaxTLSPadding:                  recommendedMaxTLSPadding,
+		TTLSeconds:                                int64(proxyEntryTTL / time.Second),
 		ObfuscationKey:                            obfuscationKeyBytes,
 		VerifyPin:                                 verifyPin,
 		VerifyServerName:                          verifyServerName,

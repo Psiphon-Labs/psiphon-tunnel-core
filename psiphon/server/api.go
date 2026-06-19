@@ -701,6 +701,9 @@ var connectedRequestParams = append(
 // updateOnConnectedParamNames are connected request parameters which are
 // copied to update data logged with server_tunnel: these fields either only
 // ship with or ship newer data with connected requests.
+//
+// To be logged with server_tunnel, these fields must also appear in
+// serverTunnelStatParams.
 var updateOnConnectedParamNames = append(
 	[]string{
 		"last_connected",
