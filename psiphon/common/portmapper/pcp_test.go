@@ -40,7 +40,8 @@ import (
 var examplePCPMapResponse = []byte{2, 129, 0, 0, 0, 0, 28, 32, 0, 2, 155, 237, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 129, 112, 9, 24, 241, 208, 251, 45, 157, 76, 10, 188, 17, 0, 0, 0, 4, 210, 4, 210, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 135, 180, 175, 246}
 
 func TestParsePCPMapResponse(t *testing.T) {
-	mapping, err := parsePCPMapResponse(examplePCPMapResponse)
+	// The example response carries the UDP protocol (17).
+	mapping, err := parsePCPMapResponse(examplePCPMapResponse, MapProtocolUDP)
 	if err != nil {
 		t.Fatalf("failed to parse PCP Map Response: %v", err)
 	}
@@ -50,6 +51,9 @@ func TestParsePCPMapResponse(t *testing.T) {
 	expectedAddr := netip.MustParseAddrPort("135.180.175.246:1234")
 	if mapping.external != expectedAddr {
 		t.Errorf("mismatched external address, got: %v, want: %v", mapping.external, expectedAddr)
+	}
+	if mapping.protocol != MapProtocolUDP {
+		t.Errorf("mismatched protocol, got: %v, want: UDP", mapping.protocol)
 	}
 }
 

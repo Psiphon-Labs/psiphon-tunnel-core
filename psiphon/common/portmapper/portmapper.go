@@ -72,6 +72,12 @@ var (
 	ErrPortMappingDisabled   = errors.New("port mapping is disabled")
 )
 
+// errProtocolChangedDuringCreate is returned (wrapped in NoMappingError) when
+// SetProtocol changes the requested protocol while a mapping create is in
+// flight. The stale mapping is discarded rather than published, so the client
+// never caches a mapping for a protocol it is no longer configured for.
+var errProtocolChangedDuringCreate = errors.New("port mapping protocol changed during creation")
+
 // ProbeResult is the result of a portmapper probe, saying which port mapping
 // protocols were discovered. It replaces tailscale.com/net/portmapper/
 // portmappertype.ProbeResult.
@@ -79,6 +85,26 @@ type ProbeResult struct {
 	PCP  bool
 	PMP  bool
 	UPnP bool
+}
+
+// MapProtocol selects the transport protocol (UDP or TCP) that a port mapping
+// forwards. The zero value is MapProtocolUDP, preserving the previous
+// UDP-only behaviour for callers that do not set a protocol.
+type MapProtocol int
+
+const (
+	// MapProtocolUDP maps a UDP port. It is the default.
+	MapProtocolUDP MapProtocol = iota
+
+	// MapProtocolTCP maps a TCP port.
+	MapProtocolTCP
+)
+
+func (p MapProtocol) String() string {
+	if p == MapProtocolTCP {
+		return "TCP"
+	}
+	return "UDP"
 }
 
 var disablePortMapperEnv = registerBoolEnv("TS_DISABLE_PORTMAPPER")
@@ -193,6 +219,10 @@ type Client struct {
 
 	localPort uint16
 
+	// protocol is the transport protocol (UDP or TCP) to map. The zero
+	// value is MapProtocolUDP. Set via SetProtocol.
+	protocol MapProtocol
+
 	mapping mapping // non-nil if we have a mapping
 }
 
@@ -239,6 +269,7 @@ type pmpMapping struct {
 	gw         netip.AddrPort
 	external   netip.AddrPort
 	internal   netip.AddrPort
+	protocol   MapProtocol
 	renewAfter time.Time // the time at which we want to renew the mapping
 	goodUntil  time.Time // the mapping's total lifetime
 	epoch      uint32
@@ -255,8 +286,8 @@ func (p *pmpMapping) RenewAfter() time.Time    { return p.renewAfter }
 func (p *pmpMapping) External() netip.AddrPort { return p.external }
 
 func (p *pmpMapping) MappingDebug() string {
-	return fmt.Sprintf("pmpMapping{gw:%v, external:%v, internal:%v, renewAfter:%d, goodUntil:%d, epoch:%v}",
-		p.gw, p.external, p.internal,
+	return fmt.Sprintf("pmpMapping{gw:%v, external:%v, internal:%v, protocol:%v, renewAfter:%d, goodUntil:%d, epoch:%v}",
+		p.gw, p.external, p.internal, p.protocol,
 		p.renewAfter.Unix(), p.goodUntil.Unix(),
 		p.epoch)
 }
@@ -268,7 +299,7 @@ func (m *pmpMapping) Release(ctx context.Context) {
 		return
 	}
 	defer uc.Close()
-	pkt := buildPMPRequestMappingPacket(m.internal.Port(), m.external.Port(), pmpMapLifetimeDelete)
+	pkt := buildPMPRequestMappingPacket(m.internal.Port(), m.external.Port(), pmpMapLifetimeDelete, m.protocol)
 	uc.WriteToUDPAddrPort(pkt, m.gw)
 }
 
@@ -384,6 +415,7 @@ func (c *Client) Clone(onChange func()) *Client {
 		debug:        c.debug,
 		testPxPPort:  c.testPxPPort,
 		testUPnPPort: c.testUPnPPort,
+		protocol:     c.protocol,
 
 		// Probe-result fields: the port mapping service discovery state.
 		lastMyIP:     c.lastMyIP,
@@ -432,6 +464,19 @@ func (c *Client) SetLocalPort(localPort uint16) {
 		return
 	}
 	c.localPort = localPort
+	c.invalidateMappingsLocked(true)
+}
+
+// SetProtocol sets the transport protocol (UDP or TCP) to map. The default is
+// MapProtocolUDP. Changing the protocol invalidates any existing mapping,
+// since a UDP and a TCP mapping are distinct on the gateway.
+func (c *Client) SetProtocol(protocol MapProtocol) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.protocol == protocol {
+		return
+	}
+	c.protocol = protocol
 	c.invalidateMappingsLocked(true)
 }
 
@@ -724,6 +769,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 
 	c.mu.Lock()
 	localPort := c.localPort
+	protocol := c.protocol
 	internalAddr := netip.AddrPortFrom(myIP, localPort)
 
 	// prevPort is the port we had most previously, if any. We try
@@ -766,6 +812,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 		c:        c,
 		gw:       netip.AddrPortFrom(gw, c.pxpPort()),
 		internal: internalAddr,
+		protocol: protocol,
 	}
 	if haveRecentPMP {
 		m.external = netip.AddrPortFrom(c.pmpPubIP, m.external.Port())
@@ -798,7 +845,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 	if preferPCP {
 		// TODO replace wildcardIP here with previous external if known.
 		// Only do PCP mapping in the case when PMP did not appear to be available recently.
-		pkt := buildPCPRequestMappingPacket(myIP, localPort, prevPort, pcpMapLifetimeSec, wildcardIP)
+		pkt := buildPCPRequestMappingPacket(myIP, localPort, prevPort, pcpMapLifetimeSec, wildcardIP, protocol)
 		if _, err := uc.WriteToUDPAddrPort(pkt, pxpAddr); err != nil {
 			if treatAsLostUDP(err) {
 				err = NoMappingError{ErrNoPortMappingServices}
@@ -816,7 +863,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 			}
 		}
 
-		pkt := buildPMPRequestMappingPacket(localPort, prevPort, pmpMapLifetimeSec)
+		pkt := buildPMPRequestMappingPacket(localPort, prevPort, pmpMapLifetimeSec, protocol)
 		if _, err := uc.WriteToUDPAddrPort(pkt, pxpAddr); err != nil {
 			if treatAsLostUDP(err) {
 				err = NoMappingError{ErrNoPortMappingServices}
@@ -857,7 +904,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 				if pres.OpCode == pmpOpReply|pmpOpMapPublicAddr {
 					m.external = netip.AddrPortFrom(pres.PublicAddr, m.external.Port())
 				}
-				if pres.OpCode == pmpOpReply|pmpOpMapUDP {
+				if pres.OpCode == pmpOpReply|pmpMapOp(protocol) {
 					m.external = netip.AddrPortFrom(m.external.Addr(), pres.ExternalPort)
 					d := time.Duration(pres.MappingValidSeconds) * time.Second
 					now := time.Now()
@@ -866,7 +913,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 					m.epoch = pres.SecondsSinceEpoch
 				}
 			case pcpVersion:
-				pcpMapping, err := parsePCPMapResponse(res[:n])
+				pcpMapping, err := parsePCPMapResponse(res[:n], protocol)
 				if err != nil {
 					c.logf("failed to get PCP mapping: %v", err)
 					// PCP should only have a single packet response
@@ -876,8 +923,18 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 				pcpMapping.internal = m.internal
 				pcpMapping.gw = netip.AddrPortFrom(gw, c.pxpPort())
 				c.mu.Lock()
-				defer c.mu.Unlock()
+				// Don't publish a mapping if SetProtocol changed the requested
+				// protocol while this create was in flight. The mapping was
+				// already created on the gateway, so release it -- without
+				// holding c.mu -- to avoid leaving an orphaned external port
+				// open until lease expiry.
+				if c.protocol != pcpMapping.protocol {
+					c.mu.Unlock()
+					pcpMapping.Release(ctx)
+					return nil, netip.AddrPort{}, NoMappingError{errProtocolChangedDuringCreate}
+				}
 				c.mapping = pcpMapping
+				c.mu.Unlock()
 				return pcpMapping, pcpMapping.external, nil
 			default:
 				c.logf("unknown PMP/PCP version number: %d %v", version, res[:n])
@@ -887,8 +944,17 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 
 		if m.externalValid() {
 			c.mu.Lock()
-			defer c.mu.Unlock()
+			// Don't publish a mapping if SetProtocol changed the requested
+			// protocol while this create was in flight. The mapping was already
+			// created on the gateway, so release it -- without holding c.mu --
+			// to avoid leaving an orphaned external port open until lease expiry.
+			if c.protocol != m.protocol {
+				c.mu.Unlock()
+				m.Release(ctx)
+				return nil, netip.AddrPort{}, NoMappingError{errProtocolChangedDuringCreate}
+			}
 			c.mapping = m
+			c.mu.Unlock()
 			return nil, m.external, nil
 		}
 	}
@@ -913,6 +979,7 @@ const (
 	pmpVersion         = 0
 	pmpOpMapPublicAddr = 0
 	pmpOpMapUDP        = 1
+	pmpOpMapTCP        = 2
 	pmpOpReply         = 0x80 // OR'd into request's op code on response
 
 	pmpCodeOK                 pmpResultCode = 0
@@ -923,10 +990,18 @@ const (
 	pmpCodeUnsupportedOpcode  pmpResultCode = 5
 )
 
-func buildPMPRequestMappingPacket(localPort, prevPort uint16, lifetimeSec uint32) (pkt []byte) {
+// pmpMapOp returns the NAT-PMP map opcode for the given MapProtocol.
+func pmpMapOp(protocol MapProtocol) byte {
+	if protocol == MapProtocolTCP {
+		return pmpOpMapTCP
+	}
+	return pmpOpMapUDP
+}
+
+func buildPMPRequestMappingPacket(localPort, prevPort uint16, lifetimeSec uint32, protocol MapProtocol) (pkt []byte) {
 	pkt = make([]byte, 12)
 
-	pkt[1] = pmpOpMapUDP
+	pkt[1] = pmpMapOp(protocol)
 	binary.BigEndian.PutUint16(pkt[4:], localPort)
 	binary.BigEndian.PutUint16(pkt[6:], prevPort)
 	binary.BigEndian.PutUint32(pkt[8:], lifetimeSec)
@@ -960,7 +1035,9 @@ func parsePMPResponse(pkt []byte) (res pmpResponse, ok bool) {
 	res.ResultCode = pmpResultCode(binary.BigEndian.Uint16(pkt[2:]))
 	res.SecondsSinceEpoch = binary.BigEndian.Uint32(pkt[4:])
 
-	if res.OpCode == pmpOpReply|pmpOpMapUDP {
+	// Map replies for UDP and TCP share the same structure; accept either so
+	// the caller (which knows the protocol it requested) can use the result.
+	if res.OpCode == pmpOpReply|pmpOpMapUDP || res.OpCode == pmpOpReply|pmpOpMapTCP {
 		if len(pkt) != 16 {
 			return res, false
 		}

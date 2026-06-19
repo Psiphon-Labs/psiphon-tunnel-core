@@ -97,6 +97,7 @@ type upnpMapping struct {
 	gw         netip.Addr
 	external   netip.AddrPort
 	internal   netip.AddrPort
+	protocol   MapProtocol
 	goodUntil  time.Time
 	renewAfter time.Time
 
@@ -121,18 +122,30 @@ type upnpMapping struct {
 //	https://github.com/tailscale/tailscale/issues/7377
 const upnpProtocolUDP = "UDP"
 
+// upnpProtocolTCP represents the protocol name for TCP, used in the same
+// <NewProtocol> field. As with UDP, this must be an upper-case string.
+const upnpProtocolTCP = "TCP"
+
+// upnpProtocol returns the UPnP <NewProtocol> string for the given MapProtocol.
+func upnpProtocol(p MapProtocol) string {
+	if p == MapProtocolTCP {
+		return upnpProtocolTCP
+	}
+	return upnpProtocolUDP
+}
+
 func (u *upnpMapping) MappingType() string      { return "upnp" }
 func (u *upnpMapping) GoodUntil() time.Time     { return u.goodUntil }
 func (u *upnpMapping) RenewAfter() time.Time    { return u.renewAfter }
 func (u *upnpMapping) External() netip.AddrPort { return u.external }
 func (u *upnpMapping) MappingDebug() string {
-	return fmt.Sprintf("upnpMapping{gw:%v, external:%v, internal:%v, renewAfter:%d, goodUntil:%d, loc:%q}",
-		u.gw, u.external, u.internal,
+	return fmt.Sprintf("upnpMapping{gw:%v, external:%v, internal:%v, protocol:%v, renewAfter:%d, goodUntil:%d, loc:%q}",
+		u.gw, u.external, u.internal, u.protocol,
 		u.renewAfter.Unix(), u.goodUntil.Unix(),
 		u.loc)
 }
 func (u *upnpMapping) Release(ctx context.Context) {
-	u.client.DeletePortMappingCtx(ctx, "", u.external.Port(), upnpProtocolUDP)
+	u.client.DeletePortMappingCtx(ctx, "", u.external.Port(), upnpProtocol(u.protocol))
 }
 
 // upnpClient is an interface over the multiple different clients exported by goupnp,
@@ -196,6 +209,7 @@ const tsPortMappingDesc = "tailscale-portmap"
 func addAnyPortMapping(
 	ctx context.Context,
 	upnp upnpClient,
+	protocol string,
 	externalPort uint16,
 	internalPort uint16,
 	internalClient string,
@@ -231,7 +245,7 @@ func addAnyPortMapping(
 			ctx,
 			"",
 			externalPort,
-			upnpProtocolUDP,
+			protocol,
 			internalPort,
 			internalClient,
 			true,
@@ -246,7 +260,7 @@ func addAnyPortMapping(
 		ctx,
 		"",
 		externalPort,
-		upnpProtocolUDP,
+		protocol,
 		internalPort,
 		internalClient,
 		true,
@@ -509,6 +523,7 @@ func (c *Client) getUPnPPortMapping(
 	c.mu.Lock()
 	oldMapping, ok := c.mapping.(*upnpMapping)
 	metas := c.uPnPMetas
+	protocol := c.protocol
 	ctx = upnpHTTPClientKey.WithValue(ctx, c.upnpHTTPClientLocked())
 	c.mu.Unlock()
 
@@ -572,7 +587,7 @@ func (c *Client) getUPnPPortMapping(
 		//
 		// This is probably sufficiently unlikely that I'm leaving that
 		// as a follow-up task if it's necessary.
-		externalAddrPort, client, err := c.tryUPnPPortmapWithDevice(ctx, internal, prevPort, rootDev, loc)
+		externalAddrPort, client, err := c.tryUPnPPortmapWithDevice(ctx, internal, prevPort, protocol, rootDev, loc)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -588,14 +603,24 @@ func (c *Client) getUPnPPortMapping(
 		upnp.goodUntil = now.Add(d)
 		upnp.renewAfter = now.Add(d / 2)
 		upnp.external = externalAddrPort
+		upnp.protocol = protocol
 		upnp.rootDev = rootDev
 		upnp.loc = loc
 		upnp.client = client
 
 		c.mu.Lock()
-		defer c.mu.Unlock()
+		// Don't publish a mapping if SetProtocol changed the requested protocol
+		// while this create was in flight. AddPortMapping already succeeded on
+		// the gateway, so release it -- without holding c.mu -- to avoid leaving
+		// an orphaned external port open until lease expiry.
+		if c.protocol != upnp.protocol {
+			c.mu.Unlock()
+			upnp.Release(ctx)
+			return netip.AddrPort{}, false
+		}
 		c.mapping = upnp
 		c.localPort = internal.Port()
+		c.mu.Unlock()
 		return upnp.external, true
 	}
 
@@ -617,9 +642,11 @@ func (c *Client) tryUPnPPortmapWithDevice(
 	ctx context.Context,
 	internal netip.AddrPort,
 	prevPort uint16,
+	protocol MapProtocol,
 	rootDev *goupnp.RootDevice,
 	loc *url.URL,
 ) (netip.AddrPort, upnpClient, error) {
+	protocolStr := upnpProtocol(protocol)
 	// Select the best mapping service from the given root device. This
 	// makes network requests, and can vary from mapping to mapping if the
 	// upstream device's connection status changes.
@@ -647,6 +674,7 @@ func (c *Client) tryUPnPPortmapWithDevice(
 	newPort, err = addAnyPortMapping(
 		ctx,
 		client,
+		protocolStr,
 		prevPort,
 		internal.Port(),
 		internal.Addr().String(),
@@ -671,6 +699,7 @@ func (c *Client) tryUPnPPortmapWithDevice(
 			newPort, err = addAnyPortMapping(
 				ctx,
 				client,
+				protocolStr,
 				prevPort,
 				internal.Port(),
 				internal.Addr().String(),

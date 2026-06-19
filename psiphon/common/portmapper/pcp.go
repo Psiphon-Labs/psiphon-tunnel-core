@@ -82,6 +82,7 @@ type pcpMapping struct {
 	gw       netip.AddrPort
 	internal netip.AddrPort
 	external netip.AddrPort
+	protocol MapProtocol
 
 	renewAfter time.Time
 	goodUntil  time.Time
@@ -94,8 +95,8 @@ func (p *pcpMapping) GoodUntil() time.Time     { return p.goodUntil }
 func (p *pcpMapping) RenewAfter() time.Time    { return p.renewAfter }
 func (p *pcpMapping) External() netip.AddrPort { return p.external }
 func (p *pcpMapping) MappingDebug() string {
-	return fmt.Sprintf("pcpMapping{gw:%v, external:%v, internal:%v, renewAfter:%d, goodUntil:%d}",
-		p.gw, p.external, p.internal,
+	return fmt.Sprintf("pcpMapping{gw:%v, external:%v, internal:%v, protocol:%v, renewAfter:%d, goodUntil:%d}",
+		p.gw, p.external, p.internal, p.protocol,
 		p.renewAfter.Unix(), p.goodUntil.Unix())
 }
 
@@ -105,8 +106,16 @@ func (p *pcpMapping) Release(ctx context.Context) {
 		return
 	}
 	defer uc.Close()
-	pkt := buildPCPRequestMappingPacket(p.internal.Addr(), p.internal.Port(), p.external.Port(), 0, p.external.Addr())
+	pkt := buildPCPRequestMappingPacket(p.internal.Addr(), p.internal.Port(), p.external.Port(), 0, p.external.Addr(), p.protocol)
 	uc.WriteToUDPAddrPort(pkt, p.gw)
+}
+
+// pcpMapProtocol returns the PCP protocol number for the given MapProtocol.
+func pcpMapProtocol(protocol MapProtocol) byte {
+	if protocol == MapProtocolTCP {
+		return pcpTCPMapping
+	}
+	return pcpUDPMapping
 }
 
 // buildPCPRequestMappingPacket generates a PCP packet with a MAP opcode.
@@ -118,6 +127,7 @@ func buildPCPRequestMappingPacket(
 	localPort, prevPort uint16,
 	lifetimeSec uint32,
 	prevExternalIP netip.Addr,
+	protocol MapProtocol,
 ) (pkt []byte) {
 	// 24 byte common PCP header + 36 bytes of MAP-specific fields
 	pkt = make([]byte, 24+36)
@@ -130,9 +140,10 @@ func buildPCPRequestMappingPacket(
 	mapOp := pkt[24:]
 	rand.Read(mapOp[:12]) // 96 bit mapping nonce
 
-	// TODO: should this be a UDP mapping? It looks like it supports "all protocols" with 0, but
-	// also doesn't support a local port then.
-	mapOp[12] = pcpUDPMapping
+	// PCP also supports mapping "all protocols" with a 0 protocol number, but
+	// that mode does not allow specifying a local port, so we always map a
+	// single protocol (UDP or TCP).
+	mapOp[12] = pcpMapProtocol(protocol)
 	binary.BigEndian.PutUint16(mapOp[16:18], localPort)
 	binary.BigEndian.PutUint16(mapOp[18:20], prevPort)
 
@@ -143,7 +154,12 @@ func buildPCPRequestMappingPacket(
 
 // parsePCPMapResponse parses resp into a partially populated pcpMapping.
 // In particular, its Client is not populated.
-func parsePCPMapResponse(resp []byte) (*pcpMapping, error) {
+//
+// expectedProtocol is the protocol that was requested; the MAP response echoes
+// the protocol in its opcode-specific data, and a response whose protocol does
+// not match (e.g. a stale or mismatched response) is rejected so that a mapping
+// is never recorded under the wrong protocol.
+func parsePCPMapResponse(resp []byte, expectedProtocol MapProtocol) (*pcpMapping, error) {
 	if len(resp) < 60 {
 		return nil, fmt.Errorf("Does not appear to be PCP MAP response")
 	}
@@ -157,6 +173,24 @@ func parsePCPMapResponse(resp []byte) (*pcpMapping, error) {
 	if res.ResultCode != pcpCodeOK {
 		return nil, fmt.Errorf("PCP response not ok, code %d", res.ResultCode)
 	}
+
+	// The MAP-specific data begins at offset 24; the protocol field is at
+	// offset 12 within it, matching buildPCPRequestMappingPacket.
+	var protocol MapProtocol
+	switch resp[24+12] {
+	case pcpTCPMapping:
+		protocol = MapProtocolTCP
+	case pcpUDPMapping:
+		protocol = MapProtocolUDP
+	default:
+		return nil, fmt.Errorf("PCP MAP response has unexpected protocol %d", resp[24+12])
+	}
+	if protocol != expectedProtocol {
+		return nil, fmt.Errorf(
+			"PCP MAP response protocol %v does not match requested %v",
+			protocol, expectedProtocol)
+	}
+
 	// TODO: don't ignore the nonce and make sure it's the same?
 	externalPort := binary.BigEndian.Uint16(resp[42:44])
 	externalIPBytes := [16]byte{}
@@ -169,6 +203,7 @@ func parsePCPMapResponse(resp []byte) (*pcpMapping, error) {
 	now := time.Now()
 	mapping := &pcpMapping{
 		external:   external,
+		protocol:   protocol,
 		renewAfter: now.Add(lifetime / 2),
 		goodUntil:  now.Add(lifetime),
 		epoch:      res.Epoch,
