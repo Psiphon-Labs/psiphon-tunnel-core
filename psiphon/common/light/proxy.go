@@ -86,6 +86,7 @@ type ProxyConfig struct {
 	SplitDownstreamInterfaceName                  string              `json:",omitempty"`
 	ProxyProtocolHeaderMACKeys                    map[string]string   `json:",omitempty"`
 	ProxyProtocolHeaderTargetDestinationAddresses map[string][]string `json:",omitempty"`
+	LogDestinationAddresses                       bool                `json:",omitempty"`
 	AllowBogons                                   bool                `json:",omitempty"`
 	EnableDebugLogs                               bool                `json:",omitempty"`
 }
@@ -622,8 +623,10 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			failure = retErr.Error()
 		}
 
-		// DestinationAddress is logged unredacted in the "disallowed
-		// destination" case.
+		destinationAddress := ""
+		if proxy.config.LogDestinationAddresses {
+			destinationAddress = normalizedDestinationAddress
+		}
 
 		stats := &ConnectionStats{
 			ProxyID:                     proxy.ID,
@@ -639,7 +642,7 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 			ProxyEntryTracker:           proxyEntryTracker,
 			NetworkType:                 networkType,
 			ClientConnectionNum:         clientConnectionNum,
-			DestinationAddress:          normalizedDestinationAddress,
+			DestinationAddress:          destinationAddress,
 			TLSProfile:                  tlsProfile,
 			SNI:                         clientSNI,
 			TLSClientHelloFragmented:    tlsClientHelloFragmented,
