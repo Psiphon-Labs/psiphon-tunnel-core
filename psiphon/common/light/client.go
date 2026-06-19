@@ -269,6 +269,8 @@ func (client *Client) Dial(
 		"connectionNum":     connectionNum,
 		"tlsProfile":        tlsProfile,
 		"SNI":               sni,
+		"tlsFragment":       fragmentClientHello,
+		"tlsPadding":        tlsPadding,
 		"hasIPv6":           client.proxyEntry.DialAddressIPv6 != "",
 	}
 	logFields.Add(additionalLogFields)
