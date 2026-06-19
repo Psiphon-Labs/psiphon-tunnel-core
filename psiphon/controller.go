@@ -272,6 +272,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 		var err error
 
 		if len(config.LightProxyEntry) > 0 {
+
+			// Any TTL in the light proxy entry is ignored. When
+			// LightProxyEntry is configured, this entry is always chosen.
+
 			err = initLightProxy(
 				controller,
 				config.LightProxyEntry,
