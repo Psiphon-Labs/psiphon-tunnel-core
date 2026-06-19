@@ -424,6 +424,11 @@ Returns the path where the rotated notices file will be created.
 - (BOOL)stopAndReconnectWithCurrentSessionID;
 
 /*!
+ Toggle packet tunnel mode traffic dropping.
+ */
+- (void)dropPacketTunnelTraffic:(BOOL)drop;
+
+/*!
  Notify Psiphon that the host app has resumed from background.
  */
 - (void)appResumed;

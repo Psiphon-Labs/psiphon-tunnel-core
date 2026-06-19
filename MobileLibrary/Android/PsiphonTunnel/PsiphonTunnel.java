@@ -282,6 +282,11 @@ public class PsiphonTunnel {
         Psi.reconnectTunnel();
     }
 
+    // Toggle packet tunnel mode traffic dropping.
+    public synchronized void dropPacketTunnelTraffic(boolean drop) {
+        Psi.dropPacketTunnelTraffic(drop);
+    }
+
     // Notify Psiphon that the host app has resumed from background.
     public synchronized void appResumed() {
         Psi.appResumed();
