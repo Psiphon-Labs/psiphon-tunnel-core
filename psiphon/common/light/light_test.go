@@ -252,6 +252,8 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
 	proxyConfig.MaxConcurrent = &maxConcurrent
+	proxyConfig.LimitUpstreamBytesPerSecond = 1 << 30
+	proxyConfig.LimitDownstreamBytesPerSecond = 1 << 30
 
 	proxyConfig.AllowBogons = true
 	proxyConfig.EnableDebugLogs = true
@@ -272,6 +274,14 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	case <-receiver.listening:
 	case <-ctx.Done():
 		return errors.Trace(ctx.Err())
+	}
+
+	err = proxy.SetLimits(
+		nil,
+		1<<30,
+		1<<30)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	newClientConfig := func() *ClientConfig {

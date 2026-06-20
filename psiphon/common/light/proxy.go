@@ -79,6 +79,8 @@ type ProxyConfig struct {
 	PerIPRateLimitInterval                        string              `json:",omitempty"`
 	PerIPMaxConcurrent                            *int                `json:",omitempty"`
 	MaxConcurrent                                 *int                `json:",omitempty"`
+	LimitUpstreamBytesPerSecond                   int                 `json:",omitempty"`
+	LimitDownstreamBytesPerSecond                 int                 `json:",omitempty"`
 	DialFallbackDelay                             string              `json:",omitempty"`
 	DNSResolverCacheMaxSize                       *int                `json:",omitempty"`
 	DNSResolverCacheTTL                           string              `json:",omitempty"`
@@ -145,16 +147,18 @@ type Proxy struct {
 	rateLimitQuantity          int
 	rateLimitInterval          time.Duration
 	perIPMaxConcurrent         int
-	maxConcurrent              int
 	dialFallbackDelay          time.Duration
 
 	listenConfig *net.ListenConfig
 	dialer       *net.Dialer
 
-	limitsMutex                sync.Mutex
-	perIPConcurrentConnections map[string]int
-	rateLimiters               *lrucache.Cache
-	concurrentConnections      int
+	limitsMutex                   sync.Mutex
+	maxConcurrent                 int
+	limitUpstreamBytesPerSecond   int
+	limitDownstreamBytesPerSecond int
+	perIPConcurrentConnections    map[string]int
+	rateLimiters                  *lrucache.Cache
+	concurrentConnections         int
 
 	dnsResolver *net.Resolver
 	dnsCache    *lrucache.Cache
@@ -245,7 +249,9 @@ func NewProxy(
 	if (config.PerIPRateLimitQuantity != nil) != (config.PerIPRateLimitInterval != "") ||
 		(config.PerIPRateLimitQuantity != nil && *config.PerIPRateLimitQuantity < 0) ||
 		(config.PerIPMaxConcurrent != nil && *config.PerIPMaxConcurrent < 0) ||
-		(config.MaxConcurrent != nil && *config.MaxConcurrent < 0) {
+		(config.MaxConcurrent != nil && *config.MaxConcurrent < 0) ||
+		config.LimitUpstreamBytesPerSecond < 0 ||
+		config.LimitDownstreamBytesPerSecond < 0 {
 		return nil, errors.TraceNew("invalid limits")
 	}
 
@@ -416,15 +422,17 @@ func NewProxy(
 			b := make([]byte, relayBufferSize)
 			return &b
 		}},
-		rateLimitQuantity:  rateLimitQuantity,
-		rateLimitInterval:  rateLimitInterval,
-		perIPMaxConcurrent: perIPMaxConcurrent,
-		maxConcurrent:      maxConcurrent,
-		dnsResolver:        dnsResolver,
-		dnsCache:           dnsCache,
-		listenConfig:       listenConfig,
-		dialer:             dialer,
-		dialFallbackDelay:  dialFallbackDelay,
+		rateLimitQuantity:             rateLimitQuantity,
+		rateLimitInterval:             rateLimitInterval,
+		perIPMaxConcurrent:            perIPMaxConcurrent,
+		maxConcurrent:                 maxConcurrent,
+		limitUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
+		limitDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
+		dnsResolver:                   dnsResolver,
+		dnsCache:                      dnsCache,
+		listenConfig:                  listenConfig,
+		dialer:                        dialer,
+		dialFallbackDelay:             dialFallbackDelay,
 
 		perIPConcurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
@@ -487,6 +495,34 @@ func (proxy *Proxy) Pause() {
 func (proxy *Proxy) Resume() {
 	proxy.paused.Store(false)
 	proxy.eventReceiver.Resumed()
+}
+
+// SetLimits sets new values for MaxConcurrent, LimitUpstreamBytesPerSecond, and
+// LimitDownstreamBytesPerSecond. These values will be applied rolling forward;
+// no active connections are closed and the rate limits for active connections
+// do not change.
+func (proxy *Proxy) SetLimits(
+	maxConcurrent *int,
+	limitUpstreamBytesPerSecond int,
+	limitDownstreamBytesPerSecond int) error {
+
+	if (maxConcurrent != nil && *maxConcurrent < 0) ||
+		limitUpstreamBytesPerSecond < 0 ||
+		limitDownstreamBytesPerSecond < 0 {
+		return errors.TraceNew("invalid limits")
+	}
+
+	newMaxConcurrent := defaultMaxConcurrent
+	if maxConcurrent != nil {
+		newMaxConcurrent = *maxConcurrent
+	}
+
+	proxy.limitsMutex.Lock()
+	defer proxy.limitsMutex.Unlock()
+	proxy.maxConcurrent = newMaxConcurrent
+	proxy.limitUpstreamBytesPerSecond = limitUpstreamBytesPerSecond
+	proxy.limitDownstreamBytesPerSecond = limitDownstreamBytesPerSecond
+	return nil
 }
 
 // Run runs the proxy until the specified context is done.
@@ -845,6 +881,18 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 		}
 	}
 
+	rateLimits, apply := proxy.getTrafficRateLimits()
+	if apply {
+
+		// Throttling does not apply to the TLS handshake, reading the light
+		// proxy header, or writing the PROXY protocol header, just the relay.
+
+		upstreamConn = common.NewThrottledConn(
+			upstreamConn,
+			true,
+			rateLimits)
+	}
+
 	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
 		relayBuffer := proxy.relayBufferPool.Get().(*[]byte)
 		defer proxy.relayBufferPool.Put(relayBuffer)
@@ -881,6 +929,22 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	relayWaitGroup.Wait()
 
 	return nil
+}
+
+func (proxy *Proxy) getTrafficRateLimits() (common.RateLimits, bool) {
+
+	proxy.limitsMutex.Lock()
+	defer proxy.limitsMutex.Unlock()
+
+	if proxy.limitUpstreamBytesPerSecond == 0 &&
+		proxy.limitDownstreamBytesPerSecond == 0 {
+		return common.RateLimits{}, false
+	}
+
+	return common.RateLimits{
+		ReadBytesPerSecond:  int64(proxy.limitDownstreamBytesPerSecond),
+		WriteBytesPerSecond: int64(proxy.limitUpstreamBytesPerSecond),
+	}, true
 }
 
 func (proxy *Proxy) applyRateLimit(limitIP string) error {
