@@ -27,7 +27,6 @@ import (
 	"math"
 	"net"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -134,6 +133,14 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 	return proxyEntry, nil
 }
 
+// makeProxyID derives a unique proxy ID from a proxy's dial address and
+// obfuscation key. This derivation saves light header space.
+func makeProxyID(dialAddress, obfuscationKey string) string {
+	h := hmac.New(sha256.New, []byte(obfuscationKey))
+	h.Write([]byte(dialAddress))
+	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
+}
+
 func validateRecommendedTLSSettings(
 	fragmentClientHelloProbability float64,
 	tlsPaddingProbability float64,
@@ -167,55 +174,6 @@ func validateRecommendedTLSSettings(
 	}
 
 	return nil
-}
-
-// ConnectionStats are the proxy connection stats reported to
-// ProxyEventReceiver at the end of connection. If the connection failed to
-// fully establish, the ConnectionFailure reports the reason. Values that the
-// clients sends in the light header will be zero values when the light
-// header was not read successfully, and the proxy's phase-completed
-// timestamps will be zero values when the phase was not completed.
-type ConnectionStats struct {
-	ProxyID                     string
-	ProxyProviderID             string
-	ProxyGeoIPData              common.GeoIPData
-	ProxyConnectionNum          int64
-	ClientGeoIPData             common.GeoIPData
-	SponsorID                   string
-	ClientPlatform              string
-	ClientBuildRev              string
-	DeviceRegion                string
-	SessionID                   string
-	ProxyEntryTracker           int64
-	NetworkType                 string
-	ClientConnectionNum         int64
-	DestinationAddress          string
-	TLSProfile                  string
-	SNI                         string
-	TLSClientHelloFragmented    bool
-	TLSClientHelloPadding       int
-	TLSDidResume                bool
-	ClientTCPDuration           time.Duration
-	ClientTLSDuration           time.Duration
-	ProxyCompletedTCP           time.Time
-	ProxyCompletedTLS           time.Time
-	ProxyCompletedLightHeader   time.Time
-	ProxyCompletedUpstreamDNS   time.Time
-	ProxyCompletedUpstreamTCP   time.Time
-	UpstreamDNSCached           bool
-	ProxyProtocolHeaderAdded    bool
-	ProxyProtocolHeaderReplaced bool
-	BytesRead                   int64
-	BytesWritten                int64
-	Failure                     string
-}
-
-// makeProxyID derives a unique proxy ID from a proxy's dial address and
-// obfuscation key. This derivation saves light header space.
-func makeProxyID(dialAddress, obfuscationKey string) string {
-	h := hmac.New(sha256.New, []byte(obfuscationKey))
-	h.Write([]byte(dialAddress))
-	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
 }
 
 type proxyProtocolHeaderConfig struct {
@@ -259,16 +217,6 @@ func prepareProxyProtocolHeaderConfigs(
 	}
 
 	return proxyProtocolHeaderConfigs, nil
-}
-
-type bytesCounter struct {
-	bytesRead    atomic.Int64
-	bytesWritten atomic.Int64
-}
-
-func (b *bytesCounter) UpdateProgress(bytesRead, bytesWritten, _ int64) {
-	b.bytesRead.Add(bytesRead)
-	b.bytesWritten.Add(bytesWritten)
 }
 
 func normalizeDestinationAddress(address string) (string, error) {

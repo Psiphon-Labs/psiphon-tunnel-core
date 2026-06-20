@@ -572,6 +572,21 @@ func (r *proxyEventReceiver) Accepted() {
 func (r *proxyEventReceiver) Rejected() {
 }
 
+func (r *proxyEventReceiver) Activity(stats *light.ActivityStats) {
+	const activityFormat = `[Activity] proxyID: %s, providerID: %s, ` +
+		`bytesUp: %d, bytesDown: %d, bytesDuration: %s, ` +
+		`currentConnectionCount: %d` + "\n"
+
+	r.logf(
+		activityFormat,
+		stats.ProxyID,
+		stats.ProxyProviderID,
+		stats.BytesUp,
+		stats.BytesDown,
+		stats.BytesDuration,
+		stats.CurrentConnectionCount)
+}
+
 func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +

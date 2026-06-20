@@ -55,6 +55,7 @@ const (
 	defaultPerIPMaxConcurrent       = 50000
 	defaultMaxConcurrent            = 1000000
 	defaultDialFallbackDelay        = 300 * time.Millisecond
+	proxyActivityUpdatePeriod       = 1 * time.Second
 	defaultDNSResolverCacheMaxSize  = 256
 	defaultDNSResolverCacheTTL      = 10 * time.Second
 	dnsResolverCacheReapFrequency   = 1 * time.Minute
@@ -90,7 +91,59 @@ type ProxyConfig struct {
 	ProxyProtocolHeaderTargetDestinationAddresses map[string][]string `json:",omitempty"`
 	LogDestinationAddresses                       bool                `json:",omitempty"`
 	AllowBogons                                   bool                `json:",omitempty"`
+	EmitActivity                                  bool                `json:",omitempty"`
 	EnableDebugLogs                               bool                `json:",omitempty"`
+}
+
+// ConnectionStats are the proxy connection stats reported to
+// ProxyEventReceiver at the end of connection. If the connection failed to
+// fully establish, the ConnectionFailure reports the reason. Values that the
+// clients sends in the light header will be zero values when the light
+// header was not read successfully, and the proxy's phase-completed
+// timestamps will be zero values when the phase was not completed.
+type ConnectionStats struct {
+	ProxyID                     string
+	ProxyProviderID             string
+	ProxyGeoIPData              common.GeoIPData
+	ProxyConnectionNum          int64
+	ClientGeoIPData             common.GeoIPData
+	SponsorID                   string
+	ClientPlatform              string
+	ClientBuildRev              string
+	DeviceRegion                string
+	SessionID                   string
+	ProxyEntryTracker           int64
+	NetworkType                 string
+	ClientConnectionNum         int64
+	DestinationAddress          string
+	TLSProfile                  string
+	SNI                         string
+	TLSClientHelloFragmented    bool
+	TLSClientHelloPadding       int
+	TLSDidResume                bool
+	ClientTCPDuration           time.Duration
+	ClientTLSDuration           time.Duration
+	ProxyCompletedTCP           time.Time
+	ProxyCompletedTLS           time.Time
+	ProxyCompletedLightHeader   time.Time
+	ProxyCompletedUpstreamDNS   time.Time
+	ProxyCompletedUpstreamTCP   time.Time
+	UpstreamDNSCached           bool
+	ProxyProtocolHeaderAdded    bool
+	ProxyProtocolHeaderReplaced bool
+	BytesRead                   int64
+	BytesWritten                int64
+	Failure                     string
+}
+
+// ActivityStats are proxy activity stats reported to ProxyEventReceiver.
+type ActivityStats struct {
+	ProxyID                string
+	ProxyProviderID        string
+	BytesUp                int64
+	BytesDown              int64
+	BytesDuration          time.Duration
+	CurrentConnectionCount int64
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -114,6 +167,7 @@ type ProxyEventReceiver interface {
 	// The ProxyEventReceiver may assume ownership of stats. The Proxy caller
 	// will not access it after passing it to Connection.
 	Connection(stats *ConnectionStats)
+	Activity(stats *ActivityStats)
 
 	IrregularConnection(
 		proxyID string,
@@ -165,6 +219,10 @@ type Proxy struct {
 
 	connectionNumber atomic.Int64
 	paused           atomic.Bool
+
+	activityBytesUp        atomic.Int64
+	activityBytesDown      atomic.Int64
+	currentConnectionCount atomic.Int64
 }
 
 // NewProxy initializes a Proxy. ProxyConfig, LookupGeoIP, and
@@ -552,6 +610,14 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 
 	waitGroup := new(sync.WaitGroup)
 
+	if proxy.config.EmitActivity {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			proxy.activityUpdate(ctx)
+		}()
+	}
+
 	for _, listener := range listeners {
 		listener := listener
 		waitGroup.Add(1)
@@ -587,7 +653,11 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 				go func(conn net.Conn) {
 					defer waitGroup.Done()
 					proxy.eventReceiver.Accepted()
-					proxy.handleConn(ctx, conn)
+					err := proxy.handleConn(ctx, conn)
+					if err != nil && ctx.Err() == nil {
+						proxy.eventReceiver.WarningLog(
+							proxy.ID, errors.Trace(err).Error())
+					}
 				}(conn)
 			}
 		}()
@@ -600,17 +670,14 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 	return nil
 }
 
-func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) {
-	err := proxy.handleConnWithErr(ctx, conn)
-	if err != nil && ctx.Err() == nil {
-		proxy.eventReceiver.WarningLog(
-			proxy.ID, errors.Trace(err).Error())
-	}
-}
-
-func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retErr error) {
+func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error) {
 
 	defer conn.Close()
+
+	if proxy.config.EmitActivity {
+		proxy.currentConnectionCount.Add(1)
+		defer proxy.currentConnectionCount.Add(-1)
+	}
 
 	var geoIPData common.GeoIPData
 	completedTCP := time.Now().UTC()
@@ -620,6 +687,9 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	var tlsClientHelloPadding int
 	var tlsDidResume bool
 	bytesCounter := &bytesCounter{}
+	if proxy.config.EmitActivity {
+		bytesCounter.activityProxy = proxy
+	}
 	var completedLightHeader time.Time
 	var header *lightHeader
 	var sponsorID string
@@ -929,6 +999,44 @@ func (proxy *Proxy) handleConnWithErr(ctx context.Context, conn net.Conn) (retEr
 	relayWaitGroup.Wait()
 
 	return nil
+}
+
+type bytesCounter struct {
+	bytesRead     atomic.Int64
+	bytesWritten  atomic.Int64
+	activityProxy *Proxy
+}
+
+func (counter *bytesCounter) UpdateProgress(bytesRead, bytesWritten, _ int64) {
+	counter.bytesRead.Add(bytesRead)
+	counter.bytesWritten.Add(bytesWritten)
+	if counter.activityProxy != nil {
+		counter.activityProxy.activityBytesUp.Add(bytesRead)
+		counter.activityProxy.activityBytesDown.Add(bytesWritten)
+	}
+}
+
+func (proxy *Proxy) activityUpdate(ctx context.Context) {
+
+	activityUpdatePeriod := proxyActivityUpdatePeriod
+	ticker := time.NewTicker(activityUpdatePeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			proxy.eventReceiver.Activity(&ActivityStats{
+				ProxyID:                proxy.ID,
+				ProxyProviderID:        proxy.config.ProviderID,
+				BytesUp:                proxy.activityBytesUp.Swap(0),
+				BytesDown:              proxy.activityBytesDown.Swap(0),
+				BytesDuration:          activityUpdatePeriod,
+				CurrentConnectionCount: proxy.currentConnectionCount.Load(),
+			})
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (proxy *Proxy) getTrafficRateLimits() (common.RateLimits, bool) {

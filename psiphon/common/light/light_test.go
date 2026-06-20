@@ -255,6 +255,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	proxyConfig.LimitUpstreamBytesPerSecond = 1 << 30
 	proxyConfig.LimitDownstreamBytesPerSecond = 1 << 30
 
+	proxyConfig.EmitActivity = true
 	proxyConfig.AllowBogons = true
 	proxyConfig.EnableDebugLogs = true
 
@@ -743,6 +744,21 @@ func (r *testProxyEventReceiver) Accepted() {
 
 func (r *testProxyEventReceiver) Rejected() {
 	fmt.Printf("[Rejected]\n")
+}
+
+func (r *testProxyEventReceiver) Activity(stats *ActivityStats) {
+	const activityFormat = `[Activity] proxyID: %s, providerID: %s, ` +
+		`bytesUp: %d, bytesDown: %d, bytesDuration: %s, ` +
+		`currentConnectionCount: %d` + "\n"
+
+	fmt.Printf(
+		activityFormat,
+		stats.ProxyID,
+		stats.ProxyProviderID,
+		stats.BytesUp,
+		stats.BytesDown,
+		stats.BytesDuration,
+		stats.CurrentConnectionCount)
 }
 
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
