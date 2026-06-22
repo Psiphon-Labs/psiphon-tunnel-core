@@ -27,6 +27,7 @@ import (
 	"encoding/xml"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"sync/atomic"
 	"testing"
 )
@@ -254,5 +255,77 @@ func TestGetUPnPPortMappingTCP(t *testing.T) {
 	}
 	if um.protocol != MapProtocolTCP {
 		t.Errorf("stored mapping protocol = %v, want TCP", um.protocol)
+	}
+}
+
+// TestSeedPreferredExternalPort verifies that SetPreferredExternalPort seeds the
+// suggested external port of a fresh mapping create (no existing mapping to
+// renew). It drives createOrGetMapping through the UPnP fallback path and
+// asserts the gateway's AddPortMapping receives the preferred external port.
+func TestSeedPreferredExternalPort(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+
+	const preferred uint16 = 41234
+
+	var gotExternalPort atomic.Uint32
+	handlers := map[string]any{
+		"AddPortMapping": func(body []byte) (int, string) {
+			var req struct {
+				ExternalPort  string `xml:"NewExternalPort"`
+				LeaseDuration string `xml:"NewLeaseDuration"`
+			}
+			if err := xml.Unmarshal(body, &req); err != nil {
+				t.Errorf("bad request: %v", err)
+				return http.StatusBadRequest, "bad request"
+			}
+			if p, err := strconv.Atoi(req.ExternalPort); err == nil {
+				gotExternalPort.Store(uint32(p))
+			}
+			if req.LeaseDuration != "0" {
+				// Force the permanent-lease fallback, as in the other UPnP tests.
+				return http.StatusOK, testAddPortMappingPermanentLease
+			}
+			return http.StatusOK, testAddPortMappingResponse
+		},
+		"GetExternalIPAddress": testGetExternalIPAddressResponse,
+		"GetStatusInfo":        testGetStatusInfoResponse,
+		"DeletePortMapping":    "", // Do nothing for test
+	}
+
+	igd.SetUPnPHandler(&upnpServer{
+		t:    t,
+		Desc: testRootDesc,
+		Control: map[string]map[string]any{
+			"/ctl/IPConn":                          handlers,
+			"/upnp/control/yomkmsnooi/wanipconn-1": handlers,
+		},
+	})
+
+	ctx := context.Background()
+	c := newTestClient(t, igd)
+	c.debug.VerboseLogs = true
+	c.SetLocalPort(12345)
+	c.SetPreferredExternalPort(preferred)
+
+	// Probe first so createOrGetMapping sees no recent PMP/PCP and falls back
+	// to UPnP without waiting for the PMP/PCP timeout.
+	if _, err := c.Probe(ctx); err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+
+	_, ext, err := c.createOrGetMapping(ctx)
+	if err != nil {
+		t.Fatalf("createOrGetMapping: %v", err)
+	}
+
+	if got := uint16(gotExternalPort.Load()); got != preferred {
+		t.Errorf("gateway received external port %d, want %d", got, preferred)
+	}
+	if ext.Port() != preferred {
+		t.Errorf("returned external port %d, want %d", ext.Port(), preferred)
 	}
 }

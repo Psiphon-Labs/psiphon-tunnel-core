@@ -223,6 +223,11 @@ type Client struct {
 	// value is MapProtocolUDP. Set via SetProtocol.
 	protocol MapProtocol
 
+	// preferredExternalPort, if non-zero, is the external port to suggest to
+	// the gateway when creating a new mapping (for example, a port persisted
+	// across restarts). It is advisory; see SetPreferredExternalPort.
+	preferredExternalPort uint16
+
 	mapping mapping // non-nil if we have a mapping
 }
 
@@ -408,14 +413,15 @@ func (c *Client) Clone(onChange func()) *Client {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return &Client{
-		logf:         c.logf,
-		control:      c.control,
-		ipAndGateway: c.ipAndGateway,
-		onChange:     onChange,
-		debug:        c.debug,
-		testPxPPort:  c.testPxPPort,
-		testUPnPPort: c.testUPnPPort,
-		protocol:     c.protocol,
+		logf:                  c.logf,
+		control:               c.control,
+		ipAndGateway:          c.ipAndGateway,
+		onChange:              onChange,
+		debug:                 c.debug,
+		testPxPPort:           c.testPxPPort,
+		testUPnPPort:          c.testUPnPPort,
+		protocol:              c.protocol,
+		preferredExternalPort: c.preferredExternalPort,
 
 		// Probe-result fields: the port mapping service discovery state.
 		lastMyIP:     c.lastMyIP,
@@ -478,6 +484,22 @@ func (c *Client) SetProtocol(protocol MapProtocol) {
 	}
 	c.protocol = protocol
 	c.invalidateMappingsLocked(true)
+}
+
+// SetPreferredExternalPort sets a preferred external port to suggest to the
+// gateway when creating a new mapping -- for example, a port persisted from a
+// previous run so that already-distributed external addresses keep working
+// across restarts. A value of 0 clears the preference (request any port).
+//
+// This is advisory: the gateway may assign a different external port (e.g.
+// under contention or after a reboot). Unlike SetLocalPort and SetProtocol it
+// does not invalidate the current mapping, since it only influences the
+// suggested external port of the next fresh mapping create; an existing
+// mapping's own port still takes precedence when renewing.
+func (c *Client) SetPreferredExternalPort(port uint16) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.preferredExternalPort = port
 }
 
 func (c *Client) gatewayAndSelfIP() (gw, myIP netip.Addr, ok bool) {
@@ -785,6 +807,18 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 		}
 		// The mapping might still be valid, so just try to renew it.
 		prevPort = m.External().Port()
+	} else if c.preferredExternalPort != 0 {
+		// No live mapping to renew. Seed the suggested external port with the
+		// caller-provided preferred port (e.g. persisted across restarts) so
+		// the gateway is asked to reuse the same external port. This flows into
+		// the NAT-PMP, PCP, and UPnP requests below. Best-effort: the gateway
+		// may assign a different port.
+		//
+		// Limitation: Only the external port is seeded. PCP can also carry a
+		// suggested external IP (buildPCPRequestMappingPacket's prevExternalIP,
+		// currently wildcardIP); a preferred external IP could be threaded
+		// through here later if needed.
+		prevPort = c.preferredExternalPort
 	}
 
 	if c.debug.DisablePCP() && c.debug.DisablePMP() {
