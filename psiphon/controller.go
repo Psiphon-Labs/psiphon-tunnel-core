@@ -1645,6 +1645,26 @@ func (controller *Controller) terminateAllTunnels() {
 	NoticeTunnels(len(controller.tunnels))
 }
 
+// signalProbeInactiveTunnels enqueues SSH keep alive probes for all tunnels
+// that are read inactive over the given threshold.
+func (controller *Controller) signalProbeInactiveTunnels(
+	readInactiveThreshold time.Duration) {
+
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+
+	if readInactiveThreshold <= 0 {
+		return
+	}
+
+	for i := 0; i < len(controller.tunnels); i++ {
+		tunnel := controller.tunnels[i]
+		if tunnel.GetReadInactiveDuration() > readInactiveThreshold {
+			tunnel.SignalReadInactiveProbe()
+		}
+	}
+}
+
 // getNextActiveTunnel returns the next tunnel from the pool of active
 // tunnels. Currently, tunnel selection order is simple round-robin. When
 // readInactiveThreshold is greater than zero, tunnels without recent read
@@ -1868,6 +1888,12 @@ func (controller *Controller) Dial(
 					// light proxy.
 					(controller.config.LightProxyTestFetchAddress == "" ||
 						remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
+					// Launch SSH keep alive probes for any connected tunnels
+					// which are read inactive. If a tunnel is still live,
+					// its keep alive response may result in
+					// getNextActiveTunnel winning the race in dialLightProxyRace.
+					controller.signalProbeInactiveTunnels(readInactiveThreshold)
 
 					var lightConn net.Conn
 					lightConn, tunnel, err = dialLightProxyRace(
