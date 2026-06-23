@@ -193,6 +193,7 @@ var controller *psiphon.Controller
 var controllerCtx context.Context
 var stopController context.CancelFunc
 var controllerWaitGroup *sync.WaitGroup
+var dropPacketTunnelTraffic bool
 
 func Start(
 	configJson string,
@@ -317,6 +318,10 @@ func Start(
 		return errors.Trace(err)
 	}
 
+	// Apply any packet tunnel traffic dropping state that was set, including
+	// before the Controller was started.
+	controller.DropPacketTunnelTraffic(dropPacketTunnelTraffic)
+
 	controllerWaitGroup = new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
 	go func() {
@@ -378,6 +383,28 @@ func AppResumed() {
 
 	if controller != nil {
 		controller.AppResumed()
+	}
+}
+
+// DropPacketTunnelTraffic toggles packet tunnel mode traffic dropping.
+//
+// The value is latched, so DropPacketTunnelTraffic may be called before Start,
+// in which case it is applied to the Controller once it is started. The latched
+// value persists across Stop/Start cycles until changed.
+//
+// If PacketTunnelTunFileDescriptor is not set, this has no effect.
+func DropPacketTunnelTraffic(drop bool) {
+
+	// If no Controller is started, or if PacketTunnelTunFileDescriptor is not
+	// set, this is a no-op.
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	dropPacketTunnelTraffic = drop
+
+	if controller != nil {
+		controller.DropPacketTunnelTraffic(dropPacketTunnelTraffic)
 	}
 }
 
