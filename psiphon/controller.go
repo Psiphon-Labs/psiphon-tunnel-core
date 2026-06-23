@@ -589,6 +589,18 @@ func (controller *Controller) SignalComponentFailure() {
 	controller.stopRunning()
 }
 
+// DropPacketTunnelTraffic toggles packet tunnel mode traffic dropping. When
+// enabled, tun device and packet tunnel channel packets are drained and
+// dropped.
+func (controller *Controller) DropPacketTunnelTraffic(drop bool) {
+
+	// If config.PacketTunnelTunFileDescriptor is not set, this is a no-op.
+
+	if controller.packetTunnelClient != nil {
+		controller.packetTunnelClient.DropTraffic(drop)
+	}
+}
+
 // SetDynamicConfig overrides the sponsor ID and authorizations fields of the
 // Controller config with the input values. The new values will be used in the
 // next tunnel connection.
