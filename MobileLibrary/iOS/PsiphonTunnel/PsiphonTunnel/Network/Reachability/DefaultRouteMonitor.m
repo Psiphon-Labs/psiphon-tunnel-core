@@ -22,7 +22,6 @@
 #import <net/if.h>
 #import <ifaddrs.h>
 #import <netinet/in.h>
-#import <netinet6/in6.h>
 
 @interface NetworkPathState ()
 /// See comment in DefaultRouteMonitor.h
