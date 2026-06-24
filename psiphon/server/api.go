@@ -695,7 +695,8 @@ var connectedRequestParams = append(
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -713,6 +714,7 @@ var updateOnConnectedParamNames = append(
 		"light_proxy_dial_IPv4",
 		"light_proxy_dial_IPv6",
 		"light_proxy_dial_failed",
+		"light_proxy_dial_canceled",
 	},
 	fragmentor.GetUpstreamMetricsNames()...)
 

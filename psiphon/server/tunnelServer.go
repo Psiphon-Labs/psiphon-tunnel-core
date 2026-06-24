@@ -3654,7 +3654,8 @@ var serverTunnelStatParams = append(
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {

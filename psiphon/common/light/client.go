@@ -90,18 +90,22 @@ type Client struct {
 	obfuscationKey    string
 	verifyPin         string
 	connectionNumber  atomic.Int64
-	dialIPv4Count     atomic.Int64
-	dialIPv6Count     atomic.Int64
-	dialFailedCount   atomic.Int64
+
+	metricsMutex      sync.Mutex
+	dialIPv4Count     int
+	dialIPv6Count     int
+	dialFailedCount   int
+	dialCanceledCount int
 }
 
 type ClientMetrics struct {
 	ProxyID           string
 	ProxyEntryTracker int64
-	DialIPv4Count     int64
 	HasIPv6           bool
-	DialIPv6Count     int64
-	DialFailedCount   int64
+	DialIPv4Count     int
+	DialIPv6Count     int
+	DialFailedCount   int
+	DialCanceledCount int
 }
 
 // NewClient initializes a Client.
@@ -227,15 +231,31 @@ func (client *Client) GetRecommendedMaxTLSPadding() int {
 	return client.proxyEntry.RecommendedMaxTLSPadding
 }
 
-func (client *Client) GetMetrics() *ClientMetrics {
-	return &ClientMetrics{
+// GetMetrics returns ClientMetrics stats for the light client. If
+// resetCounters is true, cumulative dial success/failed/cancel metrics
+// counters are reset to zero after reporting current values.
+func (client *Client) GetMetrics(resetCounters bool) *ClientMetrics {
+	client.metricsMutex.Lock()
+	defer client.metricsMutex.Unlock()
+
+	metrics := &ClientMetrics{
 		ProxyID:           client.proxyID,
 		ProxyEntryTracker: client.config.ProxyEntryTracker,
-		DialIPv4Count:     client.dialIPv4Count.Load(),
 		HasIPv6:           client.proxyEntry.DialAddressIPv6 != "",
-		DialIPv6Count:     client.dialIPv6Count.Load(),
-		DialFailedCount:   client.dialFailedCount.Load(),
+		DialIPv4Count:     client.dialIPv4Count,
+		DialIPv6Count:     client.dialIPv6Count,
+		DialFailedCount:   client.dialFailedCount,
+		DialCanceledCount: client.dialCanceledCount,
 	}
+
+	if resetCounters {
+		client.dialIPv4Count = 0
+		client.dialIPv6Count = 0
+		client.dialFailedCount = 0
+		client.dialCanceledCount = 0
+	}
+
+	return metrics
 }
 
 // Dial connects to the specified destination.
@@ -278,11 +298,22 @@ func (client *Client) Dial(
 	// Log once per connection. If the dial fails, log accumulated fields
 	// here. Otherwise, log on Close.
 	defer func() {
-		if retErr != nil && ctx.Err() != context.Canceled {
-			client.dialFailedCount.Add(1)
-			logFields["error"] = retErr.Error()
-			client.config.Logger.WithTraceFields(
-				logFields).Warning("light proxy dial failed")
+		if retErr != nil {
+			ctxErr := ctx.Err()
+
+			client.metricsMutex.Lock()
+			if ctxErr == context.Canceled {
+				client.dialCanceledCount += 1
+			} else {
+				client.dialFailedCount += 1
+			}
+			client.metricsMutex.Unlock()
+
+			if ctxErr != context.Canceled {
+				logFields["error"] = retErr.Error()
+				client.config.Logger.WithTraceFields(
+					logFields).Warning("light proxy dial failed")
+			}
 		}
 	}()
 
@@ -406,11 +437,13 @@ func (client *Client) Dial(
 		bytesCounter:  bytesCounter,
 	}
 
+	client.metricsMutex.Lock()
 	if isIPv6 {
-		client.dialIPv6Count.Add(1)
+		client.dialIPv6Count += 1
 	} else {
-		client.dialIPv4Count.Add(1)
+		client.dialIPv4Count += 1
 	}
+	client.metricsMutex.Unlock()
 
 	return clientConn, nil
 }

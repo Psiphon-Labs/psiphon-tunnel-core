@@ -1899,7 +1899,7 @@ func MakeDialParameters(
 
 		lightProxyClient := config.GetLightProxyClient()
 		if lightProxyClient != nil {
-			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics().ProxyID
+			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics(false).ProxyID
 		}
 
 		// When CustomDialer is set, other dialConfig parameters such as
