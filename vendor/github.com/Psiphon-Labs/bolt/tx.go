@@ -498,9 +498,14 @@ func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bo
 	}
 
 	var err error
+	var subBuckets []*Bucket
 
 	// Check every page used by this bucket.
 	b.tx.forEachPage(b.root, 0, func(p *page, _ int) {
+		if err != nil {
+			return
+		}
+
 		if p.id > tx.meta.pgid {
 			err = fmt.Errorf("page %d: out of bounds: %d", int(p.id), int(b.tx.meta.pgid))
 			return
@@ -524,6 +529,15 @@ func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bo
 			err = fmt.Errorf("page %d: invalid type: %s", int(p.id), p.typ())
 			return
 		}
+
+		if (p.flags & leafPageFlag) != 0 {
+			for i := uint16(0); i < p.count; i++ {
+				elem := p.leafPageElement(i)
+				if (elem.flags & bucketLeafFlag) != 0 {
+					subBuckets = append(subBuckets, b.openBucket(elem.value()))
+				}
+			}
+		}
 	})
 
 	if err != nil {
@@ -531,15 +545,12 @@ func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bo
 	}
 
 	// Check each bucket within this bucket.
-	return b.ForEach(func(k, v []byte) error {
-		if child := b.Bucket(k); child != nil {
-			err := tx.checkBucket(child, reachable, freed)
-			if err != nil {
-				return err
-			}
+	for _, child := range subBuckets {
+		if err := tx.checkBucket(child, reachable, freed); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // allocate returns a contiguous block of memory starting at a given page.

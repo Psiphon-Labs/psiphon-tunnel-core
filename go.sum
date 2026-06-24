@@ -18,8 +18,8 @@ github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e h1:
 github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e/go.mod h1:ZdY5pBfat/WVzw3eXbIf7N1nZN0XD5H5+X8ZMDWbCs4=
 github.com/Psiphon-Inc/uds-ipc v1.0.1 h1:K3Z0cS1XfzDdhxWTIwh/hiLrkRR83ZxUo2bqgBOGuZE=
 github.com/Psiphon-Inc/uds-ipc v1.0.1/go.mod h1:R8TGG+OXumorJdpAcSFE4SVTT2frMFEGY43Zc/44sNk=
-github.com/Psiphon-Labs/bolt v0.0.0-20260623211331-1f8b367910d7 h1:hNgoh41BbkbPMnq62ONy/NmDrLE2xJGRNrg/0aOAFRU=
-github.com/Psiphon-Labs/bolt v0.0.0-20260623211331-1f8b367910d7/go.mod h1:alTtZBo3j4AWFvUrAH6F5ZaHcTj4G5Y01nHz8dkU6vU=
+github.com/Psiphon-Labs/bolt v0.0.0-20260624144735-04fba30caf38 h1:KNwcEmv7WvKhcPO0MN2XpGAbr/cjgTJ2CX/oOBKaEUk=
+github.com/Psiphon-Labs/bolt v0.0.0-20260624144735-04fba30caf38/go.mod h1:alTtZBo3j4AWFvUrAH6F5ZaHcTj4G5Y01nHz8dkU6vU=
 github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737 h1:QTMy7Uc2Xc7fz6O/Khy1xi0VBND13GqzLUE2mHw6HUU=
 github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737/go.mod h1:Enj/Gszv2zCbuRbHbabmNvfO9EM+5kmaGj8CyjwNPlY=
 github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be h1:Lh1pAsY7Rvzrnecx4n7RVxhBgzZcAruARl/F3uN/74s=
