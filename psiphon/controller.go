@@ -272,8 +272,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		var err error
 
 		if len(config.LightProxyEntry) > 0 {
-			err = initLightProxy(
-				controller,
+			err = controller.initLightProxy(
 				config.LightProxyEntry,
 				config.LightProxyEntryTracker)
 		} else {
@@ -284,8 +283,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 			lightProxy := LoadLightProxy()
 			if lightProxy != nil {
-				err = initLightProxy(
-					controller,
+				err = controller.initLightProxy(
 					lightProxy.LightProxyEntry,
 					lightProxy.LightProxyEntryTracker)
 			}
@@ -300,8 +298,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	if config.EnablePersonalLightProxyTunnels {
 
-		err = initLightProxy(
-			controller,
+		err = controller.initLightProxy(
 			config.LightProxyEntry,
 			config.LightProxyEntryTracker)
 		if err != nil {
@@ -505,26 +502,10 @@ func (controller *Controller) Run(ctx context.Context) {
 	if !controller.config.DisableDSLFetcher {
 
 		controller.runWaitGroup.Add(1)
-		go func() {
-			defer controller.runWaitGroup.Done()
-			runUntunneledDSLFetcher(
-				controller.runCtx,
-				controller.config,
-				controller.inproxyClientBrokerClientManager,
-				controller.signalUntunneledDSLFetch)
-		}()
+		go controller.runUntunneledDSLFetcher()
 
 		controller.runWaitGroup.Add(1)
-		go func() {
-			defer controller.runWaitGroup.Done()
-			runTunneledDSLFetcher(
-				controller.runCtx,
-				controller.config,
-				func() *Tunnel {
-					return controller.getNextActiveTunnel(0)
-				},
-				controller.signalTunneledDSLFetch)
-		}()
+		go controller.runTunneledDSLFetcher()
 	}
 
 	if controller.config.InproxyEnableProxy {
@@ -798,32 +779,12 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 
 		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
 
-		// Push-imported light proxies are persisted for potential future
-		// use as fallbacks. In EnablePersonalLightProxyTunnels mode,
-		// initLightProxy is not called, and the light proxy in use remains
-		// config.LightProxyEntry.
-		ok := StoreLightProxy(&StoredLightProxy{
-			LightProxyEntry:        lightProxyEntry.ProxyEntry,
-			LightProxyEntryTracker: lightProxyEntry.ProxyEntryTracker,
-		})
-		if !ok {
+		lightProxyErr := controller.storeAndInitLightProxy(
+			lightProxyEntry.ProxyEntry,
+			lightProxyEntry.ProxyEntryTracker)
+		if lightProxyErr != nil {
+			NoticeWarning("light proxy import failed: %v", errors.Trace(lightProxyErr))
 			importOK = false
-		} else {
-			if controller.config.EnableLightProxyFallback {
-
-				// TODO: skip the reinitialization, or retain the current
-				// replay parameters, when the pushed proxy entry is
-				// unchanged from the proxy entry currently in use, so that
-				// a proven-working replay selection isn't discarded.
-				lightProxyErr := initLightProxy(
-					controller,
-					lightProxyEntry.ProxyEntry,
-					lightProxyEntry.ProxyEntryTracker)
-				if lightProxyErr != nil {
-					NoticeWarning("light proxy init failed: %v", errors.Trace(lightProxyErr))
-					importOK = false
-				}
-			}
 		}
 	}
 

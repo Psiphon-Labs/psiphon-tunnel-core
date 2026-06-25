@@ -75,18 +75,20 @@ func (b *backendTestShim) UnmarshalDiscoverServerEntriesRequest(
 
 	apiParams protocol.PackedAPIParameters,
 	oslKeys [][]byte,
-	discoverCount int32,
+	serverEntryDiscoverCount int32,
+	lightProxyDiscoverCount int32,
 	retErr error) {
 
 	var request *DiscoverServerEntriesRequest
 	err := cbor.Unmarshal(cborRequest, &request)
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, nil, 0, 0, errors.Trace(err)
 	}
 
 	return request.BaseAPIParameters,
 		convertSlice[OSLKey, []byte](request.OSLKeys),
-		request.DiscoverCount,
+		request.ServerEntryDiscoverCount,
+		request.LightProxyDiscoverCount,
 		nil
 }
 
@@ -97,6 +99,10 @@ func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 		PrioritizeDial           bool
 		PrioritizeReason         string
 		PrioritizeTunnelProtocol string
+	},
+	lightProxyEntries []*struct {
+		ProxyEntry        []byte
+		ProxyEntryTracker int64
 	}) (
 
 	cborResponse []byte,
@@ -111,6 +117,11 @@ func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 				PrioritizeReason         string
 				PrioritizeTunnelProtocol string
 			}, *VersionedServerEntryTag](versionedServerEntryTags),
+		LightProxyEntries: convertSlice[
+			*struct {
+				ProxyEntry        []byte
+				ProxyEntryTracker int64
+			}, *LightProxyEntry](lightProxyEntries),
 	}
 
 	cborResponse, err := protocol.CBOREncoding.Marshal(response)

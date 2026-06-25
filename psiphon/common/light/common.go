@@ -65,11 +65,11 @@ type ProxyEntry struct {
 // SignedProxyEntry is a signed ProxyEntry.
 type SignedProxyEntry struct {
 
-	// Currently signatures are not added or verified since the initial
-	// distribution scheme for proxy entries is via ephemeral push payloads,
-	// which are already signed. Adding the SignedProxyEntry layer now allows
-	// for the addition of signatures in the future without changing the
-	// expected unmarshal type, SignedProxyEntry.
+	// Currently signatures are not added or verified since the distribution
+	// schemes for proxy entries are via ephemeral push payloads, which are
+	// already signed, or secure DSL requests. Adding the SignedProxyEntry layer
+	// now allows for the addition of signatures in the future without changing
+	// the expected unmarshal type, SignedProxyEntry.
 
 	Signature  []byte     `cbor:"1,keyasint,omitempty"`
 	ProxyEntry ProxyEntry `cbor:"2,keyasint,omitempty"`

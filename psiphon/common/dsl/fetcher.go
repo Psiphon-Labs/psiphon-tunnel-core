@@ -67,6 +67,13 @@ type FetcherConfig struct {
 		prioritizeReason string,
 		prioritizeTunnelProtocol string) error
 
+	// DatastoreStoreLightProxy is an optional callback to persist a light
+	// proxy entry discovered via DiscoverServerEntries. proxyEntry is an
+	// opaque encoded light.SignedProxyEntry.
+	DatastoreStoreLightProxy func(
+		proxyEntry []byte,
+		proxyEntryTracker int64) error
+
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
 	DatastoreKnownOSLIDs           func() (IDs []OSLID, err error)
@@ -85,6 +92,8 @@ type FetcherConfig struct {
 	FetchTTL                      time.Duration
 	DiscoverServerEntriesMinCount int
 	DiscoverServerEntriesMaxCount int
+	DiscoverLightProxyMinCount    int
+	DiscoverLightProxyMaxCount    int
 	GetServerEntriesMinCount      int
 	GetServerEntriesMaxCount      int
 	GetLastActiveOSLsTTL          time.Duration
@@ -209,17 +218,24 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 	// Vary the size of the requested response to avoid a trivial traffic
 	// fingerprint.
-	discoverCount := prng.Range(
+	serverEntryDiscoverCount := prng.Range(
 		f.config.DiscoverServerEntriesMinCount,
 		f.config.DiscoverServerEntriesMaxCount)
 
-	versionedTags, err := f.doDiscoverServerEntriesRequest(
+	lightProxyDiscoverCount := prng.Range(
+		f.config.DiscoverLightProxyMinCount,
+		f.config.DiscoverLightProxyMaxCount)
+
+	discoverResponse, err := f.doDiscoverServerEntriesRequest(
 		ctx,
 		OSLKeys,
-		discoverCount)
+		serverEntryDiscoverCount,
+		lightProxyDiscoverCount)
 	if err != nil {
 		return errors.Trace(err)
 	}
+	versionedTags := discoverResponse.VersionedServerEntryTags
+	lightProxyEntries := discoverResponse.LightProxyEntries
 
 	// Check each discovered server entry tag and version. Skip when the
 	// tag/version is already in the local datastore. Fetch the unknown or
@@ -230,14 +246,16 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 	storeServerEntriesCount := 0
 	knownServerEntriesCount := 0
+	storeLightProxyCount := 0
 	tagCount := len(versionedTags)
 	defer func() {
 		// Emit log even if not all fetches succeed.
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"tunneled": f.config.Tunneled,
-			"tags":     tagCount,
-			"updated":  storeServerEntriesCount,
-			"known":    knownServerEntriesCount,
+			"tunneled":     f.config.Tunneled,
+			"tags":         tagCount,
+			"updated":      storeServerEntriesCount,
+			"known":        knownServerEntriesCount,
+			"lightProxies": storeLightProxyCount,
 		}).Info("DSL: fetched server entries")
 	}()
 
@@ -332,6 +350,33 @@ func (f *Fetcher) Run(ctx context.Context) error {
 			prioritizeTunnelProtocols[len(sourcedServerEntries):]
 
 		f.config.DoGarbageCollection()
+	}
+
+	// Import a light proxy entry, if any were discovered.
+	// At most one light proxy entry is imported, selected at random.
+	if f.config.DatastoreStoreLightProxy != nil && len(lightProxyEntries) > 0 {
+
+		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
+
+		if lightProxyEntry == nil || len(lightProxyEntry.ProxyEntry) == 0 {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: missing light proxy entry")
+		} else {
+			err := f.config.DatastoreStoreLightProxy(
+				lightProxyEntry.ProxyEntry,
+				lightProxyEntry.ProxyEntryTracker)
+			if err != nil {
+				// Non-fatal: log and continue. Server entry discovery has
+				// already succeeded.
+				f.config.Logger.WithTraceFields(common.LogFields{
+					"tunneled": f.config.Tunneled,
+					"error":    err.Error(),
+				}).Warning("DSL: store light proxy failed")
+			} else {
+				storeLightProxyCount += 1
+			}
+		}
 	}
 
 	err = f.config.DatastoreSetLastFetchTime(time.Now())
@@ -570,7 +615,8 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
-	discoverCount int) ([]*VersionedServerEntryTag, error) {
+	discoverCount int,
+	lightProxyDiscoverCount int) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger
@@ -582,9 +628,10 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		// of active OSL IDs is expected to be relatively small.
 
 		request := &DiscoverServerEntriesRequest{
-			BaseAPIParameters: f.packedAPIParameters,
-			OSLKeys:           keys,
-			DiscoverCount:     int32(discoverCount),
+			BaseAPIParameters:        f.packedAPIParameters,
+			OSLKeys:                  keys,
+			ServerEntryDiscoverCount: int32(discoverCount),
+			LightProxyDiscoverCount:  int32(lightProxyDiscoverCount),
 		}
 
 		var response DiscoverServerEntriesResponse
@@ -592,7 +639,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 			ctx, requestTypeDiscoverServerEntries, request, &response)
 
 		if err == nil {
-			return response.VersionedServerEntryTags, nil
+			return &response, nil
 		}
 
 		if i >= f.config.RequestRetryCount || !doRetry || ctx.Err() != nil {

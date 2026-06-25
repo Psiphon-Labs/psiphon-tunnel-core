@@ -31,11 +31,12 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-func runUntunneledDSLFetcher(
-	ctx context.Context,
-	config *Config,
-	brokerClientManager *InproxyBrokerClientManager,
-	signal <-chan struct{}) {
+func (controller *Controller) runUntunneledDSLFetcher() {
+
+	defer controller.runWaitGroup.Done()
+
+	ctx := controller.runCtx
+	config := controller.config
 
 	NoticeInfo("running untunneled DSL fetcher")
 
@@ -43,7 +44,7 @@ fetcherLoop:
 	for !disableDSLFetches.Load() {
 
 		select {
-		case <-signal:
+		case <-controller.signalUntunneledDSLFetch:
 		case <-ctx.Done():
 			break fetcherLoop
 		}
@@ -55,7 +56,8 @@ fetcherLoop:
 
 			networkID := config.GetNetworkID()
 
-			brokerClient, _, err := brokerClientManager.GetBrokerClient(networkID)
+			brokerClient, _, err :=
+				controller.inproxyClientBrokerClientManager.GetBrokerClient(networkID)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -84,7 +86,7 @@ fetcherLoop:
 			// TODO: add a failed_dsl_request log, similar to failed_tunnel,
 			// to record and report failures?
 
-			err = doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
+			err = controller.doDSLFetch(networkID, isTunneled, roundTripper)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -102,11 +104,12 @@ fetcherLoop:
 	NoticeInfo("exiting untunneled DSL fetcher")
 }
 
-func runTunneledDSLFetcher(
-	ctx context.Context,
-	config *Config,
-	getActiveTunnel func() *Tunnel,
-	signal <-chan struct{}) {
+func (controller *Controller) runTunneledDSLFetcher() {
+
+	defer controller.runWaitGroup.Done()
+
+	ctx := controller.runCtx
+	config := controller.config
 
 	NoticeInfo("running tunneled DSL fetcher")
 
@@ -114,12 +117,12 @@ fetcherLoop:
 	for !disableDSLFetches.Load() {
 
 		select {
-		case <-signal:
+		case <-controller.signalTunneledDSLFetch:
 		case <-ctx.Done():
 			break fetcherLoop
 		}
 
-		tunnel := getActiveTunnel()
+		tunnel := controller.getNextActiveTunnel(0)
 		if tunnel == nil {
 			continue
 		}
@@ -146,7 +149,7 @@ fetcherLoop:
 		// Detailed logging, retries, last request times, and
 		// WaitForNetworkConnectivity are all handled inside dsl.Fetcher.
 
-		err := doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
+		err := controller.doDSLFetch(networkID, isTunneled, roundTripper)
 		if err != nil {
 			NoticeError("tunneled DSL fetch failed: %v", errors.Trace(err))
 			// No cooldown pause, since runTunneledDSLFetcher is called only
@@ -157,12 +160,13 @@ fetcherLoop:
 	NoticeInfo("exiting tunneled DSL fetcher")
 }
 
-func doDSLFetch(
-	ctx context.Context,
-	config *Config,
+func (controller *Controller) doDSLFetch(
 	networkID string,
 	isTunneled bool,
 	roundTripper dsl.FetcherRoundTripper) error {
+
+	ctx := controller.runCtx
+	config := controller.config
 
 	p := config.GetParameters().Get()
 	if !p.Bool(parameters.EnableDSLFetcher) {
@@ -295,6 +299,7 @@ func doDSLFetch(
 
 		DatastoreHasServerEntry:        hasServerEntry,
 		DatastoreStoreServerEntry:      storeServerEntry,
+		DatastoreStoreLightProxy:       controller.storeAndInitLightProxy,
 		DatastoreGetLastActiveOSLsTime: DSLGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: DSLSetLastActiveOSLsTime,
 		DatastoreKnownOSLIDs:           DSLKnownOSLIDs,
@@ -319,6 +324,8 @@ func doDSLFetch(
 		c.FetchTTL = p.Duration(parameters.DSLFetcherTunneledFetchTTL)
 		c.DiscoverServerEntriesMinCount = p.Int(parameters.DSLFetcherTunneledDiscoverServerEntriesMinCount)
 		c.DiscoverServerEntriesMaxCount = p.Int(parameters.DSLFetcherTunneledDiscoverServerEntriesMaxCount)
+		c.DiscoverLightProxyMinCount = p.Int(parameters.DSLFetcherTunneledDiscoverLightProxyMinCount)
+		c.DiscoverLightProxyMaxCount = p.Int(parameters.DSLFetcherTunneledDiscoverLightProxyMaxCount)
 		c.GetServerEntriesMinCount = p.Int(parameters.DSLFetcherTunneledGetServerEntriesMinCount)
 		c.GetServerEntriesMaxCount = p.Int(parameters.DSLFetcherTunneledGetServerEntriesMaxCount)
 
@@ -339,6 +346,8 @@ func doDSLFetch(
 		c.FetchTTL = p.Duration(parameters.DSLFetcherUntunneledFetchTTL)
 		c.DiscoverServerEntriesMinCount = p.Int(parameters.DSLFetcherUntunneledDiscoverServerEntriesMinCount)
 		c.DiscoverServerEntriesMaxCount = p.Int(parameters.DSLFetcherUntunneledDiscoverServerEntriesMaxCount)
+		c.DiscoverLightProxyMinCount = p.Int(parameters.DSLFetcherUntunneledDiscoverLightProxyMinCount)
+		c.DiscoverLightProxyMaxCount = p.Int(parameters.DSLFetcherUntunneledDiscoverLightProxyMaxCount)
 		c.GetServerEntriesMinCount = p.Int(parameters.DSLFetcherUntunneledGetServerEntriesMinCount)
 		c.GetServerEntriesMaxCount = p.Int(parameters.DSLFetcherUntunneledGetServerEntriesMaxCount)
 

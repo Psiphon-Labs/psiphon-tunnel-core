@@ -719,6 +719,99 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 	}
 }
 
+// TestControllerStoreAndInitLightProxy covers Controller.storeAndInitLightProxy
+// directly. This is the shared light proxy import path that DSL discovery wires
+// in as FetcherConfig.DatastoreStoreLightProxy (see Controller.doDSLFetch in
+// dsl.go);
+// the push payload import uses the same helper. This test asserts that a
+// discovered light proxy entry is persisted to the datastore and, with
+// EnableLightProxyFallback, the live light proxy client is initialized.
+func TestControllerStoreAndInitLightProxy(t *testing.T) {
+
+	dataRoot, err := ioutil.TempDir("", "psiphon-controller-dsl-light-proxy-test")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer os.RemoveAll(dataRoot)
+
+	const lightProxyEntryTTL = 1 * time.Hour
+	const lightProxyEntryTracker = 0x0102030405060708
+
+	_, lightProxyEntry, err := light.Generate(
+		prng.HexString(8),
+		[]string{"127.0.0.1:1"},
+		"127.0.0.1:1",
+		"",
+		"example.org",
+		"",
+		0.0,
+		"",
+		0.0,
+		0,
+		0,
+		0,
+		0,
+		lightProxyEntryTTL,
+		[]string{"example.com:443"},
+		nil,
+		nil,
+		"example.com:443")
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	config := &Config{
+		DataRootDirectory:      dataRoot,
+		PropagationChannelId:   "0000000000000000",
+		SponsorId:              "0000000000000000",
+		DisableLocalSocksProxy: true,
+		// EnableLightProxy is the deprecated alias for EnableLightProxyFallback,
+		// which gates the initLightProxy call in storeAndInitLightProxy.
+		EnableLightProxy: true,
+	}
+
+	err = config.Commit(false)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+	defer CloseDataStore()
+
+	controller, err := NewController(config)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	// Invoke the exact callback DSL discovery uses.
+	err = controller.storeAndInitLightProxy(
+		lightProxyEntry, lightProxyEntryTracker)
+	if err != nil {
+		t.Fatal(errors.Trace(err))
+	}
+
+	storedLightProxy := LoadLightProxy()
+	if storedLightProxy == nil {
+		t.Fatal("missing stored light proxy")
+	}
+	if !bytes.Equal(storedLightProxy.LightProxyEntry, lightProxyEntry) ||
+		storedLightProxy.LightProxyEntryTracker != lightProxyEntryTracker {
+		t.Fatal("unexpected stored light proxy")
+	}
+	if storedLightProxy.Expires.IsZero() ||
+		!storedLightProxy.Expires.After(time.Now().UTC()) {
+		t.Fatal("unexpected stored light proxy expiry")
+	}
+
+	// EnableLightProxyFallback (via EnableLightProxy) means the live light
+	// proxy client should have been initialized.
+	if controller.config.GetLightProxyClient() == nil {
+		t.Fatal("missing initialized light proxy client")
+	}
+}
+
 func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 
 	dataRoot, err := ioutil.TempDir("", "psiphon-controller-push-light-proxy-store-failure-test")
