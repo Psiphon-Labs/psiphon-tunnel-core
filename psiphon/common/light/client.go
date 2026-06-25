@@ -473,3 +473,7 @@ func (conn *ClientConn) Close() error {
 	})
 	return conn.closeErr
 }
+
+func (conn *ClientConn) IsClosed() bool {
+	return conn.activityConn.IsClosed()
+}
