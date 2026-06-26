@@ -27,6 +27,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"math/rand"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -177,9 +178,11 @@ func NewDatabase(filename string) (*Database, error) {
 // GetRandomizedHomepages returns a randomly ordered list of home pages
 // for the specified sponsor, region, and platform.
 func (db *Database) GetRandomizedHomepages(
-	sponsorID, clientRegion, clientASN, deviceRegion string, isMobilePlatform bool) []string {
+	sponsorID, clientRegion, clientASN, deviceRegion, normalizedClientPlatform string,
+	isMobilePlatform bool) []string {
 
-	homepages := db.GetHomepages(sponsorID, clientRegion, clientASN, deviceRegion, isMobilePlatform)
+	homepages := db.GetHomepages(
+		sponsorID, clientRegion, clientASN, deviceRegion, normalizedClientPlatform, isMobilePlatform)
 	if len(homepages) > 1 {
 		shuffledHomepages := make([]string, len(homepages))
 		perm := rand.Perm(len(homepages))
@@ -194,7 +197,8 @@ func (db *Database) GetRandomizedHomepages(
 // GetHomepages returns a list of home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(
-	sponsorID, clientRegion, clientASN, deviceRegion string, isMobilePlatform bool) []string {
+	sponsorID, clientRegion, clientASN, deviceRegion, normalizedClientPlatform string,
+	isMobilePlatform bool) []string {
 
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
@@ -228,7 +232,7 @@ func (db *Database) GetHomepages(
 		for _, homePage := range homePagesByRegion {
 			sponsorHomePages = append(
 				sponsorHomePages, homepageQueryParameterSubstitution(
-					homePage.URL, clientRegion, clientASN, deviceRegion))
+					homePage.URL, clientRegion, clientASN, deviceRegion, normalizedClientPlatform))
 		}
 	}
 
@@ -240,7 +244,7 @@ func (db *Database) GetHomepages(
 				// client_region query parameter substitution
 				sponsorHomePages = append(
 					sponsorHomePages, homepageQueryParameterSubstitution(
-						homePage.URL, clientRegion, clientASN, deviceRegion))
+						homePage.URL, clientRegion, clientASN, deviceRegion, normalizedClientPlatform))
 			}
 		}
 	}
@@ -249,18 +253,31 @@ func (db *Database) GetHomepages(
 }
 
 func homepageQueryParameterSubstitution(
-	url, clientRegion, clientASN, deviceRegion string) string {
+	homepageURL, clientRegion, clientASN, deviceRegion, normalizedClientPlatform string) string {
 
-	url = strings.Replace(url, "client_region=XX", "client_region="+clientRegion, 1)
-	url = strings.Replace(url, "client_asn=XX", "client_asn="+clientASN, 1)
-	url = strings.Replace(url, "device_region=XX", "device_region="+deviceRegion, 1)
-	return url
+	// url.QueryEscape guards against URL injection from untrusted inputs.
+	// Currently, client GeoIP values and server.normalizeClientPlatform
+	// values are already known-URL-safe.
+
+	homepageURL = strings.Replace(
+		homepageURL, "client_region=XX", "client_region="+url.QueryEscape(clientRegion), 1)
+
+	homepageURL = strings.Replace(
+		homepageURL, "client_asn=XX", "client_asn="+url.QueryEscape(clientASN), 1)
+
+	homepageURL = strings.Replace(
+		homepageURL, "device_region=XX", "device_region="+url.QueryEscape(deviceRegion), 1)
+
+	homepageURL = strings.Replace(
+		homepageURL, "client_platform=XX", "client_platform="+url.QueryEscape(strings.ToLower(normalizedClientPlatform)), 1)
+
+	return homepageURL
 }
 
 // GetAlertActionURLs returns a list of alert action URLs for the specified
 // alert reason and sponsor.
 func (db *Database) GetAlertActionURLs(
-	alertReason, sponsorID, clientRegion, clientASN, deviceRegion string) []string {
+	alertReason, sponsorID, clientRegion, clientASN, deviceRegion, normalizedClientPlatform string) []string {
 
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
@@ -275,7 +292,7 @@ func (db *Database) GetAlertActionURLs(
 		for _, URL := range sponsor.AlertActionURLs[alertReason] {
 			actionURLs = append(
 				actionURLs, homepageQueryParameterSubstitution(
-					URL, clientRegion, clientASN, deviceRegion))
+					URL, clientRegion, clientASN, deviceRegion, normalizedClientPlatform))
 		}
 	}
 
@@ -283,7 +300,7 @@ func (db *Database) GetAlertActionURLs(
 		for _, URL := range db.DefaultAlertActionURLs[alertReason] {
 			actionURLs = append(
 				actionURLs, homepageQueryParameterSubstitution(
-					URL, clientRegion, clientASN, deviceRegion))
+					URL, clientRegion, clientASN, deviceRegion, normalizedClientPlatform))
 		}
 	}
 

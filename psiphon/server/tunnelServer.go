@@ -4060,16 +4060,21 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 	sshClient.Lock()
 	sponsorID, _ := getStringRequestParam(
 		sshClient.handshakeState.apiParams, "sponsor_id")
+	clientPlatform, _ := getStringRequestParam(
+		sshClient.handshakeState.apiParams, "client_platform")
 	clientGeoIPData := sshClient.clientGeoIPData
 	deviceRegion := sshClient.handshakeState.deviceRegion
 	sshClient.Unlock()
+
+	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
 
 	return sshClient.sshServer.support.PsinetDatabase.GetAlertActionURLs(
 		alertReason,
 		sponsorID,
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
-		deviceRegion)
+		deviceRegion,
+		normalizedClientPlatform)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
