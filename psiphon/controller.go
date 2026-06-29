@@ -278,6 +278,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 				config.LightProxyEntryTracker)
 		} else {
 
+			// LoadLightProxy will enforce the light proxy entry TTL, if any,
+			// and will not return an expired light proxy. After this point,
+			// the TTL is not enforced in the middle of the session.
+
 			lightProxy := LoadLightProxy()
 			if lightProxy != nil {
 				err = initLightProxy(
@@ -583,6 +587,18 @@ func (controller *Controller) Run(ctx context.Context) {
 func (controller *Controller) SignalComponentFailure() {
 	NoticeWarning("controller shutdown due to component failure")
 	controller.stopRunning()
+}
+
+// DropPacketTunnelTraffic toggles packet tunnel mode traffic dropping. When
+// enabled, tun device and packet tunnel channel packets are drained and
+// dropped.
+func (controller *Controller) DropPacketTunnelTraffic(drop bool) {
+
+	// If config.PacketTunnelTunFileDescriptor is not set, this is a no-op.
+
+	if controller.packetTunnelClient != nil {
+		controller.packetTunnelClient.DropTraffic(drop)
+	}
 }
 
 // SetDynamicConfig overrides the sponsor ID and authorizations fields of the

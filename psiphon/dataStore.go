@@ -3032,12 +3032,11 @@ func DSLDeleteOSLState(ID dsl.OSLID) error {
 type StoredLightProxy struct {
 	LightProxyEntry        []byte
 	LightProxyEntryTracker int64
+	Expires                time.Time
 }
 
 // StoreLightProxy updates the latest stored light proxy.
 func StoreLightProxy(lightProxy *StoredLightProxy) bool {
-
-	// TODO: add a StoredLightProxy.TTL?
 
 	if lightProxy == nil {
 		NoticeWarning("StoreLightProxy failed: missing light proxy")
@@ -3045,10 +3044,16 @@ func StoreLightProxy(lightProxy *StoredLightProxy) bool {
 	}
 
 	// Ensure the proxy entry is valid before storing.
-	_, err := light.DecodeAndValidateProxyEntry(lightProxy.LightProxyEntry)
+	proxyEntry, err := light.DecodeAndValidateProxyEntry(lightProxy.LightProxyEntry)
 	if err != nil {
 		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
 		return false
+	}
+
+	// The TTL applies from import time; set a fixed expiry deadline.
+	if proxyEntry.TTLSeconds > 0 {
+		lightProxy.Expires = time.Now().UTC().Add(
+			time.Duration(proxyEntry.TTLSeconds) * time.Second)
 	}
 
 	jsonLightProxy, err := json.Marshal(lightProxy)
@@ -3084,6 +3089,21 @@ func LoadLightProxy() *StoredLightProxy {
 	err = json.Unmarshal([]byte(jsonLightProxy), &lightProxy)
 	if err != nil {
 		NoticeWarning("LoadLightProxy failed: %v", errors.Trace(err))
+		return nil
+	}
+
+	if !lightProxy.Expires.IsZero() &&
+		time.Now().UTC().After(lightProxy.Expires) {
+
+		NoticeInfo("LoadLightProxy: stored light proxy expired")
+
+		err := deleteIfBucketValue(
+			datastoreKeyValueBucket,
+			[]byte(datastoreStoredLightProxyKey),
+			[]byte(jsonLightProxy))
+		if err != nil {
+			NoticeWarning("LoadLightProxy: %v", errors.Trace(err))
+		}
 		return nil
 	}
 
@@ -3151,6 +3171,24 @@ func deleteBucketValue(bucket, key []byte) error {
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		bucket := tx.bucket(bucket)
+		return bucket.delete(key)
+	})
+
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func deleteIfBucketValue(bucket, key, expectedValue []byte) error {
+
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		bucket := tx.bucket(bucket)
+		value := bucket.get(key)
+		if !bytes.Equal(value, expectedValue) {
+			return nil
+		}
 		return bucket.delete(key)
 	})
 

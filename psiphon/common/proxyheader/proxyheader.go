@@ -17,7 +17,9 @@
  *
  */
 
-package server
+// Package proxyheader implements HAProxy PROXY protocol v2 headers with a
+// custom authentication TLV.
+package proxyheader
 
 import (
 	"bufio"
@@ -35,13 +37,21 @@ import (
 )
 
 const (
-	proxyProtocolHeaderVersion      = uint16(1)
-	proxyProtocolHeaderVersionSize  = 2
-	proxyProtocolHeaderKeyIDSize    = 4
+	proxyProtocolHeaderVersion     = uint16(1)
+	proxyProtocolHeaderVersionSize = 2
+
+	// ProxyProtocolHeaderKeyIDSize is the byte length of the key ID in the
+	// authentication TLV.
+	ProxyProtocolHeaderKeyIDSize = 4
+
 	proxyProtocolHeaderPreambleSize = proxyProtocolHeaderVersionSize +
-		proxyProtocolHeaderKeyIDSize
+		ProxyProtocolHeaderKeyIDSize
 	proxyProtocolHeaderTimestampSize = 8
-	proxyProtocolHeaderMACKeySize    = 32
+
+	// ProxyProtocolHeaderMACKeySize is the byte length of the MAC key used
+	// with BLAKE3 in keyed mode.
+	ProxyProtocolHeaderMACKeySize = 32
+
 	proxyProtocolHeaderMACDigestSize = 32
 	proxyProtocolHeaderMACTLVType    = proxyproto.PP2Type(0xEA)
 	proxyProtocolHeaderMACTLVSize    = proxyProtocolHeaderPreambleSize +
@@ -49,7 +59,7 @@ const (
 		proxyProtocolHeaderMACDigestSize
 )
 
-// makeProxyProtocolHeader creates a HAProxy PROXY protocol v2 header with a
+// MakeProxyProtocolHeader creates a HAProxy PROXY protocol v2 header with a
 // custom authentication TLV and returns the serialized wire format.
 //
 // The PROXY header is populated with the given source IP and destination IP
@@ -62,17 +72,17 @@ const (
 // The authentication data is added as an application-specific TLV with type
 // 0xEA and the following fields:
 //
-// Bytes  0–1   : Version (16-bit unsigned integer representing the authentication scheme version)
-// Bytes  2–5   : Key ID (32-bit unsigned integer identifying the MAC key)
-// Bytes  6–13  : Timestamp (64-bit unsigned integer representing milliseconds since the Unix epoch, UTC)
-// Bytes 14–45  : MAC digest (256 bits)
+// Bytes  0-1   : Version (16-bit unsigned integer representing the authentication scheme version)
+// Bytes  2-5   : Key ID (32-bit unsigned integer identifying the MAC key)
+// Bytes  6-13  : Timestamp (64-bit unsigned integer representing milliseconds since the Unix epoch, UTC)
+// Bytes 14-45  : MAC digest (256 bits)
 // Total        : 46 bytes
 //
 // The current authentication version 1 and uses BLAKE3 in keyed mode, with a
 // 32 byte input key and 32 byte output digest. Integer values are encoded in
 // network byte order, big endian.
 //
-// makeProxyProtocolHeader serializes the PROXY header with the authentication
+// MakeProxyProtocolHeader serializes the PROXY header with the authentication
 // TLV in the final TLV position and all-zero bytes in the MAC digest field.
 // A MAC is computed over this entire message, and the resulting digest is
 // written back into the MAC digest field to produce the final result.
@@ -98,18 +108,18 @@ const (
 //	|  |Version | Key ID | Timestamp | Computed MAC digest             |  |
 //	|  +--------+--------+---------------------------------------------+  |
 //	+---------------------------------------------------------------------+
-func makeProxyProtocolHeader(
+func MakeProxyProtocolHeader(
 	keyID []byte,
 	key []byte,
 	sourceIP net.IP,
 	destinationIP net.IP,
 	destinationPort int) ([]byte, error) {
 
-	if len(keyID) != proxyProtocolHeaderKeyIDSize {
+	if len(keyID) != ProxyProtocolHeaderKeyIDSize {
 		return nil, errors.TraceNew("invalid key ID")
 	}
 
-	if len(key) != proxyProtocolHeaderMACKeySize {
+	if len(key) != ProxyProtocolHeaderMACKeySize {
 		return nil, errors.TraceNew("invalid key size")
 	}
 
@@ -130,8 +140,8 @@ func makeProxyProtocolHeader(
 		proxyProtocolHeaderVersion)
 	offset += proxyProtocolHeaderVersionSize
 
-	copy(macTLV[offset:offset+proxyProtocolHeaderKeyIDSize], keyID)
-	offset += proxyProtocolHeaderKeyIDSize
+	copy(macTLV[offset:offset+ProxyProtocolHeaderKeyIDSize], keyID)
+	offset += ProxyProtocolHeaderKeyIDSize
 
 	binary.BigEndian.PutUint64(
 		macTLV[offset:offset+proxyProtocolHeaderTimestampSize],
@@ -172,11 +182,11 @@ func makeProxyProtocolHeader(
 	return wireHeader, nil
 }
 
-// verifyProxyProtocolHeader verifies the input wire format PROXY v2 header
+// VerifyProxyProtocolHeader verifies the input wire format PROXY v2 header
 // using the MAC in the authentication TLV and returns the network address
 // information from the header and the timestamp from the authentication
-// TLV.
-func verifyProxyProtocolHeader(
+// TLV. The caller is responsible for checking for replays.
+func VerifyProxyProtocolHeader(
 	keyID []byte,
 	key []byte,
 	wireHeader []byte) (
@@ -187,12 +197,12 @@ func verifyProxyProtocolHeader(
 	destinationPort int,
 	retErr error) {
 
-	if len(keyID) != proxyProtocolHeaderKeyIDSize {
+	if len(keyID) != ProxyProtocolHeaderKeyIDSize {
 		retErr = errors.TraceNew("invalid key ID")
 		return
 	}
 
-	if len(key) != proxyProtocolHeaderMACKeySize {
+	if len(key) != ProxyProtocolHeaderMACKeySize {
 		retErr = errors.TraceNew("invalid key size")
 		return
 	}
@@ -277,13 +287,13 @@ func verifyProxyProtocolHeader(
 	return
 }
 
-// addOrReplaceProxyProtocolHeader detects and removes any HAProxy PROXY
+// AddOrReplaceProxyProtocolHeader detects and removes any HAProxy PROXY
 // protocol header from the input stream and prepends the specified new
 // header to the output stream. Any bytes read in the detection process that
 // are not part of a PROXY header are relayed to the output stream. A count
 // of bytes read is returned.
 //
-// addOrReplaceProxyProtocolHeader blocks on first reading the input stream
+// AddOrReplaceProxyProtocolHeader blocks on first reading the input stream
 // and is compatible only with client-first network protocols.
 //
 // If the input stream begins with a PROXY v1/v2 signature, it must follow
@@ -291,7 +301,7 @@ func verifyProxyProtocolHeader(
 // signature or a subset of the signature and nothing more will stall. Input
 // streams that send a matching signature followed by non-PROXY protocol
 // header bytes will result in an error.
-func addOrReplaceProxyProtocolHeader(
+func AddOrReplaceProxyProtocolHeader(
 	in io.Reader,
 	out io.Writer,
 	newHeader []byte) (bytesRead int64, replaced bool, retErr error) {

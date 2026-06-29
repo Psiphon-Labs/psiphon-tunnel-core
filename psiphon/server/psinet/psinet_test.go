@@ -62,6 +62,10 @@ func TestDatabase(t *testing.T) {
                         "region" : "CLIENT-REGION",
                         "url" : "HOME-PAGE-URL?client_region=XX&device_region=XX"
                      }],
+                    "CLIENT-REGION-ANDROID-PLATFORM" : [{
+                        "region" : "CLIENT-REGION-ANDROID-PLATFORM",
+                        "url" : "HOME-PAGE-URL?client_region=XX&client_platform=XX"
+                     }],
                     "None" : [{
                         "region" : "None",
                         "url" : "DEFAULT-HOME-PAGE-URL?client_region=XX&device_region=XX"
@@ -72,13 +76,17 @@ func TestDatabase(t *testing.T) {
                         "region" : "CLIENT-REGION",
                         "url" : "MOBILE-HOME-PAGE-URL?client_region=XX&client_asn=XX"
                      }],
+                    "CLIENT-REGION-IOS-PLATFORM" : [{
+                        "region" : "CLIENT-REGION-IOS-PLATFORM",
+                        "url" : "MOBILE-HOME-PAGE-URL?client_asn=XX&client_platform=XX"
+                     }],
                     "None" : [{
                         "region" : "None",
                         "url" : "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=XX&client_asn=XX"
                      }]
                 },
                 "alert_action_urls" : {
-                    "ALERT-REASON-1" : ["SPONSOR-ALERT-1-ACTION-URL?client_region=XX&device_region=XX"]
+                    "ALERT-REASON-1" : ["SPONSOR-ALERT-1-ACTION-URL?client_region=XX&device_region=XX&client_platform=XX"]
                 },
                 "https_request_regexes" : [{
                     "regex" : "REGEX-VALUE",
@@ -124,26 +132,29 @@ func TestDatabase(t *testing.T) {
 	}
 
 	homePageTestCases := []struct {
-		sponsorID    string
-		clientRegion string
-		clientASN    string
-		deviceRegion string
-		isMobile     bool
-		expectedURL  string
+		sponsorID                string
+		clientRegion             string
+		clientASN                string
+		deviceRegion             string
+		normalizedClientPlatform string
+		isMobile                 bool
+		expectedURL              string
 	}{
-		{"SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION"},
-		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&device_region=DEVICE-REGION"},
-		{"SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
-		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
-		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", false, "HOME-PAGE-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&device_region=DEVICE-REGION"},
-		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
-		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
+		{"SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", false, "HOME-PAGE-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&device_region=DEVICE-REGION"},
+		{"SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
+		{"SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", false, "HOME-PAGE-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", false, "DEFAULT-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&device_region=DEVICE-REGION"},
+		{"UNCONFIGURED-SPONSOR-ID", "CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", true, "MOBILE-HOME-PAGE-URL?client_region=CLIENT-REGION&client_asn=65535"},
+		{"UNCONFIGURED-SPONSOR-ID", "UNCONFIGURED-CLIENT-REGION", "65535", "DEVICE-REGION", "CLIENT-PLATFORM", true, "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=UNCONFIGURED-CLIENT-REGION&client_asn=65535"},
+		{"SPONSOR-ID", "CLIENT-REGION-ANDROID-PLATFORM", "65535", "DEVICE-REGION", "Android", false, "HOME-PAGE-URL?client_region=CLIENT-REGION-ANDROID-PLATFORM&client_platform=android"},
+		{"SPONSOR-ID", "CLIENT-REGION-IOS-PLATFORM", "65535", "DEVICE-REGION", "iOS", true, "MOBILE-HOME-PAGE-URL?client_asn=65535&client_platform=ios"},
 	}
 
 	for _, testCase := range homePageTestCases {
 		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
-			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.clientASN, testCase.deviceRegion, testCase.isMobile)
+			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.clientASN, testCase.deviceRegion, testCase.normalizedClientPlatform, testCase.isMobile)
 			if len(homepages) != 1 || homepages[0] != testCase.expectedURL {
 				t.Fatalf("unexpected home page: %+v", homepages)
 			}
@@ -156,7 +167,7 @@ func TestDatabase(t *testing.T) {
 		expectedURLCount int
 		expectedURL      string
 	}{
-		{"ALERT-REASON-1", "SPONSOR-ID", 1, "SPONSOR-ALERT-1-ACTION-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION"},
+		{"ALERT-REASON-1", "SPONSOR-ID", 1, "SPONSOR-ALERT-1-ACTION-URL?client_region=CLIENT-REGION&device_region=DEVICE-REGION&client_platform=client-platform"},
 		{"ALERT-REASON-1", "UNCONFIGURED-SPONSOR-ID", 1, "DEFAULT-ALERT-1-ACTION-URL?client_region=CLIENT-REGION"},
 		{"ALERT-REASON-2", "SPONSOR-ID", 1, "DEFAULT-ALERT-2-ACTION-URL?client_region=CLIENT-REGION"},
 		{"ALERT-REASON-2", "UNCONFIGURED-SPONSOR-ID", 1, "DEFAULT-ALERT-2-ACTION-URL?client_region=CLIENT-REGION"},
@@ -165,7 +176,7 @@ func TestDatabase(t *testing.T) {
 
 	for _, testCase := range alertActionURLTestCases {
 		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
-			URLs := db.GetAlertActionURLs(testCase.alertReason, testCase.sponsorID, "CLIENT-REGION", "", "DEVICE-REGION")
+			URLs := db.GetAlertActionURLs(testCase.alertReason, testCase.sponsorID, "CLIENT-REGION", "", "DEVICE-REGION", "CLIENT-PLATFORM")
 			if len(URLs) != testCase.expectedURLCount || (len(URLs) > 0 && URLs[0] != testCase.expectedURL) {
 				t.Fatalf("unexpected URLs: %d %+v, %+v", testCase.expectedURLCount, testCase.expectedURL, URLs)
 			}

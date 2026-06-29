@@ -65,6 +65,7 @@ func main() {
 	var recommendedTLSPaddingProbability float64
 	var recommendedMinTLSPadding int
 	var recommendedMaxTLSPadding int
+	var proxyEntryTTL time.Duration
 	var allowedDestinations stringListFlag
 	var passthroughAddress string
 	var splitUpstreamInterfaceName string
@@ -165,6 +166,12 @@ func main() {
 		0,
 		"generate recommended maximum TLS padding; optional")
 
+	flag.DurationVar(
+		&proxyEntryTTL,
+		"proxyEntryTTL",
+		0,
+		"generate proxy entry TTL; optional; 0 means no expiry")
+
 	flag.Var(
 		&allowedDestinations,
 		"allowedDestination",
@@ -260,7 +267,10 @@ func main() {
 				recommendedTLSPaddingProbability,
 				recommendedMinTLSPadding,
 				recommendedMaxTLSPadding,
+				proxyEntryTTL,
 				[]string(allowedDestinations),
+				nil,
+				nil,
 				passthroughAddress)
 			if err != nil {
 				return errors.Trace(err)
@@ -573,6 +583,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
 		`completedTCP: %s, completedTLS: %s, completedLightHeader: %s, ` +
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
+		`proxyProtocolHeaderAdded: %t, proxyProtocolHeaderReplaced: %t, ` +
 		`bytesRead: %d, bytesWritten: %d, ` +
 		`failure: %s` + "\n"
 
@@ -602,6 +613,8 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		stats.ProxyCompletedUpstreamDNS.Format(time.RFC3339Nano),
 		stats.ProxyCompletedUpstreamTCP.Format(time.RFC3339Nano),
 		stats.UpstreamDNSCached,
+		stats.ProxyProtocolHeaderAdded,
+		stats.ProxyProtocolHeaderReplaced,
 		stats.BytesRead,
 		stats.BytesWritten,
 		stats.Failure)

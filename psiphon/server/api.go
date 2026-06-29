@@ -430,6 +430,7 @@ func handshakeAPIRequestHandler(
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
+		normalizedPlatform,
 		isMobile)
 
 	clientAddress := ""

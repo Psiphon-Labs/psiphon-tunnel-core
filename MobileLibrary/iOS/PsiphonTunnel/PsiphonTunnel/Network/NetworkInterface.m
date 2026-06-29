@@ -22,9 +22,8 @@
 #import <net/if.h>
 #import <ifaddrs.h>
 #import <netdb.h>
-#import <netinet6/in6.h>
-#import <Network/path.h>
-#import <Network/path_monitor.h>
+#import <netinet/in.h>
+#import <Network/Network.h>
 #import "DefaultRouteMonitor.h"
 
 @implementation NetworkInterface

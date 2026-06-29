@@ -1,3 +1,4 @@
+//go:build !windows && !plan9 && !solaris && !aix
 // +build !windows,!plan9,!solaris,!aix
 
 package bolt
@@ -7,6 +8,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // flock acquires an advisory lock on a file descriptor.
@@ -84,10 +87,9 @@ func munmap(db *DB) error {
 }
 
 // NOTE: This function is copied from stdlib because it is not available on darwin.
+//
+// Implemented via golang.org/x/sys/unix, which routes through libSystem on
+// Apple platforms, instead of syscall.Syscall.
 func madvise(b []byte, advice int) (err error) {
-	_, _, e1 := syscall.Syscall(syscall.SYS_MADVISE, uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)), uintptr(advice))
-	if e1 != 0 {
-		err = e1
-	}
-	return
+	return unix.Madvise(b, advice)
 }

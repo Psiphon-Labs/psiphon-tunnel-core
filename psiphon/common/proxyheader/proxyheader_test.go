@@ -17,7 +17,7 @@
  *
  */
 
-package server
+package proxyheader
 
 import (
 	"bufio"
@@ -42,13 +42,13 @@ func TestProxyProtocolHeaderVerification(t *testing.T) {
 
 func runTestProxyProtocolHeaderVerification() error {
 
-	keyID := make([]byte, proxyProtocolHeaderKeyIDSize)
+	keyID := make([]byte, ProxyProtocolHeaderKeyIDSize)
 	binary.BigEndian.PutUint32(keyID, 1)
-	key := prng.Bytes(32)
+	key := prng.Bytes(ProxyProtocolHeaderMACKeySize)
 
-	incorrectKeyID := make([]byte, proxyProtocolHeaderKeyIDSize)
+	incorrectKeyID := make([]byte, ProxyProtocolHeaderKeyIDSize)
 	binary.BigEndian.PutUint32(incorrectKeyID, 2)
-	incorrectKey := prng.Bytes(32)
+	incorrectKey := prng.Bytes(ProxyProtocolHeaderMACKeySize)
 
 	sourceIP := net.ParseIP("127.0.0.1")
 	destinationIP := net.ParseIP("127.0.0.2")
@@ -56,7 +56,7 @@ func runTestProxyProtocolHeaderVerification() error {
 
 	// Test: check offset of final TLV and MAC
 
-	wireHeader, err := makeProxyProtocolHeader(
+	wireHeader, err := MakeProxyProtocolHeader(
 		keyID, key, sourceIP, destinationIP, destinationPort)
 	if err != nil {
 		return errors.Trace(err)
@@ -90,7 +90,7 @@ func runTestProxyProtocolHeaderVerification() error {
 
 	// Test: successful verification
 
-	wireHeader, err = makeProxyProtocolHeader(
+	wireHeader, err = MakeProxyProtocolHeader(
 		keyID, key, sourceIP, destinationIP, destinationPort)
 	if err != nil {
 		return errors.Trace(err)
@@ -101,7 +101,7 @@ func runTestProxyProtocolHeaderVerification() error {
 		headerDestinationIP,
 		headerDestinationPort,
 		err :=
-		verifyProxyProtocolHeader(keyID, key, wireHeader)
+		VerifyProxyProtocolHeader(keyID, key, wireHeader)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -116,7 +116,7 @@ func runTestProxyProtocolHeaderVerification() error {
 	// Test: wrong key ID
 
 	_, _, _, _, err =
-		verifyProxyProtocolHeader(incorrectKeyID, key, wireHeader)
+		VerifyProxyProtocolHeader(incorrectKeyID, key, wireHeader)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
@@ -124,7 +124,7 @@ func runTestProxyProtocolHeaderVerification() error {
 	// Test: wrong key
 
 	_, _, _, _, err =
-		verifyProxyProtocolHeader(keyID, incorrectKey, wireHeader)
+		VerifyProxyProtocolHeader(keyID, incorrectKey, wireHeader)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
@@ -134,12 +134,12 @@ func runTestProxyProtocolHeaderVerification() error {
 	wireHeader[16] ^= 0xff // Flip source IPv4 field bits
 
 	_, _, _, _, err =
-		verifyProxyProtocolHeader(keyID, key, wireHeader)
+		VerifyProxyProtocolHeader(keyID, key, wireHeader)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
 
-	// Note: addOrReplaceProxyProtocolHeader is exercised in server_test.
+	// Note: AddOrReplaceProxyProtocolHeader is exercised in server_test.
 
 	return nil
 }
