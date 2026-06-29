@@ -668,7 +668,11 @@ func MakeDialParameters(
 		}
 	}
 
-	if config.TunnelDialsUseUpstreamProxy() {
+	if config.TunnelDialsUseUpstreamProxy() &&
+
+		// Tactics requests use UpstreamProxyURL when configured, but do not
+		// use the light proxy in personal light proxy tunnel mode.
+		(!isTactics || config.UpstreamProxyURL != "") {
 
 		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
 		// called via selectProtocol, will filter out protocols such that will not
