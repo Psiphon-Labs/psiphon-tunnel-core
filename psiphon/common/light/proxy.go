@@ -144,6 +144,14 @@ type ActivityStats struct {
 	BytesDown              int64
 	BytesDuration          time.Duration
 	CurrentConnectionCount int64
+	RegionActivity         map[string]RegionActivityStats
+}
+
+// RegionActivityStats are per-region proxy activity stats.
+type RegionActivityStats struct {
+	BytesUp                int64
+	BytesDown              int64
+	CurrentConnectionCount int64
 }
 
 // ProxyEventReceiver receives event callbacks from a light proxy, and handles
@@ -222,6 +230,15 @@ type Proxy struct {
 
 	activityBytesUp        atomic.Int64
 	activityBytesDown      atomic.Int64
+	currentConnectionCount atomic.Int64
+
+	activityRegionsMutex sync.Mutex
+	regionActivity       map[string]*regionActivity
+}
+
+type regionActivity struct {
+	bytesUp                atomic.Int64
+	bytesDown              atomic.Int64
 	currentConnectionCount atomic.Int64
 }
 
@@ -497,6 +514,7 @@ func NewProxy(
 			0,
 			rateLimiterReapHistoryFrequency,
 			rateLimiterMaxCacheEntries),
+		regionActivity: make(map[string]*regionActivity),
 	}
 
 	tlsConfig.PassthroughAddress = config.PassthroughAddress
@@ -781,6 +799,17 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 
 	geoIPData = proxy.lookupGeoIP(clientIP)
 
+	if proxy.config.EmitActivity {
+		activityRegion := proxy.getOrCreateRegionActivity(geoIPData.Country)
+		if activityRegion != nil {
+			bytesCounter.activityRegion = activityRegion
+			activityRegion.currentConnectionCount.Add(1)
+			defer func() {
+				activityRegion.currentConnectionCount.Add(-1)
+			}()
+		}
+	}
+
 	activityConn, err := common.NewActivityMonitoredConn(
 		conn,
 		proxy.inactivityTimeout,
@@ -1002,9 +1031,10 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 }
 
 type bytesCounter struct {
-	bytesRead     atomic.Int64
-	bytesWritten  atomic.Int64
-	activityProxy *Proxy
+	bytesRead      atomic.Int64
+	bytesWritten   atomic.Int64
+	activityProxy  *Proxy
+	activityRegion *regionActivity
 }
 
 func (counter *bytesCounter) UpdateProgress(bytesRead, bytesWritten, _ int64) {
@@ -1014,6 +1044,52 @@ func (counter *bytesCounter) UpdateProgress(bytesRead, bytesWritten, _ int64) {
 		counter.activityProxy.activityBytesUp.Add(bytesRead)
 		counter.activityProxy.activityBytesDown.Add(bytesWritten)
 	}
+	if counter.activityRegion != nil {
+		counter.activityRegion.bytesUp.Add(bytesRead)
+		counter.activityRegion.bytesDown.Add(bytesWritten)
+	}
+}
+
+func (proxy *Proxy) getOrCreateRegionActivity(region string) *regionActivity {
+	if region == "" {
+		return nil
+	}
+
+	proxy.activityRegionsMutex.Lock()
+	defer proxy.activityRegionsMutex.Unlock()
+
+	stats, ok := proxy.regionActivity[region]
+	if !ok {
+		stats = &regionActivity{}
+		proxy.regionActivity[region] = stats
+	}
+	return stats
+}
+
+func (proxy *Proxy) snapshotAndResetRegionActivity() map[string]RegionActivityStats {
+	proxy.activityRegionsMutex.Lock()
+	defer proxy.activityRegionsMutex.Unlock()
+
+	result := make(map[string]RegionActivityStats, len(proxy.regionActivity))
+	var regionsToDelete []string
+	for region, stats := range proxy.regionActivity {
+		snapshot := RegionActivityStats{
+			BytesUp:                stats.bytesUp.Swap(0),
+			BytesDown:              stats.bytesDown.Swap(0),
+			CurrentConnectionCount: stats.currentConnectionCount.Load(),
+		}
+		if snapshot.BytesUp > 0 ||
+			snapshot.BytesDown > 0 ||
+			snapshot.CurrentConnectionCount > 0 {
+			result[region] = snapshot
+		} else {
+			regionsToDelete = append(regionsToDelete, region)
+		}
+	}
+	for _, region := range regionsToDelete {
+		delete(proxy.regionActivity, region)
+	}
+	return result
 }
 
 func (proxy *Proxy) activityUpdate(ctx context.Context) {
@@ -1025,13 +1101,17 @@ func (proxy *Proxy) activityUpdate(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			bytesUp := proxy.activityBytesUp.Swap(0)
+			bytesDown := proxy.activityBytesDown.Swap(0)
+			regionActivity := proxy.snapshotAndResetRegionActivity()
 			proxy.eventReceiver.Activity(&ActivityStats{
 				ProxyID:                proxy.ID,
 				ProxyProviderID:        proxy.config.ProviderID,
-				BytesUp:                proxy.activityBytesUp.Swap(0),
-				BytesDown:              proxy.activityBytesDown.Swap(0),
+				BytesUp:                bytesUp,
+				BytesDown:              bytesDown,
 				BytesDuration:          activityUpdatePeriod,
 				CurrentConnectionCount: proxy.currentConnectionCount.Load(),
+				RegionActivity:         regionActivity,
 			})
 		case <-ctx.Done():
 			return
