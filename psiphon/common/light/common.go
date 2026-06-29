@@ -222,7 +222,7 @@ func prepareProxyProtocolHeaderConfigs(
 func normalizeDestinationAddress(address string) (string, error) {
 
 	// TODO: make common helper and also use for
-	// psiphon/server.normalizeProxyProtocolTargetDestinationAddress.
+	// psiphon/server.normalizeHostAddress.
 
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {

@@ -553,7 +553,7 @@ func getProxyProtocolHeaderConfig(
 	for _, target := range targets {
 		normalizedTargets = append(
 			normalizedTargets,
-			normalizeProxyProtocolTargetDestinationAddress(target))
+			normalizeHostAddress(target))
 	}
 
 	return &proxyProtocolHeaderConfig{
@@ -562,7 +562,7 @@ func getProxyProtocolHeaderConfig(
 	}
 }
 
-func normalizeProxyProtocolTargetDestinationAddress(target string) string {
+func normalizeHostAddress(target string) string {
 
 	// Normalize IP address representation.
 	ip := net.ParseIP(target)
@@ -907,6 +907,10 @@ func statusAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
+			if bytes < 0 {
+				continue
+			}
+
 			// Limitation: only TCP bytes are reported.
 			support.destBytesLogger.AddDomainBytes(
 				domain,

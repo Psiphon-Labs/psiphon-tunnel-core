@@ -3552,6 +3552,12 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 
 	if isUdpgwChannel {
 
+		completed, _ := sshClient.getHandshaked()
+		if !completed {
+			sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+			return
+		}
+
 		// Dispatch immediately. handleUDPChannel runs the udpgw protocol in its
 		// own worker goroutine.
 
@@ -4940,6 +4946,8 @@ func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
 		return false, "invalid domain name"
 	}
 
+	domain = normalizeHostAddress(domain)
+
 	// Don't even attempt to resolve the default mDNS top-level domain.
 	// Non-default cases won't be caught here but should fail to resolve due
 	// to the PreferGo setting in net.Resolver.
@@ -5286,7 +5294,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	addProxyProtocolHeader :=
 		sshClient.handshakeState.proxyProtocolHeaderConfig != nil &&
 			sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses.Contains(
-				normalizeProxyProtocolTargetDestinationAddress(hostToConnect))
+				normalizeHostAddress(hostToConnect))
 
 	// Validate the domain name and check the domain blocklist before dialing.
 	//
