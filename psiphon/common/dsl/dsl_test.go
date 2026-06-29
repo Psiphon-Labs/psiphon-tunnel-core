@@ -50,6 +50,7 @@ type testConfig struct {
 	expectFailure      bool
 	cacheServerEntries bool
 	cacheOSLFileSpecs  bool
+	testLightProxy     bool
 }
 
 func TestDSLs(t *testing.T) {
@@ -121,6 +122,11 @@ func TestDSLs(t *testing.T) {
 			cacheServerEntries: true,
 			cacheOSLFileSpecs:  true,
 		},
+		{
+			name: "light proxy entries",
+
+			testLightProxy: true,
+		},
 	}
 
 	for _, testConfig := range tests {
@@ -188,6 +194,44 @@ func testDSLs(testConfig *testConfig) error {
 		return errors.Trace(err)
 	}
 	defer backend.Stop()
+
+	// Initialize light proxy entries. These are opaque bytes here; the dsl
+	// fetcher does not decode or validate them (validation happens in the
+	// client's StoreLightProxy at import time).
+
+	var backendLightProxyEntries []*struct {
+		ProxyEntry        []byte
+		ProxyEntryTracker int64
+	}
+	if testConfig.testLightProxy {
+		backendLightProxyEntries = []*struct {
+			ProxyEntry        []byte
+			ProxyEntryTracker int64
+		}{
+			{
+				ProxyEntry:        []byte("test-light-proxy-entry"),
+				ProxyEntryTracker: 0x0102030405060708,
+			},
+		}
+		backend.SetLightProxyEntries(backendLightProxyEntries)
+	}
+
+	var lightProxyMutex sync.Mutex
+	var storedLightProxyEntries []*struct {
+		ProxyEntry        []byte
+		ProxyEntryTracker int64
+	}
+	storeLightProxy := func(proxyEntry []byte, proxyEntryTracker int64) error {
+		lightProxyMutex.Lock()
+		defer lightProxyMutex.Unlock()
+		storedLightProxyEntries = append(
+			storedLightProxyEntries,
+			&struct {
+				ProxyEntry        []byte
+				ProxyEntryTracker int64
+			}{append([]byte(nil), proxyEntry...), proxyEntryTracker})
+		return nil
+	}
 
 	// Initialize relay
 
@@ -267,6 +311,10 @@ func testDSLs(testConfig *testConfig) error {
 	discoverCount := 128
 	getCount := 64
 	oslCount := 1
+	lightProxyCount := 0
+	if testConfig.testLightProxy {
+		lightProxyCount = 1
+	}
 	interruptLimit := 0
 	if testConfig.interruptDownloads {
 		interruptLimit = 8192
@@ -374,6 +422,7 @@ func testDSLs(testConfig *testConfig) error {
 		DatastoreSetLastActiveOSLsTime: dslClient.DatastoreSetLastActiveOSLsTime,
 		DatastoreHasServerEntry:        datastoreHasServerEntryWithCheck,
 		DatastoreStoreServerEntry:      datastoreStoreServerEntryWithCheck,
+		DatastoreStoreLightProxy:       storeLightProxy,
 		DatastoreKnownOSLIDs:           dslClient.DatastoreKnownOSLIDs,
 		DatastoreGetOSLState:           dslClient.DatastoreGetOSLState,
 		DatastoreStoreOSLState:         dslClient.DatastoreStoreOSLState,
@@ -388,6 +437,8 @@ func testDSLs(testConfig *testConfig) error {
 		FetchTTL:                      1 * time.Hour,
 		DiscoverServerEntriesMinCount: discoverCount,
 		DiscoverServerEntriesMaxCount: discoverCount,
+		DiscoverLightProxyMinCount:    lightProxyCount,
+		DiscoverLightProxyMaxCount:    lightProxyCount,
 		GetServerEntriesMinCount:      getCount,
 		GetServerEntriesMaxCount:      getCount,
 		GetLastActiveOSLsTTL:          1 * time.Hour,
@@ -546,6 +597,34 @@ func testDSLs(testConfig *testConfig) error {
 
 	if unexpectedServerEntryPrioritizeDial.Load() != 0 {
 		return errors.TraceNew("unexpected server entry prioritize dial")
+	}
+
+	if testConfig.testLightProxy {
+		lightProxyMutex.Lock()
+		defer lightProxyMutex.Unlock()
+
+		// At least one light proxy entry should have been imported (exactly
+		// one per Discover request, selected at random from the configured
+		// set).
+		if len(storedLightProxyEntries) < 1 {
+			return errors.TraceNew("expected light proxy entry import")
+		}
+
+		// Every imported light proxy entry must match a configured entry,
+		// confirming the bytes and tracker round-trip correctly.
+		for _, stored := range storedLightProxyEntries {
+			matched := false
+			for _, expected := range backendLightProxyEntries {
+				if bytes.Equal(stored.ProxyEntry, expected.ProxyEntry) &&
+					stored.ProxyEntryTracker == expected.ProxyEntryTracker {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return errors.TraceNew("unexpected light proxy entry")
+			}
+		}
 	}
 
 	return nil

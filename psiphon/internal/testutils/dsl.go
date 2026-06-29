@@ -62,7 +62,8 @@ type DSLBackendTestShim interface {
 		cborRequest []byte) (
 		apiParams protocol.PackedAPIParameters,
 		oslKeys [][]byte,
-		discoverCount int32,
+		serverEntryDiscoverCount int32,
+		lightProxyDiscoverCount int32,
 		retErr error)
 
 	MarshalDiscoverServerEntriesResponse(
@@ -72,6 +73,10 @@ type DSLBackendTestShim interface {
 			PrioritizeDial           bool
 			PrioritizeReason         string
 			PrioritizeTunnelProtocol string
+		},
+		lightProxyEntries []*struct {
+			ProxyEntry        []byte
+			ProxyEntryTracker int64
 		}) (
 		cborResponse []byte,
 		retErr error)
@@ -120,9 +125,17 @@ type TestDSLBackend struct {
 	expectedClientGeoIPData *common.GeoIPData
 	expectedHostID          string
 	oslPaveData             atomic.Value
+	lightProxyEntries       atomic.Value
 	untunneledServerEntries map[string]*dslSourcedServerEntry
 	tunneledServerEntries   map[string]*dslSourcedServerEntry
 	listener                net.Listener
+}
+
+// dslLightProxyEntry mirrors the anonymous struct shape expected by
+// DSLBackendTestShim.MarshalDiscoverServerEntriesResponse.
+type dslLightProxyEntry = struct {
+	ProxyEntry        []byte
+	ProxyEntryTracker int64
 }
 
 type dslSourcedServerEntry struct {
@@ -456,6 +469,14 @@ func (b *TestDSLBackend) SetOSLPaveData(oslPaveData []*osl.PaveData) {
 	b.oslPaveData.Store(oslPaveData)
 }
 
+// SetLightProxyEntries sets the light proxy entries returned in
+// DiscoverServerEntries responses. Each ProxyEntry is an opaque encoded
+// light.SignedProxyEntry.
+func (b *TestDSLBackend) SetLightProxyEntries(
+	lightProxyEntries []*dslLightProxyEntry) {
+	b.lightProxyEntries.Store(lightProxyEntries)
+}
+
 func (b *TestDSLBackend) handleDiscoverServerEntries(
 	tunneled bool,
 	cborRequest []byte) ([]byte, error) {
@@ -465,7 +486,7 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 		serverEntries = b.tunneledServerEntries
 	}
 
-	_, oslKeys, discoverCount, err :=
+	_, oslKeys, discoverCount, lightProxyDiscoverCount, err :=
 		b.shim.UnmarshalDiscoverServerEntriesRequest(cborRequest)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -536,8 +557,19 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 		}
 	}
 
+	// Light proxy entries, when configured, are returned regardless of OSL
+	// gating; they are not compartmentalized in this test backend. The
+	// client-driven lightProxyDiscoverCount caps how many are returned.
+	var lightProxyEntries []*dslLightProxyEntry
+	if lightProxyEntriesValue := b.lightProxyEntries.Load(); lightProxyEntriesValue != nil {
+		lightProxyEntries = lightProxyEntriesValue.([]*dslLightProxyEntry)
+		if len(lightProxyEntries) > int(lightProxyDiscoverCount) {
+			lightProxyEntries = lightProxyEntries[:lightProxyDiscoverCount]
+		}
+	}
+
 	cborResponse, err := b.shim.MarshalDiscoverServerEntriesResponse(
-		versionedServerEntryTags)
+		versionedServerEntryTags, lightProxyEntries)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
