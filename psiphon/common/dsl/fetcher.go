@@ -615,7 +615,7 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
-	discoverCount int,
+	serverEntryDiscoverCount int,
 	lightProxyDiscoverCount int) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
@@ -630,7 +630,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		request := &DiscoverServerEntriesRequest{
 			BaseAPIParameters:        f.packedAPIParameters,
 			OSLKeys:                  keys,
-			ServerEntryDiscoverCount: int32(discoverCount),
+			ServerEntryDiscoverCount: int32(serverEntryDiscoverCount),
 			LightProxyDiscoverCount:  int32(lightProxyDiscoverCount),
 		}
 
@@ -647,9 +647,10 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"tunneled":      f.config.Tunneled,
-			"discoverCount": discoverCount,
-			"error":         err.Error(),
+			"tunneled":                 f.config.Tunneled,
+			"serverEntryDiscoverCount": serverEntryDiscoverCount,
+			"lightProxyDiscoverCount":  lightProxyDiscoverCount,
+			"error":                    err.Error(),
 		}).Warning("DSL: doDiscoverServerEntriesRequest failed")
 
 		common.SleepWithContext(
@@ -658,8 +659,11 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 				f.config.RequestRetryDelay,
 				f.config.RequestRetryDelayJitter))
 
-		if discoverCount > 1 {
-			discoverCount /= 2
+		if serverEntryDiscoverCount > 1 {
+			serverEntryDiscoverCount /= 2
+		}
+		if lightProxyDiscoverCount > 1 {
+			lightProxyDiscoverCount /= 2
 		}
 	}
 }
