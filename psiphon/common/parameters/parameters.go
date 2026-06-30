@@ -585,16 +585,17 @@ const (
 	SSHChannelWindowSize                               = "SSHChannelWindowSize"
 	SSHPacketTunnelChannelWindowSize                   = "SSHPacketTunnelChannelWindowSize"
 	DisableServerEntriesReporter                       = "DisableServerEntriesReporter"
-	LightProxyDisable                                  = "LightProxyDisable"
+	LightProxyDisableFallback                          = "LightProxyDisableFallback"
 	LightProxyCustomHostNameRegexes                    = "LightProxyCustomHostNameRegexes"
 	LightProxyCustomHostNameProbability                = "LightProxyCustomHostNameProbability"
-	LightProxyUseRecommendedSNIProbability             = "LightProxyUseRecommendedSNIProbability"
 	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 
 	// Retired parameters
 
+	LightProxyUseRecommendedSNIProbability    = "LightProxyUseRecommendedSNIProbability"
+	LightProxyDisable                         = "LightProxyDisable"
 	ReplayRandomizedTLSProfile                = "ReplayRandomizedTLSProfile"
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
@@ -1263,6 +1264,7 @@ var defaultParameters = map[string]struct {
 
 	DisableServerEntriesReporter: {value: false},
 
+	LightProxyDisableFallback:              {value: false},
 	LightProxyDisable:                      {value: false},
 	LightProxyCustomHostNameRegexes:        {value: RegexStrings{}},
 	LightProxyCustomHostNameProbability:    {value: 0.0, minimum: 0.0},

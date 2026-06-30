@@ -199,7 +199,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig(sessionTicketKey string) (*tl
 
 			// Use a custom, shorter TTL based on the validity period of the
 			// passthrough message.
-			TTL := obfuscator.TLS_PASSTHROUGH_TIME_PERIOD
+			TTL := obfuscator.TLS_PASSTHROUGH_HISTORY_TTL
 
 			// strictMode is true as legitimate clients never retry TLS
 			// connections using a previous random value.

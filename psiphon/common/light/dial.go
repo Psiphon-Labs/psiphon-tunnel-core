@@ -77,13 +77,14 @@ func (addrs netTCPAddrs) isEmpty() bool {
 func netDialParallel(
 	ctx context.Context,
 	fallbackDelay time.Duration,
-	addrs netTCPAddrs) (net.Conn, error) {
+	addrs netTCPAddrs,
+	dialer *net.Dialer) (net.Conn, error) {
 
 	primaries := addrs[0]
 	fallbacks := addrs[1]
 
 	if len(fallbacks) == 0 {
-		conn, err := netDialSerial(ctx, primaries)
+		conn, err := netDialSerial(ctx, primaries, dialer)
 		return conn, errors.Trace(err)
 	}
 
@@ -103,7 +104,7 @@ func netDialParallel(
 		if !primary {
 			ras = fallbacks
 		}
-		c, err := netDialSerial(ctx, ras)
+		c, err := netDialSerial(ctx, ras, dialer)
 		select {
 		case results <- dialResult{Conn: c, error: err, primary: primary, done: true}:
 		case <-returned:
@@ -158,7 +159,7 @@ func netDialParallel(
 //
 // dialSerial connects to a list of addresses in sequence, returning
 // either the first successful connection, or the first error.
-func netDialSerial(ctx context.Context, ras []net.TCPAddr) (net.Conn, error) {
+func netDialSerial(ctx context.Context, ras []net.TCPAddr, dialer *net.Dialer) (net.Conn, error) {
 	var firstErr error // The error from the first address is most relevant.
 
 	for i, ra := range ras {
@@ -185,7 +186,7 @@ func netDialSerial(ctx context.Context, ras []net.TCPAddr) (net.Conn, error) {
 			}
 		}
 
-		c, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", ra.String())
+		c, err := dialer.DialContext(dialCtx, "tcp", ra.String())
 		if err == nil {
 			return c, nil
 		}

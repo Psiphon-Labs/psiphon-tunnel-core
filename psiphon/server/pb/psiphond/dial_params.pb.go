@@ -115,6 +115,7 @@ type DialParams struct {
 	MeekPayloadPadding                *bool                  `protobuf:"varint,89,opt,name=meek_payload_padding,json=meekPayloadPadding,proto3,oneof" json:"meek_payload_padding,omitempty"`
 	DslPrioritizedReason              *string                `protobuf:"bytes,90,opt,name=dsl_prioritized_reason,json=dslPrioritizedReason,proto3,oneof" json:"dsl_prioritized_reason,omitempty"`
 	DslPrioritizedTunnelProtocol      *string                `protobuf:"bytes,91,opt,name=dsl_prioritized_tunnel_protocol,json=dslPrioritizedTunnelProtocol,proto3,oneof" json:"dsl_prioritized_tunnel_protocol,omitempty"`
+	TunnelPersonalLightProxyId        *string                `protobuf:"bytes,92,opt,name=tunnel_personal_light_proxy_id,json=tunnelPersonalLightProxyId,proto3,oneof" json:"tunnel_personal_light_proxy_id,omitempty"`
 	unknownFields                     protoimpl.UnknownFields
 	sizeCache                         protoimpl.SizeCache
 }
@@ -786,11 +787,18 @@ func (x *DialParams) GetDslPrioritizedTunnelProtocol() string {
 	return ""
 }
 
+func (x *DialParams) GetTunnelPersonalLightProxyId() string {
+	if x != nil && x.TunnelPersonalLightProxyId != nil {
+		return *x.TunnelPersonalLightProxyId
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcb6\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb77\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -893,7 +901,8 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1cfirst_fronted_meek_candidate\x18X \x01(\x03HVR\x19firstFrontedMeekCandidate\x88\x01\x01\x125\n" +
 	"\x14meek_payload_padding\x18Y \x01(\bHWR\x12meekPayloadPadding\x88\x01\x01\x129\n" +
 	"\x16dsl_prioritized_reason\x18Z \x01(\tHXR\x14dslPrioritizedReason\x88\x01\x01\x12J\n" +
-	"\x1fdsl_prioritized_tunnel_protocol\x18[ \x01(\tHYR\x1cdslPrioritizedTunnelProtocol\x88\x01\x01B\x11\n" +
+	"\x1fdsl_prioritized_tunnel_protocol\x18[ \x01(\tHYR\x1cdslPrioritizedTunnelProtocol\x88\x01\x01\x12G\n" +
+	"\x1etunnel_personal_light_proxy_id\x18\\ \x01(\tHZR\x1atunnelPersonalLightProxyId\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -985,7 +994,8 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1d_first_fronted_meek_candidateB\x17\n" +
 	"\x15_meek_payload_paddingB\x19\n" +
 	"\x17_dsl_prioritized_reasonB\"\n" +
-	" _dsl_prioritized_tunnel_protocolBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	" _dsl_prioritized_tunnel_protocolB!\n" +
+	"\x1f_tunnel_personal_light_proxy_idBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dial_params_proto_rawDescOnce sync.Once

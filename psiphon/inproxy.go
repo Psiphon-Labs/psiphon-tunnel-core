@@ -1212,10 +1212,6 @@ func MakeInproxyBrokerDialParameters(
 	brokerSpec *parameters.InproxyBrokerSpec,
 	tlsCache utls.ClientSessionCache) (*InproxyBrokerDialParameters, error) {
 
-	if config.UseUpstreamProxy() {
-		return nil, errors.TraceNew("upstream proxy unsupported")
-	}
-
 	currentTimestamp := time.Now()
 
 	// Select new broker dial parameters
@@ -1236,6 +1232,11 @@ func MakeInproxyBrokerDialParameters(
 	// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
 	// meek cookies, so meek obfuscation is not configured. The in-proxy
 	// broker session payloads have their own obfuscation layer.
+	//
+	// makeFrontedMeekDialParameters may wire up upstream proxy support, which
+	// is compatible with the current broker transports. While in-proxy
+	// tunnel protocols are incompatible with UpstreamProxyURL, other broker
+	// use cases, such as relayed DSL requests, will still work.
 
 	payloadSecure := true
 	skipVerify := false

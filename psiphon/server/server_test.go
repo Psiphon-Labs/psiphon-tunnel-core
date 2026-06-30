@@ -55,10 +55,12 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
@@ -166,6 +168,18 @@ func TestSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+		})
+}
+
+func TestPersonalLightProxySSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:              "SSH",
+			requireAuthorization:        true,
+			doTunneledWebRequest:        true,
+			doLogHostProvider:           true,
+			doLogProtobuf:               false,
+			usePersonalLightProxyTunnel: true,
 		})
 }
 
@@ -870,6 +884,7 @@ type runServerConfig struct {
 	doLogProtobuf                bool
 	doProxyProtocolHeader        bool
 	doReplaceProxyProtocolHeader bool
+	usePersonalLightProxyTunnel  bool
 }
 
 var (
@@ -896,6 +911,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	psiphonServerIPAddress := "127.0.0.1"
 	psiphonServerPort := 4000
+	psiphonServerAddress := net.JoinHostPort(
+		psiphonServerIPAddress, strconv.Itoa(psiphonServerPort))
 
 	clientTunnelProtocol := runConfig.tunnelProtocol
 	if runConfig.clientTunnelProtocol != "" {
@@ -1306,7 +1323,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		keyID := []byte{0x00, 0x00, 0x00, 0x01}
 		proxyProtocolHeaderMACKey = append(
-			keyID, prng.Bytes(proxyProtocolHeaderMACKeySize)...)
+			keyID, prng.Bytes(proxyheader.ProxyProtocolHeaderMACKeySize)...)
 		serverConfig["ProxyProtocolHeaderMACKeys"] = map[string]string{
 			sponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
 	} else if runConfig.doReplaceProxyProtocolHeader {
@@ -1647,6 +1664,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	timer.Stop()
 
+	// run light proxy if configured
+
+	var lightProxyEntry []byte
+	const lightProxyEntryTracker = 0x0102030405060708
+	var tunnelPersonalLightProxyID string
+	if runConfig.usePersonalLightProxyTunnel {
+		lightProxyCtx, lightProxyCancel :=
+			context.WithTimeout(context.Background(), 30*time.Second)
+		defer lightProxyCancel()
+
+		var stopLightProxy func()
+		lightProxyEntry, tunnelPersonalLightProxyID, stopLightProxy, err =
+			startLightProxy(lightProxyCtx, psiphonServerAddress)
+		if err != nil {
+			t.Fatalf("error starting light proxy: %s", err)
+		}
+		defer stopLightProxy()
+	}
+
 	// reset client datastore
 
 	_ = os.RemoveAll(filepath.Join(testDataDirName, psiphon.PsiphonDataDirectoryName))
@@ -1730,6 +1766,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// the mock.DSL backend.
 	if !doDSL {
 		clientConfig.TargetServerEntry = string(encodedServerEntry)
+	}
+
+	if runConfig.usePersonalLightProxyTunnel {
+		clientConfig.EnablePersonalLightProxyTunnels = true
+		clientConfig.LightProxyEntry = lightProxyEntry
+		clientConfig.LightProxyEntryTracker = lightProxyEntryTracker
+
+		allowAllServerEntrySources := true
+		clientConfig.UpstreamProxyAllowAllServerEntrySources =
+			&allowAllServerEntrySources
 	}
 
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
@@ -2263,9 +2309,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			validateProxyProtocolHeader.Store(func(header *proxyproto.Header) error {
 				wireHeader, _ := header.Format()
 				timestamp, sourceIP, destinationIP, destinationPort, err :=
-					verifyProxyProtocolHeader(
-						proxyProtocolHeaderMACKey[:proxyProtocolHeaderKeyIDSize],
-						proxyProtocolHeaderMACKey[proxyProtocolHeaderKeyIDSize:],
+					proxyheader.VerifyProxyProtocolHeader(
+						proxyProtocolHeaderMACKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
+						proxyProtocolHeaderMACKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
 						wireHeader)
 				if err != nil {
 					return errors.Trace(err)
@@ -2526,6 +2572,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectAddedProxyProtocolHeader,
 			expectReplacedProxyProtocolHeader,
 			inproxyTestConfig,
+			tunnelPersonalLightProxyID,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -3025,6 +3072,7 @@ func checkExpectedServerTunnelLogFields(
 	expectAddedProxyProtocolHeader bool,
 	expectReplacedProxyProtocolHeader bool,
 	inproxyTestConfig *inproxyTestConfig,
+	expectTunnelPersonalLightProxyID string,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -3146,6 +3194,19 @@ func checkExpectedServerTunnelLogFields(
 	if fields["server_entry_count"].(float64) != float64(expectServerEntryCount) {
 		return fmt.Errorf("unexpected server_entry_count: '%d'",
 			int(fields["server_entry_count"].(float64)))
+	}
+
+	if runConfig.usePersonalLightProxyTunnel {
+		if fields["tunnel_personal_light_proxy_id"] == nil {
+			return fmt.Errorf("missing expected field 'tunnel_personal_light_proxy_id'")
+		}
+		if fields["tunnel_personal_light_proxy_id"].(string) != expectTunnelPersonalLightProxyID {
+			return fmt.Errorf(
+				"unexpected tunnel_personal_light_proxy_id '%s'",
+				fields["tunnel_personal_light_proxy_id"])
+		}
+	} else if fields["tunnel_personal_light_proxy_id"] != nil {
+		return fmt.Errorf("unexpected field 'tunnel_personal_light_proxy_id'")
 	}
 
 	// With interruptions, timeouts, and retries in some tests, there may be
@@ -5782,3 +5843,94 @@ func configureDSLTestServerEntries(
 
 	return nil
 }
+
+func startLightProxy(
+	ctx context.Context,
+	allowedDestination string) ([]byte, string, func(), error) {
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+	proxyAddress := proxyListener.Addr().String()
+	proxyPort := proxyListener.Addr().(*net.TCPAddr).Port
+
+	err = proxyListener.Close()
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+
+	proxyIPv6Address := net.JoinHostPort("::1", strconv.Itoa(proxyPort))
+
+	proxyConfig, proxyEntry, err := light.Generate(
+		prng.HexString(8),
+		[]string{proxyAddress, proxyIPv6Address},
+		proxyAddress,
+		proxyIPv6Address,
+		"example.org",
+		"",
+		0.5,
+		protocol.TLS_PROFILE_CHROME_133,
+		0.5,
+		0,
+		0,
+		0,
+		0,
+		0,
+		[]string{allowedDestination},
+		nil,
+		nil,
+		allowedDestination)
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+
+	proxyConfig.AllowBogons = true
+
+	receiver := &lightProxyEventReceiver{
+		listening: make(chan struct{}),
+	}
+	proxy, err := light.NewProxy(
+		proxyConfig,
+		func(string) common.GeoIPData { return common.GeoIPData{} },
+		receiver)
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+
+	proxyCtx, stopProxy := context.WithCancel(ctx)
+	go func() {
+		_ = proxy.Run(proxyCtx)
+	}()
+
+	select {
+	case <-receiver.listening:
+	case <-ctx.Done():
+		stopProxy()
+		return nil, "", nil, errors.Trace(ctx.Err())
+	}
+
+	return proxyEntry, proxy.ID, stopProxy, nil
+}
+
+type lightProxyEventReceiver struct {
+	listening     chan struct{}
+	listeningOnce sync.Once
+}
+
+func (r *lightProxyEventReceiver) Listening(string) {
+	r.listeningOnce.Do(func() { close(r.listening) })
+}
+
+func (r *lightProxyEventReceiver) Paused()                           {}
+func (r *lightProxyEventReceiver) Resumed()                          {}
+func (r *lightProxyEventReceiver) Accepted()                         {}
+func (r *lightProxyEventReceiver) Rejected()                         {}
+func (r *lightProxyEventReceiver) Connection(*light.ConnectionStats) {}
+func (r *lightProxyEventReceiver) IrregularConnection(
+	string, common.GeoIPData, string) {
+}
+func (r *lightProxyEventReceiver) DebugLog(string, string)   {}
+func (r *lightProxyEventReceiver) InfoLog(string, string)    {}
+func (r *lightProxyEventReceiver) WarningLog(string, string) {}
+func (r *lightProxyEventReceiver) ErrorLog(string, string)   {}

@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -433,6 +434,13 @@ func configureClientInterface(
 	}
 
 	return nil
+}
+
+func IsBindToDeviceSupported() bool {
+
+	// This file also builds for GOOS=android, but on Android SO_BINDTODEVICE
+	// requires CAP_NET_RAW and BindToDevice fails with EPERM at dial time.
+	return runtime.GOOS != "android"
 }
 
 // BindToDevice binds a socket to the specified interface.

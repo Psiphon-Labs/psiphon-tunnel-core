@@ -49,7 +49,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // Originally based on https://gopkg.in/getlantern/tlsdialer.v1.
 
-package psiphon
+package tlsdialer
 
 import (
 	"bytes"
@@ -72,9 +72,9 @@ import (
 	utls "github.com/Psiphon-Labs/utls"
 )
 
-// CustomTLSConfig specifies the parameters for a CustomTLSDial, supporting
+// Config specifies the parameters for a Dial, supporting
 // many TLS-related network obfuscation mechanisms.
-type CustomTLSConfig struct {
+type Config struct {
 
 	// Parameters is the active set of parameters.Parameters to use for the TLS
 	// dial. Must not be nil.
@@ -194,21 +194,20 @@ type CustomTLSConfig struct {
 	ClientSessionCache utls.ClientSessionCache
 }
 
-// NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
-func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
+// NewDialer creates a new dialer based on Dial.
+func NewDialer(config *Config) common.Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return CustomTLSDial(ctx, network, addr, config)
+		return Dial(ctx, network, addr, config)
 	}
 }
 
-// CustomTLSDial dials a new TLS connection using the parameters set in
-// CustomTLSConfig.
+// Dial dials a new TLS connection using the parameters set in Config.
 //
 // The dial aborts if ctx becomes Done before the dial completes.
-func CustomTLSDial(
+func Dial(
 	ctx context.Context,
 	network, addr string,
-	config *CustomTLSConfig) (net.Conn, error) {
+	config *Config) (net.Conn, error) {
 
 	// Note that servers may return a chain which excludes the root CA
 	// cert https://datatracker.ietf.org/doc/html/rfc8446#section-4.4.2.
@@ -407,7 +406,7 @@ func CustomTLSDial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", p)
+		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", "", p)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -760,7 +759,7 @@ func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certif
 	return nil
 }
 
-func IsTLSConnUsingHTTP2(conn net.Conn) bool {
+func IsConnUsingHTTP2(conn net.Conn) bool {
 	if t, ok := conn.(*tlsConn); ok {
 		if u, ok := t.Conn.(*utls.UConn); ok {
 			state := u.ConnectionState()
@@ -771,33 +770,102 @@ func IsTLSConnUsingHTTP2(conn net.Conn) bool {
 	return false
 }
 
+// TLSProfileSupportsTLS13 indicates whether the specified TLS profile is
+// supported and capable of negotiating TLS 1.3.
+//
+// TLS_PROFILE_RANDOMIZED, which generates a ClientHello that may negotiate
+// either TLS 1.2 or TLS 1.3, is reported as capable.
+func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
+
+	if !common.Contains(protocol.SupportedTLSProfiles, tlsProfile) {
+		return false, errors.TraceNew("unsupported TLS profile")
+	}
+
+	if protocol.TLSProfileIsRandomized(tlsProfile) {
+		return true, nil
+	}
+
+	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
+		parameters.MakeNilParametersAccessor(), tlsProfile)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	tlsVersion, err := getClientHelloVersion(
+		utlsClientHelloID, utlsClientHelloSpec)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	return tlsVersion == protocol.TLS_VERSION_13, nil
+}
+
 // SelectTLSProfile picks and returns a TLS profile at random from the
 // available candidates along with its version and a newly generated PRNG seed
 // if the profile is randomized, i.e. protocol.TLSProfileIsRandomized is true,
 // which should be used when generating a randomized TLS ClientHello.
+//
+// When preferredTLSProfile is set, it is attempted first. If the preferred
+// profile is unknown, disabled, incompatible with the requested constraints,
+// or fails the TLS version requirement, random selection is used as fallback.
+//
+// If SelectTLSProfile can't find a TLS profile that matches the input
+// constraints, including tactics parameters such as LimitTLSProfiles and
+// DisableFrontingProviderTLSProfiles, it returns an error.
 func SelectTLSProfile(
 	requireTLS12SessionTickets bool,
 	requireTLS13Support bool,
 	isFronted bool,
 	frontingProviderID string,
-	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
+	preferredTLSProfile string,
+	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
+
+	preferred := preferredTLSProfile
 
 	for i := 0; i < 1000; i++ {
-		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err = selectTLSProfile(requireTLS12SessionTickets, isFronted, frontingProviderID, p)
+
+		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err :=
+			selectTLSProfile(
+				requireTLS12SessionTickets,
+				isFronted,
+				frontingProviderID,
+				preferred,
+				p)
 		if err != nil {
 			return "", "", nil, errors.Trace(err)
 		}
+		if tlsProfile == "" {
+			if preferred != "" {
+				// The preferred profile is unknown, disabled, or incompatible
+				// with the constraints; fall back to random selection.
+				preferred = ""
+				continue
+			}
+
+			// If no profile can be selected and that's not due to a preferred
+			// choice, looping won't produce a different result.
+			break
+		}
 
 		if requireTLS13Support && tlsVersion != protocol.TLS_VERSION_13 {
+
 			// Continue picking profiles at random until an eligible one is
 			// chosen. It is okay to loop in this way because the probability of
 			// selecting a TLS 1.3 profile is high enough that it should not
 			// take too many iterations until one is chosen.
+			//
+			// A preferred non-random profile always produces the same TLS
+			// version, so fall back to random selection.
+
+			if preferred != "" && !protocol.TLSProfileIsRandomized(preferred) {
+				preferred = ""
+			}
 			continue
 		}
 
-		return
+		return tlsProfile, tlsVersion, randomizedTLSProfileSeed, nil
 	}
+
 	return "", "", nil, errors.TraceNew("Failed to select a TLS profile")
 }
 
@@ -809,7 +877,8 @@ func selectTLSProfile(
 	requireTLS12SessionTickets bool,
 	isFronted bool,
 	frontingProviderID string,
-	p parameters.ParametersAccessor) (tlsProfile string, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
+	preferredTLSProfile string,
+	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -885,7 +954,17 @@ func selectTLSProfile(
 		}
 	}
 
-	if len(randomizedTLSProfiles) > 0 &&
+	var tlsProfile, tlsVersion string
+	var randomizedTLSProfileSeed *prng.Seed
+
+	if preferredTLSProfile != "" {
+		if common.Contains(randomizedTLSProfiles, preferredTLSProfile) ||
+			common.Contains(parrotTLSProfiles, preferredTLSProfile) {
+			tlsProfile = preferredTLSProfile
+		} else {
+			return "", "", nil, nil
+		}
+	} else if len(randomizedTLSProfiles) > 0 &&
 		(len(parrotTLSProfiles) == 0 ||
 			p.WeightedCoinFlip(parameters.SelectRandomizedTLSProfileProbability)) {
 
@@ -983,6 +1062,12 @@ func getUTLSClientHelloID(
 		return utls.HelloRandomized, nil, nil
 	}
 
+	if p.IsNil() {
+		return utls.ClientHelloID{},
+			nil,
+			errors.Tracef("unknown TLS profile: %s", tlsProfile)
+	}
+
 	// utls.HelloCustom with a utls.ClientHelloSpec is used for
 	// CustomTLSProfiles.
 
@@ -1062,8 +1147,8 @@ func getClientHelloVersion(
 }
 
 func init() {
-	// Favor compatibility over security. CustomTLSDial is used as an obfuscation
-	// layer; users of CustomTLSDial, including meek and remote server list
+	// Favor compatibility over security. Dial is used as an obfuscation
+	// layer; users of Dial, including meek and remote server list
 	// downloads, don't depend on this TLS for its security properties.
 	utls.EnableWeakCiphers()
 }

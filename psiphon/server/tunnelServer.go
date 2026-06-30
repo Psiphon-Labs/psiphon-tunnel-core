@@ -49,6 +49,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -3648,7 +3649,12 @@ func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPor
 var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
-		{"establishment_duration", isIntString, requestParamOptional}},
+		{"establishment_duration", isIntString, requestParamOptional},
+		{"light_proxy_id", isAnyString, requestParamOptional},
+		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
@@ -4054,16 +4060,21 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 	sshClient.Lock()
 	sponsorID, _ := getStringRequestParam(
 		sshClient.handshakeState.apiParams, "sponsor_id")
+	clientPlatform, _ := getStringRequestParam(
+		sshClient.handshakeState.apiParams, "client_platform")
 	clientGeoIPData := sshClient.clientGeoIPData
 	deviceRegion := sshClient.handshakeState.deviceRegion
 	sshClient.Unlock()
+
+	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
 
 	return sshClient.sshServer.support.PsinetDatabase.GetAlertActionURLs(
 		alertReason,
 		sponsorID,
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
-		deviceRegion)
+		deviceRegion,
+		normalizedClientPlatform)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
@@ -5570,14 +5581,16 @@ func (sshClient *sshClient) handleTCPChannel(
 		// alternative for Psiphon use cases which previously added PROXY
 		// headers on the client side.
 		//
-		// Limitation: addOrReplaceProxyProtocolHeader attempts to first read
-		// any PROXY protocol sent by the client, and as a result is not
-		// compatible with server-first network protocols. See also the PROXY
-		// v1/v2 signature limitations in addOrReplaceProxyProtocolHeader.
+		// Limitation: proxyheader.AddOrReplaceProxyProtocolHeader attempts to
+		// first read any PROXY protocol sent by the client, and as a result
+		// is not compatible with server-first network protocols. See also
+		// the PROXY v1/v2 signature limitations in
+		// proxyheader.AddOrReplaceProxyProtocolHeader.
 
-		wireHeader, err := makeProxyProtocolHeader(
-			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[:proxyProtocolHeaderKeyIDSize],
-			sshClient.handshakeState.proxyProtocolHeaderConfig.macKey[proxyProtocolHeaderKeyIDSize:],
+		macKey := sshClient.handshakeState.proxyProtocolHeaderConfig.macKey
+		wireHeader, err := proxyheader.MakeProxyProtocolHeader(
+			macKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
+			macKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
 			net.ParseIP(sshClient.clientIP),
 			IP,
 			portToConnect)
@@ -5587,7 +5600,7 @@ func (sshClient *sshClient) handleTCPChannel(
 			return
 		}
 
-		bytesRead, replaced, err := addOrReplaceProxyProtocolHeader(
+		bytesRead, replaced, err := proxyheader.AddOrReplaceProxyProtocolHeader(
 			fwdChannel,
 			fwdConn,
 			wireHeader)

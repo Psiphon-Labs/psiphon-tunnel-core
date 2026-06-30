@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
@@ -595,7 +596,7 @@ func MakeUntunneledHTTPClient(
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
-	tlsConfig := &CustomTLSConfig{
+	tlsConfig := &tlsdialer.Config{
 		Parameters:                    config.GetParameters(),
 		Dial:                          dialer,
 		UseDialAddrSNI:                true,
@@ -606,7 +607,7 @@ func MakeUntunneledHTTPClient(
 		ClientSessionCache:            tlsCache,
 	}
 
-	tlsDialer := NewCustomTLSDialer(tlsConfig)
+	tlsDialer := tlsdialer.NewDialer(tlsConfig)
 
 	transport := &http.Transport{
 		Dial: func(network, addr string) (net.Conn, error) {

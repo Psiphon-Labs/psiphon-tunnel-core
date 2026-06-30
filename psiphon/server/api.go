@@ -430,6 +430,7 @@ func handshakeAPIRequestHandler(
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
+		normalizedPlatform,
 		isMobile)
 
 	clientAddress := ""
@@ -701,6 +702,9 @@ var connectedRequestParams = append(
 // updateOnConnectedParamNames are connected request parameters which are
 // copied to update data logged with server_tunnel: these fields either only
 // ship with or ship newer data with connected requests.
+//
+// To be logged with server_tunnel, these fields must also appear in
+// serverTunnelStatParams.
 var updateOnConnectedParamNames = append(
 	[]string{
 		"last_connected",
@@ -1426,6 +1430,7 @@ var baseDialParams = []requestParamSpec{
 	{"unique_candidate_estimate", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidates_moved_to_front", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"first_fronted_meek_candidate", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"tunnel_personal_light_proxy_id", isAnyString, requestParamOptional},
 }
 
 var inproxyDialParams = []requestParamSpec{

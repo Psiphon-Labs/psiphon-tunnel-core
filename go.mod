@@ -20,13 +20,13 @@ require (
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Inc/uds-ipc v1.0.1
-	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
+	github.com/Psiphon-Labs/bolt v0.0.0-20260624144735-04fba30caf38
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
 	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260429174135-190516348878
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
 	github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f

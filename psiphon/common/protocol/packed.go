@@ -868,7 +868,11 @@ func init() {
 		{182, "light_proxy_dial_IPv6", intConverter},
 		{183, "light_proxy_dial_failed", intConverter},
 
-		// Next key value = 184
+		// Specs: server.baseDialParams
+
+		{184, "tunnel_personal_light_proxy_id", unpaddedBase64Converter},
+
+		// Next key value = 185
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
@@ -900,6 +904,10 @@ func init() {
 	//
 	// - local-only fields are also packed, to allow for future use of packed
 	//   encodings in the local datastore.
+	//
+	// Known limitation: sshShadowsocksPort, sshShadowsocksKey,
+	// disableShadowsocksPrefix, and inproxyShadowsocksPort are not assigned
+	// packed field keys and fall through to UnrecognizedFields.
 
 	packedServerEntryFieldSpecs := []packSpec{
 		{1, "tag", base64Converter},
@@ -949,6 +957,7 @@ func init() {
 		{45, "localSource", nil},
 		{46, "localTimestamp", nil},
 		{47, "isLocalDerivedTag", nil},
+		{48, "allowUpstreamProxy", nil},
 	}
 
 	for _, spec := range packedServerEntryFieldSpecs {

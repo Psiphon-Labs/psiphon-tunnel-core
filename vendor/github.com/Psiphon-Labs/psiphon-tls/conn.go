@@ -77,6 +77,13 @@ type Conn struct {
 	// [Psiphon]
 	clientSentTicket bool
 
+	// [Psiphon] The following fields are used for recording TLS ClientHello fragmentation
+	// and padding metrics; and are protected by handshakeMutex.
+	clientHelloMetricsRecorded bool
+	clientHelloRecordStarted   bool
+	clientHelloFragmented      bool
+	clientHelloPaddingLength   int
+
 	// ticketKeys is the set of active session ticket keys for this
 	// connection. The first one is used to encrypt new tickets and
 	// all are tried to decrypt tickets.
@@ -789,10 +796,30 @@ func (c *Conn) readRecordOrCCS(expectChangeCipherSpec bool) error {
 		if len(data) == 0 || expectChangeCipherSpec {
 			return c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
 		}
+		// [Psiphon] Record TLS ClientHello fragmentation metrics at the record layer.
+		c.recordClientHelloRecordConnectionMetrics(data)
 		c.hand.Write(data)
 	}
 
 	return nil
+}
+
+// [Psiphon] recordClientHelloRecordConnectionMetrics records TLS ClientHello
+// fragmentation metrics by observing TLS record boundaries before the first
+// ClientHello is fully parsed.
+func (c *Conn) recordClientHelloRecordConnectionMetrics(data []byte) {
+	if c.isClient || c.isHandshakeComplete.Load() || c.clientHelloMetricsRecorded {
+		return
+	}
+
+	if c.clientHelloRecordStarted {
+		c.clientHelloFragmented = true
+		return
+	}
+
+	if c.hand.Len() == 0 && len(data) > 0 && data[0] == typeClientHello {
+		c.clientHelloRecordStarted = true
+	}
 }
 
 // retryReadRecord recurs into readRecordOrCCS to drop a non-advancing record, like
@@ -1225,6 +1252,15 @@ func (c *Conn) unmarshalHandshakeMessage(data []byte, transcript transcriptHash)
 
 	if !m.unmarshal(data) {
 		return nil, c.in.setErrorLocked(c.sendAlert(alertDecodeError))
+	}
+
+	// [Psiphon] Record TLS ClientHello fragmentation and padding metrics from
+	// the first parsed ClientHello.
+	if !c.isClient && !c.clientHelloMetricsRecorded {
+		if clientHello, ok := m.(*clientHelloMsg); ok {
+			c.clientHelloPaddingLength = clientHello.paddingLength
+			c.clientHelloMetricsRecorded = true
+		}
 	}
 
 	if transcript != nil {
@@ -1662,7 +1698,9 @@ func (c *Conn) ConnectionMetrics() ConnectionMetrics {
 	c.handshakeMutex.Lock()
 	defer c.handshakeMutex.Unlock()
 	return ConnectionMetrics{
-		ClientSentTicket: c.clientSentTicket,
+		ClientSentTicket:         c.clientSentTicket,
+		ClientHelloFragmented:    c.clientHelloFragmented,
+		ClientHelloPaddingLength: c.clientHelloPaddingLength,
 	}
 }
 

@@ -246,7 +246,7 @@ func discoverNATType(
 
 		config.WebRTCDialCoordinator.STUNServerAddressFailed(RFC5780, stunServerAddress)
 
-		return NATTypeUnknown, errors.Trace(err)
+		return NATTypeUnknown, errors.Trace(r.err)
 	}
 
 	config.WebRTCDialCoordinator.STUNServerAddressSucceeded(RFC5780, stunServerAddress)

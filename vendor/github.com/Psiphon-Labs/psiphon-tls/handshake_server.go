@@ -148,7 +148,11 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 				// is not interrupted.
 				_ = conn.SetDeadline(time.Time{})
 
-				passthroughConn, err := net.Dial("tcp", c.config.PassthroughAddress)
+				passthroughDialer := c.config.PassthroughDialer
+				if passthroughDialer == nil {
+					passthroughDialer = net.Dial
+				}
+				passthroughConn, err := passthroughDialer("tcp", c.config.PassthroughAddress)
 				if err != nil {
 					return
 				}

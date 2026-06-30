@@ -58,7 +58,6 @@ import (
 	"os"
 	"strconv"
 	"syscall"
-	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -135,70 +134,30 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 		return nil, "", errors.Trace(err)
 	}
 
-	var tunControlName [96]byte
-	copy(tunControlName[:], TUN_CONTROL_NAME)
+	// Use golang.org/x/sys/unix wrappers, which route through libSystem,
+	// instead of syscall.Syscall/RawSyscall/Syscall6, which make direct SVC
+	// kernel traps. The direct traps are prohibited on Apple platforms.
 
-	ctlInfo := struct {
-		ctlID   uint32
-		ctlName [96]byte
-	}{
-		0,
-		tunControlName,
+	ctlInfo := &unix.CtlInfo{}
+	copy(ctlInfo.Name[:], TUN_CONTROL_NAME)
+
+	err = unix.IoctlCtlInfo(fd, ctlInfo)
+	if err != nil {
+		return nil, "", errors.Trace(err)
 	}
 
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		uintptr(fd),
-		uintptr(CTLIOCGINFO),
-		uintptr(unsafe.Pointer(&ctlInfo)))
-	if errno != 0 {
-		return nil, "", errors.Trace(errno)
+	err = unix.Connect(fd, &unix.SockaddrCtl{
+		ID:   ctlInfo.Id,
+		Unit: unit,
+	})
+	if err != nil {
+		return nil, "", errors.Trace(err)
 	}
 
-	sockaddrCtlSize := 32
-	sockaddrCtl := struct {
-		scLen      uint8
-		scFamily   uint8
-		ssSysaddr  uint16
-		scID       uint32
-		scUnit     uint32
-		scReserved [5]uint32
-	}{
-		uint8(sockaddrCtlSize),
-		syscall.AF_SYSTEM,
-		AF_SYS_CONTROL,
-		ctlInfo.ctlID,
-		unit,
-		[5]uint32{},
+	deviceName, err := unix.GetsockoptString(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME)
+	if err != nil {
+		return nil, "", errors.Trace(err)
 	}
-
-	_, _, errno = syscall.RawSyscall(
-		syscall.SYS_CONNECT,
-		uintptr(fd),
-		uintptr(unsafe.Pointer(&sockaddrCtl)),
-		uintptr(sockaddrCtlSize))
-	if errno != 0 {
-		return nil, "", errors.Trace(errno)
-	}
-
-	ifNameSize := uintptr(16)
-	ifName := struct {
-		name [16]byte
-	}{}
-
-	_, _, errno = syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT,
-		uintptr(fd),
-		SYSPROTO_CONTROL,
-		UTUN_OPT_IFNAME,
-		uintptr(unsafe.Pointer(&ifName)),
-		uintptr(unsafe.Pointer(&ifNameSize)),
-		0)
-	if errno != 0 {
-		return nil, "", errors.Trace(errno)
-	}
-
-	deviceName := string(ifName.name[:ifNameSize-1])
 
 	file := os.NewFile(uintptr(fd), deviceName)
 
@@ -452,7 +411,18 @@ func configureClientInterface(
 	return nil
 }
 
-// BindToDevice binds a socket to the specified interface.
+func IsBindToDeviceSupported() bool {
+	return true
+}
+
+// BindToDevice binds a socket to the specified interface on Darwin.
+//
+// Sets both IP_BOUND_IF and IPV6_BOUND_IF unconditionally. Go may create
+// AF_INET, AF_INET6 dual-stack, or AF_INET6 v6-only sockets depending on
+// the dial target. Rather than probing the socket family, both options
+// are attempted unconditionally; the option that doesn't apply to the
+// socket's address family fails harmlessly. At least one must succeed
+// for the bind to be successful.
 func BindToDevice(fd int, deviceName string) error {
 
 	netInterface, err := net.InterfaceByName(deviceName)
@@ -460,13 +430,14 @@ func BindToDevice(fd int, deviceName string) error {
 		return errors.Trace(err)
 	}
 
-	// IP_BOUND_IF definition from <netinet/in.h>
+	ipv4Err := syscall.SetsockoptInt(
+		fd, syscall.IPPROTO_IP, syscall.IP_BOUND_IF, netInterface.Index)
+	ipv6Err := syscall.SetsockoptInt(
+		fd, syscall.IPPROTO_IPV6, syscall.IPV6_BOUND_IF, netInterface.Index)
 
-	const IP_BOUND_IF = 25
-
-	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, IP_BOUND_IF, netInterface.Index)
-	if err != nil {
-		return errors.Trace(err)
+	if ipv4Err != nil && ipv6Err != nil {
+		return errors.Tracef(
+			"BindToDevice failed: IPv4=%v, IPv6=%v", ipv4Err, ipv6Err)
 	}
 
 	return nil

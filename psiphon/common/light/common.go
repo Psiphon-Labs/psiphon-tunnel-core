@@ -24,6 +24,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"math"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -32,23 +33,33 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/fxamacker/cbor/v2"
 )
 
 const (
-	proxyIDSize = 16
+	proxyIDSize              = 16
+	maxRecommendedTLSPadding = 65535
 )
 
 // ProxyEntry is the proxy connection information distributed to clients.
 type ProxyEntry struct {
-	Protocol            string `cbor:"1,keyasint,omitempty"`
-	DialAddressIPv4     string `cbor:"2,keyasint,omitempty"`
-	RecommendedSNI      string `cbor:"3,keyasint,omitempty"`
-	ObfuscationKey      []byte `cbor:"4,keyasint,omitempty"`
-	VerifyPin           []byte `cbor:"5,keyasint,omitempty"`
-	VerifyServerName    string `cbor:"6,keyasint,omitempty"`
-	DialAddressIPv6     string `cbor:"7,keyasint,omitempty"`
-	RecommendedSNIRegex string `cbor:"8,keyasint,omitempty"`
+	Protocol                                  string  `cbor:"1,keyasint,omitempty"`
+	DialAddressIPv4                           string  `cbor:"2,keyasint,omitempty"`
+	RecommendedSNI                            string  `cbor:"3,keyasint,omitempty"`
+	ObfuscationKey                            []byte  `cbor:"4,keyasint,omitempty"`
+	VerifyPin                                 []byte  `cbor:"5,keyasint,omitempty"`
+	VerifyServerName                          string  `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6                           string  `cbor:"7,keyasint,omitempty"`
+	RecommendedSNIRegex                       string  `cbor:"8,keyasint,omitempty"`
+	RecommendedFragmentClientHelloProbability float64 `cbor:"9,keyasint,omitempty"`
+	RecommendedTLSPaddingProbability          float64 `cbor:"10,keyasint,omitempty"`
+	RecommendedMinTLSPadding                  int     `cbor:"11,keyasint,omitempty"`
+	RecommendedMaxTLSPadding                  int     `cbor:"12,keyasint,omitempty"`
+	RecommendedSNIProbability                 float64 `cbor:"13,keyasint,omitempty"`
+	RecommendedTLSProfile                     string  `cbor:"14,keyasint,omitempty"`
+	RecommendedTLSProfileProbability          float64 `cbor:"15,keyasint,omitempty"`
+	TTLSeconds                                int64   `cbor:"16,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -100,7 +111,62 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 		return nil, errors.TraceNew("missing TLS verify pin")
 	}
 
+	err = validateRecommendedTLSSettings(
+		proxyEntry.RecommendedFragmentClientHelloProbability,
+		proxyEntry.RecommendedTLSPaddingProbability,
+		proxyEntry.RecommendedMinTLSPadding,
+		proxyEntry.RecommendedMaxTLSPadding,
+		proxyEntry.RecommendedSNIProbability,
+		proxyEntry.RecommendedTLSProfileProbability)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if proxyEntry.TTLSeconds < 0 ||
+		proxyEntry.TTLSeconds > int64(math.MaxInt64/time.Second) {
+		return nil, errors.TraceNew("invalid TTL")
+	}
+
+	// Do not validate RecommendedTLSProfile here. Future proxy entries may
+	// recommend profiles not present in this client's SupportedTLSProfiles;
+	// callers must fall back when the recommendation is unknown.
+
 	return proxyEntry, nil
+}
+
+func validateRecommendedTLSSettings(
+	fragmentClientHelloProbability float64,
+	tlsPaddingProbability float64,
+	minTLSPadding int,
+	maxTLSPadding int,
+	sniProbability float64,
+	tlsProfileProbability float64) error {
+
+	if !(fragmentClientHelloProbability >= 0.0 &&
+		fragmentClientHelloProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended FragmentClientHello probability")
+	}
+
+	if !(tlsPaddingProbability >= 0.0 &&
+		tlsPaddingProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS padding probability")
+	}
+
+	if !(sniProbability >= 0.0 && sniProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended SNI probability")
+	}
+
+	if !(tlsProfileProbability >= 0.0 && tlsProfileProbability <= 1.0) {
+		return errors.TraceNew("invalid recommended TLS profile probability")
+	}
+
+	if minTLSPadding < 0 ||
+		maxTLSPadding < minTLSPadding ||
+		maxTLSPadding > maxRecommendedTLSPadding {
+		return errors.TraceNew("invalid recommended TLS padding range")
+	}
+
+	return nil
 }
 
 // ConnectionStats are the proxy connection stats reported to
@@ -110,34 +176,38 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 // header was not read successfully, and the proxy's phase-completed
 // timestamps will be zero values when the phase was not completed.
 type ConnectionStats struct {
-	ProxyID                   string
-	ProxyProviderID           string
-	ProxyGeoIPData            common.GeoIPData
-	ProxyConnectionNum        int64
-	ClientGeoIPData           common.GeoIPData
-	SponsorID                 string
-	ClientPlatform            string
-	ClientBuildRev            string
-	DeviceRegion              string
-	SessionID                 string
-	ProxyEntryTracker         int64
-	NetworkType               string
-	ClientConnectionNum       int64
-	DestinationAddress        string
-	TLSProfile                string
-	SNI                       string
-	TLSDidResume              bool
-	ClientTCPDuration         time.Duration
-	ClientTLSDuration         time.Duration
-	ProxyCompletedTCP         time.Time
-	ProxyCompletedTLS         time.Time
-	ProxyCompletedLightHeader time.Time
-	ProxyCompletedUpstreamDNS time.Time
-	ProxyCompletedUpstreamTCP time.Time
-	UpstreamDNSCached         bool
-	BytesRead                 int64
-	BytesWritten              int64
-	Failure                   string
+	ProxyID                     string
+	ProxyProviderID             string
+	ProxyGeoIPData              common.GeoIPData
+	ProxyConnectionNum          int64
+	ClientGeoIPData             common.GeoIPData
+	SponsorID                   string
+	ClientPlatform              string
+	ClientBuildRev              string
+	DeviceRegion                string
+	SessionID                   string
+	ProxyEntryTracker           int64
+	NetworkType                 string
+	ClientConnectionNum         int64
+	DestinationAddress          string
+	TLSProfile                  string
+	SNI                         string
+	TLSClientHelloFragmented    bool
+	TLSClientHelloPadding       int
+	TLSDidResume                bool
+	ClientTCPDuration           time.Duration
+	ClientTLSDuration           time.Duration
+	ProxyCompletedTCP           time.Time
+	ProxyCompletedTLS           time.Time
+	ProxyCompletedLightHeader   time.Time
+	ProxyCompletedUpstreamDNS   time.Time
+	ProxyCompletedUpstreamTCP   time.Time
+	UpstreamDNSCached           bool
+	ProxyProtocolHeaderAdded    bool
+	ProxyProtocolHeaderReplaced bool
+	BytesRead                   int64
+	BytesWritten                int64
+	Failure                     string
 }
 
 // makeProxyID derives a unique proxy ID from a proxy's dial address and
@@ -146,6 +216,49 @@ func makeProxyID(dialAddress, obfuscationKey string) string {
 	h := hmac.New(sha256.New, []byte(obfuscationKey))
 	h.Write([]byte(dialAddress))
 	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
+}
+
+type proxyProtocolHeaderConfig struct {
+	macKey                     []byte
+	targetDestinationAddresses common.StringLookup
+}
+
+func prepareProxyProtocolHeaderConfigs(
+	proxyProtocolHeaderMACKeys map[string]string,
+	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
+) (map[string]proxyProtocolHeaderConfig, error) {
+
+	proxyProtocolHeaderConfigs := make(map[string]proxyProtocolHeaderConfig)
+	for sponsorID, base64Value := range proxyProtocolHeaderMACKeys {
+		value, err := base64.StdEncoding.DecodeString(base64Value)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if len(value) != proxyheader.ProxyProtocolHeaderKeyIDSize+proxyheader.ProxyProtocolHeaderMACKeySize {
+			return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
+		}
+		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig{macKey: value}
+	}
+
+	for sponsorID, targets := range proxyProtocolHeaderTargetDestinationAddresses {
+		proxyProtocolHeaderConfig, ok := proxyProtocolHeaderConfigs[sponsorID]
+		if !ok {
+			return nil, errors.TraceNew("missing ProxyProtocolHeaderMACKey entry")
+		}
+		normalizedTargets := make([]string, 0, len(targets))
+		for _, target := range targets {
+			normalizedTarget, err := normalizeDestinationAddress(target)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			normalizedTargets = append(normalizedTargets, normalizedTarget)
+		}
+		proxyProtocolHeaderConfig.targetDestinationAddresses =
+			common.NewStringLookup(normalizedTargets)
+		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig
+	}
+
+	return proxyProtocolHeaderConfigs, nil
 }
 
 type bytesCounter struct {
@@ -244,7 +357,6 @@ func decodeNetworkType(encodedNetworkType uint8) string {
 var tlsProfileToCode = map[string]uint8{
 
 	// When protocol.SupportedTLSProfiles changes this table must be updated.
-	// TODO: add a corresponding  note next to protocol.SupportedTLSProfiles.
 
 	protocol.TLS_PROFILE_IOS_111:        1,
 	protocol.TLS_PROFILE_IOS_121:        2,
@@ -268,6 +380,8 @@ var tlsProfileToCode = map[string]uint8{
 	protocol.TLS_PROFILE_FIREFOX_99:     20,
 	protocol.TLS_PROFILE_FIREFOX_105:    21,
 	protocol.TLS_PROFILE_RANDOMIZED:     22,
+	protocol.TLS_PROFILE_CHROME_131:     23,
+	protocol.TLS_PROFILE_CHROME_133:     24,
 }
 
 var codeToTLSProfile = map[uint8]string{
@@ -293,6 +407,8 @@ var codeToTLSProfile = map[uint8]string{
 	20: protocol.TLS_PROFILE_FIREFOX_99,
 	21: protocol.TLS_PROFILE_FIREFOX_105,
 	22: protocol.TLS_PROFILE_RANDOMIZED,
+	23: protocol.TLS_PROFILE_CHROME_131,
+	24: protocol.TLS_PROFILE_CHROME_133,
 }
 
 func encodeTLSProfile(tlsProfile string) uint8 {

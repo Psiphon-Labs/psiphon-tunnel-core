@@ -23,6 +23,7 @@ import (
 	"context"
 	std_errors "errors"
 	"net"
+	"slices"
 	"sync/atomic"
 	"syscall"
 
@@ -229,6 +230,9 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 	// an IPv4 addresses for compatibility on DNS64/NAT64 networks.
 	// If synthesize fails, try the original addresses.
 	if config.IPv6Synthesizer != nil {
+		// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
+		ipAddrs = slices.Clone(ipAddrs)
+
 		for i, ipAddr := range ipAddrs {
 			if ipAddr.To4() != nil {
 				synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())

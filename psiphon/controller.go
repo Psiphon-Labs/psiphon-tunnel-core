@@ -40,19 +40,15 @@ import (
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/Psiphon-Labs/utls"
 	"github.com/axiomhq/hyperloglog"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -126,12 +122,7 @@ type Controller struct {
 	currentNetworkCtx        context.Context
 	currentNetworkCancelFunc context.CancelFunc
 
-	lightProxyClient                    atomic.Value
-	lightProxyReplay                    atomic.Value
-	lightProxyTunnelInactiveThreshold   atomic.Int64
-	lightProxyDialTimeout               atomic.Int64
-	lightProxyLimitDestinationAddresses atomic.Value
-	signalLightProxyTestFetch           chan struct{}
+	signalLightProxyTestFetch chan struct{}
 }
 
 // NewController initializes a new controller.
@@ -272,7 +263,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		controller.packetTunnelTransport = packetTunnelTransport
 	}
 
-	if config.EnableLightProxy {
+	if config.EnableLightProxyFallback {
 
 		if config.LightProxyTestFetchAddress != "" {
 			controller.signalLightProxyTestFetch = make(chan struct{}, 1)
@@ -281,14 +272,20 @@ func NewController(config *Config) (controller *Controller, err error) {
 		var err error
 
 		if len(config.LightProxyEntry) > 0 {
-			err = controller.initLightProxy(
+			err = initLightProxy(
+				controller,
 				config.LightProxyEntry,
 				config.LightProxyEntryTracker)
 		} else {
 
+			// LoadLightProxy will enforce the light proxy entry TTL, if any,
+			// and will not return an expired light proxy. After this point,
+			// the TTL is not enforced in the middle of the session.
+
 			lightProxy := LoadLightProxy()
 			if lightProxy != nil {
-				err = controller.initLightProxy(
+				err = initLightProxy(
+					controller,
 					lightProxy.LightProxyEntry,
 					lightProxy.LightProxyEntryTracker)
 			}
@@ -298,6 +295,17 @@ func NewController(config *Config) (controller *Controller, err error) {
 			NoticeWarning(
 				"light proxy init failed: %v", errors.Trace(err))
 			// Continue without a light proxy
+		}
+	}
+
+	if config.EnablePersonalLightProxyTunnels {
+
+		err = initLightProxy(
+			controller,
+			config.LightProxyEntry,
+			config.LightProxyEntryTracker)
+		if err != nil {
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -581,6 +589,18 @@ func (controller *Controller) SignalComponentFailure() {
 	controller.stopRunning()
 }
 
+// DropPacketTunnelTraffic toggles packet tunnel mode traffic dropping. When
+// enabled, tun device and packet tunnel channel packets are drained and
+// dropped.
+func (controller *Controller) DropPacketTunnelTraffic(drop bool) {
+
+	// If config.PacketTunnelTunFileDescriptor is not set, this is a no-op.
+
+	if controller.packetTunnelClient != nil {
+		controller.packetTunnelClient.DropTraffic(drop)
+	}
+}
+
 // SetDynamicConfig overrides the sponsor ID and authorizations fields of the
 // Controller config with the input values. The new values will be used in the
 // next tunnel connection.
@@ -778,6 +798,10 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 
 		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
 
+		// Push-imported light proxies are persisted for potential future
+		// use as fallbacks. In EnablePersonalLightProxyTunnels mode,
+		// initLightProxy is not called, and the light proxy in use remains
+		// config.LightProxyEntry.
 		ok := StoreLightProxy(&StoredLightProxy{
 			LightProxyEntry:        lightProxyEntry.ProxyEntry,
 			LightProxyEntryTracker: lightProxyEntry.ProxyEntryTracker,
@@ -785,12 +809,20 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 		if !ok {
 			importOK = false
 		} else {
-			lightProxyErr := controller.initLightProxy(
-				lightProxyEntry.ProxyEntry,
-				lightProxyEntry.ProxyEntryTracker)
-			if lightProxyErr != nil {
-				NoticeWarning("light proxy init failed: %v", errors.Trace(lightProxyErr))
-				importOK = false
+			if controller.config.EnableLightProxyFallback {
+
+				// TODO: skip the reinitialization, or retain the current
+				// replay parameters, when the pushed proxy entry is
+				// unchanged from the proxy entry currently in use, so that
+				// a proven-working replay selection isn't discarded.
+				lightProxyErr := initLightProxy(
+					controller,
+					lightProxyEntry.ProxyEntry,
+					lightProxyEntry.ProxyEntryTracker)
+				if lightProxyErr != nil {
+					NoticeWarning("light proxy init failed: %v", errors.Trace(lightProxyErr))
+					importOK = false
+				}
 			}
 		}
 	}
@@ -1692,7 +1724,7 @@ func (controller *Controller) triggerLightProxyTestFetch() {
 	if controller.config.LightProxyTestFetchAddress == "" {
 		return
 	}
-	if controller.lightProxyClient.Load() == nil {
+	if controller.config.GetLightProxyClient() == nil {
 		return
 	}
 
@@ -1754,7 +1786,8 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
 			// controller.runCtx.Done will interrupt controller.Dial; and
-			// controller.Dial's light proxy path uses controller.lightProxyDialTimeout.
+			// controller.Dial's light proxy path uses the configured light proxy
+			// dial timeout.
 			conn, err := controller.Dial(address, nil)
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -1776,7 +1809,7 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 
 	requestCtx, cancel := context.WithTimeout(
 		controller.runCtx,
-		time.Duration(controller.lightProxyDialTimeout.Load())+requestTimeout)
+		controller.config.GetLightProxyDialTimeout()+requestTimeout)
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(
@@ -1801,301 +1834,6 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 	return nil
 }
 
-func (controller *Controller) initLightProxy(
-	proxyEntry []byte,
-	proxyEntryTracker int64) error {
-
-	if controller.config.DisableTunnels {
-		return nil
-	}
-
-	p := controller.config.GetParameters().Get()
-	defer p.Close()
-
-	// Clients must set EnableLightProxy in the config. The LightProxyDisable
-	// tactics parameter functions as a remote override, and is only checked
-	// here, so newly fetched tactics changes won't take effect until the
-	// next session.
-
-	enableLightProxy := controller.config.EnableLightProxy &&
-		!p.Bool(parameters.LightProxyDisable)
-
-	if !enableLightProxy {
-		NoticeInfo("Light proxy disabled: skipping proxy entry")
-		return nil
-	}
-
-	tcpDialer := NewTCPDialer(controller.untunneledDialConfig)
-
-	tlsDialer := func(
-		ctx context.Context,
-		underlyingConn net.Conn,
-		tlsProfile string,
-		randomizedTLSProfileSeed *prng.Seed,
-		sni string,
-		passthroughMessage []byte,
-		verifyPin string,
-		verifyServerName string) (net.Conn, error) {
-
-		return CustomTLSDial(
-			ctx,
-			"tcp",
-			underlyingConn.RemoteAddr().String(),
-			&CustomTLSConfig{
-				Parameters: controller.config.GetParameters(),
-				Dial: func(context.Context, string, string) (net.Conn, error) {
-					return underlyingConn, nil
-				},
-				UseDialAddrSNI:           false,
-				SNIServerName:            sni,
-				VerifyServerName:         verifyServerName,
-				VerifyPins:               []string{verifyPin},
-				VerifyPinsOnly:           true,
-				TLSProfile:               tlsProfile,
-				RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
-				PassthroughMessage:       passthroughMessage,
-				ClientSessionCache: common.WrapUtlsClientSessionCache(
-					controller.tlsClientSessionCache,
-					underlyingConn.RemoteAddr().String()),
-			})
-	}
-
-	client, err := light.NewClient(&light.ClientConfig{
-		Logger: NoticeCommonLogger(false),
-		TCPDialer: func(ctx context.Context, addr string) (net.Conn, error) {
-			return tcpDialer(ctx, "tcp", addr)
-		},
-		TLSDialer:         tlsDialer,
-		SponsorID:         controller.config.SponsorId,
-		ClientPlatform:    controller.config.ClientPlatform,
-		ClientBuildRev:    buildinfo.GetBuildInfo().BuildRev,
-		DeviceRegion:      controller.config.DeviceRegion,
-		SessionID:         controller.config.SessionID,
-		ProxyEntryTracker: proxyEntryTracker,
-		ProxyEntry:        proxyEntry,
-	})
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	controller.lightProxyClient.Store(client)
-	controller.lightProxyReplay.Store(lightReplay{})
-
-	// Use this tunnel liveness target when deciding whether to fallback to
-	// light proxy. This value remains set for the session.
-	controller.lightProxyTunnelInactiveThreshold.Store(
-		int64(p.Duration(parameters.LightProxyTunnelInactiveThreshold)))
-
-	controller.lightProxyDialTimeout.Store(
-		int64(p.Duration(parameters.LightProxyDialTimeout)))
-
-	lightProxyLimitLookup := common.NewStringLookup(
-		p.Strings(parameters.LightProxyLimitDestinationAddresses))
-
-	controller.lightProxyLimitDestinationAddresses.Store(
-		&lightProxyLimitLookup)
-
-	NoticeLightProxyAvailable()
-
-	return nil
-}
-
-type lightReplay struct {
-	TLSProfile               string
-	RandomizedTLSProfileSeed *prng.Seed
-	SNI                      string
-}
-
-func (controller *Controller) dialLightProxy(
-	ctx context.Context,
-	lightClient *light.Client,
-	remoteAddr string) (net.Conn, error) {
-
-	replay, _ := controller.lightProxyReplay.Load().(lightReplay)
-
-	isReplay := replay.TLSProfile != "" && replay.SNI != ""
-	if !isReplay {
-
-		// Limitation: if SelectTLSProfile selects a CustomTLSProfile, the TLS
-		// profile reported to the proxy will be "unknown".
-
-		p := controller.config.GetParameters().Get()
-		tlsProfile, _, randomizedTLSProfileSeed, err := SelectTLSProfile(false, true, false, "", p)
-		if err != nil {
-			p.Close()
-			return nil, errors.Trace(err)
-		}
-		SNI := selectLightProxySNI(lightClient, p)
-		p.Close()
-
-		replay = lightReplay{
-			TLSProfile:               tlsProfile,
-			RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
-			SNI:                      SNI,
-		}
-	}
-
-	logFields := common.LogFields{"isReplay": isReplay}
-
-	conn, err := lightClient.Dial(
-		ctx,
-		logFields,
-		GetNetworkType(controller.config.GetNetworkID()),
-		replay.TLSProfile,
-		replay.RandomizedTLSProfileSeed,
-		replay.SNI,
-		remoteAddr)
-	if err != nil {
-		if ctx.Err() == nil {
-			controller.lightProxyReplay.Store(lightReplay{})
-		}
-		return nil, errors.Trace(err)
-	}
-
-	// Simple session-only replay: reuse the last SNI and TLS
-	// profile/randomized seed that successfully dialed. Concurrent
-	// successful dials may clobber this value, but every stored value
-	// succeeded.
-
-	controller.lightProxyReplay.Store(replay)
-
-	return conn, nil
-}
-
-func selectLightProxySNI(
-	lightClient *light.Client, p parameters.ParametersAccessor) string {
-
-	// Prefer light proxy entry recommended regex SNI, then recommended SNI,
-	// then light proxy custom hostname tactic.
-
-	recommendedRegexSNI := lightClient.GetRecommendedSNIRegex()
-	recommendedSNI := lightClient.GetRecommendedSNI()
-
-	if (recommendedRegexSNI != "" || recommendedSNI != "") &&
-		p.WeightedCoinFlip(parameters.LightProxyUseRecommendedSNIProbability) {
-
-		if recommendedRegexSNI != "" {
-			SNI, err := regen.GenerateString(recommendedRegexSNI)
-			if err != nil {
-				NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
-				SNI = values.GetHostName()
-			}
-			return SNI
-		}
-		return recommendedSNI
-	}
-
-	if p.WeightedCoinFlip(parameters.LightProxyCustomHostNameProbability) {
-		regexStrings := p.RegexStrings(parameters.LightProxyCustomHostNameRegexes)
-		if len(regexStrings) == 0 {
-			return values.GetHostName()
-		}
-		choice := prng.Intn(len(regexStrings))
-		SNI, err := regen.GenerateString(regexStrings[choice])
-		if err != nil {
-			NoticeWarning("selectLightProxySNI: regen.Generate failed: %v", errors.Trace(err))
-			SNI = values.GetHostName()
-		}
-		return SNI
-	}
-
-	return values.GetHostName()
-}
-
-type lightProxyDialResult struct {
-	conn net.Conn
-	err  error
-}
-
-const lightProxyTunnelRacePollInterval = 50 * time.Millisecond
-
-func (controller *Controller) dialLightProxyRace(
-	lightClient *light.Client,
-	remoteAddr string,
-	downstreamConn net.Conn,
-	readInactiveThreshold time.Duration) (net.Conn, *Tunnel, error) {
-
-	// Initiate a light proxy dial and run a race between that dial and any
-	// concurrent tunnel dial. This allows for selecting the tunnel if it's
-	// just about to connect, or if the read inactive test passes as a
-	// connected tunnel was simply idle.
-
-	dialTimeout := time.Duration(
-		controller.lightProxyDialTimeout.Load())
-
-	lightDialCtx, cancel := context.WithTimeout(
-		controller.runCtx, dialTimeout)
-	defer cancel()
-
-	lightResult := make(chan lightProxyDialResult)
-	var lightDialWaitGroup sync.WaitGroup
-
-	lightDialWaitGroup.Add(1)
-	go func() {
-		defer lightDialWaitGroup.Done()
-
-		conn, err := controller.dialLightProxy(
-			lightDialCtx, lightClient, remoteAddr)
-		lightResult <- lightProxyDialResult{conn: conn, err: err}
-	}()
-	defer lightDialWaitGroup.Wait()
-
-	cancelLightDial := func() {
-		cancel()
-		result := <-lightResult
-		if result.conn != nil {
-			_ = result.conn.Close()
-		}
-	}
-
-	// Simply poll for an active tunnel with a recent read. The getNextActiveTunnel
-	// call is inexpensive, while a signal on either new tunnel established
-	// or existing tunnel reads data is complex.
-	ticker := time.NewTicker(lightProxyTunnelRacePollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case result := <-lightResult:
-
-			if result.err == nil {
-				// Close downstreamConn when the light conn is closed. See
-				// Controller.Dial and TunneledConn.
-				return &lightProxyConn{
-					Conn:           result.conn,
-					downstreamConn: downstreamConn,
-				}, nil, nil
-			}
-
-			return nil, nil, errors.Trace(result.err)
-
-		case <-ticker.C:
-			tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
-			if tunnel != nil {
-				cancelLightDial()
-				return nil, tunnel, nil
-			}
-
-		case <-controller.runCtx.Done():
-			cancelLightDial()
-			return nil, nil, errors.Trace(controller.runCtx.Err())
-		}
-	}
-}
-
-type lightProxyConn struct {
-	net.Conn
-	downstreamConn net.Conn
-}
-
-func (conn *lightProxyConn) Close() error {
-	if conn.downstreamConn != nil {
-		_ = conn.downstreamConn.Close()
-	}
-
-	return conn.Conn.Close()
-}
-
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port forward failure, for the purpose of monitoring tunnel health.
@@ -2117,42 +1855,45 @@ func (controller *Controller) Dial(
 
 	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
 
-	readInactiveThreshold := time.Duration(
-		controller.lightProxyTunnelInactiveThreshold.Load())
+	readInactiveThreshold := controller.config.GetLightProxyTunnelInactiveThreshold()
 
 	tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
 	if tunnel == nil {
 
-		lightProxyClient, _ := controller.lightProxyClient.Load().(*light.Client)
-		if lightProxyClient != nil {
+		if controller.config.EnableLightProxyFallback {
 
-			limitDestinationAddresses, _ :=
-				controller.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
+			lightProxyClient := controller.config.GetLightProxyClient()
+			if lightProxyClient != nil {
 
-			if (limitDestinationAddresses == nil ||
-				limitDestinationAddresses.Len() == 0 ||
-				limitDestinationAddresses.Contains(remoteAddr)) &&
+				limitDestinationAddresses :=
+					controller.config.GetLightProxyLimitDestinationAddresses()
 
-				// In test fetch mode, only the test address is routed through
-				// light proxy.
-				(controller.config.LightProxyTestFetchAddress == "" ||
-					remoteAddr == controller.config.LightProxyTestFetchAddress) {
+				if (limitDestinationAddresses == nil ||
+					limitDestinationAddresses.Len() == 0 ||
+					limitDestinationAddresses.Contains(remoteAddr)) &&
 
-				var lightConn net.Conn
-				lightConn, tunnel, err = controller.dialLightProxyRace(
-					lightProxyClient,
-					remoteAddr,
-					downstreamConn,
-					readInactiveThreshold)
-				if err != nil && controller.runCtx.Err() == nil {
-					NoticeWarning(
-						"light proxy dial failed: %v", errors.Trace(err))
+					// In test fetch mode, only the test address is routed through
+					// light proxy.
+					(controller.config.LightProxyTestFetchAddress == "" ||
+						remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
+					var lightConn net.Conn
+					lightConn, tunnel, err = dialLightProxyRace(
+						controller,
+						lightProxyClient,
+						remoteAddr,
+						downstreamConn,
+						readInactiveThreshold)
+					if err != nil && controller.runCtx.Err() == nil {
+						NoticeWarning(
+							"light proxy dial failed: %v", errors.Trace(err))
+					}
+
+					if lightConn != nil {
+						return lightConn, nil
+					}
+					// Drop through with tunnel returned from dialLightProxyRace.
 				}
-
-				if lightConn != nil {
-					return lightConn, nil
-				}
-				// Drop through with tunnel returned from dialLightProxyRace.
 			}
 		}
 
@@ -2326,7 +2067,7 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	return p.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
-			p.config.UseUpstreamProxy(),
+			p.config.TunnelDialsUseUpstreamProxy(),
 			p.initialLimitTunnelProtocols,
 			p.limitTunnelDialPortNumbers,
 			p.limitQUICVersions,
@@ -2339,7 +2080,7 @@ func (p *protocolSelectionConstraints) isCandidate(
 
 	return len(serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.config.UseUpstreamProxy(),
+		p.config.TunnelDialsUseUpstreamProxy(),
 		p.limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
@@ -2383,7 +2124,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 
 	return serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.config.UseUpstreamProxy(),
+		p.config.TunnelDialsUseUpstreamProxy(),
 		p.getLimitTunnelProtocols(connectTunnelCount),
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
@@ -3915,8 +3656,8 @@ func (controller *Controller) runInproxyProxy() {
 	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
 	p.Close()
 
-	// Running an upstream proxy is also an incompatible case.
-	useUpstreamProxy := controller.config.UseUpstreamProxy()
+	// Using an upstream proxy is also an incompatible case.
+	useUpstreamProxy := controller.config.UpstreamProxyURL != ""
 
 	// In both the awaitFullyEstablished and inproxyAwaitProxyBrokerSpecs
 	// cases, we may arrive at this point without broker specs, and must

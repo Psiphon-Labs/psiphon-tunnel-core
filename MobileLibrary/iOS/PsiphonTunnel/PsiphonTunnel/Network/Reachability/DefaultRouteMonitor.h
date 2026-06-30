@@ -18,7 +18,7 @@
  */
 
 #import <Foundation/Foundation.h>
-#import <Network/path.h>
+#import <Network/Network.h>
 #import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
