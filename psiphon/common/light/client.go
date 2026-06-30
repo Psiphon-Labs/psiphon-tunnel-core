@@ -49,6 +49,10 @@ type TCPDialer func(
 // underlying TCP connection. The dialer allows for integrating Psiphon
 // features including utls, passthrough, pin verification, session caching,
 // and replay.
+//
+// The specified tlsProfile must be a utls TLS 1.3 ClientHello parrot
+// fingerprint, or a randomized fingerprint that produces a TLS 1.3
+// ClientHello with the given randomizedTLSProfileSeed.
 type TLSDialer func(
 	ctx context.Context,
 	underlyingConn net.Conn,
@@ -262,6 +266,10 @@ func (client *Client) GetMetrics(resetCounters bool) *ClientMetrics {
 //
 // The light proxy protocol requires the client to write first, and the light
 // header is prepended to the client's first write.
+//
+// The specified tlsProfile must be a utls TLS 1.3 ClientHello parrot
+// fingerprint, or a randomized fingerprint that produces a TLS 1.3
+// ClientHello with the given randomizedTLSProfileSeed.
 func (client *Client) Dial(
 	ctx context.Context,
 	additionalLogFields common.LogFields,
