@@ -4,4 +4,6 @@
 
 // Package test contains integration tests for the
 // github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh package.
+//
+// Deprecated: this package is for internal use only.
 package test
