@@ -2480,6 +2480,7 @@ func (s *InproxyNATStateManager) reset() {
 	s.networkID = networkID
 	s.natType = inproxy.NATTypeUnknown
 	s.portMappingTypes = inproxy.PortMappingTypes{}
+	s.portMappingProbe = nil
 }
 
 func (s *InproxyNATStateManager) getNATType(

@@ -75,8 +75,7 @@ func newPortMapper(
 	}
 
 	// Clone the probe's client, reusing its port mapping service discovery
-	// (probe-once / map-many). Clone is a proper fork API and replaces the
-	// previous unsafe-reflection copy of the dependency's unexported fields.
+	// (probe-once / map-many).
 	//
 	// The onChange callback will not be invoked until after the
 	// GetCachedMappingOrStartCreatingOne call in portMapper.start, so the
@@ -124,8 +123,7 @@ func (p *portMapper) portMappingExternalAddress() <-chan string {
 
 // respondingPortMappingTypes returns the port mapping types that have
 // responded recently for this port mapper's client. It is used for reporting
-// metrics, and replaces the previous approach of scraping
-// tailscale.com/net/portmapper process-global metrics counters.
+// metrics.
 //
 // Limitation: the return value does not indicate which of several responding
 // port mapping types was used for a particular dial.
@@ -182,10 +180,9 @@ type PortMappingProbe struct {
 // ProxyAnnounce request.
 //
 // The port mapper's UPnP/NAT-PMP/PCP sockets are bound via
-// coordinator.BindToDevice, which works on all platforms; this replaces the
-// previous process-global, Android-only netns.SetAndroidProtectFunc hook. The
-// probe's BindToDevice and gateway lookup are inherited by the port mapping
-// clients cloned from the probe.
+// coordinator.BindToDevice, which works on all platforms. The probe's
+// BindToDevice and gateway lookup are inherited by the port mapping clients
+// cloned from the probe.
 func probePortMapping(
 	ctx context.Context,
 	logger common.Logger,

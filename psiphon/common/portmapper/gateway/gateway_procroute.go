@@ -53,9 +53,9 @@ const (
 	rtfGateway = 0x0002
 )
 
-// parseProcNetRoute reads /proc/net/route and returns the first private IPv4
-// gateway of an up gateway route. If ifaceName is non-empty, only routes on
-// that interface are considered.
+// parseProcNetRoute reads /proc/net/route and returns the private IPv4 gateway
+// of the up default route (Destination 0.0.0.0/0). If ifaceName is non-empty,
+// only routes on that interface are considered.
 //
 // /proc/net/route columns are:
 //
@@ -81,10 +81,11 @@ func parseProcNetRoute(ifaceName string) (netip.Addr, bool) {
 			break
 		}
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 4 {
+		if len(fields) < 8 {
 			continue
 		}
-		iface, gwHex, flagsHex := fields[0], fields[2], fields[3]
+		iface, destHex, gwHex, flagsHex, maskHex :=
+			fields[0], fields[1], fields[2], fields[3], fields[7]
 		if ifaceName != "" && iface != ifaceName {
 			continue
 		}
@@ -93,6 +94,15 @@ func parseProcNetRoute(ifaceName string) (netip.Addr, bool) {
 			continue
 		}
 		if uint16(flags)&(rtfUp|rtfGateway) != (rtfUp | rtfGateway) {
+			continue
+		}
+		// Only accept the default route (Destination 0.0.0.0, Mask 0.0.0.0).
+		// Without this, a non-default gateway route could be selected -- for
+		// example on policy-routed or split-interface systems.
+		if dest, err := strconv.ParseUint(destHex, 16, 32); err != nil || dest != 0 {
+			continue
+		}
+		if mask, err := strconv.ParseUint(maskHex, 16, 32); err != nil || mask != 0 {
 			continue
 		}
 		ipu32, err := strconv.ParseUint(gwHex, 16, 32)

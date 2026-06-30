@@ -193,9 +193,11 @@ type upnpClient interface {
 	GetStatusInfoCtx(ctx context.Context) (status string, lastConnError string, uptime uint32, err error)
 }
 
-// tsPortMappingDesc gets sent to UPnP clients as a human-readable label for the portmapping.
-// It is not used for anything other than labelling.
-const tsPortMappingDesc = "tailscale-portmap"
+// portMappingDesc is sent to UPnP clients as a human-readable label for the
+// port mapping. It is empty to avoid writing any identifying label into the
+// gateway's port-mapping table; the field is only used for labelling and an
+// empty value is common and unremarkable.
+const portMappingDesc = ""
 
 // addAnyPortMapping abstracts over different UPnP client connections, calling
 // the available AddAnyPortMapping call if available for WAN IP connection v2,
@@ -249,7 +251,7 @@ func addAnyPortMapping(
 			internalPort,
 			internalClient,
 			true,
-			tsPortMappingDesc,
+			portMappingDesc,
 			uint32(leaseDuration.Seconds()),
 		)
 	}
@@ -264,7 +266,7 @@ func addAnyPortMapping(
 		internalPort,
 		internalClient,
 		true,
-		tsPortMappingDesc,
+		portMappingDesc,
 		uint32(leaseDuration.Seconds()),
 	)
 	return externalPort, err
@@ -491,7 +493,7 @@ func (c *Client) upnpHTTPClientLocked() *http.Client {
 }
 
 var (
-	disableUPnpEnv = registerBoolEnv("TS_DISABLE_UPNP")
+	disableUPnpEnv = registerBoolEnv("PSIPHON_DISABLE_UPNP")
 )
 
 // getUPnPPortMapping attempts to create a port-mapping over the UPnP protocol. On success,

@@ -107,7 +107,7 @@ func (p MapProtocol) String() string {
 	return "UDP"
 }
 
-var disablePortMapperEnv = registerBoolEnv("TS_DISABLE_PORTMAPPER")
+var disablePortMapperEnv = registerBoolEnv("PSIPHON_DISABLE_PORTMAPPER")
 
 // DebugKnobs contains debug configuration that can be provided when creating a
 // Client. The zero value is valid for use.
@@ -406,9 +406,6 @@ func (c *Client) SetGatewayLookupFunc(f func() (gw, myIP netip.Addr, ok bool)) {
 // the caller is responsible for not mutating c concurrently with Clone. The
 // copied UPnP discovery metadata is treated as read-only after Probe and is
 // shared (shallow-copied) with the returned Client.
-//
-// Clone replaces the unsafe-reflection field copying that the previous
-// integration performed against Tailscale's unexported Client fields.
 func (c *Client) Clone(onChange func()) *Client {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -610,11 +607,6 @@ func (c *Client) sawUPnPRecentlyLocked() bool {
 // by mapping attempts. Because probe state is shared by Clone, a Client cloned
 // from a probed Client reports the probe's responding types until it makes its
 // own observations.
-//
-// This is the per-Client replacement for reading Tailscale's process-global
-// clientmetric counters (portmap_upnp_ok / portmap_pmp_ok / portmap_pcp_ok),
-// which the previous integration scraped to report responding port mapping
-// types in metrics.
 func (c *Client) RespondingPortMappingTypes() (upnp, pmp, pcp bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
