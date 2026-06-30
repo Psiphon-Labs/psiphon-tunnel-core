@@ -2027,6 +2027,18 @@ func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 	return errors.Trace(err)
 }
 
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) BindToDeviceInterfaceName() string {
+
+	// In a split-interface in-proxy proxy, BindToDevice (via
+	// splitDeviceBinder) binds port mapping sockets to the downstream
+	// (non-upstream) interface; return that interface's name so port mapping
+	// gateway discovery targets the downstream gateway rather than the system
+	// default route. Returns "" outside split-interface mode, selecting
+	// default-route gateway discovery.
+	return w.config.splitInterfaceDownstreamInterfaceName()
+}
+
 func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 	ctx context.Context, network, address string) (net.Conn, error) {
 
@@ -2469,6 +2481,7 @@ func (s *InproxyNATStateManager) reset() {
 	s.networkID = networkID
 	s.natType = inproxy.NATTypeUnknown
 	s.portMappingTypes = inproxy.PortMappingTypes{}
+	s.portMappingProbe = nil
 }
 
 func (s *InproxyNATStateManager) getNATType(

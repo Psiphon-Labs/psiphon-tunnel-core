@@ -166,15 +166,13 @@ func filterSDPAddresses(
 	return nil, nil, errors.Trace(errNotEnabled)
 }
 
-func initPortMapper(coordinator WebRTCDialCoordinator) {
-}
-
 type PortMappingProbe struct {
 }
 
 func probePortMapping(
 	ctx context.Context,
-	logger common.Logger) (PortMappingTypes, *PortMappingProbe, error) {
+	logger common.Logger,
+	coordinator WebRTCDialCoordinator) (PortMappingTypes, *PortMappingProbe, error) {
 
 	return nil, nil, errors.Trace(errNotEnabled)
 }
