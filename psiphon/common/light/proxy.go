@@ -573,10 +573,11 @@ func (proxy *Proxy) Resume() {
 	proxy.eventReceiver.Resumed()
 }
 
-// SetLimits sets new values for MaxConcurrent, LimitUpstreamBytesPerSecond, and
-// LimitDownstreamBytesPerSecond. These values will be applied rolling forward;
-// no active connections are closed and the rate limits for active connections
-// do not change.
+// SetLimits sets new values for MaxConcurrent, LimitUpstreamBytesPerSecond,
+// and LimitDownstreamBytesPerSecond. If MaxConcurrent is nil, a default
+// value is used. These values will be applied rolling forward; no active
+// connections are closed and the rate limits for active connections do not
+// change.
 func (proxy *Proxy) SetLimits(
 	maxConcurrent *int,
 	limitUpstreamBytesPerSecond int,
@@ -692,11 +693,6 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 
 	defer conn.Close()
 
-	if proxy.config.EmitActivity {
-		proxy.currentConnectionCount.Add(1)
-		defer proxy.currentConnectionCount.Add(-1)
-	}
-
 	var geoIPData common.GeoIPData
 	completedTCP := time.Now().UTC()
 	var completedTLS time.Time
@@ -800,10 +796,13 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	geoIPData = proxy.lookupGeoIP(clientIP)
 
 	if proxy.config.EmitActivity {
+
+		proxy.currentConnectionCount.Add(1)
+		defer proxy.currentConnectionCount.Add(-1)
+
 		activityRegion := proxy.getOrCreateRegionActivity(geoIPData.Country)
 		if activityRegion != nil {
 			bytesCounter.activityRegion = activityRegion
-			activityRegion.currentConnectionCount.Add(1)
 			defer func() {
 				activityRegion.currentConnectionCount.Add(-1)
 			}()
@@ -1063,6 +1062,7 @@ func (proxy *Proxy) getOrCreateRegionActivity(region string) *regionActivity {
 		stats = &regionActivity{}
 		proxy.regionActivity[region] = stats
 	}
+	stats.currentConnectionCount.Add(1)
 	return stats
 }
 
