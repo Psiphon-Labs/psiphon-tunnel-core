@@ -554,7 +554,7 @@ func getProxyProtocolHeaderConfig(
 	for _, target := range targets {
 		normalizedTargets = append(
 			normalizedTargets,
-			normalizeProxyProtocolTargetDestinationAddress(target))
+			normalizeHostAddress(target))
 	}
 
 	return &proxyProtocolHeaderConfig{
@@ -563,7 +563,7 @@ func getProxyProtocolHeaderConfig(
 	}
 }
 
-func normalizeProxyProtocolTargetDestinationAddress(target string) string {
+func normalizeHostAddress(target string) string {
 
 	// Normalize IP address representation.
 	ip := net.ParseIP(target)
@@ -696,7 +696,8 @@ var connectedRequestParams = append(
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -714,6 +715,7 @@ var updateOnConnectedParamNames = append(
 		"light_proxy_dial_IPv4",
 		"light_proxy_dial_IPv6",
 		"light_proxy_dial_failed",
+		"light_proxy_dial_canceled",
 	},
 	fragmentor.GetUpstreamMetricsNames()...)
 
@@ -906,6 +908,10 @@ func statusAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
+			if bytes < 0 {
+				continue
+			}
+
 			// Limitation: only TCP bytes are reported.
 			support.destBytesLogger.AddDomainBytes(
 				domain,

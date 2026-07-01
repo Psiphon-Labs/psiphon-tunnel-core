@@ -142,7 +142,8 @@ func (conn *lightConn) Read(b []byte) (int, error) {
 
 	if conn.doneReadPadding {
 		n, err := conn.Conn.Read(b)
-		return n, errors.Trace(err)
+		// TraceReader preserves io.EOF
+		return n, errors.TraceReader(err)
 	}
 
 	// Read the padding size.
@@ -150,14 +151,16 @@ func (conn *lightConn) Read(b []byte) (int, error) {
 	var wirePaddingSize [2]byte
 	_, err := io.ReadFull(conn.Conn, wirePaddingSize[:])
 	if err != nil {
-		return 0, errors.Trace(err)
+		// TraceReader preserves io.EOF; a short read is io.ErrUnexpectedEOF
+		return 0, errors.TraceReader(err)
 	}
 	paddingSize := binary.BigEndian.Uint16(wirePaddingSize[:])
 
 	if paddingSize == stopPadding {
 		conn.doneReadPadding = true
 		n, err := conn.Conn.Read(b)
-		return n, errors.Trace(err)
+		// TraceReader preserves io.EOF
+		return n, errors.TraceReader(err)
 	}
 
 	// Read the size of the payload, and then read that number of payload

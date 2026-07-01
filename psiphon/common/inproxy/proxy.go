@@ -485,9 +485,9 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 		commonRegionActivity)
 }
 
-// getOrCreateRegionActivity returns the RegionActivity for a region, creating it
-// if needed. This should be called once at connection start to avoid multiple
-// lock usage.
+// getOrCreateRegionActivity returns the lock-free RegionActivity for a
+// region, creating it if needed, and increments the connecting client count
+// while holding the region activity lock.
 func (p *Proxy) getOrCreateRegionActivity(region string, isPersonal bool) *RegionActivity {
 	var mutex *sync.Mutex
 	var statsMap map[string]*RegionActivity
@@ -505,6 +505,7 @@ func (p *Proxy) getOrCreateRegionActivity(region string, isPersonal bool) *Regio
 		stats = &RegionActivity{}
 		statsMap[region] = stats
 	}
+	stats.connectingClients.Add(1)
 	return stats
 }
 
@@ -1100,18 +1101,6 @@ func (p *Proxy) proxyOneClient(
 			announceResponse.SelectedProtocolVersion)
 	}
 
-	clientRegion := announceResponse.ClientRegion
-	var regionActivity *RegionActivity
-	if clientRegion != "" {
-		regionActivity = p.getOrCreateRegionActivity(clientRegion, isPersonal)
-	}
-
-	// Create per-connection activity wrapper with cached regionActivity pointer
-	connActivityWrapper := &connectionActivityWrapper{
-		p:              p,
-		regionActivity: regionActivity,
-	}
-
 	proxyDTLSFingerprint, err := webRTCCoordinator.ProxyDTLSFingerprint(
 		announceResponse.ClientRootObfuscationSecret)
 	if err != nil {
@@ -1125,11 +1114,19 @@ func (p *Proxy) proxyOneClient(
 
 	// For activity updates, indicate that a client connection is now underway.
 
-	p.connectingClients.Add(1)
-	if regionActivity != nil {
-		regionActivity.connectingClients.Add(1)
+	var regionActivity *RegionActivity
+	if announceResponse.ClientRegion != "" {
+		regionActivity = p.getOrCreateRegionActivity(announceResponse.ClientRegion, isPersonal)
 	}
+
+	// Create per-connection activity wrapper with cached regionActivity pointer
+	connActivityWrapper := &connectionActivityWrapper{
+		p:              p,
+		regionActivity: regionActivity,
+	}
+
 	connected := false
+	p.connectingClients.Add(1)
 	defer func() {
 		if !connected {
 			p.connectingClients.Add(-1)

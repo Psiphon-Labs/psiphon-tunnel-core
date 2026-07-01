@@ -5926,6 +5926,7 @@ func (r *lightProxyEventReceiver) Paused()                           {}
 func (r *lightProxyEventReceiver) Resumed()                          {}
 func (r *lightProxyEventReceiver) Accepted()                         {}
 func (r *lightProxyEventReceiver) Rejected()                         {}
+func (r *lightProxyEventReceiver) Activity(*light.ActivityStats)     {}
 func (r *lightProxyEventReceiver) Connection(*light.ConnectionStats) {}
 func (r *lightProxyEventReceiver) IrregularConnection(
 	string, common.GeoIPData, string) {

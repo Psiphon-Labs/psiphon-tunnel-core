@@ -528,14 +528,25 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 
 	lightProxyClient := controller.config.GetLightProxyClient()
 	if lightProxyClient != nil {
-		metrics := lightProxyClient.GetMetrics()
+
+		// Specify reset counters true. Each connected tunnel will report
+		// light proxy dial count metrics for the period between the last
+		// tunnel report and now.
+		//
+		// Limitation: if the connected request goes on to fail, the counts
+		// are lost. This is a tradeoff; simply delaying the reset until
+		// after the request could potentially clobber counts for dials that
+		// are currently in-flight.
+
+		metrics := lightProxyClient.GetMetrics(true)
 		params["light_proxy_id"] = metrics.ProxyID
 		params["light_proxy_entry_tracker"] = strconv.FormatInt(metrics.ProxyEntryTracker, 10)
-		params["light_proxy_dial_IPv4"] = strconv.FormatInt(metrics.DialIPv4Count, 10)
+		params["light_proxy_dial_IPv4"] = strconv.Itoa(metrics.DialIPv4Count)
 		if metrics.HasIPv6 {
-			params["light_proxy_dial_IPv6"] = strconv.FormatInt(metrics.DialIPv6Count, 10)
+			params["light_proxy_dial_IPv6"] = strconv.Itoa(metrics.DialIPv6Count)
 		}
-		params["light_proxy_dial_failed"] = strconv.FormatInt(metrics.DialFailedCount, 10)
+		params["light_proxy_dial_failed"] = strconv.Itoa(metrics.DialFailedCount)
+		params["light_proxy_dial_canceled"] = strconv.Itoa(metrics.DialCanceledCount)
 	}
 
 	var response []byte

@@ -107,7 +107,9 @@ type Tunnel struct {
 	signalPortForwardFailure       chan struct{}
 	signalSSHRequestFailure        chan error
 	signalAppResumed               chan struct{}
+	signalReadInactiveProbe        chan struct{}
 	totalPortForwardFailures       int
+	totalReadInactiveProbes        int
 	adjustedEstablishStartTime     time.Time
 	establishDuration              time.Duration
 	establishedTime                time.Time
@@ -177,6 +179,7 @@ func ConnectTunnel(
 		signalPortForwardFailure:   make(chan struct{}, 1),
 		signalSSHRequestFailure:    make(chan error, 1),
 		signalAppResumed:           make(chan struct{}, 1),
+		signalReadInactiveProbe:    make(chan struct{}, 1),
 		adjustedEstablishStartTime: adjustedEstablishStartTime,
 	}, nil
 }
@@ -566,6 +569,15 @@ func (tunnel *Tunnel) IsDiscarded() bool {
 
 func (tunnel *Tunnel) GetReadInactiveDuration() time.Duration {
 	return tunnel.activityConn.GetReadInactiveDuration()
+}
+
+// SignalReadInactiveProbe enqueues an SSH keep alive probe for a tunnel that
+// has been classified as read inactive based on its GetReadInactiveDuration.
+func (tunnel *Tunnel) SignalReadInactiveProbe() {
+	select {
+	case tunnel.signalReadInactiveProbe <- struct{}{}:
+	default:
+	}
 }
 
 // SendAPIRequest sends an API request as an SSH request through the tunnel.
@@ -1928,14 +1940,23 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		}
 	}()
 
-	enqueueProbe := func(isAppResumed bool) error {
+	type enqueueProbeReason int
+	const (
+		enqueueProbePortForwardFailure enqueueProbeReason = iota
+		enqueueProbeSSHRequestFailure
+		enqueueProbeAppResumed
+		enqueueProbeReadInactivity
+	)
+
+	enqueueProbe := func(reason enqueueProbeReason) error {
 
 		inactive := tunnel.activityConn.GetReadInactiveDuration()
 
 		var inactiveThreshold, probeTimeout time.Duration
 		p := tunnel.getCustomParameters()
 
-		if isAppResumed {
+		switch reason {
+		case enqueueProbeAppResumed:
 
 			// In the AppResumed case, if the last tunnel read was sufficiently
 			// long ago, skip the probe and initiate a full tunnel
@@ -1959,7 +1980,19 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				NoticeInfo("AppResumed: skip SSH keep alive probe")
 			}
 
-		} else {
+		case enqueueProbeReadInactivity:
+
+			// In the read inactivity probe case, GetReadInactiveDuration
+			// criteria has already been met.
+			//
+			// Limitation: this will always launch a new probe, even if a
+			// probe or regular inbound traffic was in flight at enqueue time
+			// and arrived before this point.
+			inactiveThreshold = 0
+			probeTimeout = p.Duration(parameters.SSHKeepAliveProbeTimeout)
+
+		default:
+
 			inactiveThreshold = p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
 			probeTimeout = p.Duration(parameters.SSHKeepAliveProbeTimeout)
 		}
@@ -2069,7 +2102,20 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if tunnel.conn.IsClosed() {
 				err = errors.TraceNew("underlying conn is closed")
 			} else {
-				err = enqueueProbe(false)
+				err = enqueueProbe(enqueueProbePortForwardFailure)
+			}
+
+		case <-tunnel.signalReadInactiveProbe:
+			// See comments in tunnel.signalPortForwardFailure case.
+			tunnel.totalReadInactiveProbes++
+			NoticeInfo("read inactive probes for %s: %d",
+				tunnel.dialParams.ServerEntry.GetDiagnosticID(),
+				tunnel.totalReadInactiveProbes)
+
+			if tunnel.conn.IsClosed() {
+				err = errors.TraceNew("underlying conn is closed")
+			} else {
+				err = enqueueProbe(enqueueProbeReadInactivity)
 			}
 
 		case <-tunnel.signalAppResumed:
@@ -2077,7 +2123,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if tunnel.conn.IsClosed() {
 				err = errors.TraceNew("underlying conn is closed")
 			} else {
-				err = enqueueProbe(true)
+				err = enqueueProbe(enqueueProbeAppResumed)
 			}
 
 		case requestErr := <-tunnel.signalSSHRequestFailure:
@@ -2095,7 +2141,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 				// Trigger a probe to check if the SSH request failure is due
 				// to a dead tunnel.
-				err = enqueueProbe(false)
+				err = enqueueProbe(enqueueProbeSSHRequestFailure)
 			}
 
 		case err = <-sshKeepAliveError:

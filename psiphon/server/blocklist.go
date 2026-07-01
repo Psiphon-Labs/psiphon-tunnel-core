@@ -135,11 +135,7 @@ func (b *Blocklist) LookupDomain(domain string) []BlocklistTag {
 		return nil
 	}
 
-	// Domains parsed out of DNS queries will be fully-qualified domain names,
-	// while list entries do not end in a dot.
-	if len(domain) > 0 && domain[len(domain)-1] == '.' {
-		domain = domain[:len(domain)-1]
-	}
+	domain = normalizeHostAddress(domain)
 
 	tags, ok := b.data.Load().(*blocklistData).lookupDomain[domain]
 	if !ok {
@@ -214,7 +210,7 @@ func loadBlocklistFromFile(filename string) (*blocklistData, error) {
 				return nil, errors.Tracef("invalid domain name: %s", record[0])
 			}
 
-			key := record[0]
+			key := normalizeHostAddress(record[0])
 
 			tags := data.lookupDomain[key]
 
