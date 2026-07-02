@@ -872,7 +872,9 @@ type Config struct {
 	// push-imported or stored light proxies.
 	EnablePersonalLightProxyTunnels bool `json:",omitempty"`
 
-	// LightProxyEntry is an optional encoded light proxy entry.
+	// LightProxyEntry is an optional encoded light proxy entry. When
+	// specified, the light proxy entry is always chosen; any TTL in the entry
+	// is ignored and any previously stored light proxy entry is ignored.
 	LightProxyEntry []byte `json:",omitempty"`
 
 	// LightProxyEntryTracker is the light proxy entry tracker value to report.

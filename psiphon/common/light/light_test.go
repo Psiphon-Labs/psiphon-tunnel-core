@@ -81,6 +81,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		testClientPlatform          = "Android"
 		testClientBuildRev          = "01020304"
 		testDeviceRegion            = "US"
+		testClientRegion            = "CA"
 		testProviderID              = "01020304"
 		testSponsorID               = "0102030405060708"
 		testProxyEntryTracker int64 = 0x0102030405060708
@@ -237,7 +238,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	}
 
 	lookupGeoIP := func(string) common.GeoIPData {
-		return common.GeoIPData{}
+		return common.GeoIPData{Country: testClientRegion}
 	}
 
 	params, err := parameters.NewParameters(nil)
@@ -248,11 +249,15 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	receiver := newTestProxyEventReceiver(
 		expectedTLSClientHelloFragmented,
 		expectedTLSClientHelloPadding,
-		addProxyHeader)
+		addProxyHeader,
+		testClientRegion)
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
 	proxyConfig.MaxConcurrent = &maxConcurrent
+	proxyConfig.LimitUpstreamBytesPerSecond = 1 << 30
+	proxyConfig.LimitDownstreamBytesPerSecond = 1 << 30
 
+	proxyConfig.EmitActivity = true
 	proxyConfig.AllowBogons = true
 	proxyConfig.EnableDebugLogs = true
 
@@ -272,6 +277,14 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	case <-receiver.listening:
 	case <-ctx.Done():
 		return errors.Trace(ctx.Err())
+	}
+
+	err = proxy.SetLimits(
+		nil,
+		1<<30,
+		1<<30)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	newClientConfig := func() *ClientConfig {
@@ -374,6 +387,11 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 				"unexpected PROXY protocol header count: %d",
 				proxyProtocolHeaderCount)
 		}
+	}
+
+	err = receiver.awaitActivityRegion(ctx)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	proxy.Pause()
@@ -697,18 +715,24 @@ type testProxyEventReceiver struct {
 	expectedTLSClientHelloFragmented bool
 	expectedTLSClientHelloPadding    int
 	expectedProxyProtocolHeaderAdded bool
+	expectedActivityRegion           string
+	activityRegionSeen               chan struct{}
+	activityRegionSeenOnce           sync.Once
 }
 
 func newTestProxyEventReceiver(
 	expectedTLSClientHelloFragmented bool,
 	expectedTLSClientHelloPadding int,
-	expectedProxyProtocolHeaderAdded bool) *testProxyEventReceiver {
+	expectedProxyProtocolHeaderAdded bool,
+	expectedActivityRegion string) *testProxyEventReceiver {
 
 	return &testProxyEventReceiver{
 		listening:                        make(chan struct{}),
 		expectedTLSClientHelloFragmented: expectedTLSClientHelloFragmented,
 		expectedTLSClientHelloPadding:    expectedTLSClientHelloPadding,
 		expectedProxyProtocolHeaderAdded: expectedProxyProtocolHeaderAdded,
+		expectedActivityRegion:           expectedActivityRegion,
+		activityRegionSeen:               make(chan struct{}),
 	}
 }
 
@@ -733,6 +757,49 @@ func (r *testProxyEventReceiver) Accepted() {
 
 func (r *testProxyEventReceiver) Rejected() {
 	fmt.Printf("[Rejected]\n")
+}
+
+func (r *testProxyEventReceiver) Activity(stats *ActivityStats) {
+	if r.expectedActivityRegion != "" {
+		regionStats, ok := stats.RegionActivity[r.expectedActivityRegion]
+		if ok &&
+			(regionStats.BytesUp > 0 ||
+				regionStats.BytesDown > 0 ||
+				regionStats.CurrentConnectionCount > 0) {
+			r.activityRegionSeenOnce.Do(func() {
+				close(r.activityRegionSeen)
+			})
+		}
+	}
+
+	const activityFormat = `[Activity] proxyID: %s, providerID: %s, ` +
+		`bytesUp: %d, bytesDown: %d, bytesDuration: %s, ` +
+		`currentConnectionCount: %d` + "\n"
+
+	fmt.Printf(
+		activityFormat,
+		stats.ProxyID,
+		stats.ProxyProviderID,
+		stats.BytesUp,
+		stats.BytesDown,
+		stats.BytesDuration,
+		stats.CurrentConnectionCount)
+}
+
+func (r *testProxyEventReceiver) awaitActivityRegion(ctx context.Context) error {
+	if r.expectedActivityRegion == "" {
+		return nil
+	}
+
+	select {
+	case <-r.activityRegionSeen:
+		return nil
+	case <-ctx.Done():
+		return errors.Tracef(
+			"missing activity for region %s: %v",
+			r.expectedActivityRegion,
+			ctx.Err())
+	}
 }
 
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {
