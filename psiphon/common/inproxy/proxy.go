@@ -1290,11 +1290,13 @@ func (p *Proxy) proxyOneClient(
 	// For activity updates, indicate that a client connection is established.
 
 	connected = true
-	p.connectingClients.Add(-1)
 	p.connectedClients.Add(1)
+	p.connectingClients.Add(-1)
 	if regionActivity != nil {
-		regionActivity.connectingClients.Add(-1)
+		// Increment connectedClients first, to avoid a premature prune in
+		// snapshotAndResetRegionActivity with all-zero values.
 		regionActivity.connectedClients.Add(1)
+		regionActivity.connectingClients.Add(-1)
 	}
 	defer func() {
 		p.connectedClients.Add(-1)
