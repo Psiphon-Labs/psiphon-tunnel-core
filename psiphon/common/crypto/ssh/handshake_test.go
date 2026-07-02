@@ -367,7 +367,7 @@ type errorKeyingTransport struct {
 	readLeft, writeLeft int
 }
 
-func (n *errorKeyingTransport) prepareKeyChange(*algorithms, *kexResult) error {
+func (n *errorKeyingTransport) prepareKeyChange(*NegotiatedAlgorithms, *kexResult) error {
 	return nil
 }
 
@@ -545,7 +545,7 @@ type mockKeyingTransport struct {
 	kexInitSent    chan struct{}
 }
 
-func (n *mockKeyingTransport) prepareKeyChange(*algorithms, *kexResult) error {
+func (n *mockKeyingTransport) prepareKeyChange(*NegotiatedAlgorithms, *kexResult) error {
 	return nil
 }
 
@@ -762,7 +762,7 @@ func TestHandshakePendingPacketsError(t *testing.T) {
 func TestHandshakeRekeyDefault(t *testing.T) {
 	clientConf := &ClientConfig{
 		Config: Config{
-			Ciphers: []string{"aes128-ctr"},
+			Ciphers: []string{CipherAES128CTR},
 		},
 		HostKeyCallback: InsecureIgnoreHostKey(),
 	}
@@ -788,7 +788,7 @@ func TestHandshakeRekeyDefault(t *testing.T) {
 }
 
 func TestHandshakeAEADCipherNoMAC(t *testing.T) {
-	for _, cipher := range []string{chacha20Poly1305ID, gcm128CipherID} {
+	for _, cipher := range []string{CipherChaCha20Poly1305, CipherAES128GCM} {
 		checker := &syncChecker{
 			called: make(chan int, 1),
 		}
@@ -1237,5 +1237,130 @@ func TestStrictKEXMixed(t *testing.T) {
 	}
 	if err := client.waitSession(); err != nil {
 		t.Fatalf("client.waitSession: %v", err)
+	}
+}
+
+func TestNegotiatedAlgorithms(t *testing.T) {
+	c1, c2, err := netPipe()
+	if err != nil {
+		t.Fatalf("netPipe: %v", err)
+	}
+	defer c1.Close()
+	defer c2.Close()
+
+	var serverAlgorithms NegotiatedAlgorithms
+
+	serverConf := &ServerConfig{
+		PasswordCallback: func(conn ConnMetadata, password []byte) (*Permissions, error) {
+			if algorithmConn, ok := conn.(AlgorithmsConnMetadata); ok {
+				serverAlgorithms = algorithmConn.Algorithms()
+				return &Permissions{}, nil
+			}
+			return nil, errors.New("server conn does not implement AlgorithmsConnMetadata")
+		},
+	}
+	serverConf.AddHostKey(testSigners["rsa"])
+	go NewServerConn(c1, serverConf)
+
+	clientConf := &ClientConfig{
+		User:            "test",
+		Auth:            []AuthMethod{Password("testpw")},
+		HostKeyCallback: FixedHostKey(testSigners["rsa"].PublicKey()),
+	}
+
+	if conn, _, _, err := NewClientConn(c2, "", clientConf); err != nil {
+		t.Fatal(err)
+	} else {
+		if algorithmConn, ok := conn.(AlgorithmsConnMetadata); ok {
+			clientAlgorithms := algorithmConn.Algorithms()
+			if clientAlgorithms.HostKey == "" {
+				t.Fatal("negotiated client host key is empty")
+			}
+			if clientAlgorithms.KeyExchange == "" {
+				t.Fatal("negotiated client KEX is empty")
+			}
+			if clientAlgorithms.Read.Cipher == "" {
+				t.Fatal("negotiated client read cipher is empty")
+			}
+			if clientAlgorithms.Write.Cipher == "" {
+				t.Fatal("negotiated client write cipher is empty")
+			}
+			if !reflect.DeepEqual(clientAlgorithms, serverAlgorithms) {
+				t.Fatalf("negotiated client algorithms: %+v differs from negotiated server algorithms: %+v",
+					clientAlgorithms, serverAlgorithms)
+			}
+		} else {
+			t.Fatal("client conn does not implement AlgorithmsConnMetadata")
+		}
+	}
+}
+
+func TestAlgorithmNegotiationError(t *testing.T) {
+	c1, c2, err := netPipe()
+	if err != nil {
+		t.Fatalf("netPipe: %v", err)
+	}
+	defer c1.Close()
+	defer c2.Close()
+
+	serverConf := &ServerConfig{
+		Config: Config{
+			Ciphers: []string{CipherAES128CTR, CipherAES256CTR},
+		},
+		PasswordCallback: func(conn ConnMetadata, password []byte) (*Permissions, error) {
+			return &Permissions{}, nil
+		},
+	}
+	serverConf.AddHostKey(testSigners["rsa"])
+
+	srvErrCh := make(chan error, 1)
+	go func() {
+		_, _, _, err := NewServerConn(c1, serverConf)
+		srvErrCh <- err
+	}()
+
+	clientConf := &ClientConfig{
+		Config: Config{
+			Ciphers: []string{CipherAES128GCM, CipherAES256GCM},
+		},
+		User:            "test",
+		Auth:            []AuthMethod{Password("testpw")},
+		HostKeyCallback: FixedHostKey(testSigners["rsa"].PublicKey()),
+	}
+
+	_, _, _, err = NewClientConn(c2, "", clientConf)
+	if err == nil {
+		t.Fatal("client connection succeeded expected algorithm negotiation error")
+	}
+	var negotiationError *AlgorithmNegotiationError
+	if !errors.As(err, &negotiationError) {
+		t.Fatalf("expected algorithm negotiation error, got %v", err)
+	}
+	expectedErrorString := fmt.Sprintf("ssh: handshake failed: ssh: no common algorithm for client to server cipher; we offered: %v, peer offered: %v",
+		clientConf.Ciphers, serverConf.Ciphers)
+	if err.Error() != expectedErrorString {
+		t.Fatalf("expected error string %q, got %q", expectedErrorString, err.Error())
+	}
+	if !reflect.DeepEqual(negotiationError.RequestedAlgorithms, serverConf.Ciphers) {
+		t.Fatalf("expected requested algorithms %v, got %v", serverConf.Ciphers, negotiationError.RequestedAlgorithms)
+	}
+	if !reflect.DeepEqual(negotiationError.SupportedAlgorithms, clientConf.Ciphers) {
+		t.Fatalf("expected supported algorithms %v, got %v", clientConf.Ciphers, negotiationError.SupportedAlgorithms)
+	}
+	err = <-srvErrCh
+	negotiationError = nil
+	if !errors.As(err, &negotiationError) {
+		t.Fatalf("expected algorithm negotiation error, got %v", err)
+	}
+	expectedErrorString = fmt.Sprintf("ssh: no common algorithm for client to server cipher; we offered: %v, peer offered: %v",
+		serverConf.Ciphers, clientConf.Ciphers)
+	if err.Error() != expectedErrorString {
+		t.Fatalf("expected error string %q, got %q", expectedErrorString, err.Error())
+	}
+	if !reflect.DeepEqual(negotiationError.RequestedAlgorithms, clientConf.Ciphers) {
+		t.Fatalf("expected requested algorithms %v, got %v", clientConf.Ciphers, negotiationError.RequestedAlgorithms)
+	}
+	if !reflect.DeepEqual(negotiationError.SupportedAlgorithms, serverConf.Ciphers) {
+		t.Fatalf("expected supported algorithms %v, got %v", serverConf.Ciphers, negotiationError.SupportedAlgorithms)
 	}
 }

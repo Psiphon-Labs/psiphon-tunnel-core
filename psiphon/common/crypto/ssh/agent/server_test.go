@@ -8,6 +8,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"fmt"
+	"io"
 	pseudorand "math/rand"
 	"reflect"
 	"strings"
@@ -258,9 +259,47 @@ func TestParseConstraints(t *testing.T) {
 		t.Errorf("got extension %v, want %v", extensions, expect)
 	}
 
+	// Test Malformed Constraint
+	_, _, _, err = parseConstraints([]byte{1})
+	if err != io.ErrUnexpectedEOF {
+		t.Errorf("got %v, want %v", err, io.ErrUnexpectedEOF)
+	}
+
 	// Test Unknown Constraint
 	_, _, _, err = parseConstraints([]byte{128})
 	if err == nil || !strings.Contains(err.Error(), "unknown constraint") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseEd25519KeyShortPanic(t *testing.T) {
+	msg := ssh.Marshal(ed25519KeyMsg{
+		Type: ssh.KeyAlgoED25519,
+		Pub:  []byte{1, 2, 3},
+		Priv: []byte{1, 2, 3, 4, 5},
+	})
+
+	a, b, err := netPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	defer b.Close()
+
+	done := make(chan error, 1)
+	go func() { done <- ServeAgent(NewKeyring(), a) }()
+
+	c := NewClient(b)
+	_, err = c.(*client).call(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := c.List()
+	if err != nil {
+		t.Fatalf("agent died: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Error("short ed25519 key was accepted into keyring")
 	}
 }
