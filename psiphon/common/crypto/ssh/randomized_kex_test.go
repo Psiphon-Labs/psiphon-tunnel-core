@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -124,19 +125,23 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 				}
 
 				if !legacyClient {
-					// Ensure weak MAC is not negotiated
-					for _, p := range []packetCipher{
-						clientSSHConn.(*connection).transport.conn.(*transport).reader.packetCipher,
-						clientSSHConn.(*connection).transport.conn.(*transport).writer.packetCipher} {
-						switch c := p.(type) {
-						case *gcmCipher, *chacha20Poly1305Cipher:
-							// No weak MAC.
-						case *streamPacketCipher:
-							// The only weak MAC, "hmac-sha1-96", is also the only truncatingMAC.
-							if _, ok := c.mac.(truncatingMAC); ok {
-								return errors.TraceNew("weak MAC negotiated")
-							}
-						}
+					// Ensure SHA-1 is not negotiated.
+					isSHA1 := func(s string) bool {
+						return strings.Contains(s, "sha1") ||
+							s == KeyAlgoRSA || s == CertAlgoRSAv01 ||
+							s == InsecureKeyAlgoDSA || s == InsecureCertAlgoDSAv01
+					}
+					algorithms := clientSSHConn.(AlgorithmsConnMetadata).Algorithms()
+					if isSHA1(algorithms.KeyExchange) ||
+						isSHA1(algorithms.HostKey) ||
+						isSHA1(algorithms.Read.MAC) ||
+						isSHA1(algorithms.Write.MAC) {
+						return errors.Tracef(
+							"SHA-1 algorithm negotiated: kex=%q hostkey=%q read_mac=%q write_mac=%q",
+							algorithms.KeyExchange,
+							algorithms.HostKey,
+							algorithms.Read.MAC,
+							algorithms.Write.MAC)
 					}
 				}
 

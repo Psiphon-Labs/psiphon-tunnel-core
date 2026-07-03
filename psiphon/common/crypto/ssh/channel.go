@@ -700,7 +700,10 @@ func (ch *channel) SendRequest(name string, wantReply bool, payload []byte) (boo
 	drain:
 		for {
 			select {
-			case <-ch.msg:
+			case _, ok := <-ch.msg:
+				if !ok {
+					break drain
+				}
 			default:
 				break drain
 			}
