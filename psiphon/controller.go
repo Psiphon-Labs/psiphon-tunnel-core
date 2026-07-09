@@ -2950,6 +2950,16 @@ func (controller *Controller) establishCandidateGenerator() {
 		close(controller.serverAffinityDoneBroadcast)
 	}
 
+	inproxyAwaitBrokerSpecsEmitted := false
+	inproxyAwaitBrokerSpecs :=
+		controller.config.IsInproxyClientPersonalPairingMode() ||
+			(len(controller.protocolSelectionConstraints.limitTunnelProtocols) > 0 &&
+				controller.protocolSelectionConstraints.limitTunnelProtocols.
+					IsOnlyInproxyTunnelProtocols() &&
+				(len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) == 0 ||
+					controller.protocolSelectionConstraints.initialLimitTunnelProtocols.
+						IsOnlyInproxyTunnelProtocols()))
+
 loop:
 	// Repeat until stopped
 	for {
@@ -2985,8 +2995,31 @@ loop:
 
 		candidateServerEntryCount := 0
 
+		// If exclusively inproxy protocols will be dialed, skip down to the
+		// establishSignalForceTacticsFetch step and following pause when
+		// there are no client broker specs. This avoids establishment work
+		// that will fail with "no broker specs" and corresponding diagnostic
+		// noise.
+
+		skip := false
+		if inproxyAwaitBrokerSpecs &&
+			!haveInproxyClientBrokerSpecs(controller.config) {
+
+			if controller.config.DisableTactics {
+				NoticeWarning("inproxy client: no broker specs and tactics disabled")
+				controller.SignalComponentFailure()
+				return
+			}
+
+			if !inproxyAwaitBrokerSpecsEmitted {
+				NoticeInfo("inproxy client: await tactics with client broker specs")
+				inproxyAwaitBrokerSpecsEmitted = true
+			}
+			skip = true
+		}
+
 		// Send each iterator server entry to the establish workers
-		for {
+		for !skip {
 
 			networkWaitStartTime := time.Now()
 			if !WaitForNetworkConnectivity(
