@@ -591,6 +591,7 @@ const (
 	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
+	LightProxyPersonalPairingConnectionWorkerPoolSize  = "LightProxyPersonalPairingConnectionWorkerPoolSize"
 
 	// Retired parameters
 
@@ -1264,14 +1265,15 @@ var defaultParameters = map[string]struct {
 
 	DisableServerEntriesReporter: {value: false},
 
-	LightProxyDisableFallback:              {value: false},
-	LightProxyDisable:                      {value: false},
-	LightProxyCustomHostNameRegexes:        {value: RegexStrings{}},
-	LightProxyCustomHostNameProbability:    {value: 0.0, minimum: 0.0},
-	LightProxyUseRecommendedSNIProbability: {value: 0.5, minimum: 0.0},
-	LightProxyTunnelInactiveThreshold:      {value: 30 * time.Second, minimum: 0 * time.Millisecond},
-	LightProxyDialTimeout:                  {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
-	LightProxyLimitDestinationAddresses:    {value: []string{}},
+	LightProxyDisableFallback:                         {value: false},
+	LightProxyDisable:                                 {value: false},
+	LightProxyCustomHostNameRegexes:                   {value: RegexStrings{}},
+	LightProxyCustomHostNameProbability:               {value: 0.0, minimum: 0.0},
+	LightProxyUseRecommendedSNIProbability:            {value: 0.5, minimum: 0.0},
+	LightProxyTunnelInactiveThreshold:                 {value: 30 * time.Second, minimum: 0 * time.Millisecond},
+	LightProxyDialTimeout:                             {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	LightProxyLimitDestinationAddresses:               {value: []string{}},
+	LightProxyPersonalPairingConnectionWorkerPoolSize: {value: 2, minimum: 1},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -2675,8 +2675,8 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 
 	// ConnectionWorkerPoolSize may be set by tactics.
 	//
-	// In-proxy personal pairing mode uses a distinct parameter which is
-	// typically configured to a lower number, limiting concurrent load and
+	// Personal pairing modes use distinct parameters which are typically
+	// configured to a lower number, limiting concurrent load and
 	// announcement consumption for personal proxies.
 	//
 	// ConnectionWorkerPoolMaxSize is a config-only cap on the worker pool
@@ -2685,6 +2685,8 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 	var workerPoolSize int
 	if controller.config.IsInproxyClientPersonalPairingMode() {
 		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
+	} else if controller.config.EnablePersonalLightProxyTunnels {
+		workerPoolSize = p.Int(parameters.LightProxyPersonalPairingConnectionWorkerPoolSize)
 	} else {
 		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
 	}

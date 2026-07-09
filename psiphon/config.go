@@ -872,6 +872,11 @@ type Config struct {
 	// push-imported or stored light proxies.
 	EnablePersonalLightProxyTunnels bool `json:",omitempty"`
 
+	// LightProxyPersonalPairingConnectionWorkerPoolSize specifies the value for
+	// ConnectionWorkerPoolSize in personal light proxy tunnel mode. If omitted
+	// or when 0, a default is used; this is recommended.
+	LightProxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
+
 	// LightProxyEntry is an optional encoded light proxy entry. When
 	// specified, the light proxy entry is always chosen; any TTL in the entry
 	// is ignored and any previously stored light proxy entry is ignored.
@@ -3626,6 +3631,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LightProxyDialTimeoutMilliseconds != nil {
 		applyParameters[parameters.LightProxyDialTimeout] = fmt.Sprintf("%dms", *config.LightProxyDialTimeoutMilliseconds)
+	}
+
+	if config.LightProxyPersonalPairingConnectionWorkerPoolSize != 0 {
+		applyParameters[parameters.LightProxyPersonalPairingConnectionWorkerPoolSize] = config.LightProxyPersonalPairingConnectionWorkerPoolSize
 	}
 
 	// When adding new config dial parameters that may override tactics, also
