@@ -454,7 +454,9 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 	return !TunnelProtocolUsesInproxy(protocol) &&
-		!TunnelProtocolUsesQUIC(protocol)
+		!TunnelProtocolUsesQUIC(protocol) &&
+		// Conjure DTLS uses UDP.
+		!TunnelProtocolUsesRefractionNetworking(protocol)
 }
 
 func TunnelProtocolSupportsTactics(protocol string) bool {

@@ -282,7 +282,8 @@ func (d *RefractionNetworkingDialer) DialContext(
 		if laddr != "" {
 			return nil, errors.TraceNew("unexpected laddr for tcp dial")
 		}
-		conn, err := DialTCP(ctx, raddr, d.config)
+		tcpDialer := NewTCPDialer(d.config)
+		conn, err := tcpDialer(ctx, "tcp", raddr)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

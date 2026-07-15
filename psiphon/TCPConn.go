@@ -69,6 +69,10 @@ func NewTCPDialer(config *DialConfig) common.Dialer {
 func DialTCP(
 	ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
+	if config.CustomDialer != nil {
+		return nil, errors.TraceNew("unexpected DialConfig.CustomDialer")
+	}
+
 	var conn net.Conn
 	var err error
 
