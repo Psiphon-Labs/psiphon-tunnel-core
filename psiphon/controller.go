@@ -2362,17 +2362,10 @@ func (controller *Controller) startEstablishing() {
 	//
 	// Only the very first server, as determined by
 	// datastore.PromoteServerEntry(), is the server affinity candidate.
-	// Concurrent connections attempts to many servers are launched
-	// without delay, in case the affinity server connection fails.
-	// While the affinity server connection is outstanding, when any
-	// other connection is established, there is a short grace period
-	// delay before delivering the established tunnel; this allows some
-	// time for the affinity server connection to succeed first.
-	// When the affinity server connection fails, any other established
-	// tunnel is registered without delay.
+	// The server affinity candidate is given a brief head start.
 	//
 	// Note: the establishTunnelWorker that receives the affinity
-	// candidate is solely resonsible for closing
+	// candidate is solely responsible for closing
 	// controller.serverAffinityDoneBroadcast.
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
