@@ -449,6 +449,8 @@ const (
 	InproxyProxyAnnounceDelay                          = "InproxyProxyAnnounceDelay"
 	InproxyProxyAnnounceDelayJitter                    = "InproxyProxyAnnounceDelayJitter"
 	InproxyProxyAnnounceMaxBackoffDelay                = "InproxyProxyAnnounceMaxBackoffDelay"
+	InproxyProxyAnnounceCommonOverride                 = "InproxyProxyAnnounceCommonOverride"
+	InproxyProxyAnnouncePersonalOverride               = "InproxyProxyAnnouncePersonalOverride"
 	InproxyProxyAnswerRequestTimeout                   = "InproxyProxyAnswerRequestTimeout"
 	InproxyClientOfferRequestTimeout                   = "InproxyClientOfferRequestTimeout"
 	InproxyClientOfferRequestPersonalTimeout           = "InproxyClientOfferRequestPersonalTimeout"
@@ -1116,6 +1118,8 @@ var defaultParameters = map[string]struct {
 	InproxyProxyAnnounceDelay:                          {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyProxyAnnounceDelayJitter:                    {value: 0.5, minimum: 0.0},
 	InproxyProxyAnnounceMaxBackoffDelay:                {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyProxyAnnounceCommonOverride:                 {value: 0, minimum: 0},
+	InproxyProxyAnnouncePersonalOverride:               {value: 2, minimum: 0},
 	InproxyProxyAnswerRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRequestPersonalTimeout:           {value: 5*time.Second + 10*time.Second, minimum: time.Duration(0)},

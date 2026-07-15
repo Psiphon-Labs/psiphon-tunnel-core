@@ -108,6 +108,7 @@ type Controller struct {
 	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
 	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
 	inproxyNATStateManager                  *InproxyNATStateManager
+	inproxyProxyAnnouncementLimits          *inproxyProxyAnnouncementLimits
 	inproxyHandleTacticsMutex               sync.Mutex
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
@@ -352,6 +353,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		isProxy = true
 		controller.inproxyProxyBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy, controller.tlsClientSessionCache)
 		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyBrokerClientManager)
+		controller.inproxyProxyAnnouncementLimits = newInproxyProxyAnnouncementLimits(config)
+		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyAnnouncementLimits)
 	}
 
 	controller.config.SetTacticsAppliedReceivers(tacticAppliedReceivers)
@@ -3842,6 +3845,7 @@ func (controller *Controller) runInproxyProxy() {
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
 		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,
+		ProxyLimits:                          controller.config.InproxyProxyLimits,
 		LimitUpstreamBytesPerSecond:          controller.config.InproxyLimitUpstreamBytesPerSecond,
 		LimitDownstreamBytesPerSecond:        controller.config.InproxyLimitDownstreamBytesPerSecond,
 		ReducedStartTime:                     controller.config.InproxyReducedStartTime,
@@ -3856,6 +3860,13 @@ func (controller *Controller) runInproxyProxy() {
 	proxy, err := inproxy.NewProxy(config)
 	if err != nil {
 		NoticeError("inproxy.NewProxy failed: %v", errors.Trace(err))
+		controller.SignalComponentFailure()
+		return
+	}
+
+	err = controller.inproxyProxyAnnouncementLimits.SetProxy(proxy)
+	if err != nil {
+		NoticeError("inproxy proxy SetProxy failed: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
 	}

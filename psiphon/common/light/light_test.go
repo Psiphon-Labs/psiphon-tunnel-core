@@ -51,21 +51,28 @@ func TestLightProxy(t *testing.T) {
 		tlsTrafficShaping := tlsTrafficShaping
 		for _, addProxyHeader := range []bool{false, true} {
 			addProxyHeader := addProxyHeader
-			t.Run(
-				fmt.Sprintf(
-					"tlsTrafficShaping=%t/addProxyHeader=%t",
-					tlsTrafficShaping, addProxyHeader),
-				func(t *testing.T) {
-					err := runTestLightProxy(tlsTrafficShaping, addProxyHeader)
-					if err != nil {
-						t.Fatal(err.Error())
-					}
-				})
+			for _, sharedProxyLimits := range []bool{false, true} {
+				sharedProxyLimits := sharedProxyLimits
+				t.Run(
+					fmt.Sprintf(
+						"tlsTrafficShaping=%t/addProxyHeader=%t/sharedProxyLimits=%t",
+						tlsTrafficShaping, addProxyHeader, sharedProxyLimits),
+					func(t *testing.T) {
+						err := runTestLightProxy(
+							tlsTrafficShaping,
+							addProxyHeader,
+							sharedProxyLimits)
+						if err != nil {
+							t.Fatal(err.Error())
+						}
+					})
+			}
 		}
 	}
 }
 
-func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
+func runTestLightProxy(
+	tlsTrafficShaping, addProxyHeader, sharedProxyLimits bool) error {
 
 	// Exercise multiple concurrent clients and concurrent dials over over one
 	// proxy. The proxied traffic is an inner TLS connection to an "echo"
@@ -77,6 +84,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		numClients              = 2
 		numConnectionsPerClient = 10
 		payloadSize             = 10 * 1024 * 1024
+		bytesPerSecond          = 1 << 30
 
 		testClientPlatform          = "Android"
 		testClientBuildRev          = "01020304"
@@ -253,9 +261,21 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		testClientRegion)
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
-	proxyConfig.MaxConcurrent = &maxConcurrent
-	proxyConfig.LimitUpstreamBytesPerSecond = 1 << 30
-	proxyConfig.LimitDownstreamBytesPerSecond = 1 << 30
+	if sharedProxyLimits {
+		proxyConfig.ProxyLimits, err = common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxPersonalClients:               maxConcurrent,
+			PersonalUpstreamBytesPerSecond:   bytesPerSecond,
+			PersonalDownstreamBytesPerSecond: bytesPerSecond,
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+		proxyConfig.ProxyLimitKind = ProxyLimitKindPersonal
+	} else {
+		proxyConfig.MaxConcurrent = &maxConcurrent
+		proxyConfig.LimitUpstreamBytesPerSecond = bytesPerSecond
+		proxyConfig.LimitDownstreamBytesPerSecond = bytesPerSecond
+	}
 
 	proxyConfig.EmitActivity = true
 	proxyConfig.AllowBogons = true
@@ -283,7 +303,11 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		nil,
 		1<<30,
 		1<<30)
-	if err != nil {
+	if sharedProxyLimits {
+		if err == nil {
+			return errors.TraceNew("unexpected SetLimits success")
+		}
+	} else if err != nil {
 		return errors.Trace(err)
 	}
 
