@@ -288,7 +288,10 @@ func TestTLSDialerCompatibility(t *testing.T) {
 		}
 	}
 
-	t.Run("psiphon", runner("", false))
+	for _, fragmentClientHello := range []bool{false, true} {
+		t.Run(fmt.Sprintf("psiphon (fragmentClientHello: %v)", fragmentClientHello),
+			runner("", fragmentClientHello))
+	}
 }
 
 func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHello bool) {
@@ -385,7 +388,8 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			} else {
 
 				tlsVersion := ""
-				version := conn.(*tlsConn).Conn.(*utls.UConn).ConnectionState().Version
+				tlsConn := conn.(*tlsConn)
+				version := tlsConn.Conn.(*utls.UConn).ConnectionState().Version
 				if version == utls.VersionTLS12 {
 					tlsVersion = "TLS 1.2"
 				} else if version == utls.VersionTLS13 {
@@ -395,6 +399,20 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 				}
 				if !common.Contains(tlsVersions, tlsVersion) {
 					tlsVersions = append(tlsVersions, tlsVersion)
+				}
+
+				expectedFragmented := "0"
+				dialHostname, _, splitHostPortErr := net.SplitHostPort(address)
+				if splitHostPortErr != nil {
+					t.Fatal(splitHostPortErr)
+				}
+				usingSNI := transformHostname || net.ParseIP(dialHostname) == nil
+				if fragmentClientHello && usingSNI {
+					expectedFragmented = "1"
+				}
+				if fragmented := tlsConn.GetMetrics()["tls_fragmented"]; fragmented != expectedFragmented {
+					t.Errorf("unexpected tls_fragmented metric for %s: got %v, want %s",
+						tlsProfile, fragmented, expectedFragmented)
 				}
 
 				conn.Close()
@@ -603,7 +621,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 }
 
-func TestTLSFragmentorWithoutSNI(t *testing.T) {
+func TestTLSFragmentationWithoutSNI(t *testing.T) {
 	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
 	if err != nil {
 		t.Fatalf("TempDir failed: %v", err)
@@ -626,7 +644,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
-	// Test: missing SNI, the TLS dial fails
+	// Test: missing SNI, the TLS dial succeeds without fragmentation.
 
 	conn, err := Dial(
 		context.Background(), "tcp", serverAddr,
@@ -640,8 +658,12 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 			FragmentClientHello:           true,
 		})
 
-	if err == nil {
-		t.Errorf("unexpected success without SNI")
+	if err != nil {
+		t.Errorf("Dial failed without SNI: %v", err)
+	} else {
+		if fragmented := conn.(*tlsConn).GetMetrics()["tls_fragmented"]; fragmented != "0" {
+			t.Errorf("unexpected tls_fragmented metric without SNI: %v", fragmented)
+		}
 		conn.Close()
 	}
 
@@ -662,6 +684,9 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 	if err != nil {
 		t.Errorf("Dial failed: %v", err)
 	} else {
+		if fragmented := conn.(*tlsConn).GetMetrics()["tls_fragmented"]; fragmented != "1" {
+			t.Errorf("unexpected tls_fragmented metric with SNI: %v", fragmented)
+		}
 		conn.Close()
 	}
 
