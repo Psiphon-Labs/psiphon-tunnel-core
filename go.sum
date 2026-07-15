@@ -34,8 +34,8 @@ github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304 h1:fHcKNm
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1 h1:zD7JvZCV8gjvtI0AZmE81Ffc/v7A+qwU1/YfUmN/Flk=
 github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1/go.mod h1:rONdWgPMbFjyyBai7gB1IBF4pT9r4l0GyiDst5XR1SY=
-github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b h1:+ZY9z5ojDzZ9Xfn+whJ6N1yRcY8nGaXb3GTckz9iTfI=
-github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
+github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d h1:htAwZYlfEn3FJXqmY2iTh/53RRfcbkBahdAjDr25UnA=
+github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
 github.com/andybalholm/brotli v1.1.1 h1:PR2pgnyFznKEugtsUo0xLdDop5SKXd5Qf5ysW+7XdTA=
 github.com/andybalholm/brotli v1.1.1/go.mod h1:05ib4cKhjx3OQYUY22hTVd34Bc8upXjOLL2rKwwZBoA=
 github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f h1:SaJ6yqg936TshyeFZqQE+N+9hYkIeL9AMr7S4voCl10=
