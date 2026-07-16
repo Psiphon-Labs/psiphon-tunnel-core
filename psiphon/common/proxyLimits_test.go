@@ -195,26 +195,27 @@ func runTestProxyLimitsReduced() error {
 
 	// Test: reduced max common clients must remain <= max common clients.
 
-	config.ReducedMaxCommonClients = 5
+	config.ReducedMaxCommonClients = 11
+	_, err = NewProxyLimits(config)
+	if err == nil {
+		return errors.TraceNew("unexpected NewProxyLimits success")
+	}
 
+	// Dynamic limit changes are not supported when legacy reduced schedule
+	// parameters are configured.
+
+	config.ReducedMaxCommonClients = 5
 	limits, err = NewProxyLimits(config)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = limits.SetReducedLimits(
-		config.ReducedStartTime,
-		config.ReducedEndTime,
-		11,
-		10,
-		20)
-	if err == nil {
-		return errors.TraceNew("unexpected SetReducedLimits success")
+	if limits.SetCommonLimits(10, 100, 200) == nil {
+		return errors.TraceNew("unexpected SetCommonLimits success")
 	}
 
-	err = limits.SetCommonLimits(4, 100, 200)
-	if err == nil {
-		return errors.TraceNew("unexpected SetCommonLimits success")
+	if limits.SetPersonalLimits(3, 300, 400) == nil {
+		return errors.TraceNew("unexpected SetPersonalLimits success")
 	}
 
 	return nil

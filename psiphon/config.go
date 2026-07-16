@@ -754,12 +754,12 @@ type Config struct {
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
 
-	// InproxyReducedStartTime specifies the local time of day(HH:MM, 24-hour,
-	// UTC) at which reduced in-proxy settings begin.
+	// InproxyReducedStartTime specifies the time of day(HH:MM, 24-hour, UTC)
+	// at which reduced in-proxy settings begin.
 	InproxyReducedStartTime string `json:",omitempty"`
 
-	// InproxyReducedEndTime specifies the local time of day (HH:MM, 24-hour,
-	// UTC) at which reduced in-proxy settings end.
+	// InproxyReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC)
+	// at which reduced in-proxy settings end.
 	InproxyReducedEndTime string `json:",omitempty"`
 
 	// InproxyReducedMaxClients specifies the maximum number of common
@@ -1824,9 +1824,24 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if config.InproxyEnableProxy {
 
-		if config.InproxyProxyLimits == nil &&
-			config.InproxyMaxCommonClients+config.InproxyMaxPersonalClients <= 0 {
-			return errors.TraceNew("invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+		if config.InproxyProxyLimits == nil {
+			if config.InproxyMaxCommonClients < 0 ||
+				config.InproxyMaxPersonalClients < 0 {
+				return errors.TraceNew(
+					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+			}
+
+			if config.InproxyMaxCommonClients <= 0 &&
+				config.InproxyMaxPersonalClients <= 0 {
+				return errors.TraceNew(
+					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+			}
+
+			if config.InproxyLimitUpstreamBytesPerSecond < 0 ||
+				config.InproxyLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew(
+					"invalid InproxyLimitUpstreamBytesPerSecond or InproxyLimitDownstreamBytesPerSecond")
+			}
 		}
 
 		maxPersonalClients := config.InproxyMaxPersonalClients
@@ -1840,7 +1855,19 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.InproxyProxyLimits == nil &&
 			(config.InproxyReducedStartTime != "" ||
 				config.InproxyReducedEndTime != "" ||
-				config.InproxyReducedMaxCommonClients > 0) {
+				config.InproxyReducedMaxCommonClients != 0 ||
+				config.InproxyReducedLimitUpstreamBytesPerSecond != 0 ||
+				config.InproxyReducedLimitDownstreamBytesPerSecond != 0) {
+
+			if config.InproxyReducedMaxCommonClients < 0 {
+				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
+			}
+
+			if config.InproxyReducedLimitUpstreamBytesPerSecond < 0 ||
+				config.InproxyReducedLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew(
+					"invalid InproxyReducedLimitUpstreamBytesPerSecond or InproxyReducedLimitDownstreamBytesPerSecond")
+			}
 
 			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)
 			if err != nil {

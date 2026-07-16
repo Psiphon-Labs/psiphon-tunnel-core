@@ -30,7 +30,9 @@ import (
 // ProxyLimitsConfig specifies initial shared proxy limits. For each kind,
 // common and personal, a max clients value of 0 disables the kind. At least
 // one kind must be enabled. Rate values of 0 mean no rate limit. Reduced
-// values of 0 mean the corresponding base values apply.
+// values of 0 mean the corresponding base values apply. When any reduced
+// parameters are configured, limits cannot be changed dynamically with
+// SetCommonLimits or SetPersonalLimits.
 //
 // During the reduced schedule, the reduced max clients value applies to
 // common pairing only, while the reduced rates apply to both common and
@@ -51,15 +53,15 @@ type ProxyLimitsConfig struct {
 	CommonUpstreamBytesPerSecond   int
 	CommonDownstreamBytesPerSecond int
 
+	MaxPersonalClients               int
+	PersonalUpstreamBytesPerSecond   int
+	PersonalDownstreamBytesPerSecond int
+
 	ReducedStartTime                string
 	ReducedEndTime                  string
 	ReducedMaxCommonClients         int
 	ReducedUpstreamBytesPerSecond   int
 	ReducedDownstreamBytesPerSecond int
-
-	MaxPersonalClients               int
-	PersonalUpstreamBytesPerSecond   int
-	PersonalDownstreamBytesPerSecond int
 }
 
 // ProxyLimits provides a shared, dynamic limit state for proxies, including
@@ -107,7 +109,12 @@ func NewProxyLimits(config *ProxyLimitsConfig) (*ProxyLimits, error) {
 		return nil, errors.TraceNew("nil ProxyLimitsConfig")
 	}
 
-	if config.MaxCommonClients+config.MaxPersonalClients <= 0 {
+	if config.MaxCommonClients < 0 || config.MaxPersonalClients < 0 {
+		return nil, errors.TraceNew("invalid ProxyLimitsConfig")
+	}
+
+	if config.MaxCommonClients <= 0 &&
+		config.MaxPersonalClients <= 0 {
 		return nil, errors.TraceNew("invalid ProxyLimitsConfig")
 	}
 
@@ -129,14 +136,46 @@ func NewProxyLimits(config *ProxyLimitsConfig) (*ProxyLimits, error) {
 		return nil, errors.Trace(err)
 	}
 
-	err = proxyLimits.setReducedLimitsLocked(
-		config.ReducedStartTime,
-		config.ReducedEndTime,
-		config.ReducedMaxCommonClients,
-		config.ReducedUpstreamBytesPerSecond,
-		config.ReducedDownstreamBytesPerSecond)
-	if err != nil {
-		return nil, errors.Trace(err)
+	if config.ReducedStartTime != "" ||
+		config.ReducedEndTime != "" ||
+		config.ReducedMaxCommonClients != 0 ||
+		config.ReducedUpstreamBytesPerSecond != 0 ||
+		config.ReducedDownstreamBytesPerSecond != 0 {
+
+		err = validateProxyLimits(
+			config.ReducedMaxCommonClients,
+			config.ReducedUpstreamBytesPerSecond,
+			config.ReducedDownstreamBytesPerSecond)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if config.ReducedMaxCommonClients > proxyLimits.maxCommonClients {
+			return nil, errors.TraceNew("invalid reduced limits")
+		}
+
+		startMinute, err := ParseTimeOfDayMinutes(config.ReducedStartTime)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		endMinute, err := ParseTimeOfDayMinutes(config.ReducedEndTime)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if startMinute == endMinute {
+			return nil, errors.TraceNew("invalid reduced time range")
+		}
+
+		proxyLimits.reducedEnabled = true
+		proxyLimits.reducedStartMinute = startMinute
+		proxyLimits.reducedEndMinute = endMinute
+		proxyLimits.reducedMaxCommonClients = config.ReducedMaxCommonClients
+		proxyLimits.reducedUpstreamBytesPerSecond =
+			config.ReducedUpstreamBytesPerSecond
+		proxyLimits.reducedDownstreamBytesPerSecond =
+			config.ReducedDownstreamBytesPerSecond
 	}
 
 	return proxyLimits, nil
@@ -208,7 +247,7 @@ func (limits *ProxyLimits) GetPersonalLimits() (
 // SetCommonLimits sets common pairing proxy limits. Active clients are not
 // disconnected or rethrottled when the limits change. Setting max clients to
 // 0, disabling common pairing, is invalid when personal pairing is also
-// disabled.
+// disabled. Calls fail when reduced limits were configured.
 func (limits *ProxyLimits) SetCommonLimits(
 	maxClients int,
 	upstreamBytesPerSecond int,
@@ -216,6 +255,10 @@ func (limits *ProxyLimits) SetCommonLimits(
 
 	limits.mutex.Lock()
 	defer limits.mutex.Unlock()
+
+	if limits.reducedEnabled {
+		return errors.TraceNew("cannot set proxy limits with reduced limits configured")
+	}
 
 	if maxClients <= 0 && limits.maxPersonalClients <= 0 {
 		return errors.TraceNew("invalid proxy limits")
@@ -227,34 +270,10 @@ func (limits *ProxyLimits) SetCommonLimits(
 		downstreamBytesPerSecond))
 }
 
-func (limits *ProxyLimits) setCommonLimitsLocked(
-	maxClients int,
-	upstreamBytesPerSecond int,
-	downstreamBytesPerSecond int) error {
-
-	err := validateProxyLimits(
-		maxClients,
-		upstreamBytesPerSecond,
-		downstreamBytesPerSecond)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if maxClients < limits.reducedMaxCommonClients {
-		return errors.TraceNew("invalid proxy limits")
-	}
-
-	limits.maxCommonClients = maxClients
-	limits.commonUpstreamBytesPerSecond = upstreamBytesPerSecond
-	limits.commonDownstreamBytesPerSecond = downstreamBytesPerSecond
-
-	return nil
-}
-
 // SetPersonalLimits sets personal pairing proxy limits. Active clients are
 // not disconnected or rethrottled when the limits change. Setting max
 // clients to 0, disabling personal pairing, is invalid when common pairing
-// is also disabled.
+// is also disabled. Calls fail when reduced limits were configured.
 func (limits *ProxyLimits) SetPersonalLimits(
 	maxClients int,
 	upstreamBytesPerSecond int,
@@ -262,6 +281,10 @@ func (limits *ProxyLimits) SetPersonalLimits(
 
 	limits.mutex.Lock()
 	defer limits.mutex.Unlock()
+
+	if limits.reducedEnabled {
+		return errors.TraceNew("cannot set proxy limits with reduced limits configured")
+	}
 
 	if maxClients <= 0 && limits.maxCommonClients <= 0 {
 		return errors.TraceNew("invalid proxy limits")
@@ -271,26 +294,6 @@ func (limits *ProxyLimits) SetPersonalLimits(
 		maxClients,
 		upstreamBytesPerSecond,
 		downstreamBytesPerSecond))
-}
-
-func (limits *ProxyLimits) setPersonalLimitsLocked(
-	maxClients int,
-	upstreamBytesPerSecond int,
-	downstreamBytesPerSecond int) error {
-
-	err := validateProxyLimits(
-		maxClients,
-		upstreamBytesPerSecond,
-		downstreamBytesPerSecond)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	limits.maxPersonalClients = maxClients
-	limits.personalUpstreamBytesPerSecond = upstreamBytesPerSecond
-	limits.personalDownstreamBytesPerSecond = downstreamBytesPerSecond
-
-	return nil
 }
 
 // OverrideMaxAnnouncements sets or clears common and personal max
@@ -314,36 +317,6 @@ func (limits *ProxyLimits) OverrideMaxAnnouncements(
 	return nil
 }
 
-// SetReducedLimits sets or clears the reduced schedule. Passing empty times
-// and zero limits clears the schedule. Active clients should not be
-// disconnected or rethrottled when the schedule or limits change. The
-// reduced max clients value applies to common pairing only, while the
-// reduced rates apply to both common and personal pairing. Reduced values
-// of 0 mean the corresponding base values, including subsequent base value
-// changes, apply during the reduced period.
-func (limits *ProxyLimits) SetReducedLimits(
-	startTime string,
-	endTime string,
-	maxCommonClients int,
-	upstreamBytesPerSecond int,
-	downstreamBytesPerSecond int) error {
-
-	limits.mutex.Lock()
-	defer limits.mutex.Unlock()
-
-	err := limits.setReducedLimitsLocked(
-		startTime,
-		endTime,
-		maxCommonClients,
-		upstreamBytesPerSecond,
-		downstreamBytesPerSecond)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
-}
-
 // TryAcquireCommonClient attempts to acquire one common client slot.
 func (limits *ProxyLimits) TryAcquireCommonClient() (ProxyLimitReleaseFunc, bool) {
 	return limits.tryAcquireClient(false)
@@ -354,61 +327,42 @@ func (limits *ProxyLimits) TryAcquirePersonalClient() (ProxyLimitReleaseFunc, bo
 	return limits.tryAcquireClient(true)
 }
 
-func (limits *ProxyLimits) setReducedLimitsLocked(
-	startTime string,
-	endTime string,
-	maxCommonClients int,
+func (limits *ProxyLimits) setCommonLimitsLocked(
+	maxClients int,
 	upstreamBytesPerSecond int,
 	downstreamBytesPerSecond int) error {
 
-	if startTime == "" &&
-		endTime == "" &&
-		maxCommonClients == 0 &&
-		upstreamBytesPerSecond == 0 &&
-		downstreamBytesPerSecond == 0 {
-
-		limits.reducedEnabled = false
-		limits.reducedStartMinute = 0
-		limits.reducedEndMinute = 0
-		limits.reducedMaxCommonClients = 0
-		limits.reducedUpstreamBytesPerSecond = 0
-		limits.reducedDownstreamBytesPerSecond = 0
-
-		return nil
-	}
-
 	err := validateProxyLimits(
-		maxCommonClients,
+		maxClients,
 		upstreamBytesPerSecond,
 		downstreamBytesPerSecond)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if maxCommonClients > limits.maxCommonClients {
-		return errors.TraceNew("invalid reduced limits")
-	}
+	limits.maxCommonClients = maxClients
+	limits.commonUpstreamBytesPerSecond = upstreamBytesPerSecond
+	limits.commonDownstreamBytesPerSecond = downstreamBytesPerSecond
 
-	startMinute, err := ParseTimeOfDayMinutes(startTime)
+	return nil
+}
+
+func (limits *ProxyLimits) setPersonalLimitsLocked(
+	maxClients int,
+	upstreamBytesPerSecond int,
+	downstreamBytesPerSecond int) error {
+
+	err := validateProxyLimits(
+		maxClients,
+		upstreamBytesPerSecond,
+		downstreamBytesPerSecond)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	endMinute, err := ParseTimeOfDayMinutes(endTime)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if startMinute == endMinute {
-		return errors.TraceNew("invalid reduced time range")
-	}
-
-	limits.reducedEnabled = true
-	limits.reducedStartMinute = startMinute
-	limits.reducedEndMinute = endMinute
-	limits.reducedMaxCommonClients = maxCommonClients
-	limits.reducedUpstreamBytesPerSecond = upstreamBytesPerSecond
-	limits.reducedDownstreamBytesPerSecond = downstreamBytesPerSecond
+	limits.maxPersonalClients = maxClients
+	limits.personalUpstreamBytesPerSecond = upstreamBytesPerSecond
+	limits.personalDownstreamBytesPerSecond = downstreamBytesPerSecond
 
 	return nil
 }

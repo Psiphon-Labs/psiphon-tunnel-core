@@ -1227,6 +1227,8 @@ func (proxy *Proxy) getTrafficRateLimits() (common.RateLimits, bool) {
 		return common.RateLimits{}, false
 	}
 
+	// Throttling is applied to the proxy-to-destination connection, where
+	// writes flow upstream and reads flow downstream.
 	return common.RateLimits{
 		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
 		WriteBytesPerSecond: int64(upstreamBytesPerSecond),

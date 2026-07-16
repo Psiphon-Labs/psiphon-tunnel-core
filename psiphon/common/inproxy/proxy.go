@@ -165,13 +165,14 @@ type ProxyConfig struct {
 
 	// MaxCommonClients (formerly MaxClients) is the maximum number of common
 	// clients that are allowed to connect to the proxy. A value of 0
-	// disables common pairing; MaxCommonClients + MaxPersonalClients must
-	// be > 0.
+	// disables common pairing; at least one of MaxCommonClients and
+	// MaxPersonalClients must be > 0.
 	MaxCommonClients int
 
 	// MaxPersonalClients is the maximum number of personal clients that are
 	// allowed to connect to the proxy. A value of 0 disables personal
-	// pairing; MaxCommonClients + MaxPersonalClients must be > 0.
+	// pairing; at least one of MaxCommonClients and MaxPersonalClients must
+	// be > 0.
 	MaxPersonalClients int
 
 	// LimitUpstreamBytesPerSecond limits the upstream data transfer rate for
@@ -182,12 +183,12 @@ type ProxyConfig struct {
 	// for a single client. When 0, there is no limit.
 	LimitDownstreamBytesPerSecond int
 
-	// ReducedStartTime specifies the local time of day (HH:MM, 24-hour, UTC)
-	// at which reduced client settings begin.
+	// ReducedStartTime specifies the time of day (HH:MM, 24-hour, UTC) at
+	// which reduced client settings begin.
 	ReducedStartTime string
 
-	// ReducedEndTime specifies the local time of day (HH:MM, 24-hour, UTC) at
-	// which reduced client settings end.
+	// ReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC) at which
+	// reduced client settings end.
 	ReducedEndTime string
 
 	// ReducedMaxCommonClients specifies the maximum number of common clients
@@ -258,15 +259,10 @@ type ActivityUpdater func(
 // NewProxy initializes a new Proxy with the specified configuration.
 func NewProxy(config *ProxyConfig) (*Proxy, error) {
 
-	// Check if there are no clients who can connect when using config limit
-	// parameters.
-	if config.ProxyLimits == nil &&
-		config.MaxCommonClients+config.MaxPersonalClients <= 0 {
-		return nil, errors.TraceNew("invalid MaxCommonClients")
-	}
-
 	proxyLimits := config.ProxyLimits
 	if proxyLimits == nil {
+		// NewProxyLimits checks that MaxCommonClients and
+		// MaxPersonalClients are valid and at least one is > 0.
 		var err error
 		proxyLimits, err = newProxyLimitsFromConfig(config)
 		if err != nil {
@@ -300,6 +296,8 @@ func (p *Proxy) OverrideAnnouncementLimits(
 
 func newProxyLimitsFromConfig(config *ProxyConfig) (*common.ProxyLimits, error) {
 
+	// All reduced fields are passed through; NewProxyLimits determines
+	// whether a reduced schedule is configured and validates the values.
 	proxyLimitsConfig := &common.ProxyLimitsConfig{
 		MaxCommonClients:               config.MaxCommonClients,
 		CommonUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
@@ -308,20 +306,12 @@ func newProxyLimitsFromConfig(config *ProxyConfig) (*common.ProxyLimits, error) 
 		MaxPersonalClients:               config.MaxPersonalClients,
 		PersonalUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
 		PersonalDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
-	}
 
-	if config.ReducedStartTime != "" ||
-		config.ReducedEndTime != "" ||
-		config.ReducedMaxCommonClients > 0 {
-
-		proxyLimitsConfig.ReducedStartTime = config.ReducedStartTime
-		proxyLimitsConfig.ReducedEndTime = config.ReducedEndTime
-		proxyLimitsConfig.ReducedMaxCommonClients =
-			config.ReducedMaxCommonClients
-		proxyLimitsConfig.ReducedUpstreamBytesPerSecond =
-			config.ReducedLimitUpstreamBytesPerSecond
-		proxyLimitsConfig.ReducedDownstreamBytesPerSecond =
-			config.ReducedLimitDownstreamBytesPerSecond
+		ReducedStartTime:                config.ReducedStartTime,
+		ReducedEndTime:                  config.ReducedEndTime,
+		ReducedMaxCommonClients:         config.ReducedMaxCommonClients,
+		ReducedUpstreamBytesPerSecond:   config.ReducedLimitUpstreamBytesPerSecond,
+		ReducedDownstreamBytesPerSecond: config.ReducedLimitDownstreamBytesPerSecond,
 	}
 
 	return common.NewProxyLimits(proxyLimitsConfig)
@@ -590,9 +580,11 @@ type proxyLimitsSnapshot struct {
 // client limits used to launch workers, with max announcements clamped to
 // proxySanityMaxAnnouncements.
 //
-// The clamp ensures that proxyWorkerResultsBufferSize is sufficient for at
-// least every announcing worker of both kinds to send two results without
-// blocking.
+// As an intended side effect, the clamp bounds announcement-result bursts,
+// which proxyWorkerResultsBufferSize is sized to accommodate. This is a best
+// effort to absorb bursts; post-announcement workers also send completion
+// results, so the result buffer may fill and block until the supervisor
+// resumes draining it.
 func (p *Proxy) getProxyLimits() proxyLimitsSnapshot {
 
 	var limits proxyLimitsSnapshot
@@ -1099,6 +1091,8 @@ func (p *Proxy) getLimits(isPersonal bool) (
 		downstreamBytesPerSecond = personalDownstreamBytesPerSecond
 	}
 
+	// Throttling is applied to the proxy-to-destination connection, where
+	// writes flow upstream and reads flow downstream.
 	rateLimits = common.RateLimits{
 		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
 		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
