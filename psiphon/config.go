@@ -721,6 +721,13 @@ type Config struct {
 	// apply to both fields.
 	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
 
+	// InproxyProxyLimits specifies an optional, dynamic shared limits state
+	// for the in-proxy proxy. When nil, InproxyMaxCommonClients,
+	// InproxyMaxPersonalClients, transfer rate limits, and reduced common
+	// limit parameters are used instead. When set, other proxy limit
+	// parameters, including the Reduced fields, are ignored.
+	InproxyProxyLimits *common.ProxyLimits `json:"-"`
+
 	// InproxyMaxClients specifies the maximum number of common in-proxy
 	// clients to be proxied concurrently. When InproxyEnableProxy is set,
 	// it can only be 0 when InProxyMaxPersonalClients is > 0.
@@ -747,12 +754,12 @@ type Config struct {
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
 
-	// InproxyReducedStartTime specifies the local time of day(HH:MM, 24-hour,
-	// UTC) at which reduced in-proxy settings begin.
+	// InproxyReducedStartTime specifies the time of day(HH:MM, 24-hour, UTC)
+	// at which reduced in-proxy settings begin.
 	InproxyReducedStartTime string `json:",omitempty"`
 
-	// InproxyReducedEndTime specifies the local time of day (HH:MM, 24-hour,
-	// UTC) at which reduced in-proxy settings end.
+	// InproxyReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC)
+	// at which reduced in-proxy settings end.
 	InproxyReducedEndTime string `json:",omitempty"`
 
 	// InproxyReducedMaxClients specifies the maximum number of common
@@ -871,6 +878,11 @@ type Config struct {
 	// uses only the configured LightProxyEntry and does not use
 	// push-imported or stored light proxies.
 	EnablePersonalLightProxyTunnels bool `json:",omitempty"`
+
+	// LightProxyPersonalPairingConnectionWorkerPoolSize specifies the value for
+	// ConnectionWorkerPoolSize in personal light proxy tunnel mode. If omitted
+	// or when 0, a default is used; this is recommended.
+	LightProxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
 
 	// LightProxyEntry is an optional encoded light proxy entry. When
 	// specified, the light proxy entry is always chosen; any TTL in the entry
@@ -1265,6 +1277,8 @@ type Config struct {
 	InproxyProxyAnnounceDelayMilliseconds                   *int                                             `json:",omitempty"`
 	InproxyProxyAnnounceMaxBackoffDelayMilliseconds         *int                                             `json:",omitempty"`
 	InproxyProxyAnnounceDelayJitter                         *float64                                         `json:",omitempty"`
+	InproxyProxyAnnounceCommonOverride                      *int                                             `json:",omitempty"`
+	InproxyProxyAnnouncePersonalOverride                    *int                                             `json:",omitempty"`
 	InproxyProxyAnswerRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int                                             `json:",omitempty"`
@@ -1810,17 +1824,57 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if config.InproxyEnableProxy {
 
-		if config.InproxyMaxCommonClients+config.InproxyMaxPersonalClients <= 0 {
-			return errors.TraceNew("invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+		if config.InproxyProxyLimits == nil {
+
+			if config.InproxyMaxCommonClients < 0 {
+				return errors.TraceNew("invalid InproxyMaxCommonClients")
+			}
+
+			if config.InproxyMaxPersonalClients < 0 {
+				return errors.TraceNew("invalid InproxyMaxPersonalClients")
+			}
+
+			if config.InproxyMaxCommonClients <= 0 &&
+				config.InproxyMaxPersonalClients <= 0 {
+				return errors.TraceNew(
+					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+			}
+
+			if config.InproxyLimitUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyLimitUpstreamBytesPerSecond")
+			}
+
+			if config.InproxyLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyLimitDownstreamBytesPerSecond")
+			}
 		}
 
-		if len(config.InproxyProxyPersonalCompartmentID) > 0 && config.InproxyMaxPersonalClients <= 0 {
+		maxPersonalClients := config.InproxyMaxPersonalClients
+		if config.InproxyProxyLimits != nil {
+			_, maxPersonalClients, _, _, _ = config.InproxyProxyLimits.GetPersonalLimits()
+		}
+		if len(config.InproxyProxyPersonalCompartmentID) > 0 && maxPersonalClients <= 0 {
 			return errors.TraceNew("invalid InproxyMaxPersonalClients when personal compartment IDs are provided")
 		}
 
-		if config.InproxyReducedStartTime != "" ||
-			config.InproxyReducedEndTime != "" ||
-			config.InproxyReducedMaxCommonClients > 0 {
+		if config.InproxyProxyLimits == nil &&
+			(config.InproxyReducedStartTime != "" ||
+				config.InproxyReducedEndTime != "" ||
+				config.InproxyReducedMaxCommonClients != 0 ||
+				config.InproxyReducedLimitUpstreamBytesPerSecond != 0 ||
+				config.InproxyReducedLimitDownstreamBytesPerSecond != 0) {
+
+			if config.InproxyReducedMaxCommonClients < 0 {
+				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
+			}
+
+			if config.InproxyReducedLimitUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyReducedLimitUpstreamBytesPerSecond")
+			}
+
+			if config.InproxyReducedLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyReducedLimitDownstreamBytesPerSecond")
+			}
 
 			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)
 			if err != nil {
@@ -1837,19 +1891,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 				return errors.TraceNew("invalid InproxyReducedStartTime/InproxyReducedEndTime")
 			}
 
-			if config.InproxyReducedMaxCommonClients <= 0 ||
-				config.InproxyReducedMaxCommonClients > config.InproxyMaxCommonClients {
+			// An InproxyReducedMaxCommonClients value of 0 means max common
+			// clients are not reduced.
+			if config.InproxyReducedMaxCommonClients > config.InproxyMaxCommonClients {
 				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
-			}
-
-			// InproxyReducedLimitUpstream/DownstreamBytesPerSecond don't necessarily
-			// need to be less than InproxyLimitUpstream/DownstreamBytesPerSecond.
-
-			if config.InproxyReducedLimitUpstreamBytesPerSecond == 0 {
-				config.InproxyReducedLimitUpstreamBytesPerSecond = config.InproxyLimitUpstreamBytesPerSecond
-			}
-			if config.InproxyReducedLimitDownstreamBytesPerSecond == 0 {
-				config.InproxyReducedLimitDownstreamBytesPerSecond = config.InproxyLimitDownstreamBytesPerSecond
 			}
 		}
 	}
@@ -3321,6 +3366,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyProxyAnnounceDelayJitter] = *config.InproxyProxyAnnounceDelayJitter
 	}
 
+	if config.InproxyProxyAnnounceCommonOverride != nil {
+		applyParameters[parameters.InproxyProxyAnnounceCommonOverride] = *config.InproxyProxyAnnounceCommonOverride
+	}
+
+	if config.InproxyProxyAnnouncePersonalOverride != nil {
+		applyParameters[parameters.InproxyProxyAnnouncePersonalOverride] = *config.InproxyProxyAnnouncePersonalOverride
+	}
+
 	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyAnswerRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyAnswerRequestTimeoutMilliseconds)
 	}
@@ -3626,6 +3679,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LightProxyDialTimeoutMilliseconds != nil {
 		applyParameters[parameters.LightProxyDialTimeout] = fmt.Sprintf("%dms", *config.LightProxyDialTimeoutMilliseconds)
+	}
+
+	if config.LightProxyPersonalPairingConnectionWorkerPoolSize != 0 {
+		applyParameters[parameters.LightProxyPersonalPairingConnectionWorkerPoolSize] = config.LightProxyPersonalPairingConnectionWorkerPoolSize
 	}
 
 	// When adding new config dial parameters that may override tactics, also

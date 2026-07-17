@@ -58,6 +58,10 @@ func NewUDPConn(
 	raddr string,
 	config *DialConfig) (*net.UDPConn, *net.UDPAddr, error) {
 
+	if config.CustomDialer != nil {
+		return nil, nil, errors.TraceNew("unexpected DialConfig.CustomDialer")
+	}
+
 	switch network {
 	case "udp", "udp4", "udp6":
 	default:

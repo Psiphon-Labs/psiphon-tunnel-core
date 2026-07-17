@@ -57,7 +57,8 @@ func DialShadowsocksTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	conn, err := DialTCP(ctx, shadowsocksConfig.dialAddr, dialConfig)
+	tcpDialer := NewTCPDialer(dialConfig)
+	conn, err := tcpDialer(ctx, "tcp", shadowsocksConfig.dialAddr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

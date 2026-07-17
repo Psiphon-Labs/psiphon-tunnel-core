@@ -38,6 +38,9 @@ const (
 	proxyAnnounceMaxBackoffDelay = 1 * time.Minute
 	proxyAnnounceLogSampleSize   = 2
 	proxyAnnounceLogSamplePeriod = 30 * time.Minute
+	proxyLimitsCheckPeriod       = 1 * time.Minute
+	proxySanityMaxAnnouncements  = 1024
+	proxyWorkerResultsBufferSize = 4 * proxySanityMaxAnnouncements
 	proxyWebRTCAnswerTimeout     = 20 * time.Second
 	proxyDestinationDialTimeout  = 20 * time.Second
 	proxyRelayInactivityTimeout  = 5 * time.Minute
@@ -55,6 +58,7 @@ type Proxy struct {
 	connectedClients  atomic.Int32
 
 	config                *ProxyConfig
+	proxyLimits           *common.ProxyLimits
 	activityUpdateWrapper *activityUpdateWrapper
 	lastAnnouncing        int32
 	lastConnectingClients int32
@@ -68,9 +72,12 @@ type Proxy struct {
 	nextAnnounceBrokerClient *BrokerClient
 	nextAnnounceNotBefore    time.Time
 
-	useReducedSettings bool
-	reducedStartMinute int
-	reducedEndMinute   int
+	proxySupervisorTacticsWorker bool
+	proxySupervisorMutex         sync.Mutex
+	proxySupervisorWaitGroup     sync.WaitGroup
+	proxySupervisorResults       chan proxyWorkerResult
+	proxySupervisorCommonState   proxyKindState
+	proxySupervisorPersonalState proxyKindState
 
 	personalStatsMutex     sync.Mutex
 	personalRegionActivity map[string]*RegionActivity
@@ -157,11 +164,15 @@ type ProxyConfig struct {
 	MustUpgrade func()
 
 	// MaxCommonClients (formerly MaxClients) is the maximum number of common
-	// clients that are allowed to connect to the proxy. Must be > 0.
+	// clients that are allowed to connect to the proxy. A value of 0
+	// disables common pairing; at least one of MaxCommonClients and
+	// MaxPersonalClients must be > 0.
 	MaxCommonClients int
 
 	// MaxPersonalClients is the maximum number of personal clients that are
-	// allowed to connect to the proxy. Must be > 0.
+	// allowed to connect to the proxy. A value of 0 disables personal
+	// pairing; at least one of MaxCommonClients and MaxPersonalClients must
+	// be > 0.
 	MaxPersonalClients int
 
 	// LimitUpstreamBytesPerSecond limits the upstream data transfer rate for
@@ -172,12 +183,12 @@ type ProxyConfig struct {
 	// for a single client. When 0, there is no limit.
 	LimitDownstreamBytesPerSecond int
 
-	// ReducedStartTime specifies the local time of day (HH:MM, 24-hour, UTC)
-	// at which reduced client settings begin.
+	// ReducedStartTime specifies the time of day (HH:MM, 24-hour, UTC) at
+	// which reduced client settings begin.
 	ReducedStartTime string
 
-	// ReducedEndTime specifies the local time of day (HH:MM, 24-hour, UTC) at
-	// which reduced client settings end.
+	// ReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC) at which
+	// reduced client settings end.
 	ReducedEndTime string
 
 	// ReducedMaxCommonClients specifies the maximum number of common clients
@@ -206,6 +217,11 @@ type ProxyConfig struct {
 	// Rates for clients already connected when the reduced settings begin or
 	// end will not change.
 	ReducedLimitDownstreamBytesPerSecond int
+
+	// ProxyLimits is an optional, dynamic shared limits state. When nil,
+	// ProxyConfig limit parameters are used instead. When set, other proxy
+	// limit parameters, including the Reduced fields, are ignored.
+	ProxyLimits *common.ProxyLimits
 
 	// ActivityUpdater specifies an ActivityUpdater for activity associated
 	// with this proxy.
@@ -243,48 +259,62 @@ type ActivityUpdater func(
 // NewProxy initializes a new Proxy with the specified configuration.
 func NewProxy(config *ProxyConfig) (*Proxy, error) {
 
-	// Check if there are no clients who can connect
-	if config.MaxCommonClients+config.MaxPersonalClients <= 0 {
-		return nil, errors.TraceNew("invalid MaxCommonClients")
+	proxyLimits := config.ProxyLimits
+	if proxyLimits == nil {
+		// NewProxyLimits checks that MaxCommonClients and
+		// MaxPersonalClients are valid and at least one is > 0.
+		var err error
+		proxyLimits, err = newProxyLimitsFromConfig(config)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	p := &Proxy{
 		config:                 config,
+		proxyLimits:            proxyLimits,
 		personalRegionActivity: make(map[string]*RegionActivity),
 		commonRegionActivity:   make(map[string]*RegionActivity),
-	}
-
-	if config.ReducedStartTime != "" ||
-		config.ReducedEndTime != "" ||
-		config.ReducedMaxCommonClients > 0 {
-
-		startMinute, err := common.ParseTimeOfDayMinutes(config.ReducedStartTime)
-		if err != nil {
-			return nil, errors.Tracef("invalid ReducedStartTime: %v", err)
-		}
-
-		endMinute, err := common.ParseTimeOfDayMinutes(config.ReducedEndTime)
-		if err != nil {
-			return nil, errors.Tracef("invalid ReducedEndTime: %v", err)
-		}
-
-		if startMinute == endMinute {
-			return nil, errors.TraceNew("invalid ReducedStartTime/ReducedEndTime")
-		}
-
-		if config.ReducedMaxCommonClients <= 0 ||
-			config.ReducedMaxCommonClients > config.MaxCommonClients {
-			return nil, errors.TraceNew("invalid ReducedMaxCommonClients")
-		}
-
-		p.useReducedSettings = true
-		p.reducedStartMinute = startMinute
-		p.reducedEndMinute = endMinute
 	}
 
 	p.activityUpdateWrapper = &activityUpdateWrapper{p: p}
 
 	return p, nil
+}
+
+// OverrideAnnouncementLimits sets or clears max announcement overrides. A
+// value of 0 clears the override.
+func (p *Proxy) OverrideAnnouncementLimits(
+	maxCommonAnnouncements int,
+	maxPersonalAnnouncements int) error {
+
+	return errors.Trace(
+		p.proxyLimits.OverrideMaxAnnouncements(
+			maxCommonAnnouncements,
+			maxPersonalAnnouncements))
+}
+
+func newProxyLimitsFromConfig(config *ProxyConfig) (*common.ProxyLimits, error) {
+
+	// All reduced fields are passed through; NewProxyLimits determines
+	// whether a reduced schedule is configured and validates the values.
+	proxyLimitsConfig := &common.ProxyLimitsConfig{
+		MaxCommonClients:               config.MaxCommonClients,
+		CommonUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
+		CommonDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
+
+		MaxPersonalClients:               config.MaxPersonalClients,
+		PersonalUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
+		PersonalDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
+
+		ReducedStartTime:                config.ReducedStartTime,
+		ReducedEndTime:                  config.ReducedEndTime,
+		ReducedMaxCommonClients:         config.ReducedMaxCommonClients,
+		ReducedUpstreamBytesPerSecond:   config.ReducedLimitUpstreamBytesPerSecond,
+		ReducedDownstreamBytesPerSecond: config.ReducedLimitDownstreamBytesPerSecond,
+	}
+
+	return common.NewProxyLimits(proxyLimitsConfig)
 }
 
 // activityUpdateWrapper implements the psiphon/common.ActivityUpdater
@@ -328,9 +358,11 @@ func (w *connectionActivityWrapper) UpdateProgress(bytesRead, bytesWritten int64
 // network changes assuming that the ProxyConfig GetBrokerClient and
 // MakeWebRTCDialCoordinator callbacks react to network changes and provide
 // instances that are reflect network changes.
+//
+// Only one concurrent Run call is supported.
 func (p *Proxy) Run(ctx context.Context) {
 
-	// Run MaxClient proxying workers. Each worker handles one client at a time.
+	// Run proxying workers. Each worker handles one matched client at a time.
 
 	proxyWaitGroup := new(sync.WaitGroup)
 
@@ -361,82 +393,567 @@ func (p *Proxy) Run(ctx context.Context) {
 		}
 	}()
 
-	// Launch the first proxy worker, passing a signal to be triggered once
-	// the very first announcement round trip is complete. The first round
-	// trip is awaited so that:
+	p.runProxySupervisor(ctx)
+	proxyWaitGroup.Wait()
+}
+
+// proxyKindState tracks the announcement state for each kind of proxy client:
+// common and personal. For each, the number of concurrent announcements is
+// tracked, with limits enforced; each kind has its own back-off and log
+// sampling state.
+type proxyKindState struct {
+	announcing         int
+	endBackOffTime     time.Time
+	failureDelayFactor time.Duration
+	logAnnounceCount   int
+	logErrorsCount     int
+	lastErrMsg         string
+	startLogSampleTime time.Time
+}
+
+// proxyWorkerResult reports proxy worker events, including when an
+// announcement is completed, and, in the case of a successful match, when the
+// entire proxy-one-client job is complete. These events and event details
+// are used to manage the pool of concurrent announcements and connections.
+type proxyWorkerResult struct {
+	isPersonal   bool
+	tacticsMode  proxyTacticsMode
+	announceDone bool
+	workerDone   bool
+	backOff      bool
+	err          error
+}
+
+type proxyTacticsMode int
+
+const (
+	proxyTacticsModeNone proxyTacticsMode = iota
+	proxyTacticsModePreCheck
+	proxyTacticsModeCheck
+)
+
+func (p *Proxy) initProxySupervisor() {
+
+	p.proxySupervisorTacticsWorker = false
+	p.proxySupervisorWaitGroup = sync.WaitGroup{}
+	p.proxySupervisorResults = make(chan proxyWorkerResult, proxyWorkerResultsBufferSize)
+	p.proxySupervisorCommonState = proxyKindState{
+		failureDelayFactor: 1,
+		logAnnounceCount:   proxyAnnounceLogSampleSize,
+		logErrorsCount:     proxyAnnounceLogSampleSize,
+		startLogSampleTime: time.Now(),
+	}
+	p.proxySupervisorPersonalState = proxyKindState{
+		failureDelayFactor: 1,
+		logAnnounceCount:   proxyAnnounceLogSampleSize,
+		logErrorsCount:     proxyAnnounceLogSampleSize,
+		startLogSampleTime: time.Now(),
+	}
+}
+
+// runProxySupervisor manages the pool of concurrent announcement and
+// connection workers, enforcing max announcement and max client connection
+// limits.
+func (p *Proxy) runProxySupervisor(ctx context.Context) {
+
+	supervisorCtx, supervisorCancel := context.WithCancel(ctx)
+
+	p.initProxySupervisor()
+
+	defer func() {
+		supervisorCancel()
+		p.proxySupervisorWaitGroup.Wait()
+	}()
+
+	// Synchronously run the first proxy worker until its announcement round trip
+	// is complete. The first round trip is awaited so that:
 	//
 	// - The first announce response will arrive with any new tactics,
-	//   which may be applied before launching additional workers.
+	//   which may be applied before launching additional workers. At this
+	//   point, the broker Noise session should be established and any fresh
+	//   tactics applied.
 	//
 	// - The first worker gets no announcement delay and is also guaranteed to
 	//   be the shared session establisher. Since the announcement delays are
 	//   applied _after_ waitToShareSession, it would otherwise be possible,
-	//   with a race of MaxClient initial, concurrent announces, for the
-	//   session establisher to be a different worker than the no-delay worker.
+	//   with a race of multiple initial, concurrent announces, for the
+	//   session establisher to be a different worker than this worker.
 	//
-	// The first worker is the only proxy worker which sets
-	// ProxyAnnounceRequest.CheckTactics/PreCheckTactics. PreCheckTactics is
-	// used on the first announcement so the request returns immediately
-	// without awaiting a match. This allows all workers to be launched
-	// quickly.
+	// The first worker sets ProxyAnnounceRequest.PreCheckTactics. PreCheckTactics
+	// is used on the first announcement so the request returns immediately
+	// without awaiting a match. This allows all other workers to be launched
+	// quickly. After this initial precheck, exactly one worker performs tactics
+	// checks by setting ProxyAnnounceRequest.CheckTactics.
 
-	commonProxiesToCreate, personalProxiesToCreate :=
-		p.config.MaxCommonClients, p.config.MaxPersonalClients
-
-	// Doing this outside of the go routine to avoid race conditions
-	firstWorkerIsPersonal := p.config.MaxCommonClients <= 0
-	if firstWorkerIsPersonal {
-		personalProxiesToCreate -= 1
-	} else {
-		commonProxiesToCreate -= 1
-	}
-
-	signalFirstAnnounceCtx, signalFirstAnnounceDone :=
-		context.WithCancel(context.Background())
-
-	proxyWaitGroup.Add(1)
-	go func() {
-		defer proxyWaitGroup.Done()
-		p.proxyClients(ctx, signalFirstAnnounceDone, false, firstWorkerIsPersonal)
-	}()
-
-	select {
-	case <-signalFirstAnnounceCtx.Done():
-	case <-ctx.Done():
+	if !p.runInitialTacticsPrecheck(supervisorCtx) {
 		return
 	}
 
-	// Launch the remaining workers.
+	// Run the main loop, which reconciles the number of active workers with the
+	// target limits.
+	//
+	// Multiple strategies are possible: max announcements and max clients may
+	// be set 1:1, which should reduce client dial time since more proxy
+	// announcements are ready. This approach is suitable for common pairing
+	// when common capacity is not shared with another proxy.
+	//
+	// For personal pairing, far fewer max announcements than max client
+	// connections may be more suitable when the ProxyLimits are shared, to
+	// prevent an excess number of announcements failing after matching due
+	// to no available client slots.
+	//
+	// With either kind of pairing, a lower max announcements may reduce
+	// broker load and log volume during low demand periods.
 
-	for i := 0; i < commonProxiesToCreate; i++ {
-		isPersonal := false
+	// Periodically recheck limits, which may be set dynamically or change due
+	// to reduced common limits scheduling.
+	//
+	// The proxyLimitsCheckPeriod poll period also serves to trigger new
+	// announcements when a shared ProxyLimits is in use, no client slots
+	// were available on the last reconcile, and another proxy subsequently
+	// released slots.
+	//
+	// Limit transitions are soft: in-flight announcements and ongoing
+	// client connections are not interrupted or rethrottled.
+	//
+	// A polling approach is used, since it's simpler than signalling on the
+	// above change cases, and limit transitions are already soft.
+	limitsCheckTicker := time.NewTicker(proxyLimitsCheckPeriod)
+	defer limitsCheckTicker.Stop()
 
-		// When reduced settings are in effect, a subset of workers will pause
-		// during the reduced time period. Since ReducedMaxCommonClients > 0 the
-		// first proxy worker is never paused.
-		workerNum := i + 1
-		reducedPause := p.useReducedSettings &&
-			workerNum >= p.config.ReducedMaxCommonClients
+	for {
+		if !p.config.WaitForNetworkConnectivity() {
+			return
+		}
 
-		proxyWaitGroup.Add(1)
-		go func(reducedPause bool) {
-			defer proxyWaitGroup.Done()
-			p.proxyClients(ctx, nil, reducedPause, isPersonal)
-		}(reducedPause)
+		limits := p.getProxyLimits()
+		p.reconcile(supervisorCtx, limits)
+
+		backoffTimer := p.endBackOffTimer(limits)
+		var backoffTimerC <-chan time.Time
+		if backoffTimer != nil {
+			backoffTimerC = backoffTimer.C
+		}
+
+		select {
+		case result := <-p.proxySupervisorResults:
+			// A worker completed an announcement or connection. Drain any
+			// further pending results, batching a burst into a single
+			// reconcile.
+			p.handleResult(supervisorCtx, result)
+			for drained := false; !drained; {
+				select {
+				case result := <-p.proxySupervisorResults:
+					p.handleResult(supervisorCtx, result)
+				default:
+					drained = true
+				}
+			}
+		case <-backoffTimerC:
+			// Backoff ended; reconcile.
+		case <-limitsCheckTicker.C:
+			// Limits may have changed; reconcile.
+		case <-supervisorCtx.Done():
+			// Stop all workers and exit.
+			if backoffTimer != nil {
+				backoffTimer.Stop()
+			}
+			return
+		}
+
+		if backoffTimer != nil {
+			backoffTimer.Stop()
+		}
+	}
+}
+
+type proxyLimitsSnapshot struct {
+	maxCommonAnnouncements   int
+	maxCommonClients         int
+	activeCommonClients      int
+	maxPersonalAnnouncements int
+	maxPersonalClients       int
+	activePersonalClients    int
+}
+
+// getProxyLimits returns the current common and personal announcement and
+// client limits used to launch workers, with max announcements clamped to
+// proxySanityMaxAnnouncements.
+//
+// As an intended side effect, the clamp bounds announcement-result bursts,
+// which proxyWorkerResultsBufferSize is sized to accommodate. This is a best
+// effort to absorb bursts; post-announcement workers also send completion
+// results, so the result buffer may fill and block until the supervisor
+// resumes draining it.
+func (p *Proxy) getProxyLimits() proxyLimitsSnapshot {
+
+	var limits proxyLimitsSnapshot
+
+	limits.maxCommonAnnouncements, limits.maxCommonClients,
+		limits.activeCommonClients, _, _ = p.proxyLimits.GetCommonLimits()
+	limits.maxPersonalAnnouncements, limits.maxPersonalClients,
+		limits.activePersonalClients, _, _ = p.proxyLimits.GetPersonalLimits()
+
+	if limits.maxCommonAnnouncements > proxySanityMaxAnnouncements {
+		limits.maxCommonAnnouncements = proxySanityMaxAnnouncements
+	}
+	if limits.maxPersonalAnnouncements > proxySanityMaxAnnouncements {
+		limits.maxPersonalAnnouncements = proxySanityMaxAnnouncements
 	}
 
-	for i := 0; i < personalProxiesToCreate; i++ {
-		// Limitation: There are no reduced settings for personal proxies
-		isPersonal := true
+	return limits
+}
 
-		proxyWaitGroup.Add(1)
+func (p *Proxy) reconcile(
+	supervisorCtx context.Context, limits proxyLimitsSnapshot) {
+
+	p.proxySupervisorMutex.Lock()
+	defer p.proxySupervisorMutex.Unlock()
+
+	// Client count checks are advisory: this checks activeClients <
+	// maxClients, not activeClients+announcing < maxClients, since unmatched
+	// announcements should not reserve client capacity. There remains a race
+	// between checking capacity here, announcing and matching, and then
+	// acquiring a client slot, so some post-match capacity failures are
+	// expected. After the initial precheck, the supervisor assigns
+	// CheckTactics to exactly one active worker at a time.
+
+	for p.proxySupervisorCommonState.announcing < limits.maxCommonAnnouncements &&
+		limits.activeCommonClients < limits.maxCommonClients &&
+		!time.Now().Before(p.proxySupervisorCommonState.endBackOffTime) {
+
+		tacticsMode := proxyTacticsModeNone
+		if !p.proxySupervisorTacticsWorker {
+			p.proxySupervisorTacticsWorker = true
+			tacticsMode = proxyTacticsModeCheck
+		}
+
+		p.proxySupervisorCommonState.announcing += 1
+
+		p.proxySupervisorWaitGroup.Add(1)
 		go func() {
-			defer proxyWaitGroup.Done()
-			p.proxyClients(ctx, nil, false, isPersonal)
+			defer p.proxySupervisorWaitGroup.Done()
+			p.runWorker(supervisorCtx, tacticsMode, false)
 		}()
 	}
 
-	proxyWaitGroup.Wait()
+	for p.proxySupervisorPersonalState.announcing < limits.maxPersonalAnnouncements &&
+		limits.activePersonalClients < limits.maxPersonalClients &&
+		!time.Now().Before(p.proxySupervisorPersonalState.endBackOffTime) {
+
+		tacticsMode := proxyTacticsModeNone
+		if !p.proxySupervisorTacticsWorker {
+			p.proxySupervisorTacticsWorker = true
+			tacticsMode = proxyTacticsModeCheck
+		}
+
+		p.proxySupervisorPersonalState.announcing += 1
+
+		p.proxySupervisorWaitGroup.Add(1)
+		go func() {
+			defer p.proxySupervisorWaitGroup.Done()
+			p.runWorker(supervisorCtx, tacticsMode, true)
+		}()
+	}
+}
+
+func (p *Proxy) runInitialTacticsPrecheck(supervisorCtx context.Context) bool {
+
+	for supervisorCtx.Err() == nil {
+
+		if !p.config.WaitForNetworkConnectivity() {
+			return false
+		}
+
+		maxCommonAnnouncements, _, _, _, _ := p.proxyLimits.GetCommonLimits()
+		isPersonal := maxCommonAnnouncements <= 0
+
+		backOff, err := p.proxyOneClient(
+			supervisorCtx,
+			proxyTacticsModePreCheck,
+			nil,
+			isPersonal)
+
+		if err == nil {
+			return true
+		}
+
+		if supervisorCtx.Err() == nil {
+			p.handleResult(supervisorCtx, proxyWorkerResult{
+				isPersonal: isPersonal,
+				workerDone: true,
+				backOff:    backOff,
+				err:        err,
+			})
+		}
+
+		backoffTimer := p.endBackOffTimer(p.getProxyLimits())
+		if backoffTimer == nil {
+			// Never retry the precheck without a delay.
+			delay, _, jitter := p.getAnnounceDelayParameters()
+			common.SleepWithJitter(supervisorCtx, delay, jitter)
+			continue
+		}
+		select {
+		case <-backoffTimer.C:
+		case <-supervisorCtx.Done():
+			backoffTimer.Stop()
+			return false
+		}
+	}
+
+	return false
+}
+
+func (p *Proxy) runWorker(
+	supervisorCtx context.Context,
+	tacticsMode proxyTacticsMode,
+	isPersonal bool) {
+
+	// Each worker starts with posting a long-polling announcement request. The
+	// broker response with a matched client, and the proxy and client attempt
+	// to establish a WebRTC connection for relaying traffic.
+	//
+	// Limitation: this design may not maximize the utility of the proxy, since
+	// some proxy/client connections will fail at the WebRTC stage due to NAT
+	// traversal failure. Another scenario comes from the Psiphon client horse
+	// race, which may start in-proxy dials but then abort them when some other
+	// tunnel protocol succeeds.
+	//
+	// As a future enhancement, consider a signal from the client, to the broker,
+	// relayed to the proxy, when a dial is aborted.
+
+	announceDone := false
+	signalAnnounceDone := func() {
+		if announceDone {
+			return
+		}
+		announceDone = true
+		select {
+		case p.proxySupervisorResults <- proxyWorkerResult{
+			isPersonal:   isPersonal,
+			tacticsMode:  tacticsMode,
+			announceDone: true,
+		}:
+		case <-supervisorCtx.Done():
+		}
+	}
+
+	result := proxyWorkerResult{
+		isPersonal:  isPersonal,
+		tacticsMode: tacticsMode,
+	}
+
+	result.backOff, result.err = p.proxyOneClient(
+		supervisorCtx,
+		tacticsMode,
+		signalAnnounceDone,
+		isPersonal)
+
+	if !announceDone {
+		result.announceDone = true
+	}
+	result.workerDone = true
+	select {
+	case p.proxySupervisorResults <- result:
+	case <-supervisorCtx.Done():
+	}
+}
+
+func (p *Proxy) handleResult(
+	supervisorCtx context.Context,
+	result proxyWorkerResult) {
+
+	p.proxySupervisorMutex.Lock()
+	defer p.proxySupervisorMutex.Unlock()
+
+	kind := &p.proxySupervisorCommonState
+	if result.isPersonal {
+		kind = &p.proxySupervisorPersonalState
+	}
+
+	if result.announceDone {
+		kind.announcing -= 1
+	}
+	if result.workerDone && result.tacticsMode == proxyTacticsModeCheck {
+		p.proxySupervisorTacticsWorker = false
+	}
+
+	if result.workerDone {
+
+		if result.err == nil {
+
+			// Success resets the failure backoff escalation, but lets any
+			// pending backoff period, kind.endBackOffTime, run out. For a
+			// worker that successfully relays a client connection, its
+			// announcement typically predates the backoff, so success is not
+			// evidence that the backoff condition, such as broker rate
+			// limiting, has cleared.
+			//
+			// Results could include an announcement timestamp and use it to
+			// ignore stale successes, but that risks excessive backoff under
+			// an interleaved mix of long-lived successful connections and
+			// connections that fail at the WebRTC stage.
+
+			kind.failureDelayFactor = 1
+		}
+
+		if result.err != nil && supervisorCtx.Err() == nil {
+
+			// Apply a simple exponential backoff for failures that should
+			// delay reannouncement, while allowing non-backoff failures such
+			// as no-match to reset the escalation.
+			//
+			// The proxyOneClient failure could range from local configuration
+			// (no broker clients) to network issues (failure to completely
+			// establish a WebRTC connection), and this backoff prevents both
+			// excess local logging and churning in the former case and excessive
+			// bad service to clients or unintentionally overloading the broker
+			// in the latter case.
+			//
+			// Note that the backoff is per kind, common and personal, not per
+			// worker, delaying launches of any new workers of that kind.
+
+			now := time.Now()
+			backOffActive := now.Before(kind.endBackOffTime)
+
+			if !result.backOff {
+				kind.failureDelayFactor = 1
+			}
+
+			delay, maxBackoffDelay, jitter := p.getAnnounceDelayParameters()
+
+			delay = delay * kind.failureDelayFactor
+			if delay > maxBackoffDelay {
+				delay = maxBackoffDelay
+			}
+
+			// Escalate the failure delay factor at most once per active
+			// backoff window. Concurrent workers can fail in correlated
+			// groups so avoid jumping immediately to the maximum backoff.
+			if result.backOff &&
+				!backOffActive &&
+				kind.failureDelayFactor < 1<<20 {
+				kind.failureDelayFactor *= 2
+			}
+
+			// Activate the launch delay window. Every error is followed by
+			// a delay, at least the base announce delay, before launching
+			// more workers of the kind. A non-backoff error, including a
+			// routine "no match" result, doesn't extend an already active
+			// window: re-activating on every such result could otherwise
+			// keep the window continuously active, starving new launches,
+			// when the announce delay exceeds the result arrival interval.
+			// A backoff error extends an active window, but a shorter delay
+			// computed for a later result never shortens an active, longer
+			// backoff set for a more severe condition, such as broker rate
+			// limiting.
+			if result.backOff || !backOffActive {
+				endBackOffTime := now.Add(prng.JitterDuration(delay, jitter))
+				if endBackOffTime.After(kind.endBackOffTime) {
+					kind.endBackOffTime = endBackOffTime
+				}
+			}
+
+			p.logErrorLocked(kind, result.err, delay, jitter)
+		}
+	}
+
+}
+
+func (p *Proxy) logAnnounce(
+	isPersonal bool) bool {
+
+	p.proxySupervisorMutex.Lock()
+	defer p.proxySupervisorMutex.Unlock()
+
+	kind := &p.proxySupervisorCommonState
+	if isPersonal {
+		kind = &p.proxySupervisorPersonalState
+	}
+	kind.resetLogSampleIfNeededLocked()
+	if kind.logAnnounceCount > 0 {
+		kind.logAnnounceCount -= 1
+		return true
+	}
+	return false
+}
+
+func (p *Proxy) logErrorLocked(
+	kind *proxyKindState,
+	err error,
+	delay time.Duration,
+	jitter float64) {
+
+	kind.resetLogSampleIfNeededLocked()
+
+	errMsg := err.Error()
+	if kind.lastErrMsg != errMsg {
+		kind.logErrorsCount = proxyAnnounceLogSampleSize
+		kind.lastErrMsg = errMsg
+	}
+	if kind.logErrorsCount > 0 {
+		p.config.Logger.WithTraceFields(
+			common.LogFields{
+				"error":          errMsg,
+				"delay":          delay.String(),
+				"jitter":         jitter,
+				"effectiveDelay": time.Until(kind.endBackOffTime).String(),
+			}).Error("proxy client failed")
+		kind.logErrorsCount -= 1
+	}
+}
+
+func (kind *proxyKindState) resetLogSampleIfNeededLocked() {
+
+	// To reduce diagnostic log noise, only log an initial sample of
+	// announcement request timings (delays/elapsed time) and a periodic sample
+	// of repeating errors such as "no match".
+	//
+	// Limitation: the lastErrMsg string comparison isn't compatible with
+	// errors with minor variations, such as "unexpected response status
+	// code %d after %v" from InproxyBrokerRoundTripper.RoundTrip, with a
+	// time duration in the second parameter.
+
+	if time.Since(kind.startLogSampleTime) < proxyAnnounceLogSamplePeriod {
+		return
+	}
+
+	kind.logAnnounceCount = proxyAnnounceLogSampleSize
+	kind.logErrorsCount = proxyAnnounceLogSampleSize
+	kind.lastErrMsg = ""
+	kind.startLogSampleTime = time.Now()
+}
+
+func (p *Proxy) endBackOffTimer(limits proxyLimitsSnapshot) *time.Timer {
+
+	p.proxySupervisorMutex.Lock()
+	defer p.proxySupervisorMutex.Unlock()
+
+	endBackOffTime := time.Time{}
+	if !p.proxySupervisorCommonState.endBackOffTime.IsZero() &&
+		time.Now().Before(p.proxySupervisorCommonState.endBackOffTime) &&
+		p.proxySupervisorCommonState.announcing < limits.maxCommonAnnouncements {
+
+		endBackOffTime = p.proxySupervisorCommonState.endBackOffTime
+	}
+	if !p.proxySupervisorPersonalState.endBackOffTime.IsZero() &&
+		time.Now().Before(p.proxySupervisorPersonalState.endBackOffTime) &&
+		p.proxySupervisorPersonalState.announcing < limits.maxPersonalAnnouncements &&
+		(endBackOffTime.IsZero() || p.proxySupervisorPersonalState.endBackOffTime.Before(endBackOffTime)) {
+
+		endBackOffTime = p.proxySupervisorPersonalState.endBackOffTime
+	}
+	if endBackOffTime.IsZero() {
+		return nil
+	}
+
+	delay := time.Until(endBackOffTime)
+	if delay < 0 {
+		delay = 0
+	}
+
+	return time.NewTimer(delay)
 }
 
 func (p *Proxy) activityUpdate(period time.Duration) {
@@ -515,8 +1032,8 @@ func (p *Proxy) getOrCreateRegionActivity(region string, isPersonal bool) *Regio
 // callback invocation.
 func (p *Proxy) snapshotAndResetRegionActivity(
 	mutex *sync.Mutex,
-	statsMap map[string]*RegionActivity,
-) map[string]RegionActivitySnapshot {
+	statsMap map[string]*RegionActivity) map[string]RegionActivitySnapshot {
+
 	mutex.Lock()
 	defer mutex.Unlock()
 	result := make(map[string]RegionActivitySnapshot, len(statsMap))
@@ -553,70 +1070,33 @@ func greaterThanSwapInt64(addr *atomic.Int64, new int64) bool {
 	return false
 }
 
-func (p *Proxy) isReducedUntil() (int, time.Time) {
-	if !p.useReducedSettings {
-		return p.config.MaxCommonClients, time.Time{}
+// getLimits returns the max clients and rate limits to be reported to the
+// broker, and applied to client connections.
+func (p *Proxy) getLimits(isPersonal bool) (
+	maxCommonClients int,
+	maxPersonalClients int,
+	rateLimits common.RateLimits) {
+
+	_, maxCommonClients, _, commonUpstreamBytesPerSecond,
+		commonDownstreamBytesPerSecond := p.proxyLimits.GetCommonLimits()
+
+	_, maxPersonalClients, _, personalUpstreamBytesPerSecond,
+		personalDownstreamBytesPerSecond := p.proxyLimits.GetPersonalLimits()
+
+	upstreamBytesPerSecond := commonUpstreamBytesPerSecond
+	downstreamBytesPerSecond := commonDownstreamBytesPerSecond
+
+	if isPersonal {
+		upstreamBytesPerSecond = personalUpstreamBytesPerSecond
+		downstreamBytesPerSecond = personalDownstreamBytesPerSecond
 	}
 
-	now := time.Now().UTC()
-	minute := now.Hour()*60 + now.Minute()
-
-	isReduced := false
-	if p.reducedStartMinute < p.reducedEndMinute {
-		isReduced = minute >= p.reducedStartMinute && minute < p.reducedEndMinute
-	} else {
-		isReduced = minute >= p.reducedStartMinute || minute < p.reducedEndMinute
+	// Throttling is applied to the proxy-to-destination connection, where
+	// writes flow upstream and reads flow downstream.
+	rateLimits = common.RateLimits{
+		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
+		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
 	}
-
-	if !isReduced {
-		return p.config.MaxCommonClients, time.Time{}
-	}
-
-	endHour := p.reducedEndMinute / 60
-	endMinute := p.reducedEndMinute % 60
-	endTime := time.Date(
-		now.Year(),
-		now.Month(),
-		now.Day(),
-		endHour,
-		endMinute,
-		0,
-		0,
-		now.Location(),
-	)
-	if !endTime.After(now) {
-		endTime = endTime.AddDate(0, 0, 1)
-	}
-	return p.config.ReducedMaxCommonClients, endTime
-}
-
-func (p *Proxy) getLimits() (int, int, common.RateLimits) {
-
-	rateLimits := common.RateLimits{
-		ReadBytesPerSecond:  int64(p.config.LimitUpstreamBytesPerSecond),
-		WriteBytesPerSecond: int64(p.config.LimitDownstreamBytesPerSecond),
-	}
-
-	maxCommonClients, reducedUntil := p.isReducedUntil()
-	if !reducedUntil.IsZero() {
-
-		upstream := p.config.ReducedLimitUpstreamBytesPerSecond
-		if upstream == 0 {
-			upstream = p.config.LimitUpstreamBytesPerSecond
-		}
-
-		downstream := p.config.ReducedLimitDownstreamBytesPerSecond
-		if downstream == 0 {
-			downstream = p.config.LimitDownstreamBytesPerSecond
-		}
-
-		rateLimits = common.RateLimits{
-			ReadBytesPerSecond:  int64(upstream),
-			WriteBytesPerSecond: int64(downstream),
-		}
-	}
-
-	maxPersonalClients := p.config.MaxPersonalClients
 
 	return maxCommonClients, maxPersonalClients, rateLimits
 }
@@ -638,145 +1118,6 @@ func (p *Proxy) getAnnounceDelayParameters() (time.Duration, time.Duration, floa
 		common.ValueOrDefault(brokerCoordinator.AnnounceMaxBackoffDelay(), proxyAnnounceMaxBackoffDelay),
 		common.ValueOrDefault(brokerCoordinator.AnnounceDelayJitter(), proxyAnnounceDelayJitter)
 
-}
-
-func (p *Proxy) proxyClients(
-	ctx context.Context, signalAnnounceDone func(), reducedPause bool, isPersonal bool) {
-
-	// Proxy one client, repeating until ctx is done.
-	//
-	// This worker starts with posting a long-polling announcement request.
-	// The broker response with a matched client, and the proxy and client
-	// attempt to establish a WebRTC connection for relaying traffic.
-	//
-	// Limitation: this design may not maximize the utility of the proxy,
-	// since some proxy/client connections will fail at the WebRTC stage due
-	// to NAT traversal failure, and at most MaxClient concurrent
-	// establishments are attempted. Another scenario comes from the Psiphon
-	// client horse race, which may start in-proxy dials but then abort them
-	// when some other tunnel protocol succeeds.
-	//
-	// As a future enhancement, consider using M announcement goroutines and N
-	// WebRTC dial goroutines. When an announcement gets a response,
-	// immediately announce again unless there are already MaxClient active
-	// connections established. This approach may require the proxy to
-	// backpedal and reject connections when establishment is too successful.
-	//
-	// Another enhancement could be a signal from the client, to the broker,
-	// relayed to the proxy, when a dial is aborted.
-
-	failureDelayFactor := time.Duration(1)
-
-	// To reduce diagnostic log noise, only log an initial sample of
-	// announcement request timings (delays/elapsed time) and a periodic
-	// sample of repeating errors such as "no match".
-	logAnnounceCount := proxyAnnounceLogSampleSize
-	logErrorsCount := proxyAnnounceLogSampleSize
-	lastErrMsg := ""
-	startLogSampleTime := time.Now()
-	logAnnounce := func() bool {
-		if logAnnounceCount > 0 {
-			logAnnounceCount -= 1
-			return true
-		}
-		return false
-	}
-
-	preCheckTacticsDone := false
-
-	for ctx.Err() == nil {
-
-		if !p.config.WaitForNetworkConnectivity() {
-			break
-		}
-
-		// Pause designated workers during the reduced time range. In-flight
-		// announces are not interrupted and connected clients are not
-		// disconnected, so there is a gradual transition into reduced mode.
-
-		if reducedPause {
-			_, reducedUntil := p.isReducedUntil()
-			if !reducedUntil.IsZero() {
-
-				pauseDuration := time.Until(reducedUntil)
-				p.config.Logger.WithTraceFields(common.LogFields{
-					"duration": pauseDuration.String(),
-				}).Info("pause worker")
-
-				timer := time.NewTimer(pauseDuration)
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-				}
-				timer.Stop()
-				if ctx.Err() != nil {
-					break
-				}
-			}
-		}
-
-		if time.Since(startLogSampleTime) >= proxyAnnounceLogSamplePeriod {
-			logAnnounceCount = proxyAnnounceLogSampleSize
-			logErrorsCount = proxyAnnounceLogSampleSize
-			lastErrMsg = ""
-			startLogSampleTime = time.Now()
-		}
-
-		backOff, err := p.proxyOneClient(
-			ctx, logAnnounce, &preCheckTacticsDone, signalAnnounceDone, isPersonal)
-
-		if !backOff || err == nil {
-			failureDelayFactor = 1
-		}
-
-		if err != nil && ctx.Err() == nil {
-
-			// Apply a simple exponential backoff based on whether
-			// proxyOneClient either relayed client traffic or got no match,
-			// or encountered a failure.
-			//
-			// The proxyOneClient failure could range from local
-			// configuration (no broker clients) to network issues(failure to
-			// completely establish WebRTC connection) and this backoff
-			// prevents both excess local logging and churning in the former
-			// case and excessive bad service to clients or unintentionally
-			// overloading the broker in the latter case.
-
-			delay, maxBackoffDelay, jitter := p.getAnnounceDelayParameters()
-
-			delay = delay * failureDelayFactor
-			if delay > maxBackoffDelay {
-				delay = maxBackoffDelay
-			}
-			if failureDelayFactor < 1<<20 {
-				failureDelayFactor *= 2
-			}
-
-			// Sample error log.
-			//
-			// Limitation: the lastErrMsg string comparison isn't compatible
-			// with errors with minor variations, such as "unexpected
-			// response status code %d after %v" from
-			// InproxyBrokerRoundTripper.RoundTrip, with a time duration in
-			// the second parameter.
-			errMsg := err.Error()
-			if lastErrMsg != errMsg {
-				logErrorsCount = proxyAnnounceLogSampleSize
-				lastErrMsg = errMsg
-			}
-			if logErrorsCount > 0 {
-				p.config.Logger.WithTraceFields(
-					common.LogFields{
-						"error":  errMsg,
-						"delay":  delay.String(),
-						"jitter": jitter,
-					}).Error("proxy client failed")
-				logErrorsCount -= 1
-			}
-
-			common.SleepWithJitter(ctx, delay, jitter)
-		}
-	}
 }
 
 // resetNetworkDiscovery resets the network discovery state, which will force
@@ -843,8 +1184,7 @@ func (p *Proxy) doNetworkDiscovery(
 
 func (p *Proxy) proxyOneClient(
 	ctx context.Context,
-	logAnnounce func() bool,
-	preCheckTacticsDone *bool,
+	tacticsMode proxyTacticsMode,
 	signalAnnounceDone func(),
 	isPersonal bool) (bool, error) {
 
@@ -918,12 +1258,7 @@ func (p *Proxy) proxyOneClient(
 
 	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
 
-	// Only the first worker, which has signalAnnounceDone configured, checks
-	// for tactics.
-	checkTactics := signalAnnounceDone != nil && *preCheckTacticsDone
-	preCheckTactics := signalAnnounceDone != nil && !*preCheckTacticsDone
-
-	maxCommonClients, maxPersonalClients, rateLimits := p.getLimits()
+	maxCommonClients, maxPersonalClients, rateLimits := p.getLimits(isPersonal)
 
 	// Get the base Psiphon API parameters and additional proxy metrics,
 	// including performance information, which is sent to the broker in the
@@ -936,7 +1271,7 @@ func (p *Proxy) proxyOneClient(
 	// with the original network ID.
 
 	metrics, tacticsNetworkID, compressTactics, err := p.getMetrics(
-		checkTactics || preCheckTactics,
+		tacticsMode != proxyTacticsModeNone,
 		brokerCoordinator,
 		webRTCCoordinator,
 		maxCommonClients,
@@ -1008,10 +1343,10 @@ func (p *Proxy) proxyOneClient(
 		&ProxyAnnounceRequest{
 			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
-			CheckTactics:           checkTactics,
-			PreCheckTactics:        preCheckTactics,
+			CheckTactics:           tacticsMode == proxyTacticsModeCheck,
+			PreCheckTactics:        tacticsMode == proxyTacticsModePreCheck,
 		})
-	if logAnnounce() {
+	if p.logAnnounce(isPersonal) {
 		p.config.Logger.WithTraceFields(common.LogFields{
 			"delay":       requestDelay.String(),
 			"elapsedTime": time.Since(announceStartTime).String(),
@@ -1042,17 +1377,6 @@ func (p *Proxy) proxyOneClient(
 		}
 	}
 
-	// Signal that the announce round trip is complete, allowing other workers
-	// to launch. At this point, the broker Noise session should be established
-	// and any fresh tactics applied. Also toggle preCheckTacticsDone since
-	// there's no need to retry PreCheckTactics once a round trip succeeds.
-	if signalAnnounceDone != nil {
-		signalAnnounceDone()
-	}
-	if preCheckTactics {
-		*preCheckTacticsDone = true
-	}
-
 	// MustUpgrade has precedence over other cases, to ensure the callback is
 	// invoked. Trigger back-off back off when rate/entry limited or must
 	// upgrade; no back-off for no-match.
@@ -1070,24 +1394,27 @@ func (p *Proxy) proxyOneClient(
 		backOff = true
 		return backOff, errors.TraceNew("limited")
 
+	}
+
+	if tacticsMode == proxyTacticsModePreCheck {
+
+		// PreCheckTactics should return no-match after processing any tactics
+		// payload; it does not proceed to client matching.
+
+		if !announceResponse.NoMatch {
+			return backOff, errors.TraceNew("unexpected PreCheckTactics response")
+		}
+		return backOff, nil
+
 	} else if announceResponse.NoMatch {
 
 		// No backoff for no-match.
 		//
 		// This is also the expected response for CheckTactics with a tactics
-		// payload and PreCheckTactics with or without a tactics payload,
-		// distinct cases which should not back off.
+		// payload, which should not back off.
 
 		return backOff, errors.TraceNew("no match")
 
-	}
-
-	if preCheckTactics && !announceResponse.NoMatch {
-
-		// Sanity check: the broker should always respond with no-match for
-		// PreCheckTactics.
-
-		return backOff, errors.TraceNew("unexpected PreCheckTactics response")
 	}
 
 	if announceResponse.SelectedProtocolVersion < ProtocolVersion1 ||
@@ -1099,6 +1426,47 @@ func (p *Proxy) proxyOneClient(
 		return backOff, errors.Tracef(
 			"unsupported protocol version: %d",
 			announceResponse.SelectedProtocolVersion)
+	}
+
+	// Acquire a max client slot only after the announcement is matched. If
+	// ProxyLimits is shared, acquiring the slot before announcing could
+	// starve other proxies sharing the limit state for announcements that
+	// won't necessarily yield client connections. An outcome of this
+	// approach is that a match now has the potential to fail to acquire a
+	// slot, which results in an AnswerError and failed inproxy dial.
+
+	var releaseProxyLimit common.ProxyLimitReleaseFunc
+	var ok bool
+	if isPersonal {
+		releaseProxyLimit, ok = p.proxyLimits.TryAcquirePersonalClient()
+	} else {
+		releaseProxyLimit, ok = p.proxyLimits.TryAcquireCommonClient()
+	}
+	if !ok {
+		// Back off while capacity is exhausted; immediately announcing again is
+		// likely to produce another match the proxy cannot accept.
+		backOff = true
+
+		_, err = brokerClient.ProxyAnswer(
+			ctx,
+			&ProxyAnswerRequest{
+				ConnectionID: announceResponse.ConnectionID,
+				AnswerError:  "proxy capacity exceeded",
+			})
+		if err != nil {
+			backOff = false
+			return backOff, errors.Trace(err)
+		}
+
+		return backOff, errors.TraceNew("proxy capacity exceeded")
+	}
+	defer releaseProxyLimit()
+
+	// Signal that the announcement is no longer occupying a worker slot,
+	// allowing the supervisor to launch another worker while this worker
+	// continues with WebRTC establishment and relaying.
+	if signalAnnounceDone != nil {
+		signalAnnounceDone()
 	}
 
 	proxyDTLSFingerprint, err := webRTCCoordinator.ProxyDTLSFingerprint(
@@ -1466,8 +1834,8 @@ func (p *Proxy) getMetrics(
 		MaxPersonalClients:            int32(maxPersonalClients),
 		ConnectingClients:             p.connectingClients.Load(),
 		ConnectedClients:              p.connectedClients.Load(),
-		LimitUpstreamBytesPerSecond:   rateLimits.ReadBytesPerSecond,
-		LimitDownstreamBytesPerSecond: rateLimits.WriteBytesPerSecond,
+		LimitUpstreamBytesPerSecond:   rateLimits.WriteBytesPerSecond,
+		LimitDownstreamBytesPerSecond: rateLimits.ReadBytesPerSecond,
 		PeakUpstreamBytesPerSecond:    p.peakBytesUp.Load(),
 		PeakDownstreamBytesPerSecond:  p.peakBytesDown.Load(),
 	}, tacticsNetworkID, compressTactics, nil

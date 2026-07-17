@@ -2564,6 +2564,57 @@ func (s *InproxyNATStateManager) setPortMappingProbe(
 	s.portMappingProbe = portMappingProbe
 }
 
+// inproxyProxyAnnouncementLimits relays tactics proxy limits overrides to the
+// specified inproxy proxy.
+type inproxyProxyAnnouncementLimits struct {
+	mutex  sync.Mutex
+	config *Config
+	proxy  *inproxy.Proxy
+}
+
+func newInproxyProxyAnnouncementLimits(
+	config *Config) *inproxyProxyAnnouncementLimits {
+
+	return &inproxyProxyAnnouncementLimits{
+		config: config,
+	}
+}
+
+func (limits *inproxyProxyAnnouncementLimits) SetProxy(proxy *inproxy.Proxy) error {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	limits.proxy = proxy
+
+	return errors.Trace(limits.setLimitsLocked())
+}
+
+// TacticsApplied implements the TacticsAppliedReceiver interface.
+func (limits *inproxyProxyAnnouncementLimits) TacticsApplied() error {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	return errors.Trace(limits.setLimitsLocked())
+}
+
+func (limits *inproxyProxyAnnouncementLimits) setLimitsLocked() error {
+
+	if limits.proxy == nil {
+		return nil
+	}
+
+	p := limits.config.GetParameters().Get()
+
+	commonOverride := p.Int(parameters.InproxyProxyAnnounceCommonOverride)
+	personalOverride := p.Int(parameters.InproxyProxyAnnouncePersonalOverride)
+
+	return errors.Trace(limits.proxy.OverrideAnnouncementLimits(
+		commonOverride,
+		personalOverride))
+}
+
 // inproxyUDPConn is based on NewUDPConn and includes the write timeout
 // workaround from common.WriteTimeoutUDPConn.
 //

@@ -62,6 +62,13 @@ const (
 )
 
 // ProxyConfig specifies the configuration of a light proxy.
+//
+// When a ProxyLimits is specified, the light proxy uses that shared limits
+// state. ProxyLimitKind must also be set to either ProxyLimitKindCommon or
+// ProxyLimitKindPersonal, indicating which class of ProxyLimits values the
+// light proxy should use.
+//
+// When ProxyLimits is nil, ProxyConfig limit parameters are used instead.
 type ProxyConfig struct {
 	Protocol                                      string              `json:",omitempty"`
 	ProviderID                                    string              `json:",omitempty"`
@@ -89,11 +96,21 @@ type ProxyConfig struct {
 	SplitDownstreamInterfaceName                  string              `json:",omitempty"`
 	ProxyProtocolHeaderMACKeys                    map[string]string   `json:",omitempty"`
 	ProxyProtocolHeaderTargetDestinationAddresses map[string][]string `json:",omitempty"`
+	ProxyLimits                                   *common.ProxyLimits `json:"-"`
+	ProxyLimitKind                                ProxyLimitKind      `json:"-"`
 	LogDestinationAddresses                       bool                `json:",omitempty"`
 	AllowBogons                                   bool                `json:",omitempty"`
 	EmitActivity                                  bool                `json:",omitempty"`
 	EnableDebugLogs                               bool                `json:",omitempty"`
 }
+
+type ProxyLimitKind int
+
+const (
+	ProxyLimitKindNone ProxyLimitKind = iota
+	ProxyLimitKindCommon
+	ProxyLimitKindPersonal
+)
 
 // ConnectionStats are the proxy connection stats reported to
 // ProxyEventReceiver at the end of connection. If the connection failed to
@@ -214,13 +231,11 @@ type Proxy struct {
 	listenConfig *net.ListenConfig
 	dialer       *net.Dialer
 
-	limitsMutex                   sync.Mutex
-	maxConcurrent                 int
-	limitUpstreamBytesPerSecond   int
-	limitDownstreamBytesPerSecond int
-	perIPConcurrentConnections    map[string]int
-	rateLimiters                  *lrucache.Cache
-	concurrentConnections         int
+	limitsMutex                sync.Mutex
+	perIPConcurrentConnections map[string]int
+	rateLimiters               *lrucache.Cache
+	proxyLimits                *common.ProxyLimits
+	proxyLimitKind             ProxyLimitKind
 
 	dnsResolver *net.Resolver
 	dnsCache    *lrucache.Cache
@@ -480,6 +495,29 @@ func NewProxy(
 		MinVersion: tls.VersionTLS13,
 	}
 
+	proxyLimitKind := config.ProxyLimitKind
+	proxyLimits := config.ProxyLimits
+	if proxyLimits == nil {
+
+		// If no shared limits are provided, instantiate internal limits from
+		// config fields. The config-driven light proxy uses common limits.
+
+		if proxyLimitKind != ProxyLimitKindNone {
+			return nil, errors.TraceNew("invalid ProxyLimitKind")
+		}
+
+		proxyLimitKind = ProxyLimitKindCommon
+		proxyLimits, err = newProxyLimitsFromConfig(config, maxConcurrent)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if proxyLimitKind != ProxyLimitKindCommon &&
+		proxyLimitKind != ProxyLimitKindPersonal {
+
+		return nil, errors.TraceNew("invalid ProxyLimitKind")
+	}
+
 	proxy := &Proxy{
 		config:                     config,
 		lookupGeoIP:                lookupGeoIP,
@@ -497,17 +535,16 @@ func NewProxy(
 			b := make([]byte, relayBufferSize)
 			return &b
 		}},
-		rateLimitQuantity:             rateLimitQuantity,
-		rateLimitInterval:             rateLimitInterval,
-		perIPMaxConcurrent:            perIPMaxConcurrent,
-		maxConcurrent:                 maxConcurrent,
-		limitUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
-		limitDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
-		dnsResolver:                   dnsResolver,
-		dnsCache:                      dnsCache,
-		listenConfig:                  listenConfig,
-		dialer:                        dialer,
-		dialFallbackDelay:             dialFallbackDelay,
+		rateLimitQuantity:  rateLimitQuantity,
+		rateLimitInterval:  rateLimitInterval,
+		perIPMaxConcurrent: perIPMaxConcurrent,
+		proxyLimits:        proxyLimits,
+		proxyLimitKind:     proxyLimitKind,
+		dnsResolver:        dnsResolver,
+		dnsCache:           dnsCache,
+		listenConfig:       listenConfig,
+		dialer:             dialer,
+		dialFallbackDelay:  dialFallbackDelay,
 
 		perIPConcurrentConnections: make(map[string]int),
 		rateLimiters: lrucache.NewWithLRU(
@@ -560,6 +597,21 @@ func NewProxy(
 	return proxy, nil
 }
 
+func newProxyLimitsFromConfig(
+	config *ProxyConfig,
+	maxConcurrent int) (*common.ProxyLimits, error) {
+
+	if maxConcurrent <= 0 {
+		maxConcurrent = defaultMaxConcurrent
+	}
+
+	return common.NewProxyLimits(&common.ProxyLimitsConfig{
+		MaxCommonClients:               maxConcurrent,
+		CommonUpstreamBytesPerSecond:   config.LimitUpstreamBytesPerSecond,
+		CommonDownstreamBytesPerSecond: config.LimitDownstreamBytesPerSecond,
+	})
+}
+
 // Pause sets the paused state, in which new proxy connections are rejected.
 // This is intended for load limiting.
 func (proxy *Proxy) Pause() {
@@ -574,7 +626,7 @@ func (proxy *Proxy) Resume() {
 }
 
 // SetLimits sets new values for MaxConcurrent, LimitUpstreamBytesPerSecond,
-// and LimitDownstreamBytesPerSecond. If MaxConcurrent is nil, a default
+// and LimitDownstreamBytesPerSecond. If MaxConcurrent is nil or 0, a default
 // value is used. These values will be applied rolling forward; no active
 // connections are closed and the rate limits for active connections do not
 // change.
@@ -589,20 +641,24 @@ func (proxy *Proxy) SetLimits(
 		return errors.TraceNew("invalid limits")
 	}
 
+	if proxy.config.ProxyLimits != nil {
+		return errors.TraceNew("SetLimits cannot be used with shared ProxyLimits")
+	}
+
 	newMaxConcurrent := defaultMaxConcurrent
-	if maxConcurrent != nil {
+	if maxConcurrent != nil && *maxConcurrent > 0 {
 		newMaxConcurrent = *maxConcurrent
 	}
 
-	proxy.limitsMutex.Lock()
-	defer proxy.limitsMutex.Unlock()
-	proxy.maxConcurrent = newMaxConcurrent
-	proxy.limitUpstreamBytesPerSecond = limitUpstreamBytesPerSecond
-	proxy.limitDownstreamBytesPerSecond = limitDownstreamBytesPerSecond
-	return nil
+	return errors.Trace(proxy.proxyLimits.SetCommonLimits(
+		newMaxConcurrent,
+		limitUpstreamBytesPerSecond,
+		limitDownstreamBytesPerSecond))
 }
 
 // Run runs the proxy until the specified context is done.
+//
+// Only one concurrent Run call is supported.
 func (proxy *Proxy) Run(ctx context.Context) error {
 
 	// Future enhancement: use psiphon/server.newTCPListenerWithBPF.
@@ -691,7 +747,10 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 
 func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error) {
 
-	defer conn.Close()
+	connToClose := conn
+	defer func() {
+		connToClose.Close()
+	}()
 
 	var geoIPData common.GeoIPData
 	completedTCP := time.Now().UTC()
@@ -819,6 +878,30 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		return errors.Trace(err)
 	}
 
+	// For TLS passthrough, the underlying client conn wrapped with tls.Server
+	// must not be closed when passthrough is invoked. psiphon-tls will spawn
+	// a goroutine to relay traffic between the underlying client conn and
+	// passthrough destination. It's safe to close tlsConn when tls.Handshake
+	// fails, as the underlying client conn is detached in the passthrough
+	// case. connToClose tracks the correct client conn to close.
+	//
+	// Limitations:
+	//
+	// - The handleCtx AfterFunc, triggered at the end of Run, will interrupt
+	//   any TLS handshake in progress, regardless of whether it may be a
+	//   passthrough candidate.
+	//
+	// - Early error returns still close the actual underlying client conn
+	//   before connToClose is set to tlsConn, which is observable to a
+	//   passthrough client. However, all early returns should be
+	//   internal/unexpected error conditions.
+	//
+	// - Passthrough relays may run indefinitely, even beyond Proxy.Run. This
+	//   is the intended design; see psiphon-tls.Conn.serverHandshake. To
+	//   support this, the activityConn inactivity timeout is deactivated
+	//   when the TLS handshake fails. In addition, passthrough bytes
+	//   continue to be counted for the lifetime of the passtrhough relay.
+
 	handleCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	unassociateAfter := context.AfterFunc(handleCtx, func() {
@@ -828,12 +911,19 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	defer unassociateAfter()
 
 	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
+	connToClose = tlsConn
 
 	err = tlsConn.Handshake()
 	connectionMetrics := tlsConn.ConnectionMetrics()
 	tlsClientHelloFragmented = connectionMetrics.ClientHelloFragmented
 	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
+
+		// Disable the inactivity timeout to support the passthrough relay
+		// case. For genuine handshake failures this is inconsequential, as
+		// the conn is closed on return.
+		_ = activityConn.SetInactivityTimeout(0)
+
 		return errors.Trace(err)
 	}
 
@@ -874,11 +964,20 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		return errors.Trace(err)
 	}
 
-	err = proxy.takeMaxConcurrent(limitIP)
+	// Check light-local per-IP capacity before acquiring shared capacity, so
+	// a connection rejected by the local cap does not temporarily consume a
+	// shared slot.
+	err = proxy.takePerIPMaxConcurrent(limitIP)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer proxy.replaceMaxConcurrent(limitIP)
+	defer proxy.replacePerIPMaxConcurrent(limitIP)
+
+	releaseProxyLimit, err := proxy.acquireProxyLimit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer releaseProxyLimit()
 
 	normalizedDestinationAddress, err = normalizeDestinationAddress(header.DestinationAddress)
 	if err != nil {
@@ -1119,19 +1218,54 @@ func (proxy *Proxy) activityUpdate(ctx context.Context) {
 	}
 }
 
+func (proxy *Proxy) acquireProxyLimit() (common.ProxyLimitReleaseFunc, error) {
+
+	var release common.ProxyLimitReleaseFunc
+	var ok bool
+
+	switch proxy.proxyLimitKind {
+	case ProxyLimitKindCommon:
+		release, ok = proxy.proxyLimits.TryAcquireCommonClient()
+
+	case ProxyLimitKindPersonal:
+		release, ok = proxy.proxyLimits.TryAcquirePersonalClient()
+
+	default:
+		return nil, errors.TraceNew("invalid ProxyLimitKind")
+	}
+
+	if !ok {
+		return nil, errors.TraceNew("proxy capacity exceeded")
+	}
+
+	return release, nil
+}
+
 func (proxy *Proxy) getTrafficRateLimits() (common.RateLimits, bool) {
 
-	proxy.limitsMutex.Lock()
-	defer proxy.limitsMutex.Unlock()
+	var upstreamBytesPerSecond, downstreamBytesPerSecond int
+	switch proxy.proxyLimitKind {
+	case ProxyLimitKindCommon:
+		_, _, _, upstreamBytesPerSecond, downstreamBytesPerSecond =
+			proxy.proxyLimits.GetCommonLimits()
 
-	if proxy.limitUpstreamBytesPerSecond == 0 &&
-		proxy.limitDownstreamBytesPerSecond == 0 {
+	case ProxyLimitKindPersonal:
+		_, _, _, upstreamBytesPerSecond, downstreamBytesPerSecond =
+			proxy.proxyLimits.GetPersonalLimits()
+
+	default:
 		return common.RateLimits{}, false
 	}
 
+	if upstreamBytesPerSecond == 0 && downstreamBytesPerSecond == 0 {
+		return common.RateLimits{}, false
+	}
+
+	// Throttling is applied to the proxy-to-destination connection, where
+	// writes flow upstream and reads flow downstream.
 	return common.RateLimits{
-		ReadBytesPerSecond:  int64(proxy.limitDownstreamBytesPerSecond),
-		WriteBytesPerSecond: int64(proxy.limitUpstreamBytesPerSecond),
+		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
+		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
 	}, true
 }
 
@@ -1162,19 +1296,13 @@ func (proxy *Proxy) applyRateLimit(limitIP string) error {
 	return nil
 }
 
-func (proxy *Proxy) takeMaxConcurrent(limitIP string) error {
+func (proxy *Proxy) takePerIPMaxConcurrent(limitIP string) error {
 
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
 
-	if proxy.maxConcurrent > 0 && proxy.concurrentConnections >= proxy.maxConcurrent {
-		return errors.TraceNew("max concurrent exceeded")
-	}
-	proxy.concurrentConnections += 1
-
 	count := proxy.perIPConcurrentConnections[limitIP]
 	if proxy.perIPMaxConcurrent > 0 && count >= proxy.perIPMaxConcurrent {
-		proxy.concurrentConnections -= 1
 		return errors.TraceNew("max per IP concurrent exceeded")
 	}
 	proxy.perIPConcurrentConnections[limitIP] = count + 1
@@ -1182,12 +1310,10 @@ func (proxy *Proxy) takeMaxConcurrent(limitIP string) error {
 	return nil
 }
 
-func (proxy *Proxy) replaceMaxConcurrent(limitIP string) {
+func (proxy *Proxy) replacePerIPMaxConcurrent(limitIP string) {
 
 	proxy.limitsMutex.Lock()
 	defer proxy.limitsMutex.Unlock()
-
-	proxy.concurrentConnections -= 1
 
 	count := proxy.perIPConcurrentConnections[limitIP] - 1
 	if count <= 0 {

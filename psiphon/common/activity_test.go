@@ -102,6 +102,46 @@ func TestActivityMonitoredConn(t *testing.T) {
 		activeDuration > lastSuccessfulReadTimeAfter.Sub(monotonicStartTimeBefore) {
 		t.Fatalf("unexpected GetActiveDuration")
 	}
+
+	// Test: SetInactivityTimeout
+
+	conn, err = NewActivityMonitoredConn(
+		&dummyConn{},
+		200*time.Millisecond,
+		false,
+		nil)
+	if err != nil {
+		t.Fatalf("NewActivityMonitoredConn failed")
+	}
+
+	err = conn.SetInactivityTimeout(-1)
+	if err == nil {
+		t.Fatalf("unexpected SetInactivityTimeout success")
+	}
+
+	err = conn.SetInactivityTimeout(0)
+	if err != nil {
+		t.Fatalf("SetInactivityTimeout failed")
+	}
+
+	time.Sleep(400 * time.Millisecond)
+
+	_, err = conn.Read(buffer)
+	if err != nil {
+		t.Fatalf("read after deactivated timeout failed")
+	}
+
+	err = conn.SetInactivityTimeout(200 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("SetInactivityTimeout failed")
+	}
+
+	time.Sleep(400 * time.Millisecond)
+
+	_, err = conn.Read(buffer)
+	if err != iotest.ErrTimeout {
+		t.Fatalf("failed to timeout")
+	}
 }
 
 func TestActivityMonitoredLRUConns(t *testing.T) {
