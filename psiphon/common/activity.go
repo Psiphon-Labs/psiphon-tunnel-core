@@ -36,7 +36,8 @@ import (
 // (e.g, each Psiphon port forward).
 //
 // When an inactivity timeout is specified, the network I/O will timeout after
-// the specified period of read inactivity. Optionally, for the purpose of
+// the specified period of read inactivity; the timeout may be changed
+// dynamically with SetInactivityTimeout. Optionally, for the purpose of
 // inactivity only, ActivityMonitoredConn will also consider the connection
 // active when data is written to it.
 //
@@ -51,8 +52,8 @@ type ActivityMonitoredConn struct {
 	net.Conn
 	monotonicStartTime   int64
 	lastReadActivityTime atomic.Int64
+	inactivityTimeout    atomic.Int64
 	realStartTime        time.Time
-	inactivityTimeout    time.Duration
 	activeOnWrite        bool
 	activityUpdaters     []ActivityUpdater
 	lruEntry             *LRUConnsEntry
@@ -73,6 +74,10 @@ func NewActivityMonitoredConn(
 	lruEntry *LRUConnsEntry,
 	activityUpdaters ...ActivityUpdater) (*ActivityMonitoredConn, error) {
 
+	if inactivityTimeout < 0 {
+		return nil, errors.TraceNew("invalid inactivity timeout")
+	}
+
 	if inactivityTimeout > 0 {
 		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
 		if err != nil {
@@ -87,13 +92,13 @@ func NewActivityMonitoredConn(
 
 	activityConn := &ActivityMonitoredConn{
 		Conn:               conn,
-		inactivityTimeout:  inactivityTimeout,
 		activeOnWrite:      activeOnWrite,
 		realStartTime:      time.Now(),
 		monotonicStartTime: now,
 		lruEntry:           lruEntry,
 		activityUpdaters:   activityUpdaters,
 	}
+	activityConn.inactivityTimeout.Store(int64(inactivityTimeout))
 	activityConn.lastReadActivityTime.Store(now)
 	return activityConn, nil
 }
@@ -116,14 +121,52 @@ func (conn *ActivityMonitoredConn) GetReadInactiveDuration() time.Duration {
 	return time.Duration(int64(monotime.Now()) - conn.lastReadActivityTime.Load())
 }
 
+// SetInactivityTimeout dynamically changes the inactivity timeout. A value
+// of 0 deactivates the timeout, immediately clearing any pending I/O
+// deadline; a positive value immediately sets a fresh deadline of the
+// specified duration, regardless of the time since the last I/O activity.
+//
+// SetInactivityTimeout is intended to be called by a single goroutine at a
+// time. Concurrent Reads/Writes are supported.
+func (conn *ActivityMonitoredConn) SetInactivityTimeout(
+	inactivityTimeout time.Duration) error {
+
+	if inactivityTimeout < 0 {
+		return errors.TraceNew("invalid inactivity timeout")
+	}
+
+	// Store before applying. This supports the race handling logic in Read
+	// and Write.
+	conn.inactivityTimeout.Store(int64(inactivityTimeout))
+
+	if inactivityTimeout == 0 {
+		return errors.Trace(conn.Conn.SetDeadline(time.Time{}))
+	}
+	return errors.Trace(conn.Conn.SetDeadline(time.Now().Add(inactivityTimeout)))
+}
+
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
 	if n > 0 {
 
-		if conn.inactivityTimeout > 0 {
-			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
+		inactivityTimeout := time.Duration(conn.inactivityTimeout.Load())
+		if inactivityTimeout > 0 {
+			err = conn.Conn.SetDeadline(time.Now().Add(inactivityTimeout))
 			if err != nil {
 				return n, errors.Trace(err)
+			}
+
+			// Handle a potential concurrent SetInactivityTimeout race.
+			latestTimeout := time.Duration(conn.inactivityTimeout.Load())
+			if latestTimeout != inactivityTimeout {
+				if latestTimeout == 0 {
+					err = conn.Conn.SetDeadline(time.Time{})
+				} else {
+					err = conn.Conn.SetDeadline(time.Now().Add(latestTimeout))
+				}
+				if err != nil {
+					return n, errors.Trace(err)
+				}
 			}
 		}
 
@@ -158,10 +201,24 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 
 		if conn.activeOnWrite {
 
-			if conn.inactivityTimeout > 0 {
-				err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
+			inactivityTimeout := time.Duration(conn.inactivityTimeout.Load())
+			if inactivityTimeout > 0 {
+				err = conn.Conn.SetDeadline(time.Now().Add(inactivityTimeout))
 				if err != nil {
 					return n, errors.Trace(err)
+				}
+
+				// Handle a potential concurrent SetInactivityTimeout race.
+				latestTimeout := time.Duration(conn.inactivityTimeout.Load())
+				if latestTimeout != inactivityTimeout {
+					if latestTimeout == 0 {
+						err = conn.Conn.SetDeadline(time.Time{})
+					} else {
+						err = conn.Conn.SetDeadline(time.Now().Add(latestTimeout))
+					}
+					if err != nil {
+						return n, errors.Trace(err)
+					}
 				}
 			}
 

@@ -201,7 +201,7 @@ func runTestProxyLimitsReduced() error {
 		return errors.TraceNew("unexpected NewProxyLimits success")
 	}
 
-	// Dynamic limit changes are not supported when legacy reduced schedule
+	// Dynamic limit changes are not supported when reduced schedule
 	// parameters are configured.
 
 	config.ReducedMaxCommonClients = 5

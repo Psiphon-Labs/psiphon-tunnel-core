@@ -1825,10 +1825,13 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if config.InproxyEnableProxy {
 
 		if config.InproxyProxyLimits == nil {
-			if config.InproxyMaxCommonClients < 0 ||
-				config.InproxyMaxPersonalClients < 0 {
-				return errors.TraceNew(
-					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+
+			if config.InproxyMaxCommonClients < 0 {
+				return errors.TraceNew("invalid InproxyMaxCommonClients")
+			}
+
+			if config.InproxyMaxPersonalClients < 0 {
+				return errors.TraceNew("invalid InproxyMaxPersonalClients")
 			}
 
 			if config.InproxyMaxCommonClients <= 0 &&
@@ -1837,10 +1840,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
 			}
 
-			if config.InproxyLimitUpstreamBytesPerSecond < 0 ||
-				config.InproxyLimitDownstreamBytesPerSecond < 0 {
-				return errors.TraceNew(
-					"invalid InproxyLimitUpstreamBytesPerSecond or InproxyLimitDownstreamBytesPerSecond")
+			if config.InproxyLimitUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyLimitUpstreamBytesPerSecond")
+			}
+
+			if config.InproxyLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyLimitDownstreamBytesPerSecond")
 			}
 		}
 
@@ -1863,10 +1868,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
 			}
 
-			if config.InproxyReducedLimitUpstreamBytesPerSecond < 0 ||
-				config.InproxyReducedLimitDownstreamBytesPerSecond < 0 {
-				return errors.TraceNew(
-					"invalid InproxyReducedLimitUpstreamBytesPerSecond or InproxyReducedLimitDownstreamBytesPerSecond")
+			if config.InproxyReducedLimitUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyReducedLimitUpstreamBytesPerSecond")
+			}
+
+			if config.InproxyReducedLimitDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid InproxyReducedLimitDownstreamBytesPerSecond")
 			}
 
 			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)

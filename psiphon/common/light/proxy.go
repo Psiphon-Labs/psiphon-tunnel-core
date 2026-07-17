@@ -747,7 +747,10 @@ func (proxy *Proxy) Run(ctx context.Context) error {
 
 func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error) {
 
-	defer conn.Close()
+	connToClose := conn
+	defer func() {
+		connToClose.Close()
+	}()
 
 	var geoIPData common.GeoIPData
 	completedTCP := time.Now().UTC()
@@ -875,6 +878,30 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		return errors.Trace(err)
 	}
 
+	// For TLS passthrough, the underlying client conn wrapped with tls.Server
+	// must not be closed when passthrough is invoked. psiphon-tls will spawn
+	// a goroutine to relay traffic between the underlying client conn and
+	// passthrough destination. It's safe to close tlsConn when tls.Handshake
+	// fails, as the underlying client conn is detached in the passthrough
+	// case. connToClose tracks the correct client conn to close.
+	//
+	// Limitations:
+	//
+	// - The handleCtx AfterFunc, triggered at the end of Run, will interrupt
+	//   any TLS handshake in progress, regardless of whether it may be a
+	//   passthrough candidate.
+	//
+	// - Early error returns still close the actual underlying client conn
+	//   before connToClose is set to tlsConn, which is observable to a
+	//   passthrough client. However, all early returns should be
+	//   internal/unexpected error conditions.
+	//
+	// - Passthrough relays may run indefinitely, even beyond Proxy.Run. This
+	//   is the intended design; see psiphon-tls.Conn.serverHandshake. To
+	//   support this, the activityConn inactivity timeout is deactivated
+	//   when the TLS handshake fails. In addition, passthrough bytes
+	//   continue to be counted for the lifetime of the passtrhough relay.
+
 	handleCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	unassociateAfter := context.AfterFunc(handleCtx, func() {
@@ -884,12 +911,19 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	defer unassociateAfter()
 
 	tlsConn := tls.Server(activityConn, proxy.tlsConfig)
+	connToClose = tlsConn
 
 	err = tlsConn.Handshake()
 	connectionMetrics := tlsConn.ConnectionMetrics()
 	tlsClientHelloFragmented = connectionMetrics.ClientHelloFragmented
 	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
+
+		// Disable the inactivity timeout to support the passthrough relay
+		// case. For genuine handshake failures this is inconsequential, as
+		// the conn is closed on return.
+		_ = activityConn.SetInactivityTimeout(0)
+
 		return errors.Trace(err)
 	}
 

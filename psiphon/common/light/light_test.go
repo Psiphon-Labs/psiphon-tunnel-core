@@ -71,6 +71,141 @@ func TestLightProxy(t *testing.T) {
 	}
 }
 
+func TestLightProxyPassthrough(t *testing.T) {
+	if err := runTestLightProxyPassthrough(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runTestLightProxyPassthrough() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	_, _, webCertPEM, webKeyPEM, err := generateCert()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	webCert, err := tls.X509KeyPair(webCertPEM, webKeyPEM)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	webListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer webListener.Close()
+
+	group.Go(func() error {
+		return runTLSEchoServer(ctx, webListener, &tls.Config{
+			Certificates: []tls.Certificate{webCert},
+		})
+	})
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	proxyAddress := proxyListener.Addr().String()
+	proxyListener.Close()
+
+	_, _, proxyCertPEM, proxyKeyPEM, err := generateCert()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver := newTestProxyEventReceiver(false, 0, false, "")
+
+	// Use a short inactivity timeout to check that passthrough relays are
+	// exempt from it.
+	inactivityTimeout := 1 * time.Second
+
+	proxy, err := NewProxy(
+		&ProxyConfig{
+			Protocol:           LIGHT_PROTOCOL_TLS,
+			ListenAddresses:    []string{proxyAddress},
+			DialAddressIPv4:    proxyAddress,
+			ObfuscationKey:     prng.HexString(32),
+			TLSCertificate:     proxyCertPEM,
+			TLSPrivateKey:      proxyKeyPEM,
+			PassthroughAddress: webListener.Addr().String(),
+			AllowBogons:        true,
+			InactivityTimeout:  inactivityTimeout.String(),
+		},
+		func(string) common.GeoIPData { return common.GeoIPData{} },
+		receiver)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	group.Go(func() error {
+		return proxy.Run(ctx)
+	})
+
+	select {
+	case <-receiver.listening:
+	case <-ctx.Done():
+		return errors.Trace(ctx.Err())
+	}
+
+	conn, err := tls.Dial("tcp", proxyAddress, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !bytes.Equal(
+		conn.ConnectionState().PeerCertificates[0].Raw,
+		webCert.Certificate[0]) {
+
+		conn.Close()
+		return errors.TraceNew("did not receive passthrough certificate")
+	}
+
+	// Check that the passthrough relay is not subject to the proxy's
+	// inactivity timeout: perform an echo round trip, whose client bytes
+	// would re-arm an active inactivity deadline; hold the connection idle
+	// for longer than the timeout; then perform another round trip.
+
+	echo := func(message string) error {
+		request := []byte(message)
+		_, err := conn.Write(request)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		response := make([]byte, len(request))
+		_, err = io.ReadFull(conn, response)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if !bytes.Equal(request, response) {
+			return errors.TraceNew("unexpected echo response")
+		}
+		return nil
+	}
+
+	err = echo("passthrough echo 1")
+	if err != nil {
+		conn.Close()
+		return errors.Trace(err)
+	}
+
+	time.Sleep(2 * inactivityTimeout)
+
+	err = echo("passthrough echo 2")
+	if err != nil {
+		conn.Close()
+		return errors.Trace(err)
+	}
+
+	conn.Close()
+	cancel()
+	return errors.Trace(group.Wait())
+}
+
 func runTestLightProxy(
 	tlsTrafficShaping, addProxyHeader, sharedProxyLimits bool) error {
 

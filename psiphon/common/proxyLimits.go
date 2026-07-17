@@ -109,13 +109,18 @@ func NewProxyLimits(config *ProxyLimitsConfig) (*ProxyLimits, error) {
 		return nil, errors.TraceNew("nil ProxyLimitsConfig")
 	}
 
-	if config.MaxCommonClients < 0 || config.MaxPersonalClients < 0 {
-		return nil, errors.TraceNew("invalid ProxyLimitsConfig")
+	if config.MaxCommonClients < 0 {
+		return nil, errors.TraceNew("invalid MaxCommonClients")
+	}
+
+	if config.MaxPersonalClients < 0 {
+		return nil, errors.TraceNew("invalid MaxPersonalClients")
 	}
 
 	if config.MaxCommonClients <= 0 &&
 		config.MaxPersonalClients <= 0 {
-		return nil, errors.TraceNew("invalid ProxyLimitsConfig")
+		return nil, errors.TraceNew(
+			"invalid MaxCommonClients and MaxPersonalClients")
 	}
 
 	proxyLimits := &ProxyLimits{}
