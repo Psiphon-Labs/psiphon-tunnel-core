@@ -1053,6 +1053,31 @@ func (t *handshakeTransport) sendKexInit() error {
 			msg.MACsClientServer = MACs
 			msg.MACsServerClient = MACs
 			msg.ServerHostKeyAlgos = hostKeyAlgos
+
+		} else if !isServer && t.config.PeerKEXPRNGSeed == nil && !testLegacyClient {
+
+			// The peer is not randomized. For Psiphon tunnels, this is
+			// currently the code path for all tunnel protocols except for
+			// plain SSH; in these cases the server does not randomize its
+			// KEX. Prefer non-SHA-1 algorithms common with the server's
+			// default algorithm lists to avoid SHA-1 algorithm negotiation.
+
+			serverMACs := defaultMACs
+			if t.config.NoEncryptThenMACHash {
+				serverMACs = noEncryptThenMACs
+			}
+
+			kexAlgos = preferCommon(kexAlgos, defaultKexAlgos, nonSHA1KexAlgos)
+			MACs = preferCommon(MACs, serverMACs, nonSHA1MACs)
+			hostKeyAlgos = preferCommon(
+				hostKeyAlgos,
+				algorithmsForKeyFormat(KeyAlgoRSA),
+				nonSHA1RSAHostKeyAlgos)
+
+			msg.KexAlgos = kexAlgos
+			msg.MACsClientServer = MACs
+			msg.MACsServerClient = MACs
+			msg.ServerHostKeyAlgos = hostKeyAlgos
 		}
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH. Compression
@@ -1225,7 +1250,7 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 			s == InsecureKeyAlgoDSA || s == InsecureCertAlgoDSAv01
 	}
 	if isClient && !testLegacyClient &&
-		t.config.KEXPRNGSeed != nil && t.config.PeerKEXPRNGSeed != nil &&
+		t.config.KEXPRNGSeed != nil &&
 		(isSHA1(t.algorithms.KeyExchange) || isSHA1(t.algorithms.HostKey) ||
 			isSHA1(t.algorithms.Read.MAC) || isSHA1(t.algorithms.Write.MAC)) {
 		return fmt.Errorf("ssh: unexpected SHA-1 algorithm negotiated: kex=%q hostkey=%q read_mac=%q write_mac=%q",
