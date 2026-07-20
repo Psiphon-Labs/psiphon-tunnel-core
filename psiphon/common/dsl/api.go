@@ -63,6 +63,7 @@ type DiscoverServerEntriesRequest struct {
 	OSLKeys                  []OSLKey                     `cbor:"2,keyasint,omitempty"`
 	ServerEntryDiscoverCount int32                        `cbor:"3,keyasint,omitempty"`
 	LightProxyDiscoverCount  int32                        `cbor:"4,keyasint,omitempty"`
+	DSLTokenRegistration     bool                         `cbor:"5,keyasint,omitempty"`
 }
 
 // ServerEntryTag is a binary representation of a protocol.ServerEntry.Tag
@@ -117,6 +118,7 @@ type LightProxyEntry struct {
 type DiscoverServerEntriesResponse struct {
 	VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
 	LightProxyEntries        []*LightProxyEntry         `cbor:"2,keyasint,omitempty"`
+	DSLToken                 string                     `cbor:"3,keyasint,omitempty"`
 }
 
 // GetServerEntriesRequest is a request from a client to download the

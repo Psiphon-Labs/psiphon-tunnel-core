@@ -22,6 +22,7 @@ package dsl
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -48,6 +49,9 @@ type FetcherConfig struct {
 	Logger common.Logger
 
 	BaseAPIParameters common.APIParameters
+
+	DSLTokenRegistration         bool
+	DSLTokenRegistrationResponse func(string) error
 
 	Tunneled     bool
 	RoundTripper FetcherRoundTripper
@@ -136,6 +140,11 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher.
 func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
+	if config.DSLTokenRegistration &&
+		config.DSLTokenRegistrationResponse == nil {
+
+		return nil, errors.TraceNew("missing DSL token registration callback")
+	}
 
 	packedAPIParameters, err := protocol.EncodePackedAPIParameters(
 		config.BaseAPIParameters)
@@ -230,10 +239,34 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		ctx,
 		OSLKeys,
 		serverEntryDiscoverCount,
-		lightProxyDiscoverCount)
+		lightProxyDiscoverCount,
+		f.config.DSLTokenRegistration)
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	if f.config.DSLTokenRegistration {
+		if discoverResponse.DSLToken == "" {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: token registration response omitted token")
+		} else if decoded, err := base64.RawURLEncoding.Strict().DecodeString(
+			discoverResponse.DSLToken); err != nil ||
+			base64.RawURLEncoding.EncodeToString(decoded) != discoverResponse.DSLToken {
+
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: token registration response contained invalid encoding")
+		} else {
+			err := f.config.DSLTokenRegistrationResponse(discoverResponse.DSLToken)
+			if err != nil {
+				f.config.Logger.WithTraceFields(common.LogFields{
+					"tunneled": f.config.Tunneled,
+				}).Warning("DSL: token registration persistence failed")
+			}
+		}
+	}
+
 	versionedTags := discoverResponse.VersionedServerEntryTags
 	lightProxyEntries := discoverResponse.LightProxyEntries
 
@@ -616,7 +649,8 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
 	serverEntryDiscoverCount int,
-	lightProxyDiscoverCount int) (*DiscoverServerEntriesResponse, error) {
+	lightProxyDiscoverCount int,
+	DSLTokenRegistration bool) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger
@@ -632,6 +666,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 			OSLKeys:                  keys,
 			ServerEntryDiscoverCount: int32(serverEntryDiscoverCount),
 			LightProxyDiscoverCount:  int32(lightProxyDiscoverCount),
+			DSLTokenRegistration:     DSLTokenRegistration,
 		}
 
 		var response DiscoverServerEntriesResponse

@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -37,7 +38,366 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
+	"github.com/fxamacker/cbor/v2"
 )
+
+func TestDiscoverServerEntriesRequestCBORCompatibility(t *testing.T) {
+	type oldDiscoverServerEntriesRequest struct {
+		BaseAPIParameters        protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+		OSLKeys                  []OSLKey                     `cbor:"2,keyasint,omitempty"`
+		ServerEntryDiscoverCount int32                        `cbor:"3,keyasint,omitempty"`
+		LightProxyDiscoverCount  int32                        `cbor:"4,keyasint,omitempty"`
+	}
+
+	oldRequest := &oldDiscoverServerEntriesRequest{
+		BaseAPIParameters:        protocol.PackedAPIParameters{1: "value"},
+		OSLKeys:                  []OSLKey{{1, 2, 3}},
+		ServerEntryDiscoverCount: 4,
+		LightProxyDiscoverCount:  5,
+	}
+	encodedOldRequest, err := protocol.CBOREncoding.Marshal(oldRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decodedNewRequest DiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedOldRequest, &decodedNewRequest); err != nil {
+		t.Fatal(err)
+	}
+	if decodedNewRequest.DSLTokenRegistration {
+		t.Fatal("unexpected DSL token registration in old request")
+	}
+
+	newRequest := &DiscoverServerEntriesRequest{
+		BaseAPIParameters:        oldRequest.BaseAPIParameters,
+		OSLKeys:                  oldRequest.OSLKeys,
+		ServerEntryDiscoverCount: oldRequest.ServerEntryDiscoverCount,
+		LightProxyDiscoverCount:  oldRequest.LightProxyDiscoverCount,
+		DSLTokenRegistration:     true,
+	}
+	encodedNewRequest, err := protocol.CBOREncoding.Marshal(newRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newRequestFields map[uint64]cbor.RawMessage
+	if err := cbor.Unmarshal(encodedNewRequest, &newRequestFields); err != nil {
+		t.Fatal(err)
+	}
+	for key := uint64(1); key <= 5; key++ {
+		if _, ok := newRequestFields[key]; !ok {
+			t.Fatalf("request CBOR key %d is missing", key)
+		}
+	}
+
+	var decodedOldRequest oldDiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedNewRequest, &decodedOldRequest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&decodedOldRequest, oldRequest) {
+		t.Fatalf("old request fields changed: got %#v, want %#v", decodedOldRequest, *oldRequest)
+	}
+
+	var roundTripRequest DiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedNewRequest, &roundTripRequest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&roundTripRequest, newRequest) {
+		t.Fatalf("request round trip failed: got %#v, want %#v", roundTripRequest, *newRequest)
+	}
+}
+
+func TestDiscoverServerEntriesResponseCBORCompatibility(t *testing.T) {
+	type oldDiscoverServerEntriesResponse struct {
+		VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
+		LightProxyEntries        []*LightProxyEntry         `cbor:"2,keyasint,omitempty"`
+	}
+
+	oldResponse := &oldDiscoverServerEntriesResponse{
+		VersionedServerEntryTags: []*VersionedServerEntryTag{{Tag: []byte{1}, Version: 2}},
+		LightProxyEntries:        []*LightProxyEntry{{ProxyEntry: []byte{3}, ProxyEntryTracker: 4}},
+	}
+	encodedOldResponse, err := protocol.CBOREncoding.Marshal(oldResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decodedNewResponse DiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedOldResponse, &decodedNewResponse); err != nil {
+		t.Fatal(err)
+	}
+	if decodedNewResponse.DSLToken != "" {
+		t.Fatalf("unexpected DSL token in old response: %q", decodedNewResponse.DSLToken)
+	}
+
+	newResponse := &DiscoverServerEntriesResponse{
+		VersionedServerEntryTags: oldResponse.VersionedServerEntryTags,
+		LightProxyEntries:        oldResponse.LightProxyEntries,
+		DSLToken:                 "BQYH",
+	}
+	encodedNewResponse, err := protocol.CBOREncoding.Marshal(newResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newResponseFields map[uint64]cbor.RawMessage
+	if err := cbor.Unmarshal(encodedNewResponse, &newResponseFields); err != nil {
+		t.Fatal(err)
+	}
+	for key := uint64(1); key <= 3; key++ {
+		if _, ok := newResponseFields[key]; !ok {
+			t.Fatalf("response CBOR key %d is missing", key)
+		}
+	}
+
+	var decodedOldResponse oldDiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedNewResponse, &decodedOldResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&decodedOldResponse, oldResponse) {
+		t.Fatalf("old response fields changed: got %#v, want %#v", decodedOldResponse, *oldResponse)
+	}
+
+	var roundTripResponse DiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedNewResponse, &roundTripResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&roundTripResponse, newResponse) {
+		t.Fatalf("response round trip failed: got %#v, want %#v", roundTripResponse, *newResponse)
+	}
+}
+
+func TestFetcherDSLTokenRegistration(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			var got, fieldPresent bool
+			config := &FetcherConfig{
+				DSLTokenRegistration:         enabled,
+				DSLTokenRegistrationResponse: func(string) error { return nil },
+				RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+					var relayedRequest RelayedRequest
+					if err := cbor.Unmarshal(payload, &relayedRequest); err != nil {
+						return nil, err
+					}
+
+					var request DiscoverServerEntriesRequest
+					if err := cbor.Unmarshal(relayedRequest.Request, &request); err != nil {
+						return nil, err
+					}
+					got = request.DSLTokenRegistration
+					var requestFields map[uint64]cbor.RawMessage
+					if err := cbor.Unmarshal(relayedRequest.Request, &requestFields); err != nil {
+						return nil, err
+					}
+					_, fieldPresent = requestFields[5]
+
+					response, err := protocol.CBOREncoding.Marshal(&DiscoverServerEntriesResponse{})
+					if err != nil {
+						return nil, err
+					}
+					return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+				},
+			}
+
+			fetcher, err := NewFetcher(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fetcher.doDiscoverServerEntriesRequest(
+				context.Background(), nil, 1, 1, enabled); err != nil {
+
+				t.Fatal(err)
+			}
+			if got != enabled {
+				t.Fatalf("got DSL token registration %t, want %t", got, enabled)
+			}
+			if fieldPresent != enabled {
+				t.Fatalf("DSL token registration field present: got %t, want %t", fieldPresent, enabled)
+			}
+		})
+	}
+}
+
+func TestFetcherDSLTokenRegistrationOrdering(t *testing.T) {
+	var events []string
+	token := "b3BhcXVlLXRva2Vu"
+
+	config := &FetcherConfig{
+		Logger:               testutils.NewTestLoggerWithComponent("fetcher"),
+		DSLTokenRegistration: true,
+		DSLTokenRegistrationResponse: func(got string) error {
+			if got != token {
+				t.Fatal("unexpected token")
+			}
+			events = append(events, "token")
+			return nil
+		},
+		RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+			var request RelayedRequest
+			if err := cbor.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			if request.RequestType != requestTypeDiscoverServerEntries {
+				return nil, errors.TraceNew("unexpected request type")
+			}
+
+			var discoverRequest DiscoverServerEntriesRequest
+			if err := cbor.Unmarshal(request.Request, &discoverRequest); err != nil {
+				return nil, err
+			}
+			if !discoverRequest.DSLTokenRegistration {
+				return nil, errors.TraceNew("registration not requested")
+			}
+			events = append(events, "request")
+
+			response, err := protocol.CBOREncoding.Marshal(&DiscoverServerEntriesResponse{
+				DSLToken: token,
+				VersionedServerEntryTags: []*VersionedServerEntryTag{{
+					Tag:     []byte{1},
+					Version: 1,
+				}},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+		},
+		DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+		DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+		DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+			return time.Now(), nil
+		},
+		DatastoreKnownOSLIDs: func() ([]OSLID, error) { return nil, nil },
+		DatastoreHasServerEntry: func(
+			ServerEntryTag, int, bool, string, string) bool {
+
+			events = append(events, "entries")
+			return true
+		},
+		DatastoreFatalError:           func(error) {},
+		FetchTTL:                      0,
+		DiscoverServerEntriesMinCount: 1,
+		DiscoverServerEntriesMaxCount: 1,
+		DiscoverLightProxyMinCount:    0,
+		DiscoverLightProxyMaxCount:    0,
+		GetLastActiveOSLsTTL:          time.Hour,
+		DoGarbageCollection:           func() {},
+	}
+
+	fetcher, err := NewFetcher(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fetcher.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"request", "token", "entries"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("unexpected event order: got %v, want %v", events, want)
+	}
+}
+
+func TestFetcherDSLTokenRegistrationProceedsAfterOSLFailure(t *testing.T) {
+	registrationRequested := false
+	responseHandled := false
+	token := "b3BhcXVlLXRva2Vu"
+
+	config := &FetcherConfig{
+		Logger:               testutils.NewTestLoggerWithComponent("fetcher"),
+		DSLTokenRegistration: true,
+		DSLTokenRegistrationResponse: func(got string) error {
+			if got != token {
+				t.Fatal("unexpected token")
+			}
+			responseHandled = true
+			return nil
+		},
+		RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+			var request RelayedRequest
+			if err := cbor.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			var discoverRequest DiscoverServerEntriesRequest
+			if err := cbor.Unmarshal(request.Request, &discoverRequest); err != nil {
+				return nil, err
+			}
+			registrationRequested = discoverRequest.DSLTokenRegistration
+
+			response, err := protocol.CBOREncoding.Marshal(
+				&DiscoverServerEntriesResponse{DSLToken: token})
+			if err != nil {
+				return nil, err
+			}
+			return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+		},
+		DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+		DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+		DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+			return time.Time{}, errors.TraceNew("OSL failure")
+		},
+		DatastoreFatalError:           func(error) {},
+		FetchTTL:                      0,
+		DiscoverServerEntriesMinCount: 1,
+		DiscoverServerEntriesMaxCount: 1,
+		DiscoverLightProxyMinCount:    0,
+		DiscoverLightProxyMaxCount:    0,
+		DoGarbageCollection:           func() {},
+	}
+
+	fetcher, err := NewFetcher(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fetcher.Run(context.Background()); err == nil {
+		t.Fatal("expected OSL failure")
+	}
+	if !registrationRequested || !responseHandled {
+		t.Fatal("registration not completed after OSL processing failed")
+	}
+}
+
+func TestFetcherDSLTokenRegistrationRejectsInvalidEncoding(t *testing.T) {
+	for _, token := range []string{"YWJj=", "not+base64url", "A"} {
+		t.Run(token, func(t *testing.T) {
+			callbackInvoked := false
+			config := &FetcherConfig{
+				Logger:                       testutils.NewTestLoggerWithComponent("fetcher"),
+				DSLTokenRegistration:         true,
+				DSLTokenRegistrationResponse: func(string) error { callbackInvoked = true; return nil },
+				RoundTripper: func(_ context.Context, _ []byte) ([]byte, error) {
+					response, err := protocol.CBOREncoding.Marshal(&DiscoverServerEntriesResponse{DSLToken: token})
+					if err != nil {
+						return nil, err
+					}
+					return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+				},
+				DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+				DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+				DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+					return time.Now(), nil
+				},
+				DatastoreKnownOSLIDs:          func() ([]OSLID, error) { return nil, nil },
+				DatastoreFatalError:           func(error) {},
+				FetchTTL:                      0,
+				DiscoverServerEntriesMinCount: 0,
+				DiscoverServerEntriesMaxCount: 0,
+				DiscoverLightProxyMinCount:    0,
+				DiscoverLightProxyMaxCount:    0,
+				GetLastActiveOSLsTTL:          time.Hour,
+				DoGarbageCollection:           func() {},
+			}
+			fetcher, err := NewFetcher(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fetcher.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if callbackInvoked {
+				t.Fatal("invalid token encoding reached persistence callback")
+			}
+		})
+	}
+}
 
 type testConfig struct {
 	name               string

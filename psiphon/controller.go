@@ -375,6 +375,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	// client will always get an AvailableEgressRegions notice,
 	// an initial instance of any repetitive error notice, etc.
 	ResetRepetitiveNotices()
+	controller.announcePersistedDSLToken()
 
 	runCtx, stopRunning := context.WithCancel(ctx)
 	defer stopRunning()
