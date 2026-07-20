@@ -658,6 +658,13 @@ func GetBuildInfo() string {
 	return string(buildInfo)
 }
 
+// GetDSLToken returns the persisted opaque DSL token as unpadded Base64URL
+// text. An empty string is returned when no token has been registered. A
+// DSLTokenAvailable notice indicates that a token is available.
+func GetDSLToken() (string, error) {
+	return psiphon.GetDSLToken()
+}
+
 func GetPacketTunnelMTU() int {
 	return tun.DEFAULT_MTU
 }
