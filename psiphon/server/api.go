@@ -1860,7 +1860,7 @@ func getIntStringRequestParam(params common.APIParameters, name string) (int, er
 		return 0, errors.Tracef("invalid param: %s", name)
 	}
 	value, err := strconv.Atoi(valueStr)
-	if !ok {
+	if err != nil {
 		return 0, errors.Trace(err)
 	}
 	return value, nil
