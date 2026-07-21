@@ -80,6 +80,8 @@ const (
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
 	SSH_MAX_CLIENT_COUNT                  = 500000
 	SSH_CLIENT_MAX_DSL_REQUEST_COUNT      = 128
+	SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT = 16
+	SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS     = 1024
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -1988,6 +1990,12 @@ type sshClient struct {
 	invalidServerEntryTags               int
 	sshProtocolBytesTracker              *sshProtocolBytesTracker
 	dslRequestCount                      int
+	lastConnectedRequestTime             time.Time
+	lastConnectedTimestamp               string
+	unacceptedConnectedRequestLogged     bool
+	persistentStatsLogCount              int
+	persistentStatsDroppedLogCount       int
+	blocklistHitsLogCount                int
 	proxyProtocolMetrics                 proxyProtocolMetrics
 }
 
@@ -2116,6 +2124,7 @@ type handshakeState struct {
 	authorizedAccessTypes     []string
 	authorizationsRevoked     bool
 	domainBytesChecksum       []byte
+	hasDomainBytesRegexes     bool
 	establishedTunnelsCount   int
 	splitTunnelLookup         *common.StringLookup
 	deviceRegion              string
@@ -3127,6 +3136,8 @@ func (sshClient *sshClient) runTunnel(
 
 func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 
+	requestFailureCount := 0
+
 	for request := range requests {
 
 		// Requests are processed serially; API responses must be sent in request order.
@@ -3154,7 +3165,14 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 		if err == nil {
 			err = request.Reply(true, responsePayload)
 		} else {
-			log.WithTraceFields(LogFields{"error": err}).Warning("request failed")
+			requestFailureCount++
+			if requestFailureCount < SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+				log.WithTraceFields(LogFields{"error": err}).Warning(
+					"request failed")
+			} else if requestFailureCount == SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+				log.WithTraceFields(LogFields{"error": err}).Warning(
+					"request failure log limit exceeded")
+			}
 			err = request.Reply(false, nil)
 		}
 		if err != nil {
@@ -3880,6 +3898,20 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	sshClient.Lock()
 
+	logCount := len(tags)
+	remaining := SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS -
+		sshClient.blocklistHitsLogCount
+	if remaining < 0 {
+		remaining = 0
+	}
+	if logCount > remaining {
+		logCount = remaining
+	}
+	logLimitExceeded :=
+		logCount < len(tags) &&
+			sshClient.blocklistHitsLogCount <= SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS
+	sshClient.blocklistHitsLogCount += len(tags)
+
 	// Log this using the client, not peer, GeoIP. In the case of in-proxy
 	// tunnel protocols, the client GeoIP fields will be None if the
 	// handshake does not complete. In that case, no port forwarding will
@@ -3898,7 +3930,11 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	sshClient.Unlock()
 
-	for _, tag := range tags {
+	if logLimitExceeded {
+		log.WithTrace().Warning("blocklist hits log limit exceeded")
+	}
+
+	for _, tag := range tags[:logCount] {
 		if IP != nil {
 			logFields["blocklist_ip_address"] = IP.String()
 		}
@@ -4436,6 +4472,12 @@ func (sshClient *sshClient) updateAPIParameters(
 func (sshClient *sshClient) acceptDomainBytes() bool {
 	sshClient.Lock()
 	defer sshClient.Unlock()
+
+	// Drop domain bytes when no regexes were configured for the client at
+	// handshake.
+	if !sshClient.handshakeState.hasDomainBytesRegexes {
+		return false
+	}
 
 	// When the domain bytes checksum differs from the checksum sent to the
 	// client in the handshake response, the psinet regex configuration has
