@@ -5,7 +5,9 @@
 package ssh
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -51,33 +53,33 @@ func TestFindAgreedAlgorithms(t *testing.T) {
 		}
 	}
 
-	initDirAlgs := func(a *directionAlgorithms) {
+	initDirAlgs := func(a *DirectionAlgorithms) {
 		if a.Cipher == "" {
 			a.Cipher = "cipher1"
 		}
 		if a.MAC == "" {
 			a.MAC = "mac1"
 		}
-		if a.Compression == "" {
-			a.Compression = "compression1"
+		if a.compression == "" {
+			a.compression = "compression1"
 		}
 	}
 
-	initAlgs := func(a *algorithms) {
-		if a.kex == "" {
-			a.kex = "kex1"
+	initAlgs := func(a *NegotiatedAlgorithms) {
+		if a.KeyExchange == "" {
+			a.KeyExchange = "kex1"
 		}
-		if a.hostKey == "" {
-			a.hostKey = "hostkey1"
+		if a.HostKey == "" {
+			a.HostKey = "hostkey1"
 		}
-		initDirAlgs(&a.r)
-		initDirAlgs(&a.w)
+		initDirAlgs(&a.Read)
+		initDirAlgs(&a.Write)
 	}
 
 	type testcase struct {
 		name                   string
 		clientIn, serverIn     kexInitMsg
-		wantClient, wantServer algorithms
+		wantClient, wantServer NegotiatedAlgorithms
 		wantErr                bool
 	}
 
@@ -120,19 +122,19 @@ func TestFindAgreedAlgorithms(t *testing.T) {
 				CiphersClientServer: []string{"cipher2", "cipher1"},
 				CiphersServerClient: []string{"cipher3", "cipher2"},
 			},
-			wantClient: algorithms{
-				r: directionAlgorithms{
+			wantClient: NegotiatedAlgorithms{
+				Read: DirectionAlgorithms{
 					Cipher: "cipher3",
 				},
-				w: directionAlgorithms{
+				Write: DirectionAlgorithms{
 					Cipher: "cipher2",
 				},
 			},
-			wantServer: algorithms{
-				w: directionAlgorithms{
+			wantServer: NegotiatedAlgorithms{
+				Write: DirectionAlgorithms{
 					Cipher: "cipher3",
 				},
-				r: directionAlgorithms{
+				Read: DirectionAlgorithms{
 					Cipher: "cipher2",
 				},
 			},
@@ -172,5 +174,23 @@ func TestFindAgreedAlgorithms(t *testing.T) {
 				t.Errorf("server: got algs %#v, want %#v", clientAlgs, &c.wantClient)
 			}
 		})
+	}
+}
+
+func TestKeyFormatAlgorithms(t *testing.T) {
+	supportedAlgos := SupportedAlgorithms()
+	insecureAlgos := InsecureAlgorithms()
+	algoritms := append(supportedAlgos.PublicKeyAuths, insecureAlgos.PublicKeyAuths...)
+	algoritms = append(algoritms, slices.Collect(maps.Keys(certKeyAlgoNames))...)
+
+	for _, algo := range algoritms {
+		keyFormat := keyFormatForAlgorithm(algo)
+		if keyFormat == "" {
+			t.Errorf("got empty key format for algorithm %q", algo)
+		}
+		if !slices.Contains(algorithmsForKeyFormat(keyFormat), algo) {
+			t.Errorf("algorithms for key format %q, does not contain %q", keyFormat, algo)
+		}
+
 	}
 }

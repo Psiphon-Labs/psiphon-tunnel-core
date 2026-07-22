@@ -523,6 +523,10 @@ func (r *testLightProxyEventReceiver) Rejected() {
 	fmt.Printf("[Rejected]\n")
 }
 
+func (receiver *testLightProxyEventReceiver) Activity(
+	stats *light.ActivityStats) {
+}
+
 func (receiver *testLightProxyEventReceiver) Connection(
 	stats *light.ConnectionStats) {
 

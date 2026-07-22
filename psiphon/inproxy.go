@@ -2027,6 +2027,18 @@ func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 	return errors.Trace(err)
 }
 
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) BindToDeviceInterfaceName() string {
+
+	// In a split-interface in-proxy proxy, BindToDevice (via
+	// splitDeviceBinder) binds port mapping sockets to the downstream
+	// (non-upstream) interface; return that interface's name so port mapping
+	// gateway discovery targets the downstream gateway rather than the system
+	// default route. Returns "" outside split-interface mode, selecting
+	// default-route gateway discovery.
+	return w.config.splitInterfaceDownstreamInterfaceName()
+}
+
 func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 	ctx context.Context, network, address string) (net.Conn, error) {
 
@@ -2469,6 +2481,7 @@ func (s *InproxyNATStateManager) reset() {
 	s.networkID = networkID
 	s.natType = inproxy.NATTypeUnknown
 	s.portMappingTypes = inproxy.PortMappingTypes{}
+	s.portMappingProbe = nil
 }
 
 func (s *InproxyNATStateManager) getNATType(
@@ -2549,6 +2562,57 @@ func (s *InproxyNATStateManager) setPortMappingProbe(
 	}
 
 	s.portMappingProbe = portMappingProbe
+}
+
+// inproxyProxyAnnouncementLimits relays tactics proxy limits overrides to the
+// specified inproxy proxy.
+type inproxyProxyAnnouncementLimits struct {
+	mutex  sync.Mutex
+	config *Config
+	proxy  *inproxy.Proxy
+}
+
+func newInproxyProxyAnnouncementLimits(
+	config *Config) *inproxyProxyAnnouncementLimits {
+
+	return &inproxyProxyAnnouncementLimits{
+		config: config,
+	}
+}
+
+func (limits *inproxyProxyAnnouncementLimits) SetProxy(proxy *inproxy.Proxy) error {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	limits.proxy = proxy
+
+	return errors.Trace(limits.setLimitsLocked())
+}
+
+// TacticsApplied implements the TacticsAppliedReceiver interface.
+func (limits *inproxyProxyAnnouncementLimits) TacticsApplied() error {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	return errors.Trace(limits.setLimitsLocked())
+}
+
+func (limits *inproxyProxyAnnouncementLimits) setLimitsLocked() error {
+
+	if limits.proxy == nil {
+		return nil
+	}
+
+	p := limits.config.GetParameters().Get()
+
+	commonOverride := p.Int(parameters.InproxyProxyAnnounceCommonOverride)
+	personalOverride := p.Int(parameters.InproxyProxyAnnouncePersonalOverride)
+
+	return errors.Trace(limits.proxy.OverrideAnnouncementLimits(
+		commonOverride,
+		personalOverride))
 }
 
 // inproxyUDPConn is based on NewUDPConn and includes the write timeout

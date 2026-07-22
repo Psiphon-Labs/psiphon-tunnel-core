@@ -227,6 +227,16 @@ func (c *dummyConn) RemoteAddr() net.Addr {
 }
 
 func (c *dummyConn) SetDeadline(t time.Time) error {
+	if t.IsZero() {
+		// A zero value for t means I/O operations will not time out.
+		if c.timeout != nil {
+			if !c.timeout.Stop() {
+				<-c.timeout.C
+			}
+			c.timeout = nil
+		}
+		return nil
+	}
 	duration := time.Until(t)
 	if c.timeout == nil {
 		c.timeout = time.NewTimer(duration)

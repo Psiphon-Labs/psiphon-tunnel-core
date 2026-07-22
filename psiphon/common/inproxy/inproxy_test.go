@@ -70,6 +70,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	numProxies := 5
 	proxyMaxClients := 3
 	numClients := 10
+	sharedProxyLimitsProxyCount := 2
 
 	bytesToSend := 1 << 20
 	targetElapsedSeconds := 2
@@ -132,6 +133,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 		// Minimize test parameters for MustUpgrade case
 		numProxies = 1
 		proxyMaxClients = 1
+		sharedProxyLimitsProxyCount = 0
 		numClients = 1
 		testDisableSTUN = true
 		testDisablePortMapping = true
@@ -478,6 +480,22 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	logger.WithTrace().Info("START PROXIES")
 
+	var sharedProxyLimits *common.ProxyLimits
+	if sharedProxyLimitsProxyCount > 0 {
+		sharedProxyLimits, err = common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxCommonClients:               sharedProxyLimitsProxyCount * proxyMaxClients,
+			CommonUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
+			CommonDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
+
+			MaxPersonalClients:               sharedProxyLimitsProxyCount * proxyMaxClients,
+			PersonalUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
+			PersonalDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
 	for i := 0; i < numProxies; i++ {
 
 		proxyPrivateKey, err := GenerateSessionPrivateKey()
@@ -537,7 +555,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		name := fmt.Sprintf("proxy-%d", i)
 
-		proxy, err := NewProxy(&ProxyConfig{
+		proxyConfig := &ProxyConfig{
 
 			Logger: testutils.NewTestLoggerWithComponent(name),
 
@@ -562,11 +580,6 @@ func runTestInproxy(doMustUpgrade bool) error {
 			},
 
 			HandleTacticsPayload: makeHandleTacticsPayload(proxyPrivateKey, tacticsNetworkID),
-
-			MaxCommonClients:              proxyMaxClients,
-			MaxPersonalClients:            proxyMaxClients,
-			LimitUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
-			LimitDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
 
 			ActivityUpdater: func(
 				announcing int32,
@@ -603,7 +616,18 @@ func runTestInproxy(doMustUpgrade bool) error {
 				close(receivedProxyMustUpgrade)
 				cancelRun()
 			},
-		})
+		}
+
+		if i < sharedProxyLimitsProxyCount {
+			proxyConfig.ProxyLimits = sharedProxyLimits
+		} else {
+			proxyConfig.MaxCommonClients = proxyMaxClients
+			proxyConfig.MaxPersonalClients = proxyMaxClients
+			proxyConfig.LimitUpstreamBytesPerSecond = bytesToSend / targetElapsedSeconds
+			proxyConfig.LimitDownstreamBytesPerSecond = bytesToSend / targetElapsedSeconds
+		}
+
+		proxy, err := NewProxy(proxyConfig)
 		if err != nil {
 			return errors.Trace(err)
 		}

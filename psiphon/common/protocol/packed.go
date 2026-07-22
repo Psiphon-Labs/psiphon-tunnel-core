@@ -872,7 +872,11 @@ func init() {
 
 		{184, "tunnel_personal_light_proxy_id", unpaddedBase64Converter},
 
-		// Next key value = 185
+		// Specs: server.connectedRequestParams
+
+		{185, "light_proxy_dial_canceled", intConverter},
+
+		// Next key value = 186
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
