@@ -143,3 +143,58 @@ func runTestProxyProtocolHeaderVerification() error {
 
 	return nil
 }
+
+func TestProxyProtocolHeaderMixedAddressFamilies(t *testing.T) {
+
+	keyID := make([]byte, ProxyProtocolHeaderKeyIDSize)
+	key := prng.Bytes(ProxyProtocolHeaderMACKeySize)
+	destinationPort := 443
+
+	tests := []struct {
+		name          string
+		sourceIP      net.IP
+		destinationIP net.IP
+	}{
+		{
+			name:          "IPv4 source and IPv6 destination",
+			sourceIP:      net.ParseIP("192.0.2.1"),
+			destinationIP: net.ParseIP("2001:db8::1"),
+		},
+		{
+			name:          "IPv6 source and IPv4 destination",
+			sourceIP:      net.ParseIP("2001:db8::1"),
+			destinationIP: net.ParseIP("192.0.2.1"),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			wireHeader, err := MakeProxyProtocolHeader(
+				keyID,
+				key,
+				test.sourceIP,
+				test.destinationIP,
+				destinationPort)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+
+			_, sourceIP, destinationIP, port, err :=
+				VerifyProxyProtocolHeader(keyID, key, wireHeader)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+			if !sourceIP.Equal(test.sourceIP) ||
+				!destinationIP.Equal(test.destinationIP) ||
+				port != destinationPort {
+
+				t.Fatalf(
+					"unexpected addresses: source %s, destination %s:%d",
+					sourceIP,
+					destinationIP,
+					port)
+			}
+		})
+	}
+}

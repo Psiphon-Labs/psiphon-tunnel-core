@@ -44,6 +44,9 @@ const (
 	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
 	PADDING_MAX_BYTES   = 16 * 1024
 
+	PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL         = 1024
+	PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL = 16
+
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
@@ -138,7 +141,7 @@ func sshAPIRequestHandler(
 			support, protocol.PSIPHON_API_PROTOCOL_SSH, sshClient, params)
 		if err != nil {
 			// Handshake failed, disconnect the client.
-			sshClient.stop()
+			go sshClient.stop()
 			return nil, errors.Trace(err)
 		}
 		return responsePayload, nil
@@ -342,6 +345,7 @@ func handshakeAPIRequestHandler(
 			apiProtocol:             apiProtocol,
 			apiParams:               apiParams,
 			domainBytesChecksum:     domainBytesChecksum,
+			hasDomainBytesRegexes:   len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
 			splitTunnelLookup:       splitTunnelLookup,
 			deviceRegion:            deviceRegion,
@@ -430,6 +434,7 @@ func handshakeAPIRequestHandler(
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
+		normalizedPlatform,
 		isMobile)
 
 	clientAddress := ""
@@ -553,7 +558,7 @@ func getProxyProtocolHeaderConfig(
 	for _, target := range targets {
 		normalizedTargets = append(
 			normalizedTargets,
-			normalizeProxyProtocolTargetDestinationAddress(target))
+			normalizeHostAddress(target))
 	}
 
 	return &proxyProtocolHeaderConfig{
@@ -562,7 +567,7 @@ func getProxyProtocolHeaderConfig(
 	}
 }
 
-func normalizeProxyProtocolTargetDestinationAddress(target string) string {
+func normalizeHostAddress(target string) string {
 
 	// Normalize IP address representation.
 	ip := net.ParseIP(target)
@@ -695,7 +700,8 @@ var connectedRequestParams = append(
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -713,6 +719,7 @@ var updateOnConnectedParamNames = append(
 		"light_proxy_dial_IPv4",
 		"light_proxy_dial_IPv6",
 		"light_proxy_dial_failed",
+		"light_proxy_dial_canceled",
 	},
 	fragmentor.GetUpstreamMetricsNames()...)
 
@@ -732,12 +739,66 @@ func connectedAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	connectedRequestTime := time.Now().UTC()
+	connectedTime := connectedRequestTime.Truncate(time.Hour)
+	connectedTimestamp := connectedTime.Format(time.RFC3339)
+	connectedRequestDay := time.Date(
+		connectedRequestTime.Year(),
+		connectedRequestTime.Month(),
+		connectedRequestTime.Day(),
+		0, 0, 0, 0, time.UTC)
+
 	// Note: unlock before use is only safe as long as referenced sshClient data,
 	// such as slices in handshakeState, is read-only after initially set.
 
 	sshClient.Lock()
+
 	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
+
+	lastConnectedRequestDay := time.Date(
+		sshClient.lastConnectedRequestTime.Year(),
+		sshClient.lastConnectedRequestTime.Month(),
+		sshClient.lastConnectedRequestTime.Day(),
+		0, 0, 0, 0, time.UTC)
+
+	acceptConnectedRequest :=
+		sshClient.lastConnectedRequestTime.IsZero() ||
+			connectedRequestDay.After(lastConnectedRequestDay)
+
+	logUnacceptedConnectedRequest := false
+
+	if acceptConnectedRequest {
+		sshClient.lastConnectedRequestTime = connectedRequestTime
+		sshClient.lastConnectedTimestamp = connectedTimestamp
+	} else {
+		connectedTimestamp = sshClient.lastConnectedTimestamp
+		if !sshClient.unacceptedConnectedRequestLogged {
+			sshClient.unacceptedConnectedRequestLogged = true
+			logUnacceptedConnectedRequest = true
+		}
+	}
+
 	sshClient.Unlock()
+
+	if logUnacceptedConnectedRequest {
+		log.WithTrace().Warning("connected request not accepted")
+	}
+
+	if !acceptConnectedRequest {
+		pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
+		connectedResponse := protocol.ConnectedResponse{
+			ConnectedTimestamp: connectedTimestamp,
+			Padding:            strings.Repeat(" ", pad_response),
+		}
+
+		responsePayload, err := json.Marshal(connectedResponse)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
+	}
 
 	lastConnected, _ := getStringRequestParam(params, "last_connected")
 
@@ -748,8 +809,6 @@ func connectedAPIRequestHandler(
 	// here.
 
 	sshClient.updateAPIParameters(copyUpdateOnConnectedParams(params))
-
-	connectedTimestamp := common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
 	// The finest required granularity for unique users is daily. To save space,
 	// only record a "unique_user" log event when the client's last_connected is
@@ -764,11 +823,10 @@ func connectedAPIRequestHandler(
 		year, month, day := t1.Date()
 		d1 := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 
-		t2, _ := time.Parse(time.RFC3339, connectedTimestamp)
-		year, month, day = t2.Date()
+		year, month, day = connectedTime.Date()
 		d2 := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 
-		if t1.Before(t2) && d1 != d2 {
+		if t1.Before(connectedTime) && d1 != d2 {
 			logUniqueUser = true
 		}
 	}
@@ -875,8 +933,11 @@ func statusAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	// handleSSHRequests handles SSH requests serially, so there is no
+	// concurrent writer and these snapshots will not become stale.
 	sshClient.Lock()
 	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
+	persistentStatsDroppedLogCount := sshClient.persistentStatsDroppedLogCount
 	sshClient.Unlock()
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
@@ -890,6 +951,10 @@ func statusAPIRequestHandler(
 	// fail, and clients would then resend all the same stats again.
 
 	logQueue := make([]LogFields, 0)
+
+	loggedRemoteServerListStatDropped := false
+	loggedFailedTunnelStatDropped := false
+	droppedLogCount := 0
 
 	// Domain bytes transferred stats
 	// Older clients may not submit this data
@@ -905,6 +970,10 @@ func statusAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
+			if bytes < 0 {
+				continue
+			}
+
 			// Limitation: only TCP bytes are reported.
 			support.destBytesLogger.AddDomainBytes(
 				domain,
@@ -942,7 +1011,18 @@ func statusAPIRequestHandler(
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
 				// fail the status request, as this will lead to endless retries.
-				log.WithTraceFields(LogFields{"error": err}).Warning("remote_server_list_stats entry dropped")
+				if !loggedRemoteServerListStatDropped {
+					loggedRemoteServerListStatDropped = true
+					droppedLogCount++
+					total := persistentStatsDroppedLogCount + droppedLogCount
+					if total < PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL {
+						log.WithTraceFields(LogFields{"error": err}).Warning(
+							"remote_server_list_stats entry dropped")
+					} else if total == PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL {
+						log.WithTraceFields(LogFields{"error": err}).Warning(
+							"persistent stats dropped log limit exceeded")
+					}
+				}
 				continue
 			}
 
@@ -983,7 +1063,18 @@ func statusAPIRequestHandler(
 				//
 				// TODO: trigger pruning if the data corruption indicates corrupt server
 				// entry storage?
-				log.WithTraceFields(LogFields{"error": err}).Warning("failed_tunnel_stats entry dropped")
+				if !loggedFailedTunnelStatDropped {
+					loggedFailedTunnelStatDropped = true
+					droppedLogCount++
+					total := persistentStatsDroppedLogCount + droppedLogCount
+					if total < PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL {
+						log.WithTraceFields(LogFields{"error": err}).Warning(
+							"failed_tunnel_stats entry dropped")
+					} else if total == PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL {
+						log.WithTraceFields(LogFields{"error": err}).Warning(
+							"persistent stats dropped log limit exceeded")
+					}
+				}
 				continue
 			}
 
@@ -1076,6 +1167,38 @@ func statusAPIRequestHandler(
 		sshClient.checkedServerEntryTags += len(checkServerEntryTags)
 		sshClient.invalidServerEntryTags += invalidCount
 		sshClient.Unlock()
+	}
+
+	if droppedLogCount > 0 {
+		sshClient.Lock()
+		sshClient.persistentStatsDroppedLogCount += droppedLogCount
+		sshClient.Unlock()
+	}
+
+	if len(logQueue) > 0 {
+
+		sshClient.Lock()
+
+		logCount := len(logQueue)
+		remaining := PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL -
+			sshClient.persistentStatsLogCount
+		if remaining < 0 {
+			remaining = 0
+		}
+		if logCount > remaining {
+			logCount = remaining
+		}
+		logLimitExceeded :=
+			logCount < len(logQueue) &&
+				sshClient.persistentStatsLogCount <= PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL
+		sshClient.persistentStatsLogCount += len(logQueue)
+		logQueue = logQueue[:logCount]
+
+		sshClient.Unlock()
+
+		if logLimitExceeded {
+			log.WithTrace().Warning("persistent stats log limit exceeded")
+		}
 	}
 
 	for _, logItem := range logQueue {
@@ -1853,7 +1976,7 @@ func getIntStringRequestParam(params common.APIParameters, name string) (int, er
 		return 0, errors.Tracef("invalid param: %s", name)
 	}
 	value, err := strconv.Atoi(valueStr)
-	if !ok {
+	if err != nil {
 		return 0, errors.Trace(err)
 	}
 	return value, nil

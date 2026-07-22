@@ -130,6 +130,13 @@ func MakeProxyProtocolHeader(
 
 	header := proxyproto.HeaderProxyFromAddrs(2, &sourceAddr, &destinationAddr)
 
+	// go-proxyproto selects the transport protocol based on the source
+	// address. For an IPv4 source and IPv6 destination, force TCPv6. This
+	// avoids an "invalid address" error in header.Format.
+	if sourceIP.To4() != nil && destinationIP.To4() == nil {
+		header.TransportProtocol = proxyproto.TCPv6
+	}
+
 	// Add the authentication TLV with all-zero byte MAC digest
 
 	offset := 0

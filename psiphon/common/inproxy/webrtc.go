@@ -1007,7 +1007,7 @@ func newWebRTCConn(
 			// Limitation: if there are multiple responding protocol types, it's
 			// not known here which was used for this dial.
 			config.WebRTCDialCoordinator.SetPortMappingTypes(
-				getRespondingPortMappingTypes(config.WebRTCDialCoordinator.NetworkID()))
+				portMapper.respondingPortMappingTypes())
 
 		}
 	}

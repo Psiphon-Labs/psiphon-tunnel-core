@@ -2,7 +2,7 @@ module github.com/Psiphon-Labs/psiphon-tunnel-core
 
 go 1.26.0
 
-toolchain go1.26.3
+toolchain go1.26.5
 
 // The following replaces are required only when the build tag
 // PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
@@ -20,7 +20,7 @@ require (
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Inc/uds-ipc v1.0.1
-	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
+	github.com/Psiphon-Labs/bolt v0.0.0-20260624144735-04fba30caf38
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
@@ -48,6 +48,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/google/gopacket v1.1.19
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
+	github.com/huin/goupnp v1.3.0
 	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 	github.com/miekg/dns v1.1.56
 	github.com/minio/crc64nvme v1.1.1
@@ -73,11 +74,11 @@ require (
 	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
 	github.com/wlynxg/anet v0.0.5
 	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/crypto v0.48.0
-	golang.org/x/net v0.50.0
-	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.42.0
-	golang.org/x/term v0.40.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.56.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
+	golang.org/x/term v0.45.0
 	golang.org/x/time v0.10.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	golang.zx2c4.com/wireguard/windows v0.5.3
@@ -89,13 +90,10 @@ require (
 	filippo.io/bigmod v0.0.1 // indirect
 	filippo.io/keygen v0.0.0-20230306160926-5201437acf8e // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
-	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coreos/go-iptables v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dblohm7/wingoes v0.0.0-20230929194252-e994401fc077 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33 // indirect
@@ -104,11 +102,9 @@ require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/nftables v0.1.1-0.20230115205135-9aa6fdf5a28c // indirect
 	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/josharian/native v1.1.1-0.20230202152459-5c7d0dd6ab86 // indirect
-	github.com/jsimonetti/rtnetlink v1.3.5 // indirect
 	github.com/kamstrup/intmap v0.5.2 // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
@@ -140,7 +136,6 @@ require (
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
-	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
@@ -149,11 +144,9 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect
-	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
-	go4.org/netipx v0.0.0-20230824141953-6213f710f925 // indirect
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
-	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -386,6 +386,21 @@ type WebRTCDialCoordinator interface {
 	// nil.
 	BindToDevice(fileDescriptor int) error
 
+	// BindToDeviceInterfaceName returns the name of the network interface
+	// that BindToDevice binds sockets to, or "" when BindToDevice does not
+	// target a specific named interface -- for example, when there is no
+	// split-interface configuration, or on platforms that bind to an
+	// underlying network rather than a named interface (such as Android
+	// VpnService.protect).
+	//
+	// It is used to target port mapping (UPnP/NAT-PMP/PCP) gateway discovery
+	// at the same interface the port mapping sockets are bound to. In a
+	// split-interface in-proxy proxy, that is the downstream interface;
+	// probing the default-route gateway instead could target the wrong
+	// router and make port mapping discovery fail. When "" is returned, the
+	// system default route is used.
+	BindToDeviceInterfaceName() string
+
 	// ProxyUpstreamDial is used by the proxy when dialing a TCP or UDP
 	// upstream connection to a destination Psiphon server. This dial
 	// callback allows for TCP/UDP-level dial tactics parameters to be

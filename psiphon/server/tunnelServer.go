@@ -80,6 +80,8 @@ const (
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
 	SSH_MAX_CLIENT_COUNT                  = 500000
 	SSH_CLIENT_MAX_DSL_REQUEST_COUNT      = 128
+	SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT = 16
+	SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS     = 1024
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -1988,6 +1990,12 @@ type sshClient struct {
 	invalidServerEntryTags               int
 	sshProtocolBytesTracker              *sshProtocolBytesTracker
 	dslRequestCount                      int
+	lastConnectedRequestTime             time.Time
+	lastConnectedTimestamp               string
+	unacceptedConnectedRequestLogged     bool
+	persistentStatsLogCount              int
+	persistentStatsDroppedLogCount       int
+	blocklistHitsLogCount                int
 	proxyProtocolMetrics                 proxyProtocolMetrics
 }
 
@@ -2116,6 +2124,7 @@ type handshakeState struct {
 	authorizedAccessTypes     []string
 	authorizationsRevoked     bool
 	domainBytesChecksum       []byte
+	hasDomainBytesRegexes     bool
 	establishedTunnelsCount   int
 	splitTunnelLookup         *common.StringLookup
 	deviceRegion              string
@@ -3127,6 +3136,8 @@ func (sshClient *sshClient) runTunnel(
 
 func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 
+	requestFailureCount := 0
+
 	for request := range requests {
 
 		// Requests are processed serially; API responses must be sent in request order.
@@ -3154,7 +3165,14 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 		if err == nil {
 			err = request.Reply(true, responsePayload)
 		} else {
-			log.WithTraceFields(LogFields{"error": err}).Warning("request failed")
+			requestFailureCount++
+			if requestFailureCount < SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+				log.WithTraceFields(LogFields{"error": err}).Warning(
+					"request failed")
+			} else if requestFailureCount == SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+				log.WithTraceFields(LogFields{"error": err}).Warning(
+					"request failure log limit exceeded")
+			}
 			err = request.Reply(false, nil)
 		}
 		if err != nil {
@@ -3552,6 +3570,12 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 
 	if isUdpgwChannel {
 
+		completed, _ := sshClient.getHandshaked()
+		if !completed {
+			sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+			return
+		}
+
 		// Dispatch immediately. handleUDPChannel runs the udpgw protocol in its
 		// own worker goroutine.
 
@@ -3654,7 +3678,8 @@ var serverTunnelStatParams = append(
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
@@ -3873,6 +3898,20 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	sshClient.Lock()
 
+	logCount := len(tags)
+	remaining := SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS -
+		sshClient.blocklistHitsLogCount
+	if remaining < 0 {
+		remaining = 0
+	}
+	if logCount > remaining {
+		logCount = remaining
+	}
+	logLimitExceeded :=
+		logCount < len(tags) &&
+			sshClient.blocklistHitsLogCount <= SSH_CLIENT_MAX_BLOCKLIST_HIT_LOGS
+	sshClient.blocklistHitsLogCount += len(tags)
+
 	// Log this using the client, not peer, GeoIP. In the case of in-proxy
 	// tunnel protocols, the client GeoIP fields will be None if the
 	// handshake does not complete. In that case, no port forwarding will
@@ -3891,7 +3930,11 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	sshClient.Unlock()
 
-	for _, tag := range tags {
+	if logLimitExceeded {
+		log.WithTrace().Warning("blocklist hits log limit exceeded")
+	}
+
+	for _, tag := range tags[:logCount] {
 		if IP != nil {
 			logFields["blocklist_ip_address"] = IP.String()
 		}
@@ -4060,16 +4103,21 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 	sshClient.Lock()
 	sponsorID, _ := getStringRequestParam(
 		sshClient.handshakeState.apiParams, "sponsor_id")
+	clientPlatform, _ := getStringRequestParam(
+		sshClient.handshakeState.apiParams, "client_platform")
 	clientGeoIPData := sshClient.clientGeoIPData
 	deviceRegion := sshClient.handshakeState.deviceRegion
 	sshClient.Unlock()
+
+	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
 
 	return sshClient.sshServer.support.PsinetDatabase.GetAlertActionURLs(
 		alertReason,
 		sponsorID,
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
-		deviceRegion)
+		deviceRegion,
+		normalizedClientPlatform)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
@@ -4424,6 +4472,12 @@ func (sshClient *sshClient) updateAPIParameters(
 func (sshClient *sshClient) acceptDomainBytes() bool {
 	sshClient.Lock()
 	defer sshClient.Unlock()
+
+	// Drop domain bytes when no regexes were configured for the client at
+	// handshake.
+	if !sshClient.handshakeState.hasDomainBytesRegexes {
+		return false
+	}
 
 	// When the domain bytes checksum differs from the checksum sent to the
 	// client in the handshake response, the psinet regex configuration has
@@ -4939,6 +4993,8 @@ func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
 		return false, "invalid domain name"
 	}
 
+	domain = normalizeHostAddress(domain)
+
 	// Don't even attempt to resolve the default mDNS top-level domain.
 	// Non-default cases won't be caught here but should fail to resolve due
 	// to the PreferGo setting in net.Resolver.
@@ -5285,7 +5341,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	addProxyProtocolHeader :=
 		sshClient.handshakeState.proxyProtocolHeaderConfig != nil &&
 			sshClient.handshakeState.proxyProtocolHeaderConfig.targetDestinationAddresses.Contains(
-				normalizeProxyProtocolTargetDestinationAddress(hostToConnect))
+				normalizeHostAddress(hostToConnect))
 
 	// Validate the domain name and check the domain blocklist before dialing.
 	//

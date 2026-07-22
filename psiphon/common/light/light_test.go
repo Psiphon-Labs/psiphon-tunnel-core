@@ -51,21 +51,163 @@ func TestLightProxy(t *testing.T) {
 		tlsTrafficShaping := tlsTrafficShaping
 		for _, addProxyHeader := range []bool{false, true} {
 			addProxyHeader := addProxyHeader
-			t.Run(
-				fmt.Sprintf(
-					"tlsTrafficShaping=%t/addProxyHeader=%t",
-					tlsTrafficShaping, addProxyHeader),
-				func(t *testing.T) {
-					err := runTestLightProxy(tlsTrafficShaping, addProxyHeader)
-					if err != nil {
-						t.Fatal(err.Error())
-					}
-				})
+			for _, sharedProxyLimits := range []bool{false, true} {
+				sharedProxyLimits := sharedProxyLimits
+				t.Run(
+					fmt.Sprintf(
+						"tlsTrafficShaping=%t/addProxyHeader=%t/sharedProxyLimits=%t",
+						tlsTrafficShaping, addProxyHeader, sharedProxyLimits),
+					func(t *testing.T) {
+						err := runTestLightProxy(
+							tlsTrafficShaping,
+							addProxyHeader,
+							sharedProxyLimits)
+						if err != nil {
+							t.Fatal(err.Error())
+						}
+					})
+			}
 		}
 	}
 }
 
-func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
+func TestLightProxyPassthrough(t *testing.T) {
+	if err := runTestLightProxyPassthrough(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runTestLightProxyPassthrough() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	_, _, webCertPEM, webKeyPEM, err := generateCert()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	webCert, err := tls.X509KeyPair(webCertPEM, webKeyPEM)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	webListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer webListener.Close()
+
+	group.Go(func() error {
+		return runTLSEchoServer(ctx, webListener, &tls.Config{
+			Certificates: []tls.Certificate{webCert},
+		})
+	})
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	proxyAddress := proxyListener.Addr().String()
+	proxyListener.Close()
+
+	_, _, proxyCertPEM, proxyKeyPEM, err := generateCert()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver := newTestProxyEventReceiver(false, 0, false, "")
+
+	// Use a short inactivity timeout to check that passthrough relays are
+	// exempt from it.
+	inactivityTimeout := 1 * time.Second
+
+	proxy, err := NewProxy(
+		&ProxyConfig{
+			Protocol:           LIGHT_PROTOCOL_TLS,
+			ListenAddresses:    []string{proxyAddress},
+			DialAddressIPv4:    proxyAddress,
+			ObfuscationKey:     prng.HexString(32),
+			TLSCertificate:     proxyCertPEM,
+			TLSPrivateKey:      proxyKeyPEM,
+			PassthroughAddress: webListener.Addr().String(),
+			AllowBogons:        true,
+			InactivityTimeout:  inactivityTimeout.String(),
+		},
+		func(string) common.GeoIPData { return common.GeoIPData{} },
+		receiver)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	group.Go(func() error {
+		return proxy.Run(ctx)
+	})
+
+	select {
+	case <-receiver.listening:
+	case <-ctx.Done():
+		return errors.Trace(ctx.Err())
+	}
+
+	conn, err := tls.Dial("tcp", proxyAddress, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !bytes.Equal(
+		conn.ConnectionState().PeerCertificates[0].Raw,
+		webCert.Certificate[0]) {
+
+		conn.Close()
+		return errors.TraceNew("did not receive passthrough certificate")
+	}
+
+	// Check that the passthrough relay is not subject to the proxy's
+	// inactivity timeout: perform an echo round trip, whose client bytes
+	// would re-arm an active inactivity deadline; hold the connection idle
+	// for longer than the timeout; then perform another round trip.
+
+	echo := func(message string) error {
+		request := []byte(message)
+		_, err := conn.Write(request)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		response := make([]byte, len(request))
+		_, err = io.ReadFull(conn, response)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if !bytes.Equal(request, response) {
+			return errors.TraceNew("unexpected echo response")
+		}
+		return nil
+	}
+
+	err = echo("passthrough echo 1")
+	if err != nil {
+		conn.Close()
+		return errors.Trace(err)
+	}
+
+	time.Sleep(2 * inactivityTimeout)
+
+	err = echo("passthrough echo 2")
+	if err != nil {
+		conn.Close()
+		return errors.Trace(err)
+	}
+
+	conn.Close()
+	cancel()
+	return errors.Trace(group.Wait())
+}
+
+func runTestLightProxy(
+	tlsTrafficShaping, addProxyHeader, sharedProxyLimits bool) error {
 
 	// Exercise multiple concurrent clients and concurrent dials over over one
 	// proxy. The proxied traffic is an inner TLS connection to an "echo"
@@ -77,10 +219,12 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 		numClients              = 2
 		numConnectionsPerClient = 10
 		payloadSize             = 10 * 1024 * 1024
+		bytesPerSecond          = 1 << 30
 
 		testClientPlatform          = "Android"
 		testClientBuildRev          = "01020304"
 		testDeviceRegion            = "US"
+		testClientRegion            = "CA"
 		testProviderID              = "01020304"
 		testSponsorID               = "0102030405060708"
 		testProxyEntryTracker int64 = 0x0102030405060708
@@ -237,7 +381,7 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	}
 
 	lookupGeoIP := func(string) common.GeoIPData {
-		return common.GeoIPData{}
+		return common.GeoIPData{Country: testClientRegion}
 	}
 
 	params, err := parameters.NewParameters(nil)
@@ -248,11 +392,27 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	receiver := newTestProxyEventReceiver(
 		expectedTLSClientHelloFragmented,
 		expectedTLSClientHelloPadding,
-		addProxyHeader)
+		addProxyHeader,
+		testClientRegion)
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
-	proxyConfig.MaxConcurrent = &maxConcurrent
+	if sharedProxyLimits {
+		proxyConfig.ProxyLimits, err = common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxPersonalClients:               maxConcurrent,
+			PersonalUpstreamBytesPerSecond:   bytesPerSecond,
+			PersonalDownstreamBytesPerSecond: bytesPerSecond,
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+		proxyConfig.ProxyLimitKind = ProxyLimitKindPersonal
+	} else {
+		proxyConfig.MaxConcurrent = &maxConcurrent
+		proxyConfig.LimitUpstreamBytesPerSecond = bytesPerSecond
+		proxyConfig.LimitDownstreamBytesPerSecond = bytesPerSecond
+	}
 
+	proxyConfig.EmitActivity = true
 	proxyConfig.AllowBogons = true
 	proxyConfig.EnableDebugLogs = true
 
@@ -272,6 +432,18 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 	case <-receiver.listening:
 	case <-ctx.Done():
 		return errors.Trace(ctx.Err())
+	}
+
+	err = proxy.SetLimits(
+		nil,
+		1<<30,
+		1<<30)
+	if sharedProxyLimits {
+		if err == nil {
+			return errors.TraceNew("unexpected SetLimits success")
+		}
+	} else if err != nil {
+		return errors.Trace(err)
 	}
 
 	newClientConfig := func() *ClientConfig {
@@ -374,6 +546,11 @@ func runTestLightProxy(tlsTrafficShaping, addProxyHeader bool) error {
 				"unexpected PROXY protocol header count: %d",
 				proxyProtocolHeaderCount)
 		}
+	}
+
+	err = receiver.awaitActivityRegion(ctx)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	proxy.Pause()
@@ -697,18 +874,24 @@ type testProxyEventReceiver struct {
 	expectedTLSClientHelloFragmented bool
 	expectedTLSClientHelloPadding    int
 	expectedProxyProtocolHeaderAdded bool
+	expectedActivityRegion           string
+	activityRegionSeen               chan struct{}
+	activityRegionSeenOnce           sync.Once
 }
 
 func newTestProxyEventReceiver(
 	expectedTLSClientHelloFragmented bool,
 	expectedTLSClientHelloPadding int,
-	expectedProxyProtocolHeaderAdded bool) *testProxyEventReceiver {
+	expectedProxyProtocolHeaderAdded bool,
+	expectedActivityRegion string) *testProxyEventReceiver {
 
 	return &testProxyEventReceiver{
 		listening:                        make(chan struct{}),
 		expectedTLSClientHelloFragmented: expectedTLSClientHelloFragmented,
 		expectedTLSClientHelloPadding:    expectedTLSClientHelloPadding,
 		expectedProxyProtocolHeaderAdded: expectedProxyProtocolHeaderAdded,
+		expectedActivityRegion:           expectedActivityRegion,
+		activityRegionSeen:               make(chan struct{}),
 	}
 }
 
@@ -733,6 +916,49 @@ func (r *testProxyEventReceiver) Accepted() {
 
 func (r *testProxyEventReceiver) Rejected() {
 	fmt.Printf("[Rejected]\n")
+}
+
+func (r *testProxyEventReceiver) Activity(stats *ActivityStats) {
+	if r.expectedActivityRegion != "" {
+		regionStats, ok := stats.RegionActivity[r.expectedActivityRegion]
+		if ok &&
+			(regionStats.BytesUp > 0 ||
+				regionStats.BytesDown > 0 ||
+				regionStats.CurrentConnectionCount > 0) {
+			r.activityRegionSeenOnce.Do(func() {
+				close(r.activityRegionSeen)
+			})
+		}
+	}
+
+	const activityFormat = `[Activity] proxyID: %s, providerID: %s, ` +
+		`bytesUp: %d, bytesDown: %d, bytesDuration: %s, ` +
+		`currentConnectionCount: %d` + "\n"
+
+	fmt.Printf(
+		activityFormat,
+		stats.ProxyID,
+		stats.ProxyProviderID,
+		stats.BytesUp,
+		stats.BytesDown,
+		stats.BytesDuration,
+		stats.CurrentConnectionCount)
+}
+
+func (r *testProxyEventReceiver) awaitActivityRegion(ctx context.Context) error {
+	if r.expectedActivityRegion == "" {
+		return nil
+	}
+
+	select {
+	case <-r.activityRegionSeen:
+		return nil
+	case <-ctx.Done():
+		return errors.Tracef(
+			"missing activity for region %s: %v",
+			r.expectedActivityRegion,
+			ctx.Err())
+	}
 }
 
 func (r *testProxyEventReceiver) Connection(stats *ConnectionStats) {

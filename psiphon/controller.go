@@ -108,6 +108,7 @@ type Controller struct {
 	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
 	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
 	inproxyNATStateManager                  *InproxyNATStateManager
+	inproxyProxyAnnouncementLimits          *inproxyProxyAnnouncementLimits
 	inproxyHandleTacticsMutex               sync.Mutex
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
@@ -272,6 +273,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 		var err error
 
 		if len(config.LightProxyEntry) > 0 {
+
+			// Any TTL in the light proxy entry is ignored. When
+			// LightProxyEntry is configured, this entry is always chosen.
+
 			err = initLightProxy(
 				controller,
 				config.LightProxyEntry,
@@ -348,6 +353,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		isProxy = true
 		controller.inproxyProxyBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy, controller.tlsClientSessionCache)
 		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyBrokerClientManager)
+		controller.inproxyProxyAnnouncementLimits = newInproxyProxyAnnouncementLimits(config)
+		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyAnnouncementLimits)
 	}
 
 	controller.config.SetTacticsAppliedReceivers(tacticAppliedReceivers)
@@ -1653,6 +1660,26 @@ func (controller *Controller) terminateAllTunnels() {
 	NoticeTunnels(len(controller.tunnels))
 }
 
+// signalProbeInactiveTunnels enqueues SSH keep alive probes for all tunnels
+// that are read inactive over the given threshold.
+func (controller *Controller) signalProbeInactiveTunnels(
+	readInactiveThreshold time.Duration) {
+
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+
+	if readInactiveThreshold <= 0 {
+		return
+	}
+
+	for i := 0; i < len(controller.tunnels); i++ {
+		tunnel := controller.tunnels[i]
+		if tunnel.GetReadInactiveDuration() > readInactiveThreshold {
+			tunnel.SignalReadInactiveProbe()
+		}
+	}
+}
+
 // getNextActiveTunnel returns the next tunnel from the pool of active
 // tunnels. Currently, tunnel selection order is simple round-robin. When
 // readInactiveThreshold is greater than zero, tunnels without recent read
@@ -1876,6 +1903,12 @@ func (controller *Controller) Dial(
 					// light proxy.
 					(controller.config.LightProxyTestFetchAddress == "" ||
 						remoteAddr == controller.config.LightProxyTestFetchAddress) {
+
+					// Launch SSH keep alive probes for any connected tunnels
+					// which are read inactive. If a tunnel is still live,
+					// its keep alive response may result in
+					// getNextActiveTunnel winning the race in dialLightProxyRace.
+					controller.signalProbeInactiveTunnels(readInactiveThreshold)
 
 					var lightConn net.Conn
 					lightConn, tunnel, err = dialLightProxyRace(
@@ -2329,17 +2362,10 @@ func (controller *Controller) startEstablishing() {
 	//
 	// Only the very first server, as determined by
 	// datastore.PromoteServerEntry(), is the server affinity candidate.
-	// Concurrent connections attempts to many servers are launched
-	// without delay, in case the affinity server connection fails.
-	// While the affinity server connection is outstanding, when any
-	// other connection is established, there is a short grace period
-	// delay before delivering the established tunnel; this allows some
-	// time for the affinity server connection to succeed first.
-	// When the affinity server connection fails, any other established
-	// tunnel is registered without delay.
+	// The server affinity candidate is given a brief head start.
 	//
 	// Note: the establishTunnelWorker that receives the affinity
-	// candidate is solely resonsible for closing
+	// candidate is solely responsible for closing
 	// controller.serverAffinityDoneBroadcast.
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
@@ -2645,8 +2671,8 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 
 	// ConnectionWorkerPoolSize may be set by tactics.
 	//
-	// In-proxy personal pairing mode uses a distinct parameter which is
-	// typically configured to a lower number, limiting concurrent load and
+	// Personal pairing modes use distinct parameters which are typically
+	// configured to a lower number, limiting concurrent load and
 	// announcement consumption for personal proxies.
 	//
 	// ConnectionWorkerPoolMaxSize is a config-only cap on the worker pool
@@ -2655,6 +2681,8 @@ func (controller *Controller) getConnectionWorkerPoolSize(
 	var workerPoolSize int
 	if controller.config.IsInproxyClientPersonalPairingMode() {
 		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
+	} else if controller.config.EnablePersonalLightProxyTunnels {
+		workerPoolSize = p.Int(parameters.LightProxyPersonalPairingConnectionWorkerPoolSize)
 	} else {
 		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
 	}
@@ -2918,6 +2946,16 @@ func (controller *Controller) establishCandidateGenerator() {
 		close(controller.serverAffinityDoneBroadcast)
 	}
 
+	inproxyAwaitBrokerSpecsEmitted := false
+	inproxyAwaitBrokerSpecs :=
+		controller.config.IsInproxyClientPersonalPairingMode() ||
+			(len(controller.protocolSelectionConstraints.limitTunnelProtocols) > 0 &&
+				controller.protocolSelectionConstraints.limitTunnelProtocols.
+					IsOnlyInproxyTunnelProtocols() &&
+				(len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) == 0 ||
+					controller.protocolSelectionConstraints.initialLimitTunnelProtocols.
+						IsOnlyInproxyTunnelProtocols()))
+
 loop:
 	// Repeat until stopped
 	for {
@@ -2953,8 +2991,31 @@ loop:
 
 		candidateServerEntryCount := 0
 
+		// If exclusively inproxy protocols will be dialed, skip down to the
+		// establishSignalForceTacticsFetch step and following pause when
+		// there are no client broker specs. This avoids establishment work
+		// that will fail with "no broker specs" and corresponding diagnostic
+		// noise.
+
+		skip := false
+		if inproxyAwaitBrokerSpecs &&
+			!haveInproxyClientBrokerSpecs(controller.config) {
+
+			if controller.config.DisableTactics {
+				NoticeWarning("inproxy client: no broker specs and tactics disabled")
+				controller.SignalComponentFailure()
+				return
+			}
+
+			if !inproxyAwaitBrokerSpecsEmitted {
+				NoticeInfo("inproxy client: await tactics with client broker specs")
+				inproxyAwaitBrokerSpecsEmitted = true
+			}
+			skip = true
+		}
+
 		// Send each iterator server entry to the establish workers
-		for {
+		for !skip {
 
 			networkWaitStartTime := time.Now()
 			if !WaitForNetworkConnectivity(
@@ -3777,6 +3838,7 @@ func (controller *Controller) runInproxyProxy() {
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
 		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,
+		ProxyLimits:                          controller.config.InproxyProxyLimits,
 		LimitUpstreamBytesPerSecond:          controller.config.InproxyLimitUpstreamBytesPerSecond,
 		LimitDownstreamBytesPerSecond:        controller.config.InproxyLimitDownstreamBytesPerSecond,
 		ReducedStartTime:                     controller.config.InproxyReducedStartTime,
@@ -3791,6 +3853,13 @@ func (controller *Controller) runInproxyProxy() {
 	proxy, err := inproxy.NewProxy(config)
 	if err != nil {
 		NoticeError("inproxy.NewProxy failed: %v", errors.Trace(err))
+		controller.SignalComponentFailure()
+		return
+	}
+
+	err = controller.inproxyProxyAnnouncementLimits.SetProxy(proxy)
+	if err != nil {
+		NoticeError("inproxy proxy SetProxy failed: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
 	}

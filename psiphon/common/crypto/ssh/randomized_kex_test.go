@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -70,7 +71,21 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 		testLegacyClient = false
 	}()
 
-	for _, doPeerKEXPRNGSeed := range []bool{true, false} {
+	testCases := []struct {
+		name                     string
+		doPeerKEXPRNGSeed        bool
+		doServerKEXRandomization bool
+		noEncryptThenMACHash     bool
+		expectFailure            bool
+	}{
+		{"randomized server with prediction", true, true, false, false},
+		{"randomized server with prediction, no Encrypt-then-MAC", true, true, true, false},
+		{"randomized server without prediction", false, true, false, true},
+		{"OSSH non-randomized server", false, false, true, false},
+		{"non-randomized server, Encrypt-then-MAC allowed", false, false, false, false},
+	}
+
+	for _, testCase := range testCases {
 
 		failed := false
 
@@ -114,7 +129,9 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 
 				clientConfig.KEXPRNGSeed = clientSeed
 
-				if doPeerKEXPRNGSeed {
+				clientConfig.NoEncryptThenMACHash = testCase.noEncryptThenMACHash
+
+				if testCase.doPeerKEXPRNGSeed {
 					clientConfig.PeerKEXPRNGSeed = serverSeed
 				}
 
@@ -124,19 +141,23 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 				}
 
 				if !legacyClient {
-					// Ensure weak MAC is not negotiated
-					for _, p := range []packetCipher{
-						clientSSHConn.(*connection).transport.conn.(*transport).reader.packetCipher,
-						clientSSHConn.(*connection).transport.conn.(*transport).writer.packetCipher} {
-						switch c := p.(type) {
-						case *gcmCipher, *chacha20Poly1305Cipher:
-							// No weak MAC.
-						case *streamPacketCipher:
-							// The only weak MAC, "hmac-sha1-96", is also the only truncatingMAC.
-							if _, ok := c.mac.(truncatingMAC); ok {
-								return errors.TraceNew("weak MAC negotiated")
-							}
-						}
+					// Ensure SHA-1 is not negotiated.
+					isSHA1 := func(s string) bool {
+						return strings.Contains(s, "sha1") ||
+							s == KeyAlgoRSA || s == CertAlgoRSAv01 ||
+							s == InsecureKeyAlgoDSA || s == InsecureCertAlgoDSAv01
+					}
+					algorithms := clientSSHConn.(AlgorithmsConnMetadata).Algorithms()
+					if isSHA1(algorithms.KeyExchange) ||
+						isSHA1(algorithms.HostKey) ||
+						isSHA1(algorithms.Read.MAC) ||
+						isSHA1(algorithms.Write.MAC) {
+						return errors.Tracef(
+							"SHA-1 algorithm negotiated: kex=%q hostkey=%q read_mac=%q write_mac=%q",
+							algorithms.KeyExchange,
+							algorithms.HostKey,
+							algorithms.Read.MAC,
+							algorithms.Write.MAC)
 					}
 				}
 
@@ -159,9 +180,12 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 				serverConfig := &ServerConfig{
 					PasswordCallback: insecurePasswordCallback,
 				}
+				serverConfig.NoEncryptThenMACHash = testCase.noEncryptThenMACHash
 				serverConfig.AddHostKey(signer)
 
-				serverConfig.KEXPRNGSeed = serverSeed
+				if testCase.doServerKEXRandomization {
+					serverConfig.KEXPRNGSeed = serverSeed
+				}
 
 				serverSSHConn, _, _, err := NewServerConn(serverConn, serverConfig)
 				if err != nil {
@@ -176,19 +200,16 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 			err = testGroup.Wait()
 			if err != nil {
 
-				// Expect no failure to negotiates when setting PeerKEXPRNGSeed.
-				if doPeerKEXPRNGSeed {
-					return errors.Tracef("unexpected failure to negotiate: %v", err)
-				} else {
+				if testCase.expectFailure {
 					failed = true
 					break
 				}
+				return errors.Tracef("%s: unexpected failure to negotiate: %v", testCase.name, err)
 			}
 		}
 
-		// Expect at least one failure to negotiate when not setting PeerKEXPRNGSeed.
-		if !doPeerKEXPRNGSeed && !failed {
-			errors.TraceNew("unexpected success")
+		if testCase.expectFailure && !failed {
+			return errors.Tracef("%s: unexpected success", testCase.name)
 		}
 	}
 	return nil
