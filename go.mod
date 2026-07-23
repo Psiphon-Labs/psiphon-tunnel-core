@@ -11,6 +11,8 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 
 replace github.com/pion/dtls/v2 => ./replace/dtls
 
+replace github.com/Psiphon-Labs/utls => /Users/amir/adotkhan/utls
+
 // pion/dtls v2 uses a local replace (replace/dtls) with [Psiphon] patches
 // for Conjure/refraction-networking support.
 
