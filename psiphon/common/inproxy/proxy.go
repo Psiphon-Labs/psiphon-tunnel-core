@@ -610,16 +610,27 @@ func (p *Proxy) reconcile(
 	p.proxySupervisorMutex.Lock()
 	defer p.proxySupervisorMutex.Unlock()
 
-	// Client count checks are advisory: this checks activeClients <
-	// maxClients, not activeClients+announcing < maxClients, since unmatched
-	// announcements should not reserve client capacity. There remains a race
-	// between checking capacity here, announcing and matching, and then
-	// acquiring a client slot, so some post-match capacity failures are
-	// expected. After the initial precheck, the supervisor assigns
-	// CheckTactics to exactly one active worker at a time.
+	// Do not launch more announcements than the currently known available
+	// client slots. When ProxyLimits is exclusive to this proxy, each
+	// successful match converts one announcing worker into one active client
+	// without overcommitting capacity.
+	//
+	// When ProxyLimits is shared, another proxy may acquire a slot after this
+	// snapshot and before an announcement matches. That race may still result
+	// in a post-match capacity failure.
+	//
+	// Limit reductions are soft: existing announcements are not canceled, so
+	// a reduction may also result in post-match capacity failures.
 
-	for p.proxySupervisorCommonState.announcing < limits.maxCommonAnnouncements &&
-		limits.activeCommonClients < limits.maxCommonClients &&
+	maxCommonAnnouncements := limits.maxCommonClients - limits.activeCommonClients
+	if maxCommonAnnouncements < 0 {
+		maxCommonAnnouncements = 0
+	}
+	if maxCommonAnnouncements > limits.maxCommonAnnouncements {
+		maxCommonAnnouncements = limits.maxCommonAnnouncements
+	}
+
+	for p.proxySupervisorCommonState.announcing < maxCommonAnnouncements &&
 		!time.Now().Before(p.proxySupervisorCommonState.endBackOffTime) {
 
 		tacticsMode := proxyTacticsModeNone
@@ -637,8 +648,15 @@ func (p *Proxy) reconcile(
 		}()
 	}
 
-	for p.proxySupervisorPersonalState.announcing < limits.maxPersonalAnnouncements &&
-		limits.activePersonalClients < limits.maxPersonalClients &&
+	maxPersonalAnnouncements := limits.maxPersonalClients - limits.activePersonalClients
+	if maxPersonalAnnouncements < 0 {
+		maxPersonalAnnouncements = 0
+	}
+	if maxPersonalAnnouncements > limits.maxPersonalAnnouncements {
+		maxPersonalAnnouncements = limits.maxPersonalAnnouncements
+	}
+
+	for p.proxySupervisorPersonalState.announcing < maxPersonalAnnouncements &&
 		!time.Now().Before(p.proxySupervisorPersonalState.endBackOffTime) {
 
 		tacticsMode := proxyTacticsModeNone
