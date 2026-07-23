@@ -37,8 +37,45 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
-func initLightProxy(
-	controller *Controller,
+// storeAndInitLightProxy persists a discovered/imported light proxy entry and,
+// when light proxy fallback is enabled, reinitializes the live light proxy with
+// it. This is the shared light proxy import path used by both push payload
+// imports (Controller.ImportPushPayload) and DSL discovery
+// (FetcherConfig.DatastoreStoreLightProxy).
+//
+// proxyEntry is an opaque encoded light.SignedProxyEntry; StoreLightProxy
+// validates it before persisting.
+func (controller *Controller) storeAndInitLightProxy(
+	proxyEntry []byte,
+	proxyEntryTracker int64) error {
+
+	// Light proxies are persisted for potential future use as fallbacks. In
+	// EnablePersonalLightProxyTunnels mode, initLightProxy is not called, and
+	// the light proxy in use remains config.LightProxyEntry.
+	ok := StoreLightProxy(&StoredLightProxy{
+		LightProxyEntry:        proxyEntry,
+		LightProxyEntryTracker: proxyEntryTracker,
+	})
+	if !ok {
+		return errors.TraceNew("StoreLightProxy failed")
+	}
+
+	if controller.config.EnableLightProxyFallback {
+
+		// TODO: skip the reinitialization, or retain the current replay
+		// parameters, when the proxy entry is unchanged from the proxy entry
+		// currently in use, so that a proven-working replay selection isn't
+		// discarded.
+		err := controller.initLightProxy(proxyEntry, proxyEntryTracker)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	return nil
+}
+
+func (controller *Controller) initLightProxy(
 	proxyEntry []byte,
 	proxyEntryTracker int64) error {
 

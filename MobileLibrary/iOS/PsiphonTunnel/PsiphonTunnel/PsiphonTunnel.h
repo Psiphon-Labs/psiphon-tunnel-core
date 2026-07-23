@@ -350,6 +350,11 @@ followed by a tunnel-core shutdown.
  */
 - (void)onLightProxyAvailable;
 
+/*!
+ Called when a persisted opaque DSL token is available to fetch with getDSLToken.
+ */
+- (void)onDSLTokenAvailable;
+
 @end
 
 /*!
@@ -487,6 +492,9 @@ Returns the path where the rotated notices file will be created.
  @return  The build info json as a string.
  */
 + (NSString * _Nonnull)getBuildInfo;
+
+/*! Returns the persisted opaque DSL token as unpadded Base64URL text. */
+- (NSString * _Nullable)getDSLToken:(NSError * _Nullable * _Nonnull)error;
 
 #pragma mark - Profiling utitlities
 

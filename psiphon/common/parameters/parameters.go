@@ -554,6 +554,8 @@ const (
 	DSLFetcherTunneledFetchTTL                         = "DSLFetcherTunneledFetchTTL"
 	DSLFetcherTunneledDiscoverServerEntriesMinCount    = "DSLFetcherTunneledDiscoverServerEntriesMinCount"
 	DSLFetcherTunneledDiscoverServerEntriesMaxCount    = "DSLFetcherTunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherTunneledDiscoverLightProxyMinCount       = "DSLFetcherTunneledDiscoverLightProxyMinCount"
+	DSLFetcherTunneledDiscoverLightProxyMaxCount       = "DSLFetcherTunneledDiscoverLightProxyMaxCount"
 	DSLFetcherTunneledGetServerEntriesMinCount         = "DSLFetcherTunneledGetServerEntriesMinCount"
 	DSLFetcherTunneledGetServerEntriesMaxCount         = "DSLFetcherTunneledGetServerEntriesMaxCount"
 	DSLFetcherUntunneledRequestTimeout                 = "DSLFetcherUntunneledRequestTimeout"
@@ -563,11 +565,14 @@ const (
 	DSLFetcherUntunneledFetchTTL                       = "DSLFetcherUntunneledFetchTTL"
 	DSLFetcherUntunneledDiscoverServerEntriesMinCount  = "DSLFetcherUntunneledDiscoverServerEntriesMinCount"
 	DSLFetcherUntunneledDiscoverServerEntriesMaxCount  = "DSLFetcherUntunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherUntunneledDiscoverLightProxyMinCount     = "DSLFetcherUntunneledDiscoverLightProxyMinCount"
+	DSLFetcherUntunneledDiscoverLightProxyMaxCount     = "DSLFetcherUntunneledDiscoverLightProxyMaxCount"
 	DSLFetcherUntunneledGetServerEntriesMinCount       = "DSLFetcherUntunneledGetServerEntriesMinCount"
 	DSLFetcherUntunneledGetServerEntriesMaxCount       = "DSLFetcherUntunneledGetServerEntriesMaxCount"
 	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
 	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
+	DSLTokenRegistrationRefreshTTL                     = "DSLTokenRegistrationRefreshTTL"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
 	DSLPrioritizeDialRetainFailedProbability           = "DSLPrioritizeDialRetainFailedProbability"
@@ -1230,6 +1235,8 @@ var defaultParameters = map[string]struct {
 	DSLFetcherTunneledFetchTTL:                        {value: 1 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherTunneledDiscoverServerEntriesMinCount:   {value: 1, minimum: 0},
 	DSLFetcherTunneledDiscoverServerEntriesMaxCount:   {value: 2, minimum: 0},
+	DSLFetcherTunneledDiscoverLightProxyMinCount:      {value: 0, minimum: 0},
+	DSLFetcherTunneledDiscoverLightProxyMaxCount:      {value: 0, minimum: 0},
 	DSLFetcherTunneledGetServerEntriesMinCount:        {value: 30, minimum: 0},
 	DSLFetcherTunneledGetServerEntriesMaxCount:        {value: 60, minimum: 0},
 	DSLFetcherUntunneledRequestTimeout:                {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
@@ -1239,11 +1246,14 @@ var defaultParameters = map[string]struct {
 	DSLFetcherUntunneledFetchTTL:                      {value: 6 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherUntunneledDiscoverServerEntriesMinCount: {value: 200, minimum: 0},
 	DSLFetcherUntunneledDiscoverServerEntriesMaxCount: {value: 400, minimum: 0},
+	DSLFetcherUntunneledDiscoverLightProxyMinCount:    {value: 0, minimum: 0},
+	DSLFetcherUntunneledDiscoverLightProxyMaxCount:    {value: 0, minimum: 0},
 	DSLFetcherUntunneledGetServerEntriesMinCount:      {value: 30, minimum: 0},
 	DSLFetcherUntunneledGetServerEntriesMaxCount:      {value: 60, minimum: 0},
 	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
+	DSLTokenRegistrationRefreshTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
 	DSLPrioritizeDialRetainFailedProbability:          {value: 0.0, minimum: 0.0},

@@ -22,6 +22,7 @@ package dsl
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -49,6 +50,9 @@ type FetcherConfig struct {
 
 	BaseAPIParameters common.APIParameters
 
+	DSLTokenRegistration         bool
+	DSLTokenRegistrationResponse func(string) error
+
 	Tunneled     bool
 	RoundTripper FetcherRoundTripper
 
@@ -66,6 +70,13 @@ type FetcherConfig struct {
 		prioritizeDial bool,
 		prioritizeReason string,
 		prioritizeTunnelProtocol string) error
+
+	// DatastoreStoreLightProxy is an optional callback to persist a light
+	// proxy entry discovered via DiscoverServerEntries. proxyEntry is an
+	// opaque encoded light.SignedProxyEntry.
+	DatastoreStoreLightProxy func(
+		proxyEntry []byte,
+		proxyEntryTracker int64) error
 
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
@@ -85,6 +96,8 @@ type FetcherConfig struct {
 	FetchTTL                      time.Duration
 	DiscoverServerEntriesMinCount int
 	DiscoverServerEntriesMaxCount int
+	DiscoverLightProxyMinCount    int
+	DiscoverLightProxyMaxCount    int
 	GetServerEntriesMinCount      int
 	GetServerEntriesMaxCount      int
 	GetLastActiveOSLsTTL          time.Duration
@@ -127,6 +140,11 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher.
 func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
+	if config.DSLTokenRegistration &&
+		config.DSLTokenRegistrationResponse == nil {
+
+		return nil, errors.TraceNew("missing DSL token registration callback")
+	}
 
 	packedAPIParameters, err := protocol.EncodePackedAPIParameters(
 		config.BaseAPIParameters)
@@ -209,17 +227,48 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 	// Vary the size of the requested response to avoid a trivial traffic
 	// fingerprint.
-	discoverCount := prng.Range(
+	serverEntryDiscoverCount := prng.Range(
 		f.config.DiscoverServerEntriesMinCount,
 		f.config.DiscoverServerEntriesMaxCount)
 
-	versionedTags, err := f.doDiscoverServerEntriesRequest(
+	lightProxyDiscoverCount := prng.Range(
+		f.config.DiscoverLightProxyMinCount,
+		f.config.DiscoverLightProxyMaxCount)
+
+	discoverResponse, err := f.doDiscoverServerEntriesRequest(
 		ctx,
 		OSLKeys,
-		discoverCount)
+		serverEntryDiscoverCount,
+		lightProxyDiscoverCount,
+		f.config.DSLTokenRegistration)
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	if f.config.DSLTokenRegistration {
+		if discoverResponse.DSLToken == "" {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: token registration response omitted token")
+		} else if decoded, err := base64.RawURLEncoding.Strict().DecodeString(
+			discoverResponse.DSLToken); err != nil ||
+			base64.RawURLEncoding.EncodeToString(decoded) != discoverResponse.DSLToken {
+
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: token registration response contained invalid encoding")
+		} else {
+			err := f.config.DSLTokenRegistrationResponse(discoverResponse.DSLToken)
+			if err != nil {
+				f.config.Logger.WithTraceFields(common.LogFields{
+					"tunneled": f.config.Tunneled,
+				}).Warning("DSL: token registration persistence failed")
+			}
+		}
+	}
+
+	versionedTags := discoverResponse.VersionedServerEntryTags
+	lightProxyEntries := discoverResponse.LightProxyEntries
 
 	// Check each discovered server entry tag and version. Skip when the
 	// tag/version is already in the local datastore. Fetch the unknown or
@@ -230,14 +279,16 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 	storeServerEntriesCount := 0
 	knownServerEntriesCount := 0
+	storeLightProxyCount := 0
 	tagCount := len(versionedTags)
 	defer func() {
 		// Emit log even if not all fetches succeed.
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"tunneled": f.config.Tunneled,
-			"tags":     tagCount,
-			"updated":  storeServerEntriesCount,
-			"known":    knownServerEntriesCount,
+			"tunneled":     f.config.Tunneled,
+			"tags":         tagCount,
+			"updated":      storeServerEntriesCount,
+			"known":        knownServerEntriesCount,
+			"lightProxies": storeLightProxyCount,
 		}).Info("DSL: fetched server entries")
 	}()
 
@@ -332,6 +383,33 @@ func (f *Fetcher) Run(ctx context.Context) error {
 			prioritizeTunnelProtocols[len(sourcedServerEntries):]
 
 		f.config.DoGarbageCollection()
+	}
+
+	// Import a light proxy entry, if any were discovered.
+	// At most one light proxy entry is imported, selected at random.
+	if f.config.DatastoreStoreLightProxy != nil && len(lightProxyEntries) > 0 {
+
+		lightProxyEntry := lightProxyEntries[prng.Intn(len(lightProxyEntries))]
+
+		if lightProxyEntry == nil || len(lightProxyEntry.ProxyEntry) == 0 {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: missing light proxy entry")
+		} else {
+			err := f.config.DatastoreStoreLightProxy(
+				lightProxyEntry.ProxyEntry,
+				lightProxyEntry.ProxyEntryTracker)
+			if err != nil {
+				// Non-fatal: log and continue. Server entry discovery has
+				// already succeeded.
+				f.config.Logger.WithTraceFields(common.LogFields{
+					"tunneled": f.config.Tunneled,
+					"error":    err.Error(),
+				}).Warning("DSL: store light proxy failed")
+			} else {
+				storeLightProxyCount += 1
+			}
+		}
 	}
 
 	err = f.config.DatastoreSetLastFetchTime(time.Now())
@@ -570,7 +648,9 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
-	discoverCount int) ([]*VersionedServerEntryTag, error) {
+	serverEntryDiscoverCount int,
+	lightProxyDiscoverCount int,
+	DSLTokenRegistration bool) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger
@@ -582,9 +662,11 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		// of active OSL IDs is expected to be relatively small.
 
 		request := &DiscoverServerEntriesRequest{
-			BaseAPIParameters: f.packedAPIParameters,
-			OSLKeys:           keys,
-			DiscoverCount:     int32(discoverCount),
+			BaseAPIParameters:        f.packedAPIParameters,
+			OSLKeys:                  keys,
+			ServerEntryDiscoverCount: int32(serverEntryDiscoverCount),
+			LightProxyDiscoverCount:  int32(lightProxyDiscoverCount),
+			DSLTokenRegistration:     DSLTokenRegistration,
 		}
 
 		var response DiscoverServerEntriesResponse
@@ -592,7 +674,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 			ctx, requestTypeDiscoverServerEntries, request, &response)
 
 		if err == nil {
-			return response.VersionedServerEntryTags, nil
+			return &response, nil
 		}
 
 		if i >= f.config.RequestRetryCount || !doRetry || ctx.Err() != nil {
@@ -600,9 +682,10 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"tunneled":      f.config.Tunneled,
-			"discoverCount": discoverCount,
-			"error":         err.Error(),
+			"tunneled":                 f.config.Tunneled,
+			"serverEntryDiscoverCount": serverEntryDiscoverCount,
+			"lightProxyDiscoverCount":  lightProxyDiscoverCount,
+			"error":                    err.Error(),
 		}).Warning("DSL: doDiscoverServerEntriesRequest failed")
 
 		common.SleepWithContext(
@@ -611,8 +694,11 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 				f.config.RequestRetryDelay,
 				f.config.RequestRetryDelayJitter))
 
-		if discoverCount > 1 {
-			discoverCount /= 2
+		if serverEntryDiscoverCount > 1 {
+			serverEntryDiscoverCount /= 2
+		}
+		if lightProxyDiscoverCount > 1 {
+			lightProxyDiscoverCount /= 2
 		}
 	}
 }

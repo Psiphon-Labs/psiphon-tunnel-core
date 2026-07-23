@@ -21,7 +21,9 @@ package psiphon
 
 import (
 	"context"
+	"crypto/sha256"
 	"sync/atomic"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -31,11 +33,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-func runUntunneledDSLFetcher(
-	ctx context.Context,
-	config *Config,
-	brokerClientManager *InproxyBrokerClientManager,
-	signal <-chan struct{}) {
+const dslTokenRegistrationRefreshTTLJitter = 0.1
+
+func (controller *Controller) runUntunneledDSLFetcher() {
+
+	defer controller.runWaitGroup.Done()
+
+	ctx := controller.runCtx
+	config := controller.config
 
 	NoticeInfo("running untunneled DSL fetcher")
 
@@ -43,7 +48,7 @@ fetcherLoop:
 	for !disableDSLFetches.Load() {
 
 		select {
-		case <-signal:
+		case <-controller.signalUntunneledDSLFetch:
 		case <-ctx.Done():
 			break fetcherLoop
 		}
@@ -55,7 +60,8 @@ fetcherLoop:
 
 			networkID := config.GetNetworkID()
 
-			brokerClient, _, err := brokerClientManager.GetBrokerClient(networkID)
+			brokerClient, _, err :=
+				controller.inproxyClientBrokerClientManager.GetBrokerClient(networkID)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -84,7 +90,7 @@ fetcherLoop:
 			// TODO: add a failed_dsl_request log, similar to failed_tunnel,
 			// to record and report failures?
 
-			err = doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
+			err = controller.doDSLFetch(networkID, isTunneled, roundTripper)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -102,11 +108,12 @@ fetcherLoop:
 	NoticeInfo("exiting untunneled DSL fetcher")
 }
 
-func runTunneledDSLFetcher(
-	ctx context.Context,
-	config *Config,
-	getActiveTunnel func() *Tunnel,
-	signal <-chan struct{}) {
+func (controller *Controller) runTunneledDSLFetcher() {
+
+	defer controller.runWaitGroup.Done()
+
+	ctx := controller.runCtx
+	config := controller.config
 
 	NoticeInfo("running tunneled DSL fetcher")
 
@@ -114,12 +121,12 @@ fetcherLoop:
 	for !disableDSLFetches.Load() {
 
 		select {
-		case <-signal:
+		case <-controller.signalTunneledDSLFetch:
 		case <-ctx.Done():
 			break fetcherLoop
 		}
 
-		tunnel := getActiveTunnel()
+		tunnel := controller.getNextActiveTunnel(0)
 		if tunnel == nil {
 			continue
 		}
@@ -146,7 +153,7 @@ fetcherLoop:
 		// Detailed logging, retries, last request times, and
 		// WaitForNetworkConnectivity are all handled inside dsl.Fetcher.
 
-		err := doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
+		err := controller.doDSLFetch(networkID, isTunneled, roundTripper)
 		if err != nil {
 			NoticeError("tunneled DSL fetch failed: %v", errors.Trace(err))
 			// No cooldown pause, since runTunneledDSLFetcher is called only
@@ -157,17 +164,32 @@ fetcherLoop:
 	NoticeInfo("exiting tunneled DSL fetcher")
 }
 
-func doDSLFetch(
-	ctx context.Context,
-	config *Config,
+func (controller *Controller) doDSLFetch(
 	networkID string,
 	isTunneled bool,
 	roundTripper dsl.FetcherRoundTripper) error {
 
+	ctx := controller.runCtx
+	config := controller.config
+
 	p := config.GetParameters().Get()
-	if !p.Bool(parameters.EnableDSLFetcher) {
+	if config.DisableDSLFetcher || !p.Bool(parameters.EnableDSLFetcher) {
 		p.Close()
 		return nil
+	}
+
+	requestDSLTokenRegistration := false
+	if isTunneled && config.EnableDSLTokenRegistration {
+		record, err := loadDSLTokenRegistrationRecord()
+		if err != nil {
+			p.Close()
+			return errors.Trace(err)
+		}
+
+		requestDSLTokenRegistration = isDSLTokenRegistrationDue(
+			record,
+			time.Now(),
+			p.Duration(parameters.DSLTokenRegistrationRefreshTTL))
 	}
 
 	var paddingPRNG *prng.PRNG
@@ -288,13 +310,15 @@ func doDSLFetch(
 
 	c := &dsl.FetcherConfig{
 
-		Logger:            NoticeCommonLogger(false),
-		BaseAPIParameters: baseAPIParams,
-		Tunneled:          isTunneled,
-		RoundTripper:      roundTripper,
+		Logger:               NoticeCommonLogger(false),
+		BaseAPIParameters:    baseAPIParams,
+		DSLTokenRegistration: requestDSLTokenRegistration,
+		Tunneled:             isTunneled,
+		RoundTripper:         roundTripper,
 
 		DatastoreHasServerEntry:        hasServerEntry,
 		DatastoreStoreServerEntry:      storeServerEntry,
+		DatastoreStoreLightProxy:       controller.storeAndInitLightProxy,
 		DatastoreGetLastActiveOSLsTime: DSLGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: DSLSetLastActiveOSLsTime,
 		DatastoreKnownOSLIDs:           DSLKnownOSLIDs,
@@ -305,6 +329,12 @@ func doDSLFetch(
 		DatastoreFatalError:            onDSLDatastoreFatalError,
 
 		DoGarbageCollection: DoGarbageCollection,
+	}
+
+	if requestDSLTokenRegistration {
+		c.DSLTokenRegistrationResponse = func(token string) error {
+			return errors.Trace(controller.handleDSLTokenRegistrationResponse(token))
+		}
 	}
 
 	if isTunneled {
@@ -319,6 +349,8 @@ func doDSLFetch(
 		c.FetchTTL = p.Duration(parameters.DSLFetcherTunneledFetchTTL)
 		c.DiscoverServerEntriesMinCount = p.Int(parameters.DSLFetcherTunneledDiscoverServerEntriesMinCount)
 		c.DiscoverServerEntriesMaxCount = p.Int(parameters.DSLFetcherTunneledDiscoverServerEntriesMaxCount)
+		c.DiscoverLightProxyMinCount = p.Int(parameters.DSLFetcherTunneledDiscoverLightProxyMinCount)
+		c.DiscoverLightProxyMaxCount = p.Int(parameters.DSLFetcherTunneledDiscoverLightProxyMaxCount)
 		c.GetServerEntriesMinCount = p.Int(parameters.DSLFetcherTunneledGetServerEntriesMinCount)
 		c.GetServerEntriesMaxCount = p.Int(parameters.DSLFetcherTunneledGetServerEntriesMaxCount)
 
@@ -339,6 +371,8 @@ func doDSLFetch(
 		c.FetchTTL = p.Duration(parameters.DSLFetcherUntunneledFetchTTL)
 		c.DiscoverServerEntriesMinCount = p.Int(parameters.DSLFetcherUntunneledDiscoverServerEntriesMinCount)
 		c.DiscoverServerEntriesMaxCount = p.Int(parameters.DSLFetcherUntunneledDiscoverServerEntriesMaxCount)
+		c.DiscoverLightProxyMinCount = p.Int(parameters.DSLFetcherUntunneledDiscoverLightProxyMinCount)
+		c.DiscoverLightProxyMaxCount = p.Int(parameters.DSLFetcherUntunneledDiscoverLightProxyMaxCount)
 		c.GetServerEntriesMinCount = p.Int(parameters.DSLFetcherUntunneledGetServerEntriesMinCount)
 		c.GetServerEntriesMaxCount = p.Int(parameters.DSLFetcherUntunneledGetServerEntriesMaxCount)
 
@@ -364,6 +398,73 @@ func doDSLFetch(
 	}
 
 	return nil
+}
+
+// jitterDSLTokenRegistrationRefreshTTL applies a deterministic jitter to the
+// refresh TTL, seeded with the token, so that repeated scheduling checks
+// against the same record compute the same refresh deadline.
+func jitterDSLTokenRegistrationRefreshTTL(
+	refreshTTL time.Duration, token string) time.Duration {
+
+	hash := sha256.Sum256([]byte("dsl-token-registration-refresh-ttl\x00" + token))
+	seed := prng.Seed(hash)
+	return prng.NewPRNGWithSeed(&seed).JitterDuration(
+		refreshTTL, dslTokenRegistrationRefreshTTLJitter)
+}
+
+// isDSLTokenRegistrationDue indicates whether a DSL token registration should
+// be requested with the next tunneled DSL fetch: when no token has been
+// registered yet, or when the last successful registration is older than the
+// jittered refresh TTL. Fetch scheduling, including retry pacing after failed
+// fetches, is handled by the DSL fetcher itself.
+func isDSLTokenRegistrationDue(
+	record *dslTokenRegistrationRecord,
+	now time.Time,
+	refreshTTL time.Duration) bool {
+
+	if len(record.DSLToken) == 0 {
+		return true
+	}
+
+	refreshDeadline := record.LastSuccessfulDSLTokenRegistrationTime.Add(
+		jitterDSLTokenRegistrationRefreshTTL(
+			refreshTTL, record.DSLToken))
+	return !now.Before(refreshDeadline)
+}
+
+func (controller *Controller) handleDSLTokenRegistrationResponse(
+	token string) error {
+
+	changed, err := storeDSLTokenRegistration(token, time.Now().UTC())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if changed {
+		NoticeDSLTokenAvailable()
+	}
+
+	return nil
+}
+
+// announcePersistedDSLToken emits a DSLTokenAvailable notice when a
+// previously registered DSL token is persisted, prompting the host
+// application to fetch it with GetDSLToken.
+func (controller *Controller) announcePersistedDSLToken() {
+	if !controller.config.EnableDSLTokenRegistration {
+		return
+	}
+
+	token, err := GetDSLToken()
+	if err != nil {
+		NoticeWarning("GetDSLToken failed: %v", errors.Trace(err))
+		return
+	}
+	if token == "" {
+		return
+	}
+
+	NoticeDSLTokenAvailable()
 }
 
 var disableDSLFetches atomic.Bool

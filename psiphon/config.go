@@ -835,6 +835,13 @@ type Config struct {
 	// temporary tunnels.
 	DisableDSLFetcher bool `json:",omitempty"`
 
+	// EnableDSLTokenRegistration indicates whether DSL discovery requests ask
+	// the DSL backend to issue an opaque token. A DSLTokenAvailable notice is
+	// emitted for a persisted token at startup and when a newly issued token
+	// differs from the previously stored token; the token itself is fetched
+	// with GetDSLToken.
+	EnableDSLTokenRegistration bool `json:",omitempty"`
+
 	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
 	// deobfuscate push payloads. This value is supplied by the Psiphon
 	// Network. Required for push payload imports.

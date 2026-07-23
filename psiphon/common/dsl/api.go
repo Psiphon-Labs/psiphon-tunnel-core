@@ -51,13 +51,19 @@ type OSLFileSpec []byte
 //
 // The response contains a list of server entry tags and versions, and
 // the client will then proceed to request full server entries for unknown or
-// stale server entries, based on the tags and versions. DiscoverCount
+// stale server entries, based on the tags and versions. ServerEntryDiscoverCount
 // specifies a maximum number of server entry tags/versions to return; the
 // DSL backend may return less, but not more.
+//
+// LightProxyDiscoverCount specifies a maximum number of light proxy entries to
+// return; the DSL backend may return less, but not more, and gates eligibility
+// independently.
 type DiscoverServerEntriesRequest struct {
-	BaseAPIParameters protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
-	OSLKeys           []OSLKey                     `cbor:"2,keyasint,omitempty"`
-	DiscoverCount     int32                        `cbor:"3,keyasint,omitempty"`
+	BaseAPIParameters        protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+	OSLKeys                  []OSLKey                     `cbor:"2,keyasint,omitempty"`
+	ServerEntryDiscoverCount int32                        `cbor:"3,keyasint,omitempty"`
+	LightProxyDiscoverCount  int32                        `cbor:"4,keyasint,omitempty"`
+	DSLTokenRegistration     bool                         `cbor:"5,keyasint,omitempty"`
 }
 
 // ServerEntryTag is a binary representation of a protocol.ServerEntry.Tag
@@ -92,13 +98,27 @@ type VersionedServerEntryTag struct {
 	PrioritizeTunnelProtocol string         `cbor:"5,keyasint,omitempty"`
 }
 
+// LightProxyEntry is a light proxy entry, returned in
+// DiscoverServerEntriesResponse, paired with its tracker value. ProxyEntry is
+// an opaque encoded light.SignedProxyEntry.
+type LightProxyEntry struct {
+	ProxyEntry        []byte `cbor:"1,keyasint,omitempty"`
+	ProxyEntryTracker int64  `cbor:"2,keyasint,omitempty"`
+}
+
 // DiscoverServerEntriesResponse is the set of server entries revealed to the
 // client, specified as server entry tag and version pairs, which enable the
 // client to determine if it already has the server entry, and has the latest
 // version. For new or updated server entries, the client will proceed to
 // send a GetServerEntriesRequest to fetch the server entries.
+//
+// The response may also include LightProxyEntries, a set of light proxy
+// entries the client may import for use as relays. Unlike server entry
+// tags, light proxy entries are full (encoded) entries.
 type DiscoverServerEntriesResponse struct {
 	VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
+	LightProxyEntries        []*LightProxyEntry         `cbor:"2,keyasint,omitempty"`
+	DSLToken                 string                     `cbor:"3,keyasint,omitempty"`
 }
 
 // GetServerEntriesRequest is a request from a client to download the
