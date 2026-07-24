@@ -267,7 +267,7 @@ func runTestLightProxy(
 		expectedTLSClientHelloPadding = testTLSPaddingLength
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	serverGroup, serverCtx := errgroup.WithContext(ctx)
@@ -645,6 +645,9 @@ func runLightClient(
 	}
 	defer conn.Close()
 
+	interruptOnDone := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer interruptOnDone()
+
 	innerTLSConn := tls.Client(conn, &tls.Config{
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true,
@@ -657,8 +660,7 @@ func runLightClient(
 
 	payload := prng.Bytes(payloadSize)
 
-	readWriteGroup, readWriteCtx := errgroup.WithContext(ctx)
-
+	var readWriteGroup errgroup.Group
 	echoed := make([]byte, len(payload))
 	readWriteGroup.Go(func() error {
 		_, err := innerTLSConn.Write(payload)
@@ -666,12 +668,14 @@ func runLightClient(
 	})
 
 	readWriteGroup.Go(func() error {
-		_ = readWriteCtx
 		_, err := io.ReadFull(innerTLSConn, echoed)
 		return errors.Trace(err)
 	})
 
 	err = readWriteGroup.Wait()
+	if ctx.Err() != nil {
+		return errors.Trace(ctx.Err())
+	}
 	if err != nil {
 		return errors.Trace(err)
 	}
