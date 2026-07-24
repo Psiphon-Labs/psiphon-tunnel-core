@@ -555,7 +555,16 @@ func NewProxy(
 	}
 
 	tlsConfig.PassthroughAddress = config.PassthroughAddress
-	tlsConfig.PassthroughDialer = proxy.dialer.Dial
+	if isLoopbackAddress(config.PassthroughAddress) {
+		// A split-mode dialer is bound to the upstream interface and cannot
+		// reach a loopback passthrough service on the proxy host.
+		// TODO: If passthrough targets become user-configurable, consider a
+		// SplitPassthroughInterfaceName and dedicated dialer for independently
+		// routing passthrough through the upstream, downstream, or default route.
+		tlsConfig.PassthroughDialer = net.Dial
+	} else {
+		tlsConfig.PassthroughDialer = proxy.dialer.Dial
+	}
 
 	tlsConfig.PassthroughVerifyMessage = func(message []byte) bool {
 		return obfuscator.VerifyTLSPassthroughMessage(
@@ -595,6 +604,18 @@ func NewProxy(
 	}
 
 	return proxy, nil
+}
+
+func isLoopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	IP := net.ParseIP(host)
+	return IP != nil && IP.IsLoopback()
 }
 
 func newProxyLimitsFromConfig(

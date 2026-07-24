@@ -71,6 +71,25 @@ func TestLightProxy(t *testing.T) {
 	}
 }
 
+func TestIsLoopbackAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		want    bool
+	}{
+		{"127.0.0.1:8080", true},
+		{"[::1]:8080", true},
+		{"localhost:8080", true},
+		{"LOCALHOST:8080", true},
+		{"192.168.0.1:8080", false},
+		{"invalid", false},
+	}
+	for _, test := range tests {
+		if got := isLoopbackAddress(test.address); got != test.want {
+			t.Errorf("isLoopbackAddress(%q) = %v, want %v", test.address, got, test.want)
+		}
+	}
+}
+
 func TestLightProxyPassthrough(t *testing.T) {
 	if err := runTestLightProxyPassthrough(); err != nil {
 		t.Fatal(err)
