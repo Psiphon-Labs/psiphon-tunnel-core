@@ -2536,10 +2536,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
 	//
-	// Limitation: this check is disabled in the in-proxy case since, in the
-	// self-proxy scheme, the proxy shuts down before the client can send its
-	// final status request.
-	expectDomainDestBytes := !runConfig.doChangeBytesConfig && !doInproxy
+	// In the in-proxy self-proxy scheme, the final status request races with
+	// proxy shutdown and domain bytes may or may not arrive.
+	allowDomainDestBytes := !runConfig.doChangeBytesConfig
+	requireDomainDestBytes := allowDomainDestBytes && !doInproxy
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -2621,7 +2621,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	if expectDomainDestBytes {
+	if requireDomainDestBytes {
 		select {
 		case logFields := <-domainDestBytesLog:
 			err := checkExpectedDomainDestBytesLogFields(
@@ -2632,6 +2632,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		default:
 			t.Fatalf("missing domain bytes log")
+		}
+	} else if allowDomainDestBytes {
+		select {
+		case logFields := <-domainDestBytesLog:
+			err := checkExpectedDomainDestBytesLogFields(
+				runConfig,
+				logFields)
+			if err != nil {
+				t.Fatalf("invalid domain dest bytes log fields: %s", err)
+			}
+		default:
 		}
 	} else {
 		select {
