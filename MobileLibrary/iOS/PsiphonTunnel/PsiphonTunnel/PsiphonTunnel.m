@@ -1743,10 +1743,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     }
 }
 
-/*!
- Determine the device's region. Makes a best guess based on available info.
- @returns The two-letter country code that the device is probably located in.
- */
+// See comment in header
 + (NSString * _Nonnull)getDeviceRegion {
     /// One of the ways we determine the device region is to look at the current timezone. When then need to map that to a likely country.
     /// This mapping is derived from here: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
@@ -1754,19 +1751,25 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 #if TARGET_OS_IPHONE
     // First try getting from telephony info (will fail for non-phones and simulator)
-    if (@available(iOS 16.0, *)) {
+    if (@available(iOS 16.0, macCatalyst 16.0, *)) {
         // CTCarrier deprecated with no replacement as of iOS 16 so there is no alternative API to
         // get the carrier country code; [CTCarrier isoCountryCode] returns @"--" on iOS >=16.
-        
-        return [[[CNContactsUserDefaults sharedDefaults] countryCode] uppercaseString];
-        
+
+        NSString *contactsCountryCode = nil;
+        @synchronized ([CNContactsUserDefaults class]) {
+            contactsCountryCode = [[[CNContactsUserDefaults sharedDefaults] countryCode] uppercaseString];
+        }
+        if (contactsCountryCode.length > 0) {
+            return contactsCountryCode;
+        }
     } else {
         CTTelephonyNetworkInfo *networkInfo = nil;
         CTCarrier *carrier = nil;
         NSString *carrierCountryCode = nil;
         if ((networkInfo = [[CTTelephonyNetworkInfo alloc] init]) != nil &&
             (carrier = [networkInfo subscriberCellularProvider]) != nil &&
-            (carrierCountryCode = [carrier isoCountryCode]) != nil) {
+            (carrierCountryCode = [carrier isoCountryCode]) != nil &&
+            carrierCountryCode.length > 0) {
             return [carrierCountryCode uppercaseString];
         }
     }
@@ -1783,12 +1786,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // aren't the US).
     NSString *localeCountryCode = [[NSLocale currentLocale] objectForKey:NSLocaleCountryCode];
     
-    if (localeCountryCode != nil) {
+    if (localeCountryCode.length > 0) {
         return [localeCountryCode uppercaseString];
     }
     
-    // Generic-ish default
-    return @"US";
+    return @"";
 }
 
 // RFC3339 formatter.
