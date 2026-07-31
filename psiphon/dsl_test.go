@@ -196,6 +196,111 @@ func TestDSLTokenNoticeAfterPersistence(t *testing.T) {
 	}
 }
 
+func TestDSLTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
+	config := newDSLTokenTestConfig(t)
+	config.EnableDSLTokenRegistration = true
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(err)
+	}
+	defer CloseDataStore()
+
+	corruptRecords := [][]byte{
+		[]byte(`{"DSLToken": 42, "trailing garbage`),
+		[]byte(``),
+		[]byte(`"just a string"`),
+	}
+
+	// Assert no corrupt record content leaks into warning notices.
+	err := SetNoticeWriter(NewNoticeReceiver(func(notice []byte) {
+		if bytes.Contains(notice, []byte("trailing garbage")) {
+			t.Fatal("corrupt record content leaked into notice")
+		}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ResetNoticeWriter()
+
+	setCorruptRecord := func(corrupt []byte) {
+		if err := setBucketValue(
+			datastoreKeyValueBucket,
+			datastoreDSLTokenRegistrationKey,
+			corrupt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, corrupt := range corruptRecords {
+
+		setCorruptRecord(corrupt)
+
+		// The load succeeds, degrading to a zero-value record, so the
+		// doDSLFetch scheduling path proceeds.
+		record, err := loadDSLTokenRegistrationRecord()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Registration is considered due.
+		if !isDSLTokenRegistrationDue(record, time.Now(), 24*time.Hour) {
+			t.Fatal("registration not due after corrupt record self-heal")
+		}
+
+		// The corrupt record was deleted.
+		value, err := copyBucketValue(
+			datastoreKeyValueBucket, datastoreDSLTokenRegistrationKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value != nil {
+			t.Fatal("corrupt record was not deleted")
+		}
+	}
+
+	// A valid, zero-value record is not treated as corrupt.
+	setCorruptRecord([]byte(`{}`))
+	record, err := loadDSLTokenRegistrationRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDSLTokenRegistrationDue(record, time.Now(), 24*time.Hour) {
+		t.Fatal("registration not due for zero-value record")
+	}
+	value, err := copyBucketValue(
+		datastoreKeyValueBucket, datastoreDSLTokenRegistrationKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value == nil {
+		t.Fatal("valid zero-value record was deleted")
+	}
+
+	// GetDSLToken degrades to "no token", not an error (mobile binding
+	// path).
+	setCorruptRecord(corruptRecords[0])
+	token, err := GetDSLToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		t.Fatal("GetDSLToken did not tolerate corrupt record")
+	}
+
+	// A registration over a corrupt record succeeds, healing the
+	// storeDSLTokenRegistration path.
+	setCorruptRecord(corruptRecords[0])
+	if err := handleDSLTokenRegistrationResponse("dG9rZW4"); err != nil {
+		t.Fatal(err)
+	}
+	token, err = GetDSLToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "dG9rZW4" {
+		t.Fatal("registration did not overwrite corrupt record")
+	}
+}
+
 func newDSLTokenTestConfig(t *testing.T) *Config {
 	t.Helper()
 	config, err := LoadConfig([]byte(`{

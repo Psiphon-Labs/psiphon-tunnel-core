@@ -178,14 +178,21 @@ func doDSLFetch(
 	if isTunneled && config.EnableDSLTokenRegistration {
 		record, err := loadDSLTokenRegistrationRecord()
 		if err != nil {
-			p.Close()
-			return errors.Trace(err)
-		}
 
-		requestDSLTokenRegistration = isDSLTokenRegistrationDue(
-			record,
-			time.Now(),
-			p.Duration(parameters.DSLTokenRegistrationRefreshTTL))
+			// A registration-scheduling read failure must not block server
+			// entry discovery. Degrade to requesting a registration; a
+			// re-registered token is persisted, or persistence failure is
+			// tolerated, in the fetcher.
+			NoticeWarning(
+				"loadDSLTokenRegistrationRecord failed: %v", errors.Trace(err))
+			requestDSLTokenRegistration = true
+
+		} else {
+			requestDSLTokenRegistration = isDSLTokenRegistrationDue(
+				record,
+				time.Now(),
+				p.Duration(parameters.DSLTokenRegistrationRefreshTTL))
+		}
 	}
 
 	var paddingPRNG *prng.PRNG

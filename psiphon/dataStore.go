@@ -2741,18 +2741,37 @@ type dslTokenRegistrationRecord struct {
 	LastSuccessfulDSLTokenRegistrationTime time.Time
 }
 
+// getDSLTokenRegistrationRecord loads the DSL token registration record
+// within a read-write transaction. When no record is persisted, a zero-value
+// record is returned. When the persisted record is corrupt, it is deleted and
+// a zero-value record is returned, degrading to "registration due" (see
+// isDSLTokenRegistrationDue) rather than failing; otherwise nothing would
+// ever rewrite or delete the corrupt record, permanently blocking both DSL
+// fetches and subsequent registrations.
 func getDSLTokenRegistrationRecord(
 	tx *datastoreTx) (*dslTokenRegistrationRecord, error) {
 
 	record := new(dslTokenRegistrationRecord)
-	value := tx.bucket(datastoreKeyValueBucket).get(datastoreDSLTokenRegistrationKey)
+	bucket := tx.bucket(datastoreKeyValueBucket)
+	value := bucket.get(datastoreDSLTokenRegistrationKey)
 	if value == nil {
 		return record, nil
 	}
 
 	err := json.Unmarshal(value, record)
 	if err != nil {
-		return nil, errors.Trace(err)
+
+		// Delete the corrupt record and self-heal, following the corrupt
+		// record delete in SelectCandidateWithNetworkReplayParameters. The
+		// record content, which may include token material, is not logged.
+		NoticeWarning(
+			"getDSLTokenRegistrationRecord: unmarshal failed: %s",
+			errors.Trace(err))
+		*record = dslTokenRegistrationRecord{}
+		err = bucket.delete(datastoreDSLTokenRegistrationKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	return record, nil
@@ -2760,7 +2779,10 @@ func getDSLTokenRegistrationRecord(
 
 func loadDSLTokenRegistrationRecord() (*dslTokenRegistrationRecord, error) {
 	var record *dslTokenRegistrationRecord
-	err := datastoreView(func(tx *datastoreTx) error {
+
+	// datastoreUpdate, not datastoreView: getDSLTokenRegistrationRecord may
+	// delete a corrupt record, which requires a writable transaction.
+	err := datastoreUpdate(func(tx *datastoreTx) error {
 		var err error
 		record, err = getDSLTokenRegistrationRecord(tx)
 		return errors.Trace(err)
