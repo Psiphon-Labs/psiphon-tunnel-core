@@ -21,7 +21,9 @@ package psiphon
 
 import (
 	"context"
+	"crypto/sha256"
 	"sync/atomic"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -30,6 +32,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
+
+const dslTokenRegistrationRefreshTTLJitter = 0.1
 
 func runUntunneledDSLFetcher(
 	ctx context.Context,
@@ -170,6 +174,27 @@ func doDSLFetch(
 		return nil
 	}
 
+	requestDSLTokenRegistration := false
+	if isTunneled && config.EnableDSLTokenRegistration {
+		record, err := loadDSLTokenRegistrationRecord()
+		if err != nil {
+
+			// A registration-scheduling read failure must not block server
+			// entry discovery. Degrade to requesting a registration; a
+			// re-registered token is persisted, or persistence failure is
+			// tolerated, in the fetcher.
+			NoticeWarning(
+				"loadDSLTokenRegistrationRecord failed: %v", errors.Trace(err))
+			requestDSLTokenRegistration = true
+
+		} else {
+			requestDSLTokenRegistration = isDSLTokenRegistrationDue(
+				record,
+				time.Now(),
+				p.Duration(parameters.DSLTokenRegistrationRefreshTTL))
+		}
+	}
+
 	var paddingPRNG *prng.PRNG
 	if isTunneled {
 
@@ -288,10 +313,11 @@ func doDSLFetch(
 
 	c := &dsl.FetcherConfig{
 
-		Logger:            NoticeCommonLogger(false),
-		BaseAPIParameters: baseAPIParams,
-		Tunneled:          isTunneled,
-		RoundTripper:      roundTripper,
+		Logger:               NoticeCommonLogger(false),
+		BaseAPIParameters:    baseAPIParams,
+		DSLTokenRegistration: requestDSLTokenRegistration,
+		Tunneled:             isTunneled,
+		RoundTripper:         roundTripper,
 
 		DatastoreHasServerEntry:        hasServerEntry,
 		DatastoreStoreServerEntry:      storeServerEntry,
@@ -305,6 +331,12 @@ func doDSLFetch(
 		DatastoreFatalError:            onDSLDatastoreFatalError,
 
 		DoGarbageCollection: DoGarbageCollection,
+	}
+
+	if requestDSLTokenRegistration {
+		c.DSLTokenRegistrationResponse = func(token string) error {
+			return errors.Trace(handleDSLTokenRegistrationResponse(token))
+		}
 	}
 
 	if isTunneled {
@@ -364,6 +396,70 @@ func doDSLFetch(
 	}
 
 	return nil
+}
+
+// jitterDSLTokenRegistrationRefreshTTL applies a deterministic jitter to the
+// refresh TTL, seeded with the token, so that repeated scheduling checks
+// against the same record compute the same refresh deadline.
+func jitterDSLTokenRegistrationRefreshTTL(
+	refreshTTL time.Duration, token string) time.Duration {
+
+	hash := sha256.Sum256([]byte("dsl-token-registration-refresh-ttl\x00" + token))
+	seed := prng.Seed(hash)
+	return prng.NewPRNGWithSeed(&seed).JitterDuration(
+		refreshTTL, dslTokenRegistrationRefreshTTLJitter)
+}
+
+// isDSLTokenRegistrationDue indicates whether a DSL token registration should
+// be requested with the next tunneled DSL fetch: when no token has been
+// registered yet, or when the last successful registration is older than the
+// jittered refresh TTL. Fetch scheduling, including retry pacing after failed
+// fetches, is handled by the DSL fetcher itself.
+func isDSLTokenRegistrationDue(
+	record *dslTokenRegistrationRecord,
+	now time.Time,
+	refreshTTL time.Duration) bool {
+
+	if len(record.DSLToken) == 0 {
+		return true
+	}
+
+	refreshDeadline := record.LastSuccessfulDSLTokenRegistrationTime.Add(
+		jitterDSLTokenRegistrationRefreshTTL(refreshTTL, record.DSLToken))
+	return !now.Before(refreshDeadline)
+}
+
+func handleDSLTokenRegistrationResponse(token string) error {
+	changed, err := storeDSLTokenRegistration(token, time.Now().UTC())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if changed {
+		NoticeDSLTokenAvailable()
+	}
+
+	return nil
+}
+
+// announcePersistedDSLToken emits a DSLTokenAvailable notice when a
+// previously registered DSL token is persisted, prompting the host
+// application to fetch it with GetDSLToken.
+func (controller *Controller) announcePersistedDSLToken() {
+	if !controller.config.EnableDSLTokenRegistration {
+		return
+	}
+
+	token, err := GetDSLToken()
+	if err != nil {
+		NoticeWarning("GetDSLToken failed: %v", errors.Trace(err))
+		return
+	}
+	if token == "" {
+		return
+	}
+
+	NoticeDSLTokenAvailable()
 }
 
 var disableDSLFetches atomic.Bool

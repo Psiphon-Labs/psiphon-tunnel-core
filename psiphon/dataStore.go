@@ -66,6 +66,7 @@ var (
 	datastoreDSLLastUntunneledFetchTimeKey      = "dslLastUntunneledDiscoverTime"
 	datastoreDSLLastTunneledFetchTimeKey        = "dslLastTunneledDiscoverTime"
 	datastoreDSLLastActiveOSLsTimeKey           = "dslLastActiveOSLsTime"
+	datastoreDSLTokenRegistrationKey            = []byte("dslTokenRegistration")
 	datastoreStoredLightProxyKey                = "storedLightProxy"
 
 	datastoreServerEntryFetchGCThreshold = 10
@@ -2733,6 +2734,127 @@ func DeleteNetworkReplayParameters[R any](networkID, replayID string) error {
 	key := makeNetworkReplayParametersKey[R](networkID, replayID)
 
 	return deleteBucketValue(datastoreNetworkReplayParametersBucket, key)
+}
+
+type dslTokenRegistrationRecord struct {
+	DSLToken                               string
+	LastSuccessfulDSLTokenRegistrationTime time.Time
+}
+
+// getDSLTokenRegistrationRecord loads the DSL token registration record
+// within a read-write transaction. When no record is persisted, a zero-value
+// record is returned. When the persisted record is corrupt, it is deleted and
+// a zero-value record is returned, degrading to "registration due" (see
+// isDSLTokenRegistrationDue) rather than failing; otherwise nothing would
+// ever rewrite or delete the corrupt record, permanently blocking both DSL
+// fetches and subsequent registrations.
+func getDSLTokenRegistrationRecord(
+	tx *datastoreTx) (*dslTokenRegistrationRecord, error) {
+
+	record := new(dslTokenRegistrationRecord)
+	bucket := tx.bucket(datastoreKeyValueBucket)
+	value := bucket.get(datastoreDSLTokenRegistrationKey)
+	if value == nil {
+		return record, nil
+	}
+
+	err := json.Unmarshal(value, record)
+	if err != nil {
+
+		// Delete the corrupt record and self-heal, following the corrupt
+		// record delete in SelectCandidateWithNetworkReplayParameters. The
+		// record content, which may include token material, is not logged.
+		NoticeWarning(
+			"getDSLTokenRegistrationRecord: unmarshal failed: %s",
+			errors.Trace(err))
+		*record = dslTokenRegistrationRecord{}
+		err = bucket.delete(datastoreDSLTokenRegistrationKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	return record, nil
+}
+
+func loadDSLTokenRegistrationRecord() (*dslTokenRegistrationRecord, error) {
+	var record *dslTokenRegistrationRecord
+
+	// datastoreUpdate, not datastoreView: getDSLTokenRegistrationRecord may
+	// delete a corrupt record, which requires a writable transaction.
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		var err error
+		record, err = getDSLTokenRegistrationRecord(tx)
+		return errors.Trace(err)
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return record, nil
+}
+
+func updateDSLTokenRegistrationRecord(
+	update func(*dslTokenRegistrationRecord)) (*dslTokenRegistrationRecord, error) {
+
+	var updatedRecord *dslTokenRegistrationRecord
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		record, err := getDSLTokenRegistrationRecord(tx)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		update(record)
+
+		value, err := json.Marshal(record)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		err = tx.bucket(datastoreKeyValueBucket).put(
+			datastoreDSLTokenRegistrationKey, value)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		updatedRecord = record
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return updatedRecord, nil
+}
+
+// GetDSLToken returns the currently persisted opaque DSL token as unpadded
+// Base64URL text. An empty string and nil error are returned when no token has
+// been registered.
+func GetDSLToken() (string, error) {
+	record, err := loadDSLTokenRegistrationRecord()
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return record.DSLToken, nil
+}
+
+func storeDSLTokenRegistration(
+	token string,
+	successTime time.Time) (bool, error) {
+	if len(token) == 0 {
+		return false, errors.TraceNew("missing DSL token")
+	}
+
+	changed := false
+	_, err := updateDSLTokenRegistrationRecord(func(record *dslTokenRegistrationRecord) {
+		changed = record.DSLToken != token
+		record.DSLToken = token
+		record.LastSuccessfulDSLTokenRegistrationTime = successTime
+	})
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	return changed, nil
 }
 
 // DSLGetLastUntunneledFetchTime returns the timestamp of the last
