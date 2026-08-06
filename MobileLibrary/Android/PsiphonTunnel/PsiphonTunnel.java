@@ -325,7 +325,7 @@ public class PsiphonTunnel {
 
     /**
      * Returns the persisted opaque DSL access token, or an empty string when
-     * no token has been registered.
+     * Psiphon is not running or no token has been registered.
      */
     public String getDSLAccessToken() throws Exception {
         return Psi.getDSLAccessToken();

@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
 func TestDSLAccessTokenRegistrationScheduling(t *testing.T) {
@@ -95,7 +97,8 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 		t.Fatal("first token was not reported as changed")
 	}
 
-	got, err := GetDSLAccessToken()
+	controller := &Controller{config: config}
+	got, err := controller.GetDSLAccessToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +127,7 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	}
 	datastoreOpen = true
 
-	restartedToken, err := GetDSLAccessToken()
+	restartedToken, err := controller.GetDSLAccessToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +136,7 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	}
 }
 
-func TestDSLAccessTokenNoticeAfterPersistence(t *testing.T) {
+func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	config := newDSLAccessTokenTestConfig(t)
 	if err := OpenDataStore(config); err != nil {
 		t.Fatal(err)
@@ -158,7 +161,7 @@ func TestDSLAccessTokenNoticeAfterPersistence(t *testing.T) {
 			if len(value.Data) != 0 {
 				t.Fatal("DSLAccessTokenAvailable notice contains data")
 			}
-			persistedToken, err := GetDSLAccessToken()
+			persistedToken, err := (&Controller{config: config}).GetDSLAccessToken()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,6 +195,33 @@ func TestDSLAccessTokenNoticeAfterPersistence(t *testing.T) {
 	controller.announcePersistedDSLAccessToken()
 	if notices != 1 {
 		t.Fatal("persisted startup token was not announced")
+	}
+
+	config.EnableDSLAccessTokenRegistration = false
+	got, err := controller.GetDSLAccessToken()
+	if err != nil || got != "" {
+		t.Fatal("config-disabled access token was returned")
+	}
+	notices = 0
+	controller.announcePersistedDSLAccessToken()
+	if notices != 0 {
+		t.Fatal("config-disabled access token was announced")
+	}
+
+	config.EnableDSLAccessTokenRegistration = true
+	err = config.SetParameters("", false, map[string]interface{}{
+		parameters.DSLAccessTokenDisableRegistration: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = controller.GetDSLAccessToken()
+	if err != nil || got != "" {
+		t.Fatal("tactics-disabled access token was returned")
+	}
+	controller.announcePersistedDSLAccessToken()
+	if notices != 0 {
+		t.Fatal("tactics-disabled access token was announced")
 	}
 }
 
@@ -276,7 +306,7 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	// GetDSLAccessToken degrades to "no token", not an error (mobile binding
 	// path).
 	setCorruptRecord(corruptRecords[0])
-	token, err := GetDSLAccessToken()
+	token, err := (&Controller{config: config}).GetDSLAccessToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +320,7 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	if err := handleDSLAccessTokenRegistrationResponse("dG9rZW4"); err != nil {
 		t.Fatal(err)
 	}
-	token, err = GetDSLAccessToken()
+	token, err = (&Controller{config: config}).GetDSLAccessToken()
 	if err != nil {
 		t.Fatal(err)
 	}

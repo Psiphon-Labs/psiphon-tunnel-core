@@ -175,11 +175,14 @@ func doDSLFetch(
 	}
 
 	requestDSLAccessTokenRegistration := false
+	enableDSLAccessTokenRegistration :=
+		config.EnableDSLAccessTokenRegistration &&
+			!p.Bool(parameters.DSLAccessTokenDisableRegistration)
 
 	// Register only on tunneled fetches. The untunneled bootstrap/recovery
 	// fetch may overlap the post-connect fetch; keeping registration on one
 	// path is simpler and avoids concurrent token issuance and persistence.
-	if isTunneled && config.EnableDSLAccessTokenRegistration {
+	if isTunneled && enableDSLAccessTokenRegistration {
 		record, err := loadDSLAccessTokenRegistrationRecord()
 		if err != nil {
 
@@ -448,14 +451,30 @@ func handleDSLAccessTokenRegistrationResponse(token string) error {
 	return nil
 }
 
+func isDSLAccessTokenRegistrationEnabled(config *Config) bool {
+	if !config.EnableDSLAccessTokenRegistration {
+		return false
+	}
+
+	p := config.GetParameters().Get()
+	enabled := !p.Bool(parameters.DSLAccessTokenDisableRegistration)
+	p.Close()
+	return enabled
+}
+
+// GetDSLAccessToken returns the persisted opaque DSL access token. An empty
+// string is returned when registration is disabled or no token is available.
+func (controller *Controller) GetDSLAccessToken() (string, error) {
+	if !isDSLAccessTokenRegistrationEnabled(controller.config) {
+		return "", nil
+	}
+	return getPersistedDSLAccessToken()
+}
+
 // announcePersistedDSLAccessToken emits a DSLAccessTokenAvailable notice when
 // a previously registered DSL access token is available to the host application.
 func (controller *Controller) announcePersistedDSLAccessToken() {
-	if !controller.config.EnableDSLAccessTokenRegistration {
-		return
-	}
-
-	token, err := GetDSLAccessToken()
+	token, err := controller.GetDSLAccessToken()
 	if err != nil {
 		NoticeWarning("GetDSLAccessToken failed: %v", errors.Trace(err))
 		return

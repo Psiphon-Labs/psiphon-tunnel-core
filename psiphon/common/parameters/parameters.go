@@ -568,6 +568,7 @@ const (
 	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
 	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
+	DSLAccessTokenDisableRegistration                  = "DSLAccessTokenDisableRegistration"
 	DSLAccessTokenRegistrationRefreshTTL               = "DSLAccessTokenRegistrationRefreshTTL"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
@@ -1245,6 +1246,7 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
+	DSLAccessTokenDisableRegistration:                 {value: false},
 	DSLAccessTokenRegistrationRefreshTTL:              {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},

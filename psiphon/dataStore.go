@@ -2826,10 +2826,7 @@ func updateDSLAccessTokenRegistrationRecord(
 	return updatedRecord, nil
 }
 
-// GetDSLAccessToken returns the currently persisted opaque DSL access token as
-// unpadded Base64URL text. An empty string and nil error are returned when no
-// access token has been registered.
-func GetDSLAccessToken() (string, error) {
+func getPersistedDSLAccessToken() (string, error) {
 	record, err := loadDSLAccessTokenRegistrationRecord()
 	if err != nil {
 		return "", errors.Trace(err)

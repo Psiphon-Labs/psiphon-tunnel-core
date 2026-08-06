@@ -659,10 +659,17 @@ func GetBuildInfo() string {
 }
 
 // GetDSLAccessToken returns the persisted opaque DSL access token. An empty
-// string is returned when no token has been registered.
+// string is returned when Psiphon is not running or no token has been registered.
 // A DSLAccessTokenAvailable notice indicates that a token is available.
 func GetDSLAccessToken() (string, error) {
-	return psiphon.GetDSLAccessToken()
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller == nil {
+		return "", nil
+	}
+
+	return controller.GetDSLAccessToken()
 }
 
 func GetPacketTunnelMTU() int {

@@ -508,7 +508,7 @@ Returns the path where the rotated notices file will be created.
  */
 + (NSString * _Nonnull)getDeviceRegion;
 
-/*! Returns the persisted opaque DSL access token, or an empty string when no token has been registered. */
+/*! Returns the persisted opaque DSL access token, or an empty string when Psiphon is not running or no token has been registered. */
 - (NSString * _Nullable)getDSLAccessToken:(NSError * _Nullable * _Nonnull)error;
 
 #pragma mark - Profiling utitlities
