@@ -20,6 +20,7 @@ package psiphon
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func TestDSLAccessTokenRegistrationScheduling(t *testing.T) {
 	}
 
 	record := &dslAccessTokenRegistrationRecord{
-		DSLAccessToken: "dG9rZW4",
+		DSLAccessToken: []byte("token"),
 		LastSuccessfulDSLAccessTokenRegistrationTime: now,
 	}
 	refreshDeadline := now.Add(refreshTTL)
@@ -67,7 +68,7 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 		}
 	}()
 
-	token := "b3BhcXVlLXRva2Vu"
+	token := []byte("opaque-token")
 	successTime := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	changed, err := storeDSLAccessTokenRegistration(token, successTime)
 	if err != nil {
@@ -82,19 +83,19 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != token {
+	if !bytes.Equal(got, token) {
 		t.Fatal("unexpected stored token")
 	}
 
 	failedRefreshTime := successTime.Add(time.Hour)
-	if _, err := storeDSLAccessTokenRegistration("", failedRefreshTime); err == nil {
+	if _, err := storeDSLAccessTokenRegistration(nil, failedRefreshTime); err == nil {
 		t.Fatal("empty token registration succeeded")
 	}
 	record, err := loadDSLAccessTokenRegistrationRecord()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.DSLAccessToken != token ||
+	if !bytes.Equal(record.DSLAccessToken, token) ||
 		!record.LastSuccessfulDSLAccessTokenRegistrationTime.Equal(successTime) {
 
 		t.Fatal("failed refresh did not preserve the successful record")
@@ -111,7 +112,7 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restartedToken != token {
+	if !bytes.Equal(restartedToken, token) {
 		t.Fatal("token was not persisted across restart")
 	}
 }
@@ -123,11 +124,14 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	}
 	defer CloseDataStore()
 
-	token := "-_8Ab3BhcXVlLXNlY3JldC10b2tlbg"
+	token := []byte{0xff, 0x00, 0x80, 's', 'e', 'c', 'r', 'e', 't'}
 
 	var notices int
 	err := SetNoticeWriter(NewNoticeReceiver(func(notice []byte) {
-		if bytes.Contains(notice, []byte(token)) {
+		// Neither the raw token nor the encoding a host application would
+		// receive may appear in a notice.
+		if bytes.Contains(notice, token) ||
+			bytes.Contains(notice, []byte(base64.RawURLEncoding.EncodeToString(token))) {
 			t.Fatal("token leaked into notice")
 		}
 		var value struct {
@@ -145,7 +149,7 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if persistedToken != token {
+			if !bytes.Equal(persistedToken, token) {
 				t.Fatal("notice emitted before token persistence")
 			}
 			notices++
@@ -179,7 +183,7 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 
 	config.EnableDSLAccessTokenRegistration = false
 	got, err := controller.GetDSLAccessToken()
-	if err != nil || got != "" {
+	if err != nil || len(got) != 0 {
 		t.Fatal("config-disabled access token was returned")
 	}
 	notices = 0
@@ -196,7 +200,7 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = controller.GetDSLAccessToken()
-	if err != nil || got != "" {
+	if err != nil || len(got) != 0 {
 		t.Fatal("tactics-disabled access token was returned")
 	}
 	controller.announcePersistedDSLAccessToken()
@@ -290,21 +294,21 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "" {
+	if len(token) != 0 {
 		t.Fatal("GetDSLAccessToken did not tolerate corrupt record")
 	}
 
 	// A registration over a corrupt record succeeds, healing the
 	// storeDSLAccessTokenRegistration path.
 	setCorruptRecord(corruptRecords[0])
-	if err := handleDSLAccessTokenRegistrationResponse("dG9rZW4"); err != nil {
+	if err := handleDSLAccessTokenRegistrationResponse([]byte("token")); err != nil {
 		t.Fatal(err)
 	}
 	token, err = (&Controller{config: config}).GetDSLAccessToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "dG9rZW4" {
+	if !bytes.Equal(token, []byte("token")) {
 		t.Fatal("registration did not overwrite corrupt record")
 	}
 }

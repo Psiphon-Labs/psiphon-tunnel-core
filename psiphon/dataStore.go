@@ -2737,7 +2737,7 @@ func DeleteNetworkReplayParameters[R any](networkID, replayID string) error {
 }
 
 type dslAccessTokenRegistrationRecord struct {
-	DSLAccessToken                               string
+	DSLAccessToken                               []byte
 	LastSuccessfulDSLAccessTokenRegistrationTime time.Time
 }
 
@@ -2826,16 +2826,16 @@ func updateDSLAccessTokenRegistrationRecord(
 	return updatedRecord, nil
 }
 
-func getPersistedDSLAccessToken() (string, error) {
+func getPersistedDSLAccessToken() ([]byte, error) {
 	record, err := loadDSLAccessTokenRegistrationRecord()
 	if err != nil {
-		return "", errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	return record.DSLAccessToken, nil
 }
 
 func storeDSLAccessTokenRegistration(
-	token string,
+	token []byte,
 	successTime time.Time) (bool, error) {
 	if len(token) == 0 {
 		return false, errors.TraceNew("missing DSL access token")
@@ -2843,8 +2843,8 @@ func storeDSLAccessTokenRegistration(
 
 	changed := false
 	_, err := updateDSLAccessTokenRegistrationRecord(func(record *dslAccessTokenRegistrationRecord) {
-		changed = record.DSLAccessToken != token
-		record.DSLAccessToken = token
+		changed = !bytes.Equal(record.DSLAccessToken, token)
+		record.DSLAccessToken = append([]byte(nil), token...)
 		record.LastSuccessfulDSLAccessTokenRegistrationTime = successTime
 	})
 	if err != nil {

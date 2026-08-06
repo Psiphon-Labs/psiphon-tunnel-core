@@ -338,7 +338,7 @@ func doDSLFetch(
 	}
 
 	if requestDSLAccessTokenRegistration {
-		c.DSLAccessTokenRegistrationResponse = func(token string) error {
+		c.DSLAccessTokenRegistrationResponse = func(token []byte) error {
 			return errors.Trace(handleDSLAccessTokenRegistrationResponse(token))
 		}
 	}
@@ -421,7 +421,7 @@ func isDSLAccessTokenRegistrationDue(
 	return !now.Before(refreshDeadline)
 }
 
-func handleDSLAccessTokenRegistrationResponse(token string) error {
+func handleDSLAccessTokenRegistrationResponse(token []byte) error {
 	changed, err := storeDSLAccessTokenRegistration(token, time.Now().UTC())
 	if err != nil {
 		return errors.Trace(err)
@@ -445,11 +445,13 @@ func isDSLAccessTokenRegistrationEnabled(config *Config) bool {
 	return enabled
 }
 
-// GetDSLAccessToken returns the persisted opaque DSL access token. An empty
-// string is returned when registration is disabled or no token is available.
-func (controller *Controller) GetDSLAccessToken() (string, error) {
+// GetDSLAccessToken returns the persisted opaque DSL access token, as issued,
+// in its raw byte form. Nil is returned when registration is disabled or no
+// token is available. Callers exposing the token to a host application encode
+// it; see psi.GetDSLAccessToken.
+func (controller *Controller) GetDSLAccessToken() ([]byte, error) {
 	if !isDSLAccessTokenRegistrationEnabled(controller.config) {
-		return "", nil
+		return nil, nil
 	}
 	return getPersistedDSLAccessToken()
 }
@@ -462,7 +464,7 @@ func (controller *Controller) announcePersistedDSLAccessToken() {
 		NoticeWarning("GetDSLAccessToken failed: %v", errors.Trace(err))
 		return
 	}
-	if token == "" {
+	if len(token) == 0 {
 		return
 	}
 

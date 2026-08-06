@@ -26,6 +26,7 @@ package psi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -658,9 +659,10 @@ func GetBuildInfo() string {
 	return string(buildInfo)
 }
 
-// GetDSLAccessToken returns the persisted opaque DSL access token. An empty
-// string is returned when Psiphon is not running or no token has been registered.
-// A DSLAccessTokenAvailable notice indicates that a token is available.
+// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
+// Base64URL text. An empty string is returned when Psiphon is not running or no
+// token has been registered. A DSLAccessTokenAvailable notice indicates that a
+// token is available.
 func GetDSLAccessToken() (string, error) {
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -669,7 +671,15 @@ func GetDSLAccessToken() (string, error) {
 		return "", nil
 	}
 
-	return controller.GetDSLAccessToken()
+	token, err := controller.GetDSLAccessToken()
+	if err != nil {
+		return "", err
+	}
+	if len(token) == 0 {
+		return "", nil
+	}
+
+	return base64.RawURLEncoding.EncodeToString(token), nil
 }
 
 func GetPacketTunnelMTU() int {

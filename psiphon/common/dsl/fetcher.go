@@ -22,7 +22,6 @@ package dsl
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -50,7 +49,7 @@ type FetcherConfig struct {
 
 	BaseAPIParameters                  common.APIParameters
 	DSLAccessTokenRegistration         bool
-	DSLAccessTokenRegistrationResponse func(string) error
+	DSLAccessTokenRegistrationResponse func([]byte) error
 
 	Tunneled     bool
 	RoundTripper FetcherRoundTripper
@@ -234,7 +233,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 				"tunneled": f.config.Tunneled,
 			}).Warning("DSL: access token registration response omitted access token")
 		} else if err := f.config.DSLAccessTokenRegistrationResponse(
-			base64.RawURLEncoding.EncodeToString(discoverResponse.DSLAccessToken)); err != nil {
+			discoverResponse.DSLAccessToken); err != nil {
 			f.config.Logger.WithTraceFields(common.LogFields{
 				"tunneled": f.config.Tunneled,
 			}).Warning("DSL: access token registration persistence failed")
