@@ -55,10 +55,10 @@ type OSLFileSpec []byte
 // specifies a maximum number of server entry tags/versions to return; the
 // DSL backend may return less, but not more.
 type DiscoverServerEntriesRequest struct {
-	BaseAPIParameters    protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
-	OSLKeys              []OSLKey                     `cbor:"2,keyasint,omitempty"`
-	DiscoverCount        int32                        `cbor:"3,keyasint,omitempty"`
-	DSLTokenRegistration bool                         `cbor:"4,keyasint,omitempty"`
+	BaseAPIParameters          protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+	OSLKeys                    []OSLKey                     `cbor:"2,keyasint,omitempty"`
+	DiscoverCount              int32                        `cbor:"3,keyasint,omitempty"`
+	DSLAccessTokenRegistration bool                         `cbor:"4,keyasint,omitempty"`
 }
 
 // ServerEntryTag is a binary representation of a protocol.ServerEntry.Tag
@@ -100,7 +100,7 @@ type VersionedServerEntryTag struct {
 // send a GetServerEntriesRequest to fetch the server entries.
 type DiscoverServerEntriesResponse struct {
 	VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
-	DSLToken                 string                     `cbor:"2,keyasint,omitempty"`
+	DSLAccessToken           []byte                     `cbor:"2,keyasint,omitempty"`
 }
 
 // GetServerEntriesRequest is a request from a client to download the

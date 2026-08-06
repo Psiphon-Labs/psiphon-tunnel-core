@@ -48,9 +48,9 @@ type FetcherRoundTripper func(
 type FetcherConfig struct {
 	Logger common.Logger
 
-	BaseAPIParameters            common.APIParameters
-	DSLTokenRegistration         bool
-	DSLTokenRegistrationResponse func(string) error
+	BaseAPIParameters                  common.APIParameters
+	DSLAccessTokenRegistration         bool
+	DSLAccessTokenRegistrationResponse func(string) error
 
 	Tunneled     bool
 	RoundTripper FetcherRoundTripper
@@ -130,8 +130,8 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher.
 func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
-	if config.DSLTokenRegistration && config.DSLTokenRegistrationResponse == nil {
-		return nil, errors.TraceNew("missing DSL token registration callback")
+	if config.DSLAccessTokenRegistration && config.DSLAccessTokenRegistrationResponse == nil {
+		return nil, errors.TraceNew("missing DSL access token registration callback")
 	}
 
 	packedAPIParameters, err := protocol.EncodePackedAPIParameters(
@@ -223,27 +223,21 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		ctx,
 		OSLKeys,
 		discoverCount,
-		f.config.DSLTokenRegistration)
+		f.config.DSLAccessTokenRegistration)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if f.config.DSLTokenRegistration {
-		if discoverResponse.DSLToken == "" {
+	if f.config.DSLAccessTokenRegistration {
+		if len(discoverResponse.DSLAccessToken) == 0 {
 			f.config.Logger.WithTraceFields(common.LogFields{
 				"tunneled": f.config.Tunneled,
-			}).Warning("DSL: token registration response omitted token")
-		} else if decoded, err := base64.RawURLEncoding.Strict().DecodeString(
-			discoverResponse.DSLToken); err != nil ||
-			base64.RawURLEncoding.EncodeToString(decoded) != discoverResponse.DSLToken {
-
+			}).Warning("DSL: access token registration response omitted access token")
+		} else if err := f.config.DSLAccessTokenRegistrationResponse(
+			base64.RawURLEncoding.EncodeToString(discoverResponse.DSLAccessToken)); err != nil {
 			f.config.Logger.WithTraceFields(common.LogFields{
 				"tunneled": f.config.Tunneled,
-			}).Warning("DSL: token registration response contained invalid encoding")
-		} else if err := f.config.DSLTokenRegistrationResponse(discoverResponse.DSLToken); err != nil {
-			f.config.Logger.WithTraceFields(common.LogFields{
-				"tunneled": f.config.Tunneled,
-			}).Warning("DSL: token registration persistence failed")
+			}).Warning("DSL: access token registration persistence failed")
 		}
 	}
 
@@ -599,7 +593,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
 	discoverCount int,
-	dslTokenRegistration bool) (*DiscoverServerEntriesResponse, error) {
+	dslAccessTokenRegistration bool) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger
@@ -611,10 +605,10 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		// of active OSL IDs is expected to be relatively small.
 
 		request := &DiscoverServerEntriesRequest{
-			BaseAPIParameters:    f.packedAPIParameters,
-			OSLKeys:              keys,
-			DiscoverCount:        int32(discoverCount),
-			DSLTokenRegistration: dslTokenRegistration,
+			BaseAPIParameters:          f.packedAPIParameters,
+			OSLKeys:                    keys,
+			DiscoverCount:              int32(discoverCount),
+			DSLAccessTokenRegistration: dslAccessTokenRegistration,
 		}
 
 		var response DiscoverServerEntriesResponse

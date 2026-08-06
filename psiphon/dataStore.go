@@ -66,7 +66,7 @@ var (
 	datastoreDSLLastUntunneledFetchTimeKey      = "dslLastUntunneledDiscoverTime"
 	datastoreDSLLastTunneledFetchTimeKey        = "dslLastTunneledDiscoverTime"
 	datastoreDSLLastActiveOSLsTimeKey           = "dslLastActiveOSLsTime"
-	datastoreDSLTokenRegistrationKey            = []byte("dslTokenRegistration")
+	datastoreDSLAccessTokenRegistrationKey      = []byte("dslAccessTokenRegistration")
 	datastoreStoredLightProxyKey                = "storedLightProxy"
 
 	datastoreServerEntryFetchGCThreshold = 10
@@ -2736,24 +2736,24 @@ func DeleteNetworkReplayParameters[R any](networkID, replayID string) error {
 	return deleteBucketValue(datastoreNetworkReplayParametersBucket, key)
 }
 
-type dslTokenRegistrationRecord struct {
-	DSLToken                               string
-	LastSuccessfulDSLTokenRegistrationTime time.Time
+type dslAccessTokenRegistrationRecord struct {
+	DSLAccessToken                               string
+	LastSuccessfulDSLAccessTokenRegistrationTime time.Time
 }
 
-// getDSLTokenRegistrationRecord loads the DSL token registration record
+// getDSLAccessTokenRegistrationRecord loads the DSL access token registration record
 // within a read-write transaction. When no record is persisted, a zero-value
 // record is returned. When the persisted record is corrupt, it is deleted and
 // a zero-value record is returned, degrading to "registration due" (see
-// isDSLTokenRegistrationDue) rather than failing; otherwise nothing would
+// isDSLAccessTokenRegistrationDue) rather than failing; otherwise nothing would
 // ever rewrite or delete the corrupt record, permanently blocking both DSL
 // fetches and subsequent registrations.
-func getDSLTokenRegistrationRecord(
-	tx *datastoreTx) (*dslTokenRegistrationRecord, error) {
+func getDSLAccessTokenRegistrationRecord(
+	tx *datastoreTx) (*dslAccessTokenRegistrationRecord, error) {
 
-	record := new(dslTokenRegistrationRecord)
+	record := new(dslAccessTokenRegistrationRecord)
 	bucket := tx.bucket(datastoreKeyValueBucket)
-	value := bucket.get(datastoreDSLTokenRegistrationKey)
+	value := bucket.get(datastoreDSLAccessTokenRegistrationKey)
 	if value == nil {
 		return record, nil
 	}
@@ -2765,10 +2765,10 @@ func getDSLTokenRegistrationRecord(
 		// record delete in SelectCandidateWithNetworkReplayParameters. The
 		// record content, which may include token material, is not logged.
 		NoticeWarning(
-			"getDSLTokenRegistrationRecord: unmarshal failed: %s",
+			"getDSLAccessTokenRegistrationRecord: unmarshal failed: %s",
 			errors.Trace(err))
-		*record = dslTokenRegistrationRecord{}
-		err = bucket.delete(datastoreDSLTokenRegistrationKey)
+		*record = dslAccessTokenRegistrationRecord{}
+		err = bucket.delete(datastoreDSLAccessTokenRegistrationKey)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -2777,14 +2777,14 @@ func getDSLTokenRegistrationRecord(
 	return record, nil
 }
 
-func loadDSLTokenRegistrationRecord() (*dslTokenRegistrationRecord, error) {
-	var record *dslTokenRegistrationRecord
+func loadDSLAccessTokenRegistrationRecord() (*dslAccessTokenRegistrationRecord, error) {
+	var record *dslAccessTokenRegistrationRecord
 
-	// datastoreUpdate, not datastoreView: getDSLTokenRegistrationRecord may
+	// datastoreUpdate, not datastoreView: getDSLAccessTokenRegistrationRecord may
 	// delete a corrupt record, which requires a writable transaction.
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 		var err error
-		record, err = getDSLTokenRegistrationRecord(tx)
+		record, err = getDSLAccessTokenRegistrationRecord(tx)
 		return errors.Trace(err)
 	})
 	if err != nil {
@@ -2793,12 +2793,12 @@ func loadDSLTokenRegistrationRecord() (*dslTokenRegistrationRecord, error) {
 	return record, nil
 }
 
-func updateDSLTokenRegistrationRecord(
-	update func(*dslTokenRegistrationRecord)) (*dslTokenRegistrationRecord, error) {
+func updateDSLAccessTokenRegistrationRecord(
+	update func(*dslAccessTokenRegistrationRecord)) (*dslAccessTokenRegistrationRecord, error) {
 
-	var updatedRecord *dslTokenRegistrationRecord
+	var updatedRecord *dslAccessTokenRegistrationRecord
 	err := datastoreUpdate(func(tx *datastoreTx) error {
-		record, err := getDSLTokenRegistrationRecord(tx)
+		record, err := getDSLAccessTokenRegistrationRecord(tx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -2811,7 +2811,7 @@ func updateDSLTokenRegistrationRecord(
 		}
 
 		err = tx.bucket(datastoreKeyValueBucket).put(
-			datastoreDSLTokenRegistrationKey, value)
+			datastoreDSLAccessTokenRegistrationKey, value)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -2826,29 +2826,29 @@ func updateDSLTokenRegistrationRecord(
 	return updatedRecord, nil
 }
 
-// GetDSLToken returns the currently persisted opaque DSL token as unpadded
-// Base64URL text. An empty string and nil error are returned when no token has
-// been registered.
-func GetDSLToken() (string, error) {
-	record, err := loadDSLTokenRegistrationRecord()
+// GetDSLAccessToken returns the currently persisted opaque DSL access token as
+// unpadded Base64URL text. An empty string and nil error are returned when no
+// access token has been registered.
+func GetDSLAccessToken() (string, error) {
+	record, err := loadDSLAccessTokenRegistrationRecord()
 	if err != nil {
 		return "", errors.Trace(err)
 	}
-	return record.DSLToken, nil
+	return record.DSLAccessToken, nil
 }
 
-func storeDSLTokenRegistration(
+func storeDSLAccessTokenRegistration(
 	token string,
 	successTime time.Time) (bool, error) {
 	if len(token) == 0 {
-		return false, errors.TraceNew("missing DSL token")
+		return false, errors.TraceNew("missing DSL access token")
 	}
 
 	changed := false
-	_, err := updateDSLTokenRegistrationRecord(func(record *dslTokenRegistrationRecord) {
-		changed = record.DSLToken != token
-		record.DSLToken = token
-		record.LastSuccessfulDSLTokenRegistrationTime = successTime
+	_, err := updateDSLAccessTokenRegistrationRecord(func(record *dslAccessTokenRegistrationRecord) {
+		changed = record.DSLAccessToken != token
+		record.DSLAccessToken = token
+		record.LastSuccessfulDSLAccessTokenRegistrationTime = successTime
 	})
 	if err != nil {
 		return false, errors.Trace(err)

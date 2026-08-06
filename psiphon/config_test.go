@@ -106,16 +106,16 @@ func (suite *ConfigTestSuite) Test_LoadConfig_BasicGood() {
 	suite.Nil(err, "a basic config should succeed")
 }
 
-func (suite *ConfigTestSuite) Test_LoadConfig_DSLTokenRegistration() {
+func (suite *ConfigTestSuite) Test_LoadConfig_DSLAccessTokenRegistration() {
 	var obj map[string]any
 	suite.Require().NoError(json.Unmarshal(suite.confStubBlob, &obj))
-	obj["EnableDSLTokenRegistration"] = true
+	obj["EnableDSLAccessTokenRegistration"] = true
 
 	configJSON, err := json.Marshal(obj)
 	suite.Require().NoError(err)
 	config, err := LoadConfig(configJSON)
 	suite.Require().NoError(err)
-	suite.True(config.EnableDSLTokenRegistration)
+	suite.True(config.EnableDSLAccessTokenRegistration)
 }
 
 // Tests non-JSON file contents

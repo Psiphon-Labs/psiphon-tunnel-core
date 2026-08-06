@@ -351,9 +351,9 @@ followed by a tunnel-core shutdown.
 - (void)onLightProxyAvailable;
 
 /*!
- Called when a persisted opaque DSL token is available to fetch with getDSLToken.
+ Called when a persisted opaque DSL access token is available to fetch with getDSLAccessToken.
  */
-- (void)onDSLTokenAvailable;
+- (void)onDSLAccessTokenAvailable;
 
 @end
 
@@ -508,8 +508,8 @@ Returns the path where the rotated notices file will be created.
  */
 + (NSString * _Nonnull)getDeviceRegion;
 
-/*! Returns the persisted opaque DSL token as unpadded Base64URL text. */
-- (NSString * _Nullable)getDSLToken:(NSError * _Nullable * _Nonnull)error;
+/*! Returns the persisted opaque DSL access token, or an empty string when no token has been registered. */
+- (NSString * _Nullable)getDSLAccessToken:(NSError * _Nullable * _Nonnull)error;
 
 #pragma mark - Profiling utitlities
 

@@ -1222,10 +1222,11 @@ func NoticeLightProxyAvailable() {
 	singletonNoticeLogger.outputNotice("LightProxyAvailable", 0)
 }
 
-// NoticeDSLTokenAvailable indicates that an opaque DSL token is available to
-// fetch via GetDSLToken. The token is intentionally omitted from the notice.
-func NoticeDSLTokenAvailable() {
-	singletonNoticeLogger.outputNotice("DSLTokenAvailable", 0)
+// NoticeDSLAccessTokenAvailable indicates that an opaque DSL access token is
+// available to fetch via GetDSLAccessToken. The token is intentionally omitted
+// from the notice.
+func NoticeDSLAccessTokenAvailable() {
+	singletonNoticeLogger.outputNotice("DSLAccessTokenAvailable", 0)
 }
 
 type repetitiveNoticeState struct {

@@ -178,10 +178,10 @@ public class PsiphonTunnel {
          */
         default void onLightProxyAvailable() {}
         /**
-         * Called when a persisted opaque DSL token is available to fetch with
-         * getDSLToken.
+         * Called when a persisted opaque DSL access token is available to fetch with
+         * getDSLAccessToken.
          */
-        default void onDSLTokenAvailable() {}
+        default void onDSLAccessTokenAvailable() {}
         default void onExiting() {}
     }
 
@@ -324,11 +324,11 @@ public class PsiphonTunnel {
     }
 
     /**
-     * Returns the persisted opaque DSL token as unpadded Base64URL text, or an
-     * empty string when no token has been registered.
+     * Returns the persisted opaque DSL access token, or an empty string when
+     * no token has been registered.
      */
-    public String getDSLToken() throws Exception {
-        return Psi.getDSLToken();
+    public String getDSLAccessToken() throws Exception {
+        return Psi.getDSLAccessToken();
     }
 
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
@@ -1008,8 +1008,8 @@ public class PsiphonTunnel {
                         commonRegionActivity);
             } else if (noticeType.equals("LightProxyAvailable")) {
                 mHostService.onLightProxyAvailable();
-            } else if (noticeType.equals("DSLTokenAvailable")) {
-                mHostService.onDSLTokenAvailable();
+            } else if (noticeType.equals("DSLAccessTokenAvailable")) {
+                mHostService.onDSLAccessTokenAvailable();
             }
 
             if (diagnostic) {
