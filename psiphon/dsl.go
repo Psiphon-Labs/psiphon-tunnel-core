@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"context"
-	"crypto/sha256"
 	"sync/atomic"
 	"time"
 
@@ -32,8 +31,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
-
-const dslAccessTokenRegistrationRefreshTTLJitter = 0.1
 
 func runUntunneledDSLFetcher(
 	ctx context.Context,
@@ -405,23 +402,10 @@ func doDSLFetch(
 	return nil
 }
 
-// jitterDSLAccessTokenRegistrationRefreshTTL applies a deterministic jitter to
-// the refresh TTL, seeded with the access token, so that repeated scheduling
-// checks against the same record compute the same refresh deadline.
-func jitterDSLAccessTokenRegistrationRefreshTTL(
-	refreshTTL time.Duration, accessToken string) time.Duration {
-
-	hash := sha256.Sum256([]byte(
-		"dsl-access-token-registration-refresh-ttl\x00" + accessToken))
-	seed := prng.Seed(hash)
-	return prng.NewPRNGWithSeed(&seed).JitterDuration(
-		refreshTTL, dslAccessTokenRegistrationRefreshTTLJitter)
-}
-
 // isDSLAccessTokenRegistrationDue indicates whether a DSL access token
 // registration should be requested with the next tunneled DSL fetch: when no token has been
 // registered yet, or when the last successful registration is older than the
-// jittered refresh TTL. Fetch scheduling, including retry pacing after failed
+// refresh TTL. Fetch scheduling, including retry pacing after failed
 // fetches, is handled by the DSL fetcher itself.
 func isDSLAccessTokenRegistrationDue(
 	record *dslAccessTokenRegistrationRecord,
@@ -433,8 +417,7 @@ func isDSLAccessTokenRegistrationDue(
 	}
 
 	refreshDeadline := record.LastSuccessfulDSLAccessTokenRegistrationTime.Add(
-		jitterDSLAccessTokenRegistrationRefreshTTL(
-			refreshTTL, record.DSLAccessToken))
+		refreshTTL)
 	return !now.Before(refreshDeadline)
 }
 

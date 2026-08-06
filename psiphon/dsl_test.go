@@ -40,8 +40,7 @@ func TestDSLAccessTokenRegistrationScheduling(t *testing.T) {
 		DSLAccessToken: "dG9rZW4",
 		LastSuccessfulDSLAccessTokenRegistrationTime: now,
 	}
-	refreshDeadline := now.Add(
-		jitterDSLAccessTokenRegistrationRefreshTTL(refreshTTL, record.DSLAccessToken))
+	refreshDeadline := now.Add(refreshTTL)
 
 	if isDSLAccessTokenRegistrationDue(record, now, refreshTTL) {
 		t.Fatal("registration is due immediately after success")
@@ -49,29 +48,10 @@ func TestDSLAccessTokenRegistrationScheduling(t *testing.T) {
 	if isDSLAccessTokenRegistrationDue(
 		record, refreshDeadline.Add(-time.Nanosecond), refreshTTL) {
 
-		t.Fatal("registration is due before jittered refresh TTL")
+		t.Fatal("registration is due before refresh TTL")
 	}
 	if !isDSLAccessTokenRegistrationDue(record, refreshDeadline, refreshTTL) {
-		t.Fatal("registration is not due at jittered refresh TTL")
-	}
-}
-
-func TestDSLAccessTokenRegistrationRefreshTTLJitter(t *testing.T) {
-	refreshTTL := 24 * time.Hour
-	first := jitterDSLAccessTokenRegistrationRefreshTTL(refreshTTL, "dG9rZW4")
-	second := jitterDSLAccessTokenRegistrationRefreshTTL(refreshTTL, "dG9rZW4")
-	other := jitterDSLAccessTokenRegistrationRefreshTTL(refreshTTL, "b3RoZXItdG9rZW4")
-
-	if first != second {
-		t.Fatalf("jitter is not deterministic: %s != %s", first, second)
-	}
-	if first == other {
-		t.Fatal("jitter does not vary by access token")
-	}
-	minimum := time.Duration(float64(refreshTTL) * (1 - dslAccessTokenRegistrationRefreshTTLJitter))
-	maximum := time.Duration(float64(refreshTTL) * (1 + dslAccessTokenRegistrationRefreshTTLJitter))
-	if first < minimum || first > maximum || other < minimum || other > maximum {
-		t.Fatal("jitter is outside the configured range")
+		t.Fatal("registration is not due at refresh TTL")
 	}
 }
 
