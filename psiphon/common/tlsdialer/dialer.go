@@ -212,7 +212,7 @@ func NewDialer(config *Config) common.Dialer {
 func Dial(
 	ctx context.Context,
 	network, addr string,
-	config *Config) (net.Conn, error) {
+	config *Config) (retConn net.Conn, retErr error) {
 
 	// Note that servers may return a chain which excludes the root CA
 	// cert https://datatracker.ietf.org/doc/html/rfc8446#section-4.4.2.
@@ -263,6 +263,12 @@ func Dial(
 		return nil, errors.Trace(err)
 	}
 
+	defer func() {
+		if retErr != nil {
+			underlyingConn.Close()
+		}
+	}()
+
 	// If the hard-coded session key is not set (e.g. FRONTED-MEEK-OSSH), SetSessionKey must be called.
 	// The session key is set to the resolved IP address.
 	if wrappedCache, ok := config.ClientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
@@ -271,7 +277,6 @@ func Dial(
 
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
-		underlyingConn.Close()
 		return nil, errors.Trace(err)
 	}
 
@@ -687,23 +692,10 @@ func Dial(
 
 	// Perform the TLS Handshake.
 
-	resultChannel := make(chan error)
-
-	go func() {
-		resultChannel <- conn.Handshake()
-	}()
-
-	select {
-	case err = <-resultChannel:
-	case <-ctx.Done():
-		err = ctx.Err()
-		// Interrupt the goroutine
-		underlyingConn.Close()
-		<-resultChannel
-	}
-
+	// Note that HandshakeContext may close the underlying connection to
+	// interrupt the handshake when ctx is canceled.
+	err = conn.HandshakeContext(ctx)
 	if err != nil {
-		underlyingConn.Close()
 		return nil, errors.Trace(err)
 	}
 

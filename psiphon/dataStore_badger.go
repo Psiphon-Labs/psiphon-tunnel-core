@@ -35,6 +35,21 @@ const (
 	DATA_STORE_DIRECTORY = "psiphon.badgerdb"
 )
 
+// The key-only buckets datastoreServerEntryKeysBucket and
+// datastoreDialParameterKeysBucket require non-empty values in badger in
+// order for bucket.get to succeed when used as an existence check. These
+// values are a workaround for this limitation so that this adapter doesn't
+// break.
+//
+// The badger datastore adapter isn't used in production and no key-only bucket
+// upgrade is implemented.
+//
+// Note that badger's LSM tree naturally packs keys together in stored pages
+// and so badger doesn't actually benefit from these key-only buckets, which
+// are nonetheless maintained for consistency across adapters.
+var datastoreServerEntryKeyValue = []byte{0}
+var datastoreDialParameterKeyValue = []byte{0}
+
 type datastoreDB struct {
 	badgerDB *badger.DB
 }

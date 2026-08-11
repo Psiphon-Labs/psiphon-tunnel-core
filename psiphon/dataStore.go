@@ -44,6 +44,7 @@ import (
 
 var (
 	datastoreServerEntriesBucket                = []byte("serverEntries")
+	datastoreServerEntryKeysBucket              = []byte("serverEntryKeys")
 	datastoreServerEntryTagsBucket              = []byte("serverEntryTags")
 	datastoreServerEntryTombstoneTagsBucket     = []byte("serverEntryTombstoneTags")
 	datastoreUrlETagsBucket                     = []byte("urlETags")
@@ -54,6 +55,7 @@ var (
 	datastoreTacticsBucket                      = []byte("tactics")
 	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
 	datastoreDialParametersBucket               = []byte("dialParameters")
+	datastoreDialParameterKeysBucket            = []byte("dialParameterKeys")
 	datastoreNetworkReplayParametersBucket      = []byte("networkReplayParameters")
 	datastoreDSLOSLStatesBucket                 = []byte("dslOSLStates")
 	datastoreLastConnectedKey                   = "lastConnected"
@@ -269,7 +271,7 @@ func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 // StoreServerEntry adds the server entry to the datastore.
 //
 // When a server entry already exists for a given server, it will be
-// replaced only if replaceIfExists is set or if the the ConfigurationVersion
+// replaced only if replaceIfExists is set or if the ConfigurationVersion
 // field of the new entry is strictly higher than the existing entry.
 //
 // If the server entry data is malformed, an alert notice is issued and
@@ -311,6 +313,7 @@ func storeServerEntry(
 	err = datastoreUpdate(func(tx *datastoreTx) error {
 
 		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryKeys := tx.bucket(datastoreServerEntryKeysBucket)
 		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 		serverEntryTombstoneTags := tx.bucket(datastoreServerEntryTombstoneTagsBucket)
 
@@ -372,6 +375,15 @@ func storeServerEntry(
 		}
 
 		err = serverEntries.put(serverEntryID, data)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// A key-only mirror bucket is used for faster iteration and existence
+		// checks. See ServerEntryIterator.reset for the main case.
+
+		err = serverEntryKeys.put(
+			serverEntryID, datastoreServerEntryKeyValue)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -522,9 +534,8 @@ func PromoteServerEntry(config *Config, ipAddress string) error {
 
 		// Ensure the corresponding server entry exists before
 		// setting server affinity.
-		bucket := tx.bucket(datastoreServerEntriesBucket)
-		data := bucket.get(serverEntryID)
-		if data == nil {
+		bucket := tx.bucket(datastoreServerEntryKeysBucket)
+		if bucket.get(serverEntryID) == nil {
 			NoticeWarning(
 				"PromoteServerEntry: ignoring unknown server entry: %s",
 				ipAddress)
@@ -670,7 +681,7 @@ type ServerEntryIterator struct {
 // The boolean return value indicates whether to treat the first server(s)
 // as affinity servers or not. When the server entry selection filter changes
 // such as from a specific region to any region, or when there was no previous
-// filter/iterator, the the first server(s) are arbitrary and should not be
+// filter/iterator, the first server(s) are arbitrary and should not be
 // given affinity treatment.
 //
 // NewServerEntryIterator and any returned ServerEntryIterator are not
@@ -826,7 +837,8 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 
 		// Provide the GetLastServerEntryCount implementation. See comment below.
 		count := 0
-		err := getBucketKeys(datastoreServerEntriesBucket, func(_ []byte) { count += 1 })
+		err := getBucketKeys(
+			datastoreServerEntryKeysBucket, func(_ []byte) { count += 1 })
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -864,6 +876,8 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 
 	var serverEntryIDs [][]byte
 	movedToFront := 0
+	// -1 indicates that the move-to-front dial parameters scan was skipped.
+	dialParametersCount := -1
 
 	err := datastoreView(func(tx *datastoreTx) error {
 
@@ -933,22 +947,37 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 
 			networkID := []byte(iterator.config.GetNetworkID())
 
-			serverEntriesBucket := tx.bucket(datastoreServerEntriesBucket)
-			dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
+			serverEntryKeysBucket := tx.bucket(datastoreServerEntryKeysBucket)
+			dialParameterKeysBucket := tx.bucket(datastoreDialParameterKeysBucket)
 			moveToFrontServerEntryIDs := make([][]byte, 0)
+			dialParametersCount = 0
+
+			// Iterate over the key-only datastoreDialParameterKeysBucket
+			// bucket. This avoids paging in all the dial parameter values as
+			// would happen if iterating over datastoreDialParametersBucket,
+			// on underlying datastores that store values alongside keys.
 
 			// Performance tradeoff: this implementation works best when
-			// datastoreDialParametersBucket is sparse and significantly
-			// smaller than datastoreServerEntriesBucket. It will iterate
-			// over all keys, which means it processes records for all
-			// network IDs, not just the target network ID. This is still
-			// expected to be less work than a previous approach of iterating
-			// over all datastoreServerEntriesBucket and checking for a
-			// datastoreDialParametersBucket entry for every server entry and
-			// network ID.
+			// datastoreDialParameterKeysBucket is sparse and significantly
+			// smaller than datastoreServerEntryKeysBucket. It will iterate
+			// over all dial parameter keys, which means it processes records
+			// for all network IDs, not just the target network ID. This is
+			// still expected to be less work than a previous approach of
+			// iterating over all datastoreServerEntriesBucket and checking
+			// for a datastoreDialParametersBucket entry for every server
+			// entry and network ID.
+			//
+			// TODO: consider a network-first secondary dial parameters
+			// bucket, which would allow seeking directly to keys for the
+			// target network ID instead of scanning keys for every network.
+			// A challenge with this is that the existing dial parameters key
+			// lacks a proper delimiter and existing keys cannot be safely
+			// split when upgrading and populating a secondary bucket. See
+			// the related limitation/TODO comment in deleteServerEntryHelper.
 
-			cursor := dialParamsBucket.cursor()
+			cursor := dialParameterKeysBucket.cursor()
 			for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
+				dialParametersCount += 1
 				if ctx.Err() != nil {
 					cursor.close()
 					return errors.Trace(ctx.Err())
@@ -960,7 +989,7 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 				}
 				serverEntryID := key[:len(key)-len(networkID)]
 				if len(serverEntryID) == 0 ||
-					serverEntriesBucket.get(serverEntryID) == nil {
+					serverEntryKeysBucket.get(serverEntryID) == nil {
 					continue
 				}
 
@@ -1007,7 +1036,12 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 
 		movedToFrontRemaining := movedToFront
 
-		bucket = tx.bucket(datastoreServerEntriesBucket)
+		// Iterate over the key-only datastoreServerEntryKeysBucket bucket.
+		// This avoids paging in all the large server entry values as would
+		// happen if iterating over datastoreServerEntriesBucket, on underlying
+		// datastores that store values alongside keys.
+
+		bucket = tx.bucket(datastoreServerEntryKeysBucket)
 		cursor := bucket.cursor()
 		for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
 			if ctx.Err() != nil {
@@ -1061,8 +1095,9 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 	iterator.serverEntryIndex = 0
 
 	NoticeInfo(
-		"ServerEntryIterator.reset: entries %d, moved-to-front %d; durations: move-to-front %s, entries %s, total %s",
+		"ServerEntryIterator.reset: entries %d, dial params %d, moved-to-front %d; durations: move-to-front %s, entries %s, total %s",
 		len(serverEntryIDs),
+		dialParametersCount,
 		movedToFront,
 		moveToFrontDuration.String(),
 		entriesDuration.String(),
@@ -1367,9 +1402,11 @@ func pruneServerEntry(config *Config, serverEntryTag string) (bool, error) {
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 
 		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryKeys := tx.bucket(datastoreServerEntryKeysBucket)
 		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 		serverEntryTombstoneTags := tx.bucket(datastoreServerEntryTombstoneTagsBucket)
 		keyValues := tx.bucket(datastoreKeyValueBucket)
+		dialParameterKeys := tx.bucket(datastoreDialParameterKeysBucket)
 		dialParameters := tx.bucket(datastoreDialParametersBucket)
 
 		serverEntryTagBytes := []byte(serverEntryTag)
@@ -1423,7 +1460,9 @@ func pruneServerEntry(config *Config, serverEntryTag string) (bool, error) {
 				config,
 				serverEntryID,
 				serverEntries,
+				serverEntryKeys,
 				keyValues,
+				dialParameterKeys,
 				dialParameters)
 			if err != nil {
 				return errors.Trace(err)
@@ -1476,15 +1515,19 @@ func deleteServerEntry(config *Config, serverEntryID []byte) error {
 	return datastoreUpdate(func(tx *datastoreTx) error {
 
 		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryKeys := tx.bucket(datastoreServerEntryKeysBucket)
 		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 		keyValues := tx.bucket(datastoreKeyValueBucket)
+		dialParameterKeys := tx.bucket(datastoreDialParameterKeysBucket)
 		dialParameters := tx.bucket(datastoreDialParametersBucket)
 
 		err := deleteServerEntryHelper(
 			config,
 			serverEntryID,
 			serverEntries,
+			serverEntryKeys,
 			keyValues,
+			dialParameterKeys,
 			dialParameters)
 		if err != nil {
 			return errors.Trace(err)
@@ -1519,10 +1562,17 @@ func deleteServerEntryHelper(
 	config *Config,
 	serverEntryID []byte,
 	serverEntries *datastoreBucket,
+	serverEntryKeys *datastoreBucket,
 	keyValues *datastoreBucket,
+	dialParameterKeys *datastoreBucket,
 	dialParameters *datastoreBucket) error {
 
 	err := serverEntries.delete(serverEntryID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = serverEntryKeys.delete(serverEntryID)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1543,12 +1593,20 @@ func deleteServerEntryHelper(
 	// makeDialParametersKey. There may be multiple keys with the
 	// serverEntryID prefix; they will be grouped together, so the loop can
 	// exit as soon as a previously found prefix is no longer found.
+	//
+	// Limitation: the key is the concatenation of the server IP address and
+	// network ID with no delimiter, so this prefix match
+	// can overmatch: deleting server entry "1.2.3.4" also matches, and
+	// deletes, dial parameters keyed by server IP address "1.2.3.45". The
+	// impact is limited to the loss of replay data for the overmatched server.
+	//
+	// TODO: switch to a structured key encoding with an explicit delimiter.
 	foundFirstMatch := false
 
 	// TODO: expose boltdb Seek functionality to skip to first matching record.
 	var deleteKeys [][]byte
-	cursor := dialParameters.cursor()
-	for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+	cursor := dialParameterKeys.cursor()
+	for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
 		if bytes.HasPrefix(key, serverEntryID) {
 			foundFirstMatch = true
 			deleteKeys = append(deleteKeys, key)
@@ -1563,7 +1621,11 @@ func deleteServerEntryHelper(
 	// TODO: expose boltdb Cursor.Delete to allow for safe mutation
 	// within cursor loop.
 	for _, deleteKey := range deleteKeys {
-		err := dialParameters.delete(deleteKey)
+		err := dialParameterKeys.delete(deleteKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = dialParameters.delete(deleteKey)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1647,10 +1709,10 @@ func HasServerEntries() bool {
 	hasServerEntries := false
 
 	err := datastoreView(func(tx *datastoreTx) error {
-		bucket := tx.bucket(datastoreServerEntriesBucket)
+		bucket := tx.bucket(datastoreServerEntryKeysBucket)
 		cursor := bucket.cursor()
-		key, _ := cursor.first()
-		hasServerEntries = (key != nil)
+		key := cursor.firstKey()
+		hasServerEntries = key != nil
 		cursor.close()
 		return nil
 	})
@@ -1670,9 +1732,9 @@ func CountServerEntries() int {
 	count := 0
 
 	err := datastoreView(func(tx *datastoreTx) error {
-		bucket := tx.bucket(datastoreServerEntriesBucket)
+		bucket := tx.bucket(datastoreServerEntryKeysBucket)
 		cursor := bucket.cursor()
-		for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+		for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
 			count += 1
 		}
 		cursor.close()
@@ -2301,7 +2363,21 @@ func SetDialParameters(serverIPAddress, networkID string, dialParams *DialParame
 		return errors.Trace(err)
 	}
 
-	return setBucketValue(datastoreDialParametersBucket, key, data)
+	err = datastoreUpdate(func(tx *datastoreTx) error {
+		err := tx.bucket(datastoreDialParametersBucket).put(key, data)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// A key-only mirror bucket is used for faster iteration and existence
+		// checks. See ServerEntryIterator.reset for the main case.
+
+		err = tx.bucket(datastoreDialParameterKeysBucket).put(
+			key, datastoreDialParameterKeyValue)
+		return errors.Trace(err)
+	})
+
+	return errors.Trace(err)
 }
 
 // GetDialParameters fetches any dial parameters associated with the specified
@@ -2354,7 +2430,16 @@ func DeleteDialParameters(serverIPAddress, networkID string) error {
 
 	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
 
-	return deleteBucketValue(datastoreDialParametersBucket, key)
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		err := tx.bucket(datastoreDialParameterKeysBucket).delete(key)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = tx.bucket(datastoreDialParametersBucket).delete(key)
+		return errors.Trace(err)
+	})
+
+	return errors.Trace(err)
 }
 
 // TacticsStorer implements tactics.Storer.
@@ -2810,11 +2895,12 @@ func dslPrioritizeDialServerEntry(
 	prioritizeReason string,
 	prioritizeTunnelProtocol string) error {
 
+	dialParameterKeysBucket := tx.bucket(datastoreDialParameterKeysBucket)
 	dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
 
 	key := makeDialParametersKey(serverEntryID, []byte(networkID))
 
-	if dialParamsBucket.get(key) != nil {
+	if dialParameterKeysBucket.get(key) != nil {
 		return nil
 	}
 
@@ -2844,6 +2930,14 @@ func dslPrioritizeDialServerEntry(
 	}
 
 	err = dialParamsBucket.put(key, record)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// A key-only mirror bucket is used for faster iteration and existence
+	// checks. See ServerEntryIterator.reset for the main case.
+
+	err = dialParameterKeysBucket.put(key, datastoreDialParameterKeyValue)
 	if err != nil {
 		return errors.Trace(err)
 	}

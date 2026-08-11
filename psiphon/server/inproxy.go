@@ -208,6 +208,9 @@ func NewInproxyProxyQualityBrokerRoundTripper(
 						return nil
 					},
 				})
+
+			// Note that HandshakeContext may close the underlying connection
+			// to interrupt the handshake when ctx is canceled.
 			err = tlsConn.HandshakeContext(ctx)
 			if err != nil {
 				conn.Close()
