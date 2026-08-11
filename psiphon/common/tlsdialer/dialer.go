@@ -692,21 +692,9 @@ func Dial(
 
 	// Perform the TLS Handshake.
 
-	resultChannel := make(chan error)
-
-	go func() {
-		resultChannel <- conn.Handshake()
-	}()
-
-	select {
-	case err = <-resultChannel:
-	case <-ctx.Done():
-		err = ctx.Err()
-		// Interrupt the goroutine
-		underlyingConn.Close()
-		<-resultChannel
-	}
-
+	// Note that HandshakeContext may close the underlying connection to
+	// interrupt the handshake when ctx is canceled.
+	err = conn.HandshakeContext(ctx)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
