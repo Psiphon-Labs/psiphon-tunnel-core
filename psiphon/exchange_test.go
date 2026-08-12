@@ -195,13 +195,13 @@ func TestServerEntryExchange(t *testing.T) {
 				nil,
 				nil,
 				nil,
+				nil,
 				canReplay,
 				selectProtocol,
 				serverEntry,
 				nil,
 				nil,
 				false,
-				0,
 				0)
 			if err != nil {
 				t.Fatalf("MakeDialParameters failed: %s", err)

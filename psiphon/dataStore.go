@@ -2760,7 +2760,14 @@ func SelectCandidateWithNetworkReplayParameters[C, R any](
 	candidate := candidates[0]
 	var replay *R
 
-	err := datastoreUpdate(func(tx *datastoreTx) error {
+	// Replay records that are stale and no longer valid are pruned. To avoid
+	// always obtaining a write lock, the main logic runs in a read-only
+	// transaction and records a list of stale records to be deleted. The
+	// deletion step checks that the record values didn't change between
+	// transactions.
+	staleReplayRecords := make(map[string][]byte)
+
+	err := datastoreView(func(tx *datastoreTx) error {
 
 		bucket := tx.bucket(datastoreNetworkReplayParametersBucket)
 
@@ -2774,14 +2781,14 @@ func SelectCandidateWithNetworkReplayParameters[C, R any](
 			err := json.Unmarshal(value, &r)
 			if err != nil {
 
-				// Delete the record. This avoids continually checking it.
-				// Note that the deletes performed here won't prune records
-				// for old candidates which are no longer passed in to
-				// SelectCandidateWithNetworkReplayParameters.
+				// Add the record to the delete list. This pruning avoids
+				// continually checking it. Note that the deletes performed
+				// here won't prune records for old candidates which are no
+				// longer passed in to SelectCandidateWithNetworkReplayParameters.
 				NoticeWarning(
 					"SelectCandidateWithNetworkReplayParameters: unmarshal failed: %s",
 					errors.Trace(err))
-				_ = bucket.delete(key)
+				staleReplayRecords[string(key)] = append([]byte(nil), value...)
 				continue
 			}
 			if isValidReplay(c, r) {
@@ -2794,7 +2801,7 @@ func SelectCandidateWithNetworkReplayParameters[C, R any](
 
 				// Delete the record if it's no longer valid due to expiry or
 				// tactics changes. This avoids continually checking it.
-				_ = bucket.delete(key)
+				staleReplayRecords[string(key)] = append([]byte(nil), value...)
 				continue
 			}
 		}
@@ -2805,6 +2812,35 @@ func SelectCandidateWithNetworkReplayParameters[C, R any](
 	})
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	if len(staleReplayRecords) > 0 {
+
+		// TODO: Perform stale replay cleanup asynchronously, so obtaining the
+		// write lock doesn't block the SelectCandidateWithNetworkReplayParameters
+		// caller. Simply spawning a goroutine here could leave dangling
+		// routines on stop and/or could hit closed datastores.
+
+		err = datastoreUpdate(func(tx *datastoreTx) error {
+
+			bucket := tx.bucket(datastoreNetworkReplayParametersBucket)
+
+			for keyString, expectedValue := range staleReplayRecords {
+				key := []byte(keyString)
+				if bytes.Equal(bucket.get(key), expectedValue) {
+					_ = bucket.delete(key)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			// Log and proceed with the selected replay candidate, as pruning
+			// is just an optimization.
+			NoticeWarning(
+				"SelectCandidateWithNetworkReplayParameters: prune failed: %s",
+				errors.Trace(err))
+		}
 	}
 
 	return candidate, replay, nil

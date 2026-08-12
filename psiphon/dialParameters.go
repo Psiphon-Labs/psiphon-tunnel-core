@@ -229,6 +229,7 @@ func MakeDialParameters(
 	quicTLSClientSessionCache tls.ClientSessionCache,
 	tlsClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
+	beginProtocolSelection func() int,
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(
 		serverEntry *protocol.ServerEntry,
@@ -237,7 +238,6 @@ func MakeDialParameters(
 	inproxyClientBrokerClientManager *InproxyBrokerClientManager,
 	inproxyClientNATStateManager *InproxyNATStateManager,
 	isTactics bool,
-	candidateNumber int,
 	establishedTunnelsCount int) (*DialParameters, error) {
 
 	// Note: a subset of this code is duplicated in
@@ -337,6 +337,11 @@ func MakeDialParameters(
 			// round. For this reason, dslPendingPrioritizeDial isn't reset
 			// to false and dialParams.DSLPrioritizedDial will still be set to true.
 
+			// TODO: Perform stale dial parameter cleanup asynchronously, so
+			// obtaining the write lock doesn't block the MakeDialParameters
+			// caller. Simply spawning a goroutine here could leave
+			// dangling routines on stop and/or could hit closed datastores.
+
 			err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 			if err != nil {
 				NoticeWarning("DeleteDialParameters failed: %s", err)
@@ -428,6 +433,7 @@ func MakeDialParameters(
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
+		// TODO: Delete stale dial parameters asynchronously.
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
@@ -435,6 +441,29 @@ func MakeDialParameters(
 
 		// Reselect new dial parameters.
 		dialParams = nil
+	}
+
+	// beginProtocolSelection facilitates lazy locking of
+	// Controller.concurrentEstablishTunnelsMutex in the
+	// Controller.establishTunnelWorker caller. This ensures that the
+	// preceding datastore and JSON unmarshal operations, including
+	// potential write-locking datastore deletes, don't block all
+	// establishment workers. The concurrentEstablishTunnelsMutex lock covers
+	// overall protocol selection counters and limits enforced in
+	// establishment and referenced in canReplay and selectProtocol, which
+	// must be called only after beginProtocolSelection.
+	//
+	// An additional constraint: the caller currently assumes that every
+	// success return reaches this point, and so, for the controller caller,
+	// the concurrentEstablishTunnelsMutex lock will be held.
+	//
+	// As a potential future enhancement, consider splitting
+	// MakeDialParameters into distinct functions/phases so that the
+	// concurrentEstablishTunnelsMutex lock flow is more straightforward.
+
+	candidateNumber := 0
+	if beginProtocolSelection != nil {
+		candidateNumber = beginProtocolSelection()
 	}
 
 	if dialParams != nil {
