@@ -134,9 +134,12 @@ func (p *PreSharedKey) Unmarshal(data []byte) error { //nolint:cyclop
 		p.Binders = append(p.Binders, PskBinderEntry(binder))
 	}
 
-	// Ensure there is one binder value per identity in list,
-	// and check for trailing bytes.
-	if len(p.Binders) != len(p.Identities) || !extData.Empty() {
+	if !extData.Empty() {
+		return errLengthMismatch
+	}
+
+	// Ensure there is one binder value per identity in list
+	if len(p.Binders) != len(p.Identities) {
 		return errPreSharedKeyFormat
 	}
 

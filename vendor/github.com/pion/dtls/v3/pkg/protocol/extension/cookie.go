@@ -55,6 +55,10 @@ func (c *CookieExt) Unmarshal(data []byte) error { //nolint:cyclop
 		return errCookieExtFormat
 	}
 
+	if !extData.Empty() {
+		return errLengthMismatch
+	}
+
 	c.Cookie = append([]byte(nil), cookie...)
 
 	return nil

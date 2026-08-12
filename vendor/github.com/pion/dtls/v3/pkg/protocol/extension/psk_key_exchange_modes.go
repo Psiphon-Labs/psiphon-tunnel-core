@@ -63,11 +63,12 @@ func (p *PskKeyExchangeModes) Unmarshal(data []byte) error { //nolint:cyclop
 
 	var strModes cryptobyte.String
 
-	if !extData.ReadUint8LengthPrefixed(&strModes) {
+	if !extData.ReadUint8LengthPrefixed(&strModes) || strModes.Empty() {
 		return errPskKeyExchangeModesFormat
 	}
-	if strModes.Empty() {
-		return errPskKeyExchangeModesFormat
+
+	if !extData.Empty() {
+		return errLengthMismatch
 	}
 
 	p.KeModes = make([]PskKeyExchangeMode, 0)

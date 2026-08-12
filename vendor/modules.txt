@@ -342,7 +342,7 @@ github.com/pion/dtls/v2/pkg/protocol/alert
 github.com/pion/dtls/v2/pkg/protocol/extension
 github.com/pion/dtls/v2/pkg/protocol/handshake
 github.com/pion/dtls/v2/pkg/protocol/recordlayer
-# github.com/pion/dtls/v3 v3.1.2
+# github.com/pion/dtls/v3 v3.1.5
 ## explicit; go 1.24.0
 github.com/pion/dtls/v3
 github.com/pion/dtls/v3/internal/ciphersuite
@@ -410,8 +410,8 @@ github.com/pion/srtp/v3
 ## explicit; go 1.12
 github.com/pion/stun
 github.com/pion/stun/internal/hmac
-# github.com/pion/stun/v3 v3.1.1
-## explicit; go 1.21
+# github.com/pion/stun/v3 v3.1.6
+## explicit; go 1.24.0
 github.com/pion/stun/v3
 github.com/pion/stun/v3/internal/hmac
 # github.com/pion/transport/v2 v2.2.3
@@ -424,8 +424,8 @@ github.com/pion/transport/v2/replaydetector
 github.com/pion/transport/v2/stdnet
 github.com/pion/transport/v2/udp
 github.com/pion/transport/v2/utils/xor
-# github.com/pion/transport/v4 v4.0.1
-## explicit; go 1.21
+# github.com/pion/transport/v4 v4.0.2
+## explicit; go 1.24.0
 github.com/pion/transport/v4
 github.com/pion/transport/v4/deadline
 github.com/pion/transport/v4/netctx
@@ -638,8 +638,8 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/time v0.10.0
-## explicit; go 1.18
+# golang.org/x/time v0.14.0
+## explicit; go 1.24.0
 golang.org/x/time/rate
 # golang.org/x/tools v0.47.0
 ## explicit; go 1.25.0

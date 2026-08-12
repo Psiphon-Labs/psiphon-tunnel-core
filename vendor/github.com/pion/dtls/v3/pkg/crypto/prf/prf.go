@@ -4,7 +4,7 @@
 // Package prf implements TLS 1.2 Pseudorandom functions
 package prf
 
-import ( //nolint:gci
+import (
 	"crypto/ecdh"
 	"crypto/hmac"
 	"encoding/binary"
@@ -171,7 +171,7 @@ func PHash(secret, seed []byte, requestedLength int, hashFunc HashFunc) ([]byte,
 	out := []byte{}
 
 	iterations := int(math.Ceil(float64(requestedLength) / float64(hashFunc().Size())))
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		lastRound, err = hmacSHA256(secret, lastRound)
 		if err != nil {
 			return nil, err

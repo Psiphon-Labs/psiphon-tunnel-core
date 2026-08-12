@@ -2374,7 +2374,10 @@ func MakeInproxyWebRTCDialParameters(
 // replays the same ClientRootObfuscationSecret against a different proxy
 // whose SupportedDTLSFingerprints list has been upgraded, downgraded, or
 // reordered, the proxy's fingerprint choice will not be the same as on the
-// original dial, even though the PRNG seed is identical.
+// original dial, even though the PRNG seed is identical. Similarly, for
+// randomized fingerprints, the randomized ClientHello content is derived from
+// pion/dtls' default cipher suite and signature algorithm sets, so upgrading
+// pion/dtls also changes that content for a given seed.
 func selectDTLSFingerprint(
 	p parameters.ParametersAccessor,
 	clientRootObfuscationSecret inproxy.ObfuscationSecret,

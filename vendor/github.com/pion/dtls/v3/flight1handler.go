@@ -63,7 +63,10 @@ func flight1Generate(
 	var zeroEpoch uint16
 	state.localEpoch.Store(zeroEpoch)
 	state.remoteEpoch.Store(zeroEpoch)
-	state.namedCurve = defaultNamedCurve
+	if len(cfg.ellipticCurves) < 1 {
+		return nil, nil, errEmptyEllipticCurves
+	}
+	state.namedCurve = cfg.ellipticCurves[0]
 	state.cookie = nil
 
 	if err := state.localRandom.Populate(); err != nil {

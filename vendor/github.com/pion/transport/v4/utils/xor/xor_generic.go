@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2013 The Go Authors. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
-// SPDX-FileCopyrightText: 2024 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 //go:build go1.20 && !arm && !gccgo
