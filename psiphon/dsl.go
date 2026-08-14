@@ -184,7 +184,9 @@ func doDSLFetch(
 		if err != nil {
 
 			// A registration-scheduling read failure must not block server
-			// entry discovery. Degrade to requesting a registration; a
+			// entry discovery. Degrade to requesting a registration. In the
+			// worst case, a persistent read failure requests registration on
+			// every tunneled DSL fetch, which runs only once per connection. A
 			// re-registered token is persisted, or persistence failure is
 			// tolerated, in the fetcher.
 			NoticeWarning(
