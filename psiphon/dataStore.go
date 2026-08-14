@@ -2741,34 +2741,47 @@ type dslAccessTokenRegistrationRecord struct {
 	LastSuccessfulDSLAccessTokenRegistrationTime time.Time
 }
 
-// getDSLAccessTokenRegistrationRecord loads the DSL access token registration record
-// within a read-write transaction. When no record is persisted, a zero-value
-// record is returned. When the persisted record is corrupt, it is deleted and
-// a zero-value record is returned, degrading to "registration due" (see
-// isDSLAccessTokenRegistrationDue) rather than failing; otherwise nothing would
-// ever rewrite or delete the corrupt record, permanently blocking both DSL
-// fetches and subsequent registrations.
-func getDSLAccessTokenRegistrationRecord(
-	tx *datastoreTx) (*dslAccessTokenRegistrationRecord, error) {
+// decodeDSLAccessTokenRegistrationRecord decodes a persisted DSL access token
+// registration record. When no record is persisted, a zero-value record is
+// returned. When the persisted record is corrupt, a zero-value record and true
+// are returned, degrading to "registration due" (see
+// isDSLAccessTokenRegistrationDue) rather than failing.
+func decodeDSLAccessTokenRegistrationRecord(
+	value []byte) (*dslAccessTokenRegistrationRecord, bool) {
 
 	record := new(dslAccessTokenRegistrationRecord)
-	bucket := tx.bucket(datastoreKeyValueBucket)
-	value := bucket.get(datastoreDSLAccessTokenRegistrationKey)
 	if value == nil {
-		return record, nil
+		return record, false
 	}
 
 	err := json.Unmarshal(value, record)
 	if err != nil {
 
-		// Delete the corrupt record and self-heal, following the corrupt
-		// record delete in SelectCandidateWithNetworkReplayParameters. The
-		// record content, which may include token material, is not logged.
+		// The record content, which may include token material, is not logged.
 		NoticeWarning(
-			"getDSLAccessTokenRegistrationRecord: unmarshal failed: %s",
+			"decodeDSLAccessTokenRegistrationRecord: unmarshal failed: %s",
 			errors.Trace(err))
-		*record = dslAccessTokenRegistrationRecord{}
-		err = bucket.delete(datastoreDSLAccessTokenRegistrationKey)
+		return new(dslAccessTokenRegistrationRecord), true
+	}
+
+	return record, false
+}
+
+func loadDSLAccessTokenRegistrationRecord() (*dslAccessTokenRegistrationRecord, error) {
+	value, err := copyBucketValue(
+		datastoreKeyValueBucket, datastoreDSLAccessTokenRegistrationKey)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	record, corrupt := decodeDSLAccessTokenRegistrationRecord(value)
+	if corrupt {
+		// Delete only the corrupt value that was read. A concurrent registration
+		// may have replaced it after the read-only transaction completed.
+		err := deleteIfBucketValue(
+			datastoreKeyValueBucket,
+			datastoreDSLAccessTokenRegistrationKey,
+			value)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -2777,31 +2790,14 @@ func getDSLAccessTokenRegistrationRecord(
 	return record, nil
 }
 
-func loadDSLAccessTokenRegistrationRecord() (*dslAccessTokenRegistrationRecord, error) {
-	var record *dslAccessTokenRegistrationRecord
-
-	// datastoreUpdate, not datastoreView: getDSLAccessTokenRegistrationRecord may
-	// delete a corrupt record, which requires a writable transaction.
-	err := datastoreUpdate(func(tx *datastoreTx) error {
-		var err error
-		record, err = getDSLAccessTokenRegistrationRecord(tx)
-		return errors.Trace(err)
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return record, nil
-}
-
 func updateDSLAccessTokenRegistrationRecord(
 	update func(*dslAccessTokenRegistrationRecord)) (*dslAccessTokenRegistrationRecord, error) {
 
 	var updatedRecord *dslAccessTokenRegistrationRecord
 	err := datastoreUpdate(func(tx *datastoreTx) error {
-		record, err := getDSLAccessTokenRegistrationRecord(tx)
-		if err != nil {
-			return errors.Trace(err)
-		}
+		bucket := tx.bucket(datastoreKeyValueBucket)
+		record, _ := decodeDSLAccessTokenRegistrationRecord(
+			bucket.get(datastoreDSLAccessTokenRegistrationKey))
 
 		update(record)
 
@@ -2810,8 +2806,7 @@ func updateDSLAccessTokenRegistrationRecord(
 			return errors.Trace(err)
 		}
 
-		err = tx.bucket(datastoreKeyValueBucket).put(
-			datastoreDSLAccessTokenRegistrationKey, value)
+		err = bucket.put(datastoreDSLAccessTokenRegistrationKey, value)
 		if err != nil {
 			return errors.Trace(err)
 		}
