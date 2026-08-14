@@ -236,6 +236,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 			discoverResponse.DSLAccessToken); err != nil {
 			f.config.Logger.WithTraceFields(common.LogFields{
 				"tunneled": f.config.Tunneled,
+				"error":    err.Error(),
 			}).Warning("DSL: access token registration persistence failed")
 		}
 	}
