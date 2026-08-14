@@ -3355,6 +3355,10 @@ loop:
 		// lock has been acquired by beginProtocolSelection. The lock is then
 		// retained through to the post-MakeDialParameters where the protocol
 		// selection counters are adjusted.
+		//
+		// TODO: release the concurrentEstablishTunnelsMutex lock in the case
+		// of a panic between beginProtocolSelection and the unlock after
+		// MakeDialParameters.
 
 		excludeIntensive := false
 		inproxyForceSelection := false
