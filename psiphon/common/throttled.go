@@ -137,8 +137,8 @@ func (conn *ThrottledConn) SetLimits(limits RateLimits) {
 func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 
 	// A mutex is used to ensure conformance with net.Conn concurrency semantics.
-	// The atomic.SwapInt64 and subsequent assignment of readRateLimiter or
-	// readDelayTimer could be a race condition with concurrent reads.
+	// The atomic CompareAndSwap and subsequent assignment of readRateLimiter
+	// or readDelayTimer could be a race condition with concurrent reads.
 	conn.readLock.Lock()
 	defer conn.readLock.Unlock()
 
@@ -161,9 +161,12 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	readRate := conn.readBytesPerSecond.Swap(-1)
+	// A Load, with CompareAndSwap only when SetLimits has stored a new rate,
+	// avoids an atomic read-modify-write from Swap on every Read.
+	readRate := conn.readBytesPerSecond.Load()
 
-	if readRate != -1 {
+	if readRate != -1 &&
+		conn.readBytesPerSecond.CompareAndSwap(readRate, -1) {
 		// SetLimits has been called and a new rate limiter
 		// must be initialized. When no limit is specified,
 		// the reader/writer is simply the base conn.
@@ -265,9 +268,11 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	writeRate := conn.writeBytesPerSecond.Swap(-1)
+	// See rate Load/CompareAndSwap comment in Read.
+	writeRate := conn.writeBytesPerSecond.Load()
 
-	if writeRate != -1 {
+	if writeRate != -1 &&
+		conn.writeBytesPerSecond.CompareAndSwap(writeRate, -1) {
 		if writeRate == 0 {
 			conn.writeRateLimiter = nil
 		} else {
