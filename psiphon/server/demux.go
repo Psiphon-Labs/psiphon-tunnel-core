@@ -24,6 +24,7 @@ import (
 	"context"
 	std_errors "errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -42,6 +43,11 @@ type protocolDemux struct {
 	connClassificationTimeout time.Duration
 
 	conns []chan net.Conn
+
+	workersMutex     sync.Mutex
+	workersStopping  bool
+	workers          map[net.Conn]struct{}
+	workersWaitGroup sync.WaitGroup
 }
 
 type protocolClassifier struct {
@@ -88,6 +94,7 @@ func newProtocolDemux(
 		conns:                     conns,
 		classifiers:               classifiers,
 		connClassificationTimeout: connClassificationTimeout,
+		workers:                   make(map[net.Conn]struct{}),
 	}
 
 	protoListeners := make([]protoListener, len(classifiers))
@@ -153,7 +160,14 @@ func (mux *protocolDemux) run() error {
 			continue
 		}
 
-		go func() {
+		if !mux.trackWorker(conn) {
+			conn.Close()
+			continue
+		}
+
+		go func(conn net.Conn) {
+
+			defer mux.untrackWorker(conn)
 
 			type classifiedConnResult struct {
 				index       int
@@ -175,7 +189,11 @@ func (mux *protocolDemux) run() error {
 				})
 			}
 
+			readDone := make(chan struct{})
+
 			go func() {
+				defer close(readDone)
+
 				var acc bytes.Buffer
 				b := make([]byte, readBufferSize)
 
@@ -226,14 +244,22 @@ func (mux *protocolDemux) run() error {
 			}
 
 			if result.err != nil {
+
 				log.WithTraceFields(LogFields{"error": result.err}).Log(result.errLogLevel, "conn classification failed")
 
 				err := conn.Close()
+
+				// Ensure the nested reader has also exited before this
+				// classifier is considered stopped.
+				<-readDone
+
 				if err != nil {
 					log.WithTraceFields(LogFields{"error": err}).Debug("close failed")
 				}
 				return
 			}
+
+			<-readDone
 
 			// Found a match, replay buffered bytes in new conn and send
 			// downstream.
@@ -245,7 +271,7 @@ func (mux *protocolDemux) run() error {
 			case <-mux.ctx.Done():
 				bConn.Close()
 			}
-		}()
+		}(conn)
 	}
 
 	return mux.ctx.Err()
@@ -267,13 +293,55 @@ func (mux *protocolDemux) acceptForIndex(index int) (net.Conn, error) {
 	return nil, mux.ctx.Err()
 }
 
+func (mux *protocolDemux) trackWorker(conn net.Conn) bool {
+
+	mux.workersMutex.Lock()
+	defer mux.workersMutex.Unlock()
+
+	if mux.workersStopping {
+		return false
+	}
+
+	mux.workers[conn] = struct{}{}
+	mux.workersWaitGroup.Add(1)
+
+	return true
+}
+
+func (mux *protocolDemux) untrackWorker(conn net.Conn) {
+
+	mux.workersMutex.Lock()
+	delete(mux.workers, conn)
+	mux.workersMutex.Unlock()
+
+	// Unlock before Done so Close cannot return from Wait while this worker
+	// still holds workersMutex.
+	mux.workersWaitGroup.Done()
+}
+
 func (mux *protocolDemux) Close() error {
+
+	mux.workersMutex.Lock()
+	mux.workersStopping = true
+	workers := make([]net.Conn, 0, len(mux.workers))
+	for conn := range mux.workers {
+		workers = append(workers, conn)
+	}
+	mux.workersMutex.Unlock()
 
 	mux.cancelFunc()
 
-	err := mux.innerListener.Close()
-	if err != nil {
-		return errors.Trace(err)
+	listenerErr := mux.innerListener.Close()
+
+	// Interrupt readers blocked in conn.Read.
+	for _, conn := range workers {
+		conn.Close()
+	}
+
+	mux.workersWaitGroup.Wait()
+
+	if listenerErr != nil {
+		return errors.Trace(listenerErr)
 	}
 
 	return nil

@@ -247,13 +247,13 @@ func fetchTactics(
 		tls.NewLRUClientSessionCache(0),
 		utls.NewLRUClientSessionCache(0),
 		nil,
+		nil,
 		canReplay,
 		selectProtocol,
 		serverEntry,
 		nil,
 		nil,
 		true,
-		0,
 		0)
 	if err != nil {
 		return nil, errors.Tracef(

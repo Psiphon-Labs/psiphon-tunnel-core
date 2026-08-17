@@ -3244,6 +3244,15 @@ loop:
 // a connection to the tunnel server, and delivers the connected tunnel to a channel.
 func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
+
+	concurrentEstablishTunnelsMutexLocked := false
+	defer func() {
+		// Unlock in case of panic
+		if concurrentEstablishTunnelsMutexLocked {
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+		}
+	}()
+
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
 
@@ -3347,38 +3356,50 @@ loop:
 		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
 		p.Close()
 
-		// Access to controller fields is synchronized with this lock. The
-		// canReplay and selectProtocol callbacks are intended to be invoked
-		// in MakeDialParameters while lock is held.
-
-		controller.concurrentEstablishTunnelsMutex.Lock()
-
+		// beginProtocolSelection lazily locks concurrentEstablishTunnelsMutex,
+		// which blocks all establishment workers, only after
+		// MakeDialParameters completes its relatively expensive preamble of
+		// datastore and serialized dial parameter operations. canReplay and
+		// selectProtocol reference protocol selection counters and limits
+		// fields covered by concurrentEstablishTunnelsMutex and assume the
+		// lock has been acquired by beginProtocolSelection. The lock is then
+		// retained through to the post-MakeDialParameters where the protocol
+		// selection counters are adjusted.
 		excludeIntensive := false
-		if limitIntensiveConnectionWorkers > 0 &&
-			controller.concurrentIntensiveEstablishTunnels >= limitIntensiveConnectionWorkers {
-			excludeIntensive = true
-		}
-
-		// Force in-proxy protocol selection as required, and if the server
-		// entry supports in-proxy protocols. If this candidate happens to be
-		// a replay of an in-proxy protocol, it's still counted as a forced
-		// selection.
-		//
-		// Forced selection is skipped when excluding intensive protocols, as
-		// TunnelProtocolIsResourceIntensive currently includes
-		// TunnelProtocolUsesInproxy.
-
 		inproxyForceSelection := false
-		if !excludeIntensive &&
-			controller.establishInproxyForceSelectionCount > 0 &&
-			controller.protocolSelectionConstraints.supportedProtocols(
-				controller.establishConnectTunnelCount,
-				excludeIntensive,
-				candidateServerEntry.serverEntry).HasInproxyTunnelProtocols() {
 
-			NoticeInfo("in-proxy protocol selection forced")
-			inproxyForceSelection = true
-			controller.establishInproxyForceSelectionCount -= 1
+		beginProtocolSelection := func() int {
+
+			controller.concurrentEstablishTunnelsMutex.Lock()
+			concurrentEstablishTunnelsMutexLocked = true
+
+			if limitIntensiveConnectionWorkers > 0 &&
+				controller.concurrentIntensiveEstablishTunnels >= limitIntensiveConnectionWorkers {
+				excludeIntensive = true
+			}
+
+			// Force in-proxy protocol selection as required, and if the server
+			// entry supports in-proxy protocols. If this candidate happens to be
+			// a replay of an in-proxy protocol, it's still counted as a forced
+			// selection.
+			//
+			// Forced selection is skipped when excluding intensive protocols, as
+			// TunnelProtocolIsResourceIntensive currently includes
+			// TunnelProtocolUsesInproxy.
+
+			if !excludeIntensive &&
+				controller.establishInproxyForceSelectionCount > 0 &&
+				controller.protocolSelectionConstraints.supportedProtocols(
+					controller.establishConnectTunnelCount,
+					excludeIntensive,
+					candidateServerEntry.serverEntry).HasInproxyTunnelProtocols() {
+
+				NoticeInfo("in-proxy protocol selection forced")
+				inproxyForceSelection = true
+				controller.establishInproxyForceSelectionCount -= 1
+			}
+
+			return controller.establishConnectTunnelCount
 		}
 
 		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
@@ -3468,17 +3489,20 @@ loop:
 			controller.quicTLSClientSessionCache,
 			controller.tlsClientSessionCache,
 			upstreamProxyErrorCallback,
+			beginProtocolSelection,
 			canReplay,
 			selectProtocol,
 			candidateServerEntry.serverEntry,
 			controller.inproxyClientBrokerClientManager,
 			controller.inproxyNATStateManager,
 			false,
-			controller.establishConnectTunnelCount,
 			int(atomic.LoadInt32(&controller.establishedTunnelsCount)))
 		if dialParams == nil || err != nil {
 
-			controller.concurrentEstablishTunnelsMutex.Unlock()
+			if concurrentEstablishTunnelsMutexLocked {
+				controller.concurrentEstablishTunnelsMutex.Unlock()
+				concurrentEstablishTunnelsMutexLocked = false
+			}
 
 			// MakeDialParameters returns nil/nil when the server entry is to
 			// be skipped. See MakeDialParameters for skip cases and skip
@@ -3496,6 +3520,15 @@ loop:
 				close(controller.serverAffinityDoneBroadcast)
 			}
 
+			continue
+		}
+
+		if !concurrentEstablishTunnelsMutexLocked {
+			NoticeError("establishTunnelWorker: unexpected lock state")
+			controller.SignalComponentFailure()
+			if candidateServerEntry.isServerAffinityCandidate {
+				close(controller.serverAffinityDoneBroadcast)
+			}
 			continue
 		}
 
@@ -3523,6 +3556,7 @@ loop:
 		}
 
 		controller.concurrentEstablishTunnelsMutex.Unlock()
+		concurrentEstablishTunnelsMutexLocked = false
 
 		startStagger := time.Now()
 

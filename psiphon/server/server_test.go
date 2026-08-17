@@ -5466,6 +5466,7 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
@@ -5474,7 +5475,6 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			false,
-			0,
 			0)
 		if err != nil {
 			t.Fatalf("MakeDialParameters failed: %s", err)
