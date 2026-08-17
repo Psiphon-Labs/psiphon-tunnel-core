@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
-package extension
+package extension // nolint:dupl
 
 import "encoding/binary"
 
@@ -37,9 +37,12 @@ func (u *UseExtendedMasterSecret) Marshal() ([]byte, error) {
 
 // Unmarshal populates the extension from encoded data.
 func (u *UseExtendedMasterSecret) Unmarshal(data []byte) error {
-	if len(data) < useExtendedMasterSecretHeaderSize {
+	switch {
+	case len(data) < useExtendedMasterSecretHeaderSize:
 		return errBufferTooSmall
-	} else if TypeValue(binary.BigEndian.Uint16(data)) != u.TypeValue() {
+	case data[2] != 0x00 || data[3] != 0x00:
+		return errLengthMismatch
+	case TypeValue(binary.BigEndian.Uint16(data)) != u.TypeValue():
 		return errInvalidExtensionType
 	}
 

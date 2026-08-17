@@ -46,12 +46,19 @@ func (c *ConnectionID) Unmarshal(data []byte) error {
 	}
 
 	var extData cryptobyte.String
-	val.ReadUint16LengthPrefixed(&extData)
+	if !val.ReadUint16LengthPrefixed(&extData) {
+		return errBufferTooSmall
+	}
 
 	var cid cryptobyte.String
 	if !extData.ReadUint8LengthPrefixed(&cid) {
 		return errInvalidCIDFormat
 	}
+
+	if !extData.Empty() {
+		return errLengthMismatch
+	}
+
 	c.CID = make([]byte, len(cid))
 	if !cid.CopyBytes(c.CID) {
 		return errInvalidCIDFormat

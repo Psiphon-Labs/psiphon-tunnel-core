@@ -4,11 +4,10 @@
 package handshake
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 
 	"github.com/pion/dtls/v3/pkg/crypto/clientcertificate"
-	"github.com/pion/dtls/v3/pkg/crypto/hash"
-	"github.com/pion/dtls/v3/pkg/crypto/signature"
 	"github.com/pion/dtls/v3/pkg/crypto/signaturehash"
 )
 
@@ -38,6 +37,11 @@ func (m MessageCertificateRequest) Type() Type {
 
 // Marshal encodes the Handshake.
 func (m *MessageCertificateRequest) Marshal() ([]byte, error) {
+	if len(m.CertificateTypes) > 255 {
+		return nil, errCertificateTypesTooLong
+	}
+
+	//nolint:gosec // G115: certificate types count is validated to be <= 255 above.
 	out := []byte{byte(len(m.CertificateTypes))}
 	for _, v := range m.CertificateTypes {
 		out = append(out, byte(v))
@@ -46,8 +50,7 @@ func (m *MessageCertificateRequest) Marshal() ([]byte, error) {
 	out = append(out, []byte{0x00, 0x00}...)
 	binary.BigEndian.PutUint16(out[len(out)-2:], uint16(len(m.SignatureHashAlgorithms)*2)) //nolint:gosec //G115
 	for _, v := range m.SignatureHashAlgorithms {
-		out = append(out, byte(v.Hash))
-		out = append(out, byte(v.Signature))
+		out = append(out, v.Marshal()...)
 	}
 
 	// Distinguished Names
@@ -82,7 +85,7 @@ func (m *MessageCertificateRequest) Unmarshal(data []byte) error { //nolint:cycl
 		return errBufferTooSmall
 	}
 
-	for i := 0; i < certificateTypesLength; i++ {
+	for i := range certificateTypesLength {
 		certType := clientcertificate.Type(data[offset+i])
 		if _, ok := clientcertificate.Types()[certType]; ok {
 			m.CertificateTypes = append(m.CertificateTypes, certType)
@@ -103,15 +106,13 @@ func (m *MessageCertificateRequest) Unmarshal(data []byte) error { //nolint:cycl
 		if len(data) < (offset + i + 2) {
 			return errBufferTooSmall
 		}
-		h := hash.Algorithm(data[offset+i])
-		s := signature.Algorithm(data[offset+i+1])
 
-		if _, ok := hash.Algorithms()[h]; !ok {
-			continue
-		} else if _, ok := signature.Algorithms()[s]; !ok {
-			continue
+		scheme := binary.BigEndian.Uint16(data[offset+i : offset+i+2])
+		var alg signaturehash.Algorithm
+		if err := alg.Unmarshal(tls.SignatureScheme(scheme)); err != nil {
+			continue // skip unrecognized algorithms rather than failing the handshake
 		}
-		m.SignatureHashAlgorithms = append(m.SignatureHashAlgorithms, signaturehash.Algorithm{Signature: s, Hash: h})
+		m.SignatureHashAlgorithms = append(m.SignatureHashAlgorithms, alg)
 	}
 
 	offset += signatureHashAlgorithmsLength

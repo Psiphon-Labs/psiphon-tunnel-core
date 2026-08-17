@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package vnet
@@ -301,7 +301,7 @@ func (f *DuplicationFilter) onBucketFired(key int64) {
 	chunks := bucket.chunks
 	f.mu.Unlock()
 
-	for i := 0; i < len(chunks); i++ {
+	for i := range chunks {
 		f.router.push(chunks[i])
 	}
 }

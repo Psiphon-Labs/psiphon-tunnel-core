@@ -107,6 +107,10 @@ func (s *SupportedVersions) Unmarshal(data []byte) error { //nolint:cyclop
 			return errInvalidSupportedVersionsFormat
 		}
 
+		if !extData.Empty() {
+			return errLengthMismatch
+		}
+
 		return nil
 	}
 

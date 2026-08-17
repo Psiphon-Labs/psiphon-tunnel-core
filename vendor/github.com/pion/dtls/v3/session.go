@@ -8,7 +8,7 @@ type Session struct {
 	// ID store session id
 	ID []byte
 	// Secret store session master secret
-	Secret []byte
+	Secret []byte //nolint:gosec // no real risk of exporting the secret.
 }
 
 // SessionStore defines methods needed for session resumption.

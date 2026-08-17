@@ -39,7 +39,7 @@ func (h *handshakeCache) push(data []byte, epoch, messageSequence uint16, typ ha
 	defer h.mu.Unlock()
 
 	h.cache = append(h.cache, &handshakeCacheItem{
-		data:            append([]byte{}, data...),
+		data:            data,
 		epoch:           epoch,
 		messageSequence: messageSequence,
 		typ:             typ,
