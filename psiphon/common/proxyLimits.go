@@ -276,6 +276,10 @@ func (limits *ProxyLimits) SetCommonLimits(
 
 	rateLimits := MakeProxyRateLimits(
 		upstreamBytesPerSecond, downstreamBytesPerSecond)
+
+	// Rethrottling registered connections together may produce correlated
+	// traffic shape changes across flows that are observable to the proxy
+	// operator's ISP.
 	for conn := range limits.commonConns {
 		conn.SetLimits(rateLimits)
 	}
@@ -313,6 +317,9 @@ func (limits *ProxyLimits) SetPersonalLimits(
 
 	rateLimits := MakeProxyRateLimits(
 		upstreamBytesPerSecond, downstreamBytesPerSecond)
+
+	// See SetCommonLimits for a note about rethrottling registered
+	// connections together.
 	for conn := range limits.personalConns {
 		conn.SetLimits(rateLimits)
 	}
@@ -569,6 +576,8 @@ func (limits *ProxyLimits) registerConn(
 
 func (limits *ProxyLimits) applyScheduledRateLimitsLocked(now time.Time) {
 
+	// See SetCommonLimits for a note about rethrottling registered
+	// connections together.
 	_, _, upstreamBytesPerSecond, downstreamBytesPerSecond :=
 		limits.getCommonLimitsLocked(now)
 	rateLimits := MakeProxyRateLimits(

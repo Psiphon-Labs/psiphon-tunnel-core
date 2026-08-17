@@ -195,6 +195,116 @@ func checkElapsedTime(t *testing.T, dataSize int, rateLimit int64, duration time
 	}
 }
 
+func TestThrottledConnSetLimits(t *testing.T) {
+
+	throttledConn := NewThrottledConn(&testConn{}, true, RateLimits{
+		ReadBytesPerSecond:  100,
+		WriteBytesPerSecond: 100,
+	})
+
+	// Initialize the rate limiters; a fresh limiter starts with a full
+	// token bucket.
+	_, err := throttledConn.Read(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = throttledConn.Write(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readRateLimiter := throttledConn.readRateLimiter
+	writeRateLimiter := throttledConn.writeRateLimiter
+
+	// Reducing the rate updates the limiters in place and caps the token
+	// balance at the reduced burst.
+	throttledConn.SetLimits(RateLimits{
+		ReadBytesPerSecond:  50,
+		WriteBytesPerSecond: 50,
+	})
+	_, err = throttledConn.Read(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = throttledConn.Write(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if throttledConn.readRateLimiter != readRateLimiter {
+		t.Fatal("read rate limiter replaced")
+	}
+	if throttledConn.writeRateLimiter != writeRateLimiter {
+		t.Fatal("write rate limiter replaced")
+	}
+	if int64(readRateLimiter.Limit()) != 50 ||
+		readRateLimiter.Burst() != 50 {
+		t.Fatal("read rate limiter not updated")
+	}
+	if int64(writeRateLimiter.Limit()) != 50 ||
+		writeRateLimiter.Burst() != 50 {
+		t.Fatal("write rate limiter not updated")
+	}
+	if tokens := readRateLimiter.Tokens(); tokens > 50 {
+		t.Fatalf("tokens exceed reduced burst: %v", tokens)
+	}
+
+	// Consume the balance, then increase the rate: the limiters are updated
+	// in place, the balance is retained, and no free burst is granted.
+	_, err = throttledConn.Read(make([]byte, 50))
+	if err != nil {
+		t.Fatal(err)
+	}
+	throttledConn.SetLimits(RateLimits{
+		ReadBytesPerSecond:  200,
+		WriteBytesPerSecond: 200,
+	})
+	_, err = throttledConn.Read(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = throttledConn.Write(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if throttledConn.readRateLimiter != readRateLimiter {
+		t.Fatal("read rate limiter replaced")
+	}
+	if throttledConn.writeRateLimiter != writeRateLimiter {
+		t.Fatal("write rate limiter replaced")
+	}
+	if int64(readRateLimiter.Limit()) != 200 ||
+		readRateLimiter.Burst() != 200 {
+		t.Fatal("read rate limiter not updated")
+	}
+	if int64(writeRateLimiter.Limit()) != 200 ||
+		writeRateLimiter.Burst() != 200 {
+		t.Fatal("write rate limiter not updated")
+	}
+	if tokens := readRateLimiter.Tokens(); tokens > 100 {
+		t.Fatalf("unexpected free burst: %v", tokens)
+	}
+
+	// Accumulate a token debt exceeding a new, reduced burst, then reduce
+	// the rate: the limiter is replaced, bounding the carried debt to at
+	// most one new burst.
+	readRateLimiter.ReserveN(time.Now(), 200)
+	readRateLimiter.ReserveN(time.Now(), 200)
+	throttledConn.SetLimits(RateLimits{
+		ReadBytesPerSecond:  10,
+		WriteBytesPerSecond: 200,
+	})
+	_, err = throttledConn.Read(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if throttledConn.readRateLimiter == readRateLimiter {
+		t.Fatal("read rate limiter not replaced")
+	}
+	if tokens := throttledConn.readRateLimiter.Tokens(); tokens < -10 || tokens > 1 {
+		t.Fatalf("carried debt not bounded: %v", tokens)
+	}
+}
+
 func TestThrottledConnClose(t *testing.T) {
 
 	rateLimits := RateLimits{
