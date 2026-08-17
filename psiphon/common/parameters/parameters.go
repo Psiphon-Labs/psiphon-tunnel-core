@@ -596,6 +596,7 @@ const (
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 	LightProxyPersonalPairingConnectionWorkerPoolSize  = "LightProxyPersonalPairingConnectionWorkerPoolSize"
+	HomepageURLQueryParameterClientFeatures            = "HomepageURLQueryParameterClientFeatures"
 
 	// Retired parameters
 
@@ -1282,6 +1283,8 @@ var defaultParameters = map[string]struct {
 	LightProxyDialTimeout:                             {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	LightProxyLimitDestinationAddresses:               {value: []string{}},
 	LightProxyPersonalPairingConnectionWorkerPoolSize: {value: 2, minimum: 1},
+
+	HomepageURLQueryParameterClientFeatures: {value: KeyStrings{}, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
