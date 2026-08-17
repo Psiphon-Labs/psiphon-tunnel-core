@@ -496,6 +496,27 @@ func runTestInproxy(doMustUpgrade bool) error {
 		}
 	}
 
+	// Exercise dynamic rate limit changes
+
+	var updateLimitsOnce sync.Once
+	var updateLimitsErr error
+	updateLimits := func() error {
+		if sharedProxyLimits == nil {
+			return nil
+		}
+		updateLimitsOnce.Do(func() {
+			maxClients := sharedProxyLimitsProxyCount * proxyMaxClients
+			updateLimitsErr = sharedProxyLimits.SetCommonLimits(
+				maxClients, bytesToSend, bytesToSend)
+			if updateLimitsErr != nil {
+				return
+			}
+			updateLimitsErr = sharedProxyLimits.SetPersonalLimits(
+				maxClients, bytesToSend, bytesToSend)
+		})
+		return updateLimitsErr
+	}
+
 	for i := 0; i < numProxies; i++ {
 
 		proxyPrivateKey, err := GenerateSessionPrivateKey()
@@ -809,6 +830,13 @@ func runTestInproxy(doMustUpgrade bool) error {
 						return errors.Tracef(
 							"unexpected bytes: expected at index %d, received at index %d",
 							bytes.Index(sendBytes, buf[:m]), n)
+					}
+					if n < bytesToSend/2 && n+m >= bytesToSend/2 {
+						// Invoke dynamic rate limit change while bulk relaying
+						err = updateLimits()
+						if err != nil {
+							return errors.Trace(err)
+						}
 					}
 					n += m
 				}

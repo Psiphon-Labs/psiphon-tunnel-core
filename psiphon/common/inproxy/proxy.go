@@ -1109,12 +1109,8 @@ func (p *Proxy) getLimits(isPersonal bool) (
 		downstreamBytesPerSecond = personalDownstreamBytesPerSecond
 	}
 
-	// Throttling is applied to the proxy-to-destination connection, where
-	// writes flow upstream and reads flow downstream.
-	rateLimits = common.RateLimits{
-		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
-		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
-	}
+	rateLimits = common.MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond)
 
 	return maxCommonClients, maxPersonalClients, rateLimits
 }
@@ -1700,14 +1696,20 @@ func (p *Proxy) proxyOneClient(
 	// This approach favors performance stability: each client gets the
 	// same throttling limits regardless of how many other clients are connected.
 	//
-	// Rate limits are applied only when a client connection is established;
-	// connected clients retain their initial limits even when reduced time
-	// starts or ends.
+	// Current rate limits are applied by Register.
 
-	destinationConn = common.NewThrottledConn(
+	throttledConn := common.NewThrottledConn(
 		destinationConn,
 		announceResponse.NetworkProtocol.IsStream(),
-		rateLimits)
+		common.RateLimits{})
+	if isPersonal {
+		p.proxyLimits.RegisterPersonalConn(throttledConn)
+	} else {
+		p.proxyLimits.RegisterCommonConn(throttledConn)
+	}
+	defer p.proxyLimits.UnregisterConn(throttledConn)
+
+	destinationConn = throttledConn
 
 	// Hook up bytes transferred counting for activity updates.
 

@@ -220,3 +220,140 @@ func runTestProxyLimitsReduced() error {
 
 	return nil
 }
+
+func TestProxyLimitsDynamicRates(t *testing.T) {
+
+	limits, err := NewProxyLimits(&ProxyLimitsConfig{
+		MaxCommonClients:                 1,
+		MaxPersonalClients:               1,
+		PersonalUpstreamBytesPerSecond:   30,
+		PersonalDownstreamBytesPerSecond: 40,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newConn := func() *ThrottledConn {
+		return NewThrottledConn(nil, true, RateLimits{
+			ReadBytesPerSecond:  99,
+			WriteBytesPerSecond: 99,
+		})
+	}
+
+	check := func(conn *ThrottledConn, read, write int64) {
+		t.Helper()
+		if value := conn.readBytesPerSecond.Load(); value != read {
+			t.Fatalf("unexpected read rate: %d != %d", value, read)
+		}
+		if value := conn.writeBytesPerSecond.Load(); value != write {
+			t.Fatalf("unexpected write rate: %d != %d", value, write)
+		}
+	}
+
+	commonConn := newConn()
+	personalConn := newConn()
+	limits.RegisterCommonConn(commonConn)
+	limits.RegisterPersonalConn(personalConn)
+
+	check(commonConn, 0, 0)
+	check(personalConn, 40, 30)
+
+	err = limits.SetCommonLimits(1, 10, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(commonConn, 20, 10)
+	check(personalConn, 40, 30)
+
+	err = limits.SetPersonalLimits(1, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(commonConn, 20, 10)
+	check(personalConn, 0, 0)
+
+	limits.UnregisterConn(commonConn)
+	limits.UnregisterConn(personalConn)
+
+	err = limits.SetCommonLimits(1, 50, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = limits.SetPersonalLimits(1, 70, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(commonConn, 20, 10)
+	check(personalConn, 0, 0)
+
+	lateCommonConn := newConn()
+	latePersonalConn := newConn()
+	limits.RegisterCommonConn(lateCommonConn)
+	limits.RegisterPersonalConn(latePersonalConn)
+
+	check(lateCommonConn, 60, 50)
+	check(latePersonalConn, 80, 70)
+}
+
+func TestProxyLimitsReducedDynamicRates(t *testing.T) {
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	start := now.Add(time.Hour)
+	end := now.Add(2 * time.Hour)
+	limits, err := NewProxyLimits(&ProxyLimitsConfig{
+		MaxCommonClients:                 1,
+		CommonUpstreamBytesPerSecond:     100,
+		CommonDownstreamBytesPerSecond:   200,
+		MaxPersonalClients:               1,
+		PersonalUpstreamBytesPerSecond:   300,
+		PersonalDownstreamBytesPerSecond: 400,
+		ReducedStartTime:                 start.Format("15:04"),
+		ReducedEndTime:                   end.Format("15:04"),
+		ReducedUpstreamBytesPerSecond:    10,
+		ReducedDownstreamBytesPerSecond:  20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commonConn := NewThrottledConn(nil, true, RateLimits{})
+	personalConn := NewThrottledConn(nil, true, RateLimits{})
+	limits.RegisterCommonConn(commonConn)
+	limits.RegisterPersonalConn(personalConn)
+	defer limits.UnregisterConn(commonConn)
+	defer limits.UnregisterConn(personalConn)
+
+	check := func(conn *ThrottledConn, read, write int64) {
+		t.Helper()
+		if value := conn.readBytesPerSecond.Load(); value != read {
+			t.Fatalf("unexpected read rate: %d != %d", value, read)
+		}
+		if value := conn.writeBytesPerSecond.Load(); value != write {
+			t.Fatalf("unexpected write rate: %d != %d", value, write)
+		}
+	}
+
+	check(commonConn, 200, 100)
+	check(personalConn, 400, 300)
+	if limits.reducedTimer == nil {
+		t.Fatal("reduced timer not started")
+	}
+
+	limits.mutex.Lock()
+	limits.applyScheduledRateLimitsLocked(start.Add(30 * time.Minute))
+	limits.mutex.Unlock()
+	check(commonConn, 20, 10)
+	check(personalConn, 20, 10)
+
+	limits.mutex.Lock()
+	limits.applyScheduledRateLimitsLocked(end.Add(30 * time.Minute))
+	limits.mutex.Unlock()
+	check(commonConn, 200, 100)
+	check(personalConn, 400, 300)
+
+	limits.UnregisterConn(commonConn)
+	limits.UnregisterConn(personalConn)
+	if limits.reducedTimer != nil {
+		t.Fatal("reduced timer not stopped")
+	}
+}

@@ -530,6 +530,24 @@ func runTestLightProxy(
 			clients[0].GetRecommendedMaxTLSPadding())
 	}
 
+	// Exercise dynamic rate limit changes
+
+	var updateLimitsOnce sync.Once
+	var updateLimitsErr error
+	updateLimits := func() error {
+		updateLimitsOnce.Do(func() {
+			updatedBytesPerSecond := bytesPerSecond + bytesPerSecond/2
+			if sharedProxyLimits {
+				updateLimitsErr = proxyConfig.ProxyLimits.SetPersonalLimits(
+					maxConcurrent, updatedBytesPerSecond, updatedBytesPerSecond)
+			} else {
+				updateLimitsErr = proxy.SetLimits(
+					&maxConcurrent, updatedBytesPerSecond, updatedBytesPerSecond)
+			}
+		})
+		return updateLimitsErr
+	}
+
 	clientGroup, clientCtx := errgroup.WithContext(ctx)
 	for _, client := range clients {
 		client := client
@@ -543,7 +561,8 @@ func runTestLightProxy(
 					tlsFragmentClientHello,
 					tlsPadding,
 					echoAddress,
-					payloadSize)
+					payloadSize,
+					updateLimits)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -628,7 +647,8 @@ func runLightClient(
 	tlsFragmentClientHello bool,
 	tlsPadding int,
 	destinationAddress string,
-	payloadSize int) error {
+	payloadSize int,
+	updateLimits func() error) error {
 
 	conn, err := client.Dial(
 		ctx,
@@ -668,7 +688,19 @@ func runLightClient(
 	})
 
 	readWriteGroup.Go(func() error {
-		_, err := io.ReadFull(innerTLSConn, echoed)
+		half := len(echoed) / 2
+		_, err := io.ReadFull(innerTLSConn, echoed[:half])
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// Invoke dynamic rate limit change while bulk relaying
+		err = updateLimits()
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		_, err = io.ReadFull(innerTLSConn, echoed[half:])
 		return errors.Trace(err)
 	})
 
