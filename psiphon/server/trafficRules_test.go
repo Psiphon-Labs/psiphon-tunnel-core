@@ -126,6 +126,39 @@ func TestTrafficRulesFilters(t *testing.T) {
 
         {
           "Filter" : {
+            "Regions" : ["R6"],
+            "ClientFeatures" : ["feature-a"]
+          },
+          "ExceptFilter" : {
+            "ClientFeatures" : ["feature-blocked"]
+          },
+          "Rules" : {
+            "RateLimits" : {
+              "WriteBytesPerSecond": 21,
+              "ReadBytesPerSecond": 22
+            },
+            "AllowTCPPorts" : [5,21],
+            "AllowUDPPorts" : [6,22]
+          }
+        },
+
+        {
+          "Filter" : {
+            "Regions" : ["R6"],
+            "ClientFeatures" : ["feature-a", "feature-b"]
+          },
+          "Rules" : {
+            "RateLimits" : {
+              "WriteBytesPerSecond": 23,
+              "ReadBytesPerSecond": 24
+            },
+            "AllowTCPPorts" : [5,23],
+            "AllowUDPPorts" : [6,24]
+          }
+        },
+
+        {
+          "Filter" : {
             "Regions" : ["R5"],
             "MinClientVersion" : 30,
             "MaxClientVersion" : 40
@@ -302,6 +335,105 @@ func TestTrafficRulesFilters(t *testing.T) {
 			"P1",
 			GeoIPData{Country: "R3", ISP: "I2"},
 			handshakeState{apiParams: map[string]interface{}{"client_version": "1"}, completed: true},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"match first client feature rule",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{completed: true, clientFeatures: []string{"feature-a"}},
+			1, 21, 3, 22, makePortList("[5,21]"), makePortList("[6,22]"),
+		},
+
+		{
+			"match any configured client feature",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{
+				completed:      true,
+				clientFeatures: []string{"other", "feature-b"},
+			},
+			1, 23, 3, 24, makePortList("[5,23]"), makePortList("[6,24]"),
+		},
+
+		{
+			"first matching client feature rule wins",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{
+				completed:      true,
+				clientFeatures: []string{"feature-b", "feature-a"},
+			},
+			1, 21, 3, 22, makePortList("[5,21]"), makePortList("[6,22]"),
+		},
+
+		{
+			"client feature exception selects next rule",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{
+				completed:      true,
+				clientFeatures: []string{"feature-a", "feature-blocked"},
+			},
+			1, 23, 3, 24, makePortList("[5,23]"), makePortList("[6,24]"),
+		},
+
+		{
+			"client features do not intersect",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{completed: true, clientFeatures: []string{"other"}},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"client features are missing",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{completed: true},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"client features are empty",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{completed: true, clientFeatures: []string{}},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"client feature matching is case-sensitive",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{completed: true, clientFeatures: []string{"FEATURE-A"}},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"client features require a completed handshake",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R6", ISP: "I1"},
+			handshakeState{clientFeatures: []string{"feature-a"}},
 			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
 		},
 

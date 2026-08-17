@@ -894,7 +894,8 @@ var (
 	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
 	testClientVersion                    = 1
 	testClientPlatform                   = "Android_10_com.test.app"
-	testClientFeatures                   = []string{"feature 1", "feature 2"}
+	testRequiredClientFeature            = "required-client-feature"
+	testClientFeatures                   = []string{"feature 1", "feature 2", testRequiredClientFeature}
 	testDeviceRegion                     = "US"
 	testServerRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
@@ -4515,6 +4516,7 @@ func paveTrafficRulesFile(
         "FilteredRules" : [
             {
                 "Filter" : {
+                    "ClientFeatures" : ["%s"],
                     "HandshakeParameters" : {
                         "propagation_channel_id" : ["%s"]
                     }%s
@@ -4537,6 +4539,7 @@ func paveTrafficRulesFile(
 	trafficRulesJSON := fmt.Sprintf(
 		trafficRulesJSONFormat,
 		livenessTestSize, livenessTestSize,
+		testRequiredClientFeature,
 		propagationChannelID, authorizationFilter,
 		allowTCPPorts, allowUDPPorts, disallowTCPPorts, disallowUDPPorts)
 
@@ -4724,6 +4727,7 @@ func paveTacticsConfigFile(
         {
           "Filter" : {
             "APIParameters" : {"propagation_channel_id" : ["%s"]},
+            "ClientFeatures" : ["%s"],
             "SpeedTestRTTMilliseconds" : {
               "Aggregation" : "Median",
               "AtLeast" : 1
@@ -4825,6 +4829,7 @@ func paveTacticsConfigFile(
 		discoveryStategy,
 		enableDSLFetcher,
 		propagationChannelID,
+		testRequiredClientFeature,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
 

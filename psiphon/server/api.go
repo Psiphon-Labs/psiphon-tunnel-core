@@ -268,6 +268,15 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	var clientFeatures []string
+	if params["client_features"] != nil {
+		clientFeatures, err = getStringArrayRequestParam(
+			params, "client_features")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	// establishedTunnelsCount is used in traffic rule selection. When omitted by
 	// the client, a value of 0 will be used.
 	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
@@ -344,6 +353,7 @@ func handshakeAPIRequestHandler(
 			completed:               true,
 			apiProtocol:             apiProtocol,
 			apiParams:               apiParams,
+			clientFeatures:          clientFeatures,
 			domainBytesChecksum:     domainBytesChecksum,
 			hasDomainBytesRegexes:   len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
@@ -429,13 +439,18 @@ func handshakeAPIRequestHandler(
 	// the JSON response, return an empty array instead of null for legacy
 	// clients.
 
+	clientFeatureValues :=
+		sshClient.sshServer.selectHomepageURLQueryParameterClientFeatures(
+			clientFeatures)
+
 	homepages := db.GetRandomizedHomepages(
 		sponsorID,
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
 		normalizedPlatform,
-		isMobile)
+		isMobile,
+		clientFeatureValues)
 
 	clientAddress := ""
 	if protocol.TunnelProtocolIsDirect(sshClient.tunnelProtocol) {
