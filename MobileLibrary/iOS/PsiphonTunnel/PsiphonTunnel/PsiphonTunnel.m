@@ -511,6 +511,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return GoPsiGetBuildInfo();
 }
 
+- (NSString * _Nullable)getDSLAccessToken:(NSError * _Nullable * _Nonnull)error {
+    return GoPsiGetDSLAccessToken(error);
+}
+
 #pragma mark - Profiling utilities
 
 - (void)writeRuntimeProfilesTo:(NSString * _Nonnull)outputDirectory withCPUSampleDurationSeconds:(int)cpuSampleDurationSeconds withBlockSampleDurationSeconds:(int)blockSampleDurationSeconds {
@@ -1310,6 +1314,13 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onLightProxyAvailable)]) {
             dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onLightProxyAvailable];
+            });
+        }
+    }
+    else if ([noticeType isEqualToString:@"DSLAccessTokenAvailable"]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onDSLAccessTokenAvailable)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onDSLAccessTokenAvailable];
             });
         }
     }

@@ -63,6 +63,7 @@ type DSLBackendTestShim interface {
 		apiParams protocol.PackedAPIParameters,
 		oslKeys [][]byte,
 		discoverCount int32,
+		dslAccessTokenRegistration bool,
 		retErr error)
 
 	MarshalDiscoverServerEntriesResponse(
@@ -72,7 +73,8 @@ type DSLBackendTestShim interface {
 			PrioritizeDial           bool
 			PrioritizeReason         string
 			PrioritizeTunnelProtocol string
-		}) (
+		},
+		dslAccessToken []byte) (
 		cborResponse []byte,
 		retErr error)
 
@@ -122,7 +124,16 @@ type TestDSLBackend struct {
 	oslPaveData             atomic.Value
 	untunneledServerEntries map[string]*dslSourcedServerEntry
 	tunneledServerEntries   map[string]*dslSourcedServerEntry
+	dslAccessTokenMutex     sync.Mutex
+	dslAccessToken          []byte
+	dslAccessTokenRequests  []TestDSLAccessTokenRegistrationRequest
+	dslAccessTokenResponses [][]byte
 	listener                net.Listener
+}
+
+type TestDSLAccessTokenRegistrationRequest struct {
+	Tunneled     bool
+	Registration bool
 }
 
 type dslSourcedServerEntry struct {
@@ -456,6 +467,31 @@ func (b *TestDSLBackend) SetOSLPaveData(oslPaveData []*osl.PaveData) {
 	b.oslPaveData.Store(oslPaveData)
 }
 
+func (b *TestDSLBackend) SetDSLAccessToken(dslAccessToken []byte) {
+	b.dslAccessTokenMutex.Lock()
+	defer b.dslAccessTokenMutex.Unlock()
+
+	b.dslAccessToken = append([]byte(nil), dslAccessToken...)
+}
+
+func (b *TestDSLBackend) GetDSLAccessTokenRegistrationRequests() []TestDSLAccessTokenRegistrationRequest {
+	b.dslAccessTokenMutex.Lock()
+	defer b.dslAccessTokenMutex.Unlock()
+
+	return append([]TestDSLAccessTokenRegistrationRequest(nil), b.dslAccessTokenRequests...)
+}
+
+func (b *TestDSLBackend) GetDSLAccessTokenResponses() [][]byte {
+	b.dslAccessTokenMutex.Lock()
+	defer b.dslAccessTokenMutex.Unlock()
+
+	responses := make([][]byte, len(b.dslAccessTokenResponses))
+	for i, response := range b.dslAccessTokenResponses {
+		responses[i] = append([]byte(nil), response...)
+	}
+	return responses
+}
+
 func (b *TestDSLBackend) handleDiscoverServerEntries(
 	tunneled bool,
 	cborRequest []byte) ([]byte, error) {
@@ -465,11 +501,26 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 		serverEntries = b.tunneledServerEntries
 	}
 
-	_, oslKeys, discoverCount, err :=
+	_, oslKeys, discoverCount, dslAccessTokenRegistration, err :=
 		b.shim.UnmarshalDiscoverServerEntriesRequest(cborRequest)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	b.dslAccessTokenMutex.Lock()
+	b.dslAccessTokenRequests = append(
+		b.dslAccessTokenRequests,
+		TestDSLAccessTokenRegistrationRequest{
+			Tunneled:     tunneled,
+			Registration: dslAccessTokenRegistration,
+		})
+	var dslAccessToken []byte
+	if dslAccessTokenRegistration {
+		dslAccessToken = append([]byte(nil), b.dslAccessToken...)
+	}
+	b.dslAccessTokenResponses = append(
+		b.dslAccessTokenResponses, append([]byte(nil), dslAccessToken...))
+	b.dslAccessTokenMutex.Unlock()
 
 	missingOSLs := false
 	oslPaveDataValue := b.oslPaveData.Load()
@@ -537,7 +588,7 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 	}
 
 	cborResponse, err := b.shim.MarshalDiscoverServerEntriesResponse(
-		versionedServerEntryTags)
+		versionedServerEntryTags, dslAccessToken)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

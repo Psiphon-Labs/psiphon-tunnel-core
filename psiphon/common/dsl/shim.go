@@ -76,17 +76,19 @@ func (b *backendTestShim) UnmarshalDiscoverServerEntriesRequest(
 	apiParams protocol.PackedAPIParameters,
 	oslKeys [][]byte,
 	discoverCount int32,
+	dslAccessTokenRegistration bool,
 	retErr error) {
 
 	var request *DiscoverServerEntriesRequest
 	err := cbor.Unmarshal(cborRequest, &request)
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, nil, 0, false, errors.Trace(err)
 	}
 
 	return request.BaseAPIParameters,
 		convertSlice[OSLKey, []byte](request.OSLKeys),
 		request.DiscoverCount,
+		request.DSLAccessTokenRegistration,
 		nil
 }
 
@@ -97,7 +99,8 @@ func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 		PrioritizeDial           bool
 		PrioritizeReason         string
 		PrioritizeTunnelProtocol string
-	}) (
+	},
+	dslAccessToken []byte) (
 
 	cborResponse []byte,
 	retErr error) {
@@ -111,6 +114,7 @@ func (b *backendTestShim) MarshalDiscoverServerEntriesResponse(
 				PrioritizeReason         string
 				PrioritizeTunnelProtocol string
 			}, *VersionedServerEntryTag](versionedServerEntryTags),
+		DSLAccessToken: dslAccessToken,
 	}
 
 	cborResponse, err := protocol.CBOREncoding.Marshal(response)

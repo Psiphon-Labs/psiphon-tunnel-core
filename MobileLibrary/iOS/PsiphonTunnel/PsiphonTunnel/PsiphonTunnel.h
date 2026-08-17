@@ -350,6 +350,11 @@ followed by a tunnel-core shutdown.
  */
 - (void)onLightProxyAvailable;
 
+/*!
+ Called when a persisted opaque DSL access token is available to fetch with getDSLAccessToken.
+ */
+- (void)onDSLAccessTokenAvailable;
+
 @end
 
 /*!
@@ -502,6 +507,9 @@ Returns the path where the rotated notices file will be created.
  @return An uppercase region identifier, or an empty string if none can be determined.
  */
 + (NSString * _Nonnull)getDeviceRegion;
+
+/*! Returns the persisted opaque DSL access token, or an empty string when Psiphon is not running or no token has been registered. */
+- (NSString * _Nullable)getDSLAccessToken:(NSError * _Nullable * _Nonnull)error;
 
 #pragma mark - Profiling utitlities
 

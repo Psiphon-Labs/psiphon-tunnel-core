@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -37,7 +38,385 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
+	"github.com/fxamacker/cbor/v2"
 )
+
+func TestDiscoverServerEntriesRequestCBORCompatibility(t *testing.T) {
+	type oldDiscoverServerEntriesRequest struct {
+		BaseAPIParameters protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+		OSLKeys           []OSLKey                     `cbor:"2,keyasint,omitempty"`
+		DiscoverCount     int32                        `cbor:"3,keyasint,omitempty"`
+	}
+
+	oldRequest := &oldDiscoverServerEntriesRequest{
+		BaseAPIParameters: protocol.PackedAPIParameters{1: "value"},
+		OSLKeys:           []OSLKey{{1, 2, 3}},
+		DiscoverCount:     4,
+	}
+	encodedOldRequest, err := protocol.CBOREncoding.Marshal(oldRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decodedNewRequest DiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedOldRequest, &decodedNewRequest); err != nil {
+		t.Fatal(err)
+	}
+	if decodedNewRequest.DSLAccessTokenRegistration {
+		t.Fatal("unexpected DSL access token registration in old request")
+	}
+
+	newRequest := &DiscoverServerEntriesRequest{
+		BaseAPIParameters:          oldRequest.BaseAPIParameters,
+		OSLKeys:                    oldRequest.OSLKeys,
+		DiscoverCount:              oldRequest.DiscoverCount,
+		DSLAccessTokenRegistration: true,
+	}
+	encodedNewRequest, err := protocol.CBOREncoding.Marshal(newRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newRequestFields map[uint64]cbor.RawMessage
+	if err := cbor.Unmarshal(encodedNewRequest, &newRequestFields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []uint64{1, 2, 3, 4} {
+		if _, ok := newRequestFields[key]; !ok {
+			t.Fatalf("request CBOR key %d is missing", key)
+		}
+	}
+
+	var decodedOldRequest oldDiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedNewRequest, &decodedOldRequest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&decodedOldRequest, oldRequest) {
+		t.Fatalf("old request fields changed: got %#v, want %#v", decodedOldRequest, *oldRequest)
+	}
+
+	var roundTripRequest DiscoverServerEntriesRequest
+	if err := cbor.Unmarshal(encodedNewRequest, &roundTripRequest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&roundTripRequest, newRequest) {
+		t.Fatalf("request round trip failed: got %#v, want %#v", roundTripRequest, *newRequest)
+	}
+}
+
+func TestDiscoverServerEntriesResponseCBORCompatibility(t *testing.T) {
+	type oldDiscoverServerEntriesResponse struct {
+		VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
+	}
+
+	oldResponse := &oldDiscoverServerEntriesResponse{
+		VersionedServerEntryTags: []*VersionedServerEntryTag{{Tag: []byte{1}, Version: 2}},
+	}
+	encodedOldResponse, err := protocol.CBOREncoding.Marshal(oldResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decodedNewResponse DiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedOldResponse, &decodedNewResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(decodedNewResponse.DSLAccessToken) != 0 {
+		t.Fatalf("unexpected DSL access token in old response: %x", decodedNewResponse.DSLAccessToken)
+	}
+
+	newResponse := &DiscoverServerEntriesResponse{
+		VersionedServerEntryTags: oldResponse.VersionedServerEntryTags,
+		DSLAccessToken:           []byte{5, 6, 7},
+	}
+	encodedNewResponse, err := protocol.CBOREncoding.Marshal(newResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newResponseFields map[uint64]cbor.RawMessage
+	if err := cbor.Unmarshal(encodedNewResponse, &newResponseFields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []uint64{1, 2} {
+		if _, ok := newResponseFields[key]; !ok {
+			t.Fatalf("response CBOR key %d is missing", key)
+		}
+	}
+
+	var decodedOldResponse oldDiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedNewResponse, &decodedOldResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&decodedOldResponse, oldResponse) {
+		t.Fatalf("old response fields changed: got %#v, want %#v", decodedOldResponse, *oldResponse)
+	}
+
+	var roundTripResponse DiscoverServerEntriesResponse
+	if err := cbor.Unmarshal(encodedNewResponse, &roundTripResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&roundTripResponse, newResponse) {
+		t.Fatalf("response round trip failed: got %#v, want %#v", roundTripResponse, *newResponse)
+	}
+}
+
+func TestFetcherDSLAccessTokenRegistration(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			var got, fieldPresent bool
+			config := &FetcherConfig{
+				DSLAccessTokenRegistration:         enabled,
+				DSLAccessTokenRegistrationResponse: func([]byte) error { return nil },
+				RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+					var relayedRequest RelayedRequest
+					if err := cbor.Unmarshal(payload, &relayedRequest); err != nil {
+						return nil, err
+					}
+
+					var request DiscoverServerEntriesRequest
+					if err := cbor.Unmarshal(relayedRequest.Request, &request); err != nil {
+						return nil, err
+					}
+					got = request.DSLAccessTokenRegistration
+					var requestFields map[uint64]cbor.RawMessage
+					if err := cbor.Unmarshal(relayedRequest.Request, &requestFields); err != nil {
+						return nil, err
+					}
+					_, fieldPresent = requestFields[4]
+
+					response, err := protocol.CBOREncoding.Marshal(&DiscoverServerEntriesResponse{})
+					if err != nil {
+						return nil, err
+					}
+					return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+				},
+			}
+
+			fetcher, err := NewFetcher(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fetcher.doDiscoverServerEntriesRequest(
+				context.Background(), nil, 1, enabled); err != nil {
+
+				t.Fatal(err)
+			}
+			if got != enabled {
+				t.Fatalf("got DSL access token registration %t, want %t", got, enabled)
+			}
+			if fieldPresent != enabled {
+				t.Fatalf("DSL access token registration field present: got %t, want %t", fieldPresent, enabled)
+			}
+		})
+	}
+}
+
+func TestFetcherDSLAccessTokenRegistrationOrdering(t *testing.T) {
+	var events []string
+	accessToken := []byte("opaque-token")
+
+	config := &FetcherConfig{
+		Logger:                     testutils.NewTestLoggerWithComponent("fetcher"),
+		DSLAccessTokenRegistration: true,
+		DSLAccessTokenRegistrationResponse: func(got []byte) error {
+			// The token is delivered as issued; encoding happens where it
+			// leaves tunnel-core, not in the fetcher.
+			if !bytes.Equal(got, accessToken) {
+				t.Fatal("unexpected access token")
+			}
+			events = append(events, "access token")
+			return nil
+		},
+		RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+			var request RelayedRequest
+			if err := cbor.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			if request.RequestType != requestTypeDiscoverServerEntries {
+				return nil, errors.TraceNew("unexpected request type")
+			}
+
+			var discoverRequest DiscoverServerEntriesRequest
+			if err := cbor.Unmarshal(request.Request, &discoverRequest); err != nil {
+				return nil, err
+			}
+			if !discoverRequest.DSLAccessTokenRegistration {
+				return nil, errors.TraceNew("registration not requested")
+			}
+			events = append(events, "request")
+
+			response, err := protocol.CBOREncoding.Marshal(&DiscoverServerEntriesResponse{
+				DSLAccessToken: accessToken,
+				VersionedServerEntryTags: []*VersionedServerEntryTag{{
+					Tag:     []byte{1},
+					Version: 1,
+				}},
+			})
+			if err != nil {
+				return nil, err
+			}
+			return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+		},
+		DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+		DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+		DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+			return time.Now(), nil
+		},
+		DatastoreKnownOSLIDs: func() ([]OSLID, error) { return nil, nil },
+		DatastoreHasServerEntry: func(
+			ServerEntryTag, int, bool, string, string) bool {
+
+			events = append(events, "entries")
+			return true
+		},
+		DatastoreFatalError:           func(error) {},
+		FetchTTL:                      0,
+		DiscoverServerEntriesMinCount: 1,
+		DiscoverServerEntriesMaxCount: 1,
+		GetLastActiveOSLsTTL:          time.Hour,
+		DoGarbageCollection:           func() {},
+	}
+
+	fetcher, err := NewFetcher(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fetcher.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"request", "access token", "entries"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("unexpected event order: got %v, want %v", events, want)
+	}
+}
+
+func TestFetcherDSLAccessTokenRegistrationProceedsAfterOSLFailure(t *testing.T) {
+	registrationRequested := false
+	responseHandled := false
+	accessToken := []byte("opaque-token")
+
+	config := &FetcherConfig{
+		Logger:                     testutils.NewTestLoggerWithComponent("fetcher"),
+		DSLAccessTokenRegistration: true,
+		DSLAccessTokenRegistrationResponse: func(got []byte) error {
+			if !bytes.Equal(got, accessToken) {
+				t.Fatal("unexpected access token")
+			}
+			responseHandled = true
+			return nil
+		},
+		RoundTripper: func(_ context.Context, payload []byte) ([]byte, error) {
+			var request RelayedRequest
+			if err := cbor.Unmarshal(payload, &request); err != nil {
+				return nil, err
+			}
+			var discoverRequest DiscoverServerEntriesRequest
+			if err := cbor.Unmarshal(request.Request, &discoverRequest); err != nil {
+				return nil, err
+			}
+			registrationRequested = discoverRequest.DSLAccessTokenRegistration
+
+			response, err := protocol.CBOREncoding.Marshal(
+				&DiscoverServerEntriesResponse{DSLAccessToken: accessToken})
+			if err != nil {
+				return nil, err
+			}
+			return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+		},
+		DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+		DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+		DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+			return time.Time{}, errors.TraceNew("OSL failure")
+		},
+		DatastoreFatalError:           func(error) {},
+		FetchTTL:                      0,
+		DiscoverServerEntriesMinCount: 1,
+		DiscoverServerEntriesMaxCount: 1,
+		DoGarbageCollection:           func() {},
+	}
+
+	fetcher, err := NewFetcher(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fetcher.Run(context.Background()); err == nil {
+		t.Fatal("expected OSL failure")
+	}
+	if !registrationRequested || !responseHandled {
+		t.Fatal("registration not completed after OSL processing failed")
+	}
+}
+
+func TestFetcherDSLAccessTokenRegistrationResponse(t *testing.T) {
+	tests := []struct {
+		name           string
+		accessToken    []byte
+		expectCallback bool
+	}{
+		{
+			name:           "arbitrary bytes",
+			accessToken:    []byte{0xff, 0x00, 0x80, 0x2b, 0x2f},
+			expectCallback: true,
+		},
+		{
+			name:           "string bytes",
+			accessToken:    []byte("not+base64url"),
+			expectCallback: true,
+		},
+		{
+			name: "empty response",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var callbackValue []byte
+			callbackInvoked := false
+			config := &FetcherConfig{
+				Logger:                     testutils.NewTestLoggerWithComponent("fetcher"),
+				DSLAccessTokenRegistration: true,
+				DSLAccessTokenRegistrationResponse: func(value []byte) error {
+					callbackInvoked = true
+					callbackValue = value
+					return nil
+				},
+				RoundTripper: func(_ context.Context, _ []byte) ([]byte, error) {
+					response, err := protocol.CBOREncoding.Marshal(
+						&DiscoverServerEntriesResponse{DSLAccessToken: test.accessToken})
+					if err != nil {
+						return nil, err
+					}
+					return protocol.CBOREncoding.Marshal(&RelayedResponse{Response: response})
+				},
+				DatastoreGetLastFetchTime: func() (time.Time, error) { return time.Time{}, nil },
+				DatastoreSetLastFetchTime: func(time.Time) error { return nil },
+				DatastoreGetLastActiveOSLsTime: func() (time.Time, error) {
+					return time.Now(), nil
+				},
+				DatastoreKnownOSLIDs:          func() ([]OSLID, error) { return nil, nil },
+				DatastoreFatalError:           func(error) {},
+				FetchTTL:                      0,
+				DiscoverServerEntriesMinCount: 0,
+				DiscoverServerEntriesMaxCount: 0,
+				GetLastActiveOSLsTTL:          time.Hour,
+				DoGarbageCollection:           func() {},
+			}
+			fetcher, err := NewFetcher(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := fetcher.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if callbackInvoked != test.expectCallback {
+				t.Fatalf("callback invoked: got %t, want %t", callbackInvoked, test.expectCallback)
+			}
+			if !bytes.Equal(callbackValue, test.accessToken) {
+				t.Fatalf("callback value: got %x, want %x", callbackValue, test.accessToken)
+			}
+		})
+	}
+}
 
 type testConfig struct {
 	name               string
@@ -50,6 +429,8 @@ type testConfig struct {
 	expectFailure      bool
 	cacheServerEntries bool
 	cacheOSLFileSpecs  bool
+	testDSLAccessToken bool
+	requestAccessToken bool
 }
 
 func TestDSLs(t *testing.T) {
@@ -121,6 +502,17 @@ func TestDSLs(t *testing.T) {
 			cacheServerEntries: true,
 			cacheOSLFileSpecs:  true,
 		},
+		{
+			name: "DSL access token requested",
+
+			testDSLAccessToken: true,
+			requestAccessToken: true,
+		},
+		{
+			name: "DSL access token not requested",
+
+			testDSLAccessToken: true,
+		},
 	}
 
 	for _, testConfig := range tests {
@@ -181,6 +573,10 @@ func testDSLs(testConfig *testConfig) error {
 		backendOSLPaveData1)
 	if err != nil {
 		return errors.Trace(err)
+	}
+	testDSLAccessToken := []byte{0xff, 0x00, 0x80, 0x2b, 0x2f}
+	if testConfig.testDSLAccessToken {
+		backend.SetDSLAccessToken(testDSLAccessToken)
 	}
 
 	err = backend.Start()
@@ -317,6 +713,8 @@ func testDSLs(testConfig *testConfig) error {
 
 	var unexpectedServerEntrySource atomic.Int32
 	var unexpectedServerEntryPrioritizeDial atomic.Int32
+	var dslAccessTokenCallbackCount int
+	var receivedDSLAccessToken []byte
 
 	datastoreHasServerEntryWithCheck := func(
 		tag ServerEntryTag,
@@ -364,7 +762,13 @@ func testDSLs(testConfig *testConfig) error {
 	}
 
 	fetcherConfig := &FetcherConfig{
-		Logger: testutils.NewTestLoggerWithComponent("fetcher"),
+		Logger:                     testutils.NewTestLoggerWithComponent("fetcher"),
+		DSLAccessTokenRegistration: testConfig.requestAccessToken,
+		DSLAccessTokenRegistrationResponse: func(dslAccessToken []byte) error {
+			dslAccessTokenCallbackCount++
+			receivedDSLAccessToken = dslAccessToken
+			return nil
+		},
 
 		RoundTripper: clientRelayRoundTripper,
 
@@ -546,6 +950,39 @@ func testDSLs(testConfig *testConfig) error {
 
 	if unexpectedServerEntryPrioritizeDial.Load() != 0 {
 		return errors.TraceNew("unexpected server entry prioritize dial")
+	}
+
+	if testConfig.testDSLAccessToken {
+		requests := backend.GetDSLAccessTokenRegistrationRequests()
+		if len(requests) != 1 ||
+			requests[0].Registration != testConfig.requestAccessToken ||
+			requests[0].Tunneled != testConfig.isTunneled {
+
+			return errors.Tracef(
+				"unexpected DSL access token registration requests: %v", requests)
+		}
+
+		expectedCallbackCount := 0
+		var expectedDSLAccessToken []byte
+		var expectedResponse []byte
+		if testConfig.requestAccessToken {
+			expectedCallbackCount = 1
+			expectedDSLAccessToken = testDSLAccessToken
+			expectedResponse = testDSLAccessToken
+		}
+		responses := backend.GetDSLAccessTokenResponses()
+		if len(responses) != 1 || !bytes.Equal(responses[0], expectedResponse) {
+			return errors.Tracef(
+				"unexpected DSL access token responses: %x", responses)
+		}
+		if dslAccessTokenCallbackCount != expectedCallbackCount {
+			return errors.Tracef(
+				"unexpected DSL access token callback count: %d", dslAccessTokenCallbackCount)
+		}
+		if !bytes.Equal(receivedDSLAccessToken, expectedDSLAccessToken) {
+			return errors.Tracef(
+				"unexpected DSL access token: %x", receivedDSLAccessToken)
+		}
 	}
 
 	return nil
