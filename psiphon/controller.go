@@ -3243,6 +3243,15 @@ loop:
 // a connection to the tunnel server, and delivers the connected tunnel to a channel.
 func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
+
+	concurrentEstablishTunnelsMutexLocked := false
+	defer func() {
+		// Unlock in case of panic
+		if concurrentEstablishTunnelsMutexLocked {
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+		}
+	}()
+
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
 
@@ -3355,19 +3364,13 @@ loop:
 		// lock has been acquired by beginProtocolSelection. The lock is then
 		// retained through to the post-MakeDialParameters where the protocol
 		// selection counters are adjusted.
-		//
-		// TODO: release the concurrentEstablishTunnelsMutex lock in the case
-		// of a panic between beginProtocolSelection and the unlock after
-		// MakeDialParameters.
-
 		excludeIntensive := false
 		inproxyForceSelection := false
-		protocolSelectionStarted := false
 
 		beginProtocolSelection := func() int {
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
-			protocolSelectionStarted = true
+			concurrentEstablishTunnelsMutexLocked = true
 
 			if limitIntensiveConnectionWorkers > 0 &&
 				controller.concurrentIntensiveEstablishTunnels >= limitIntensiveConnectionWorkers {
@@ -3495,8 +3498,9 @@ loop:
 			int(atomic.LoadInt32(&controller.establishedTunnelsCount)))
 		if dialParams == nil || err != nil {
 
-			if protocolSelectionStarted {
+			if concurrentEstablishTunnelsMutexLocked {
 				controller.concurrentEstablishTunnelsMutex.Unlock()
+				concurrentEstablishTunnelsMutexLocked = false
 			}
 
 			// MakeDialParameters returns nil/nil when the server entry is to
@@ -3515,6 +3519,15 @@ loop:
 				close(controller.serverAffinityDoneBroadcast)
 			}
 
+			continue
+		}
+
+		if !concurrentEstablishTunnelsMutexLocked {
+			NoticeError("establishTunnelWorker: unexpected lock state")
+			controller.SignalComponentFailure()
+			if candidateServerEntry.isServerAffinityCandidate {
+				close(controller.serverAffinityDoneBroadcast)
+			}
 			continue
 		}
 
@@ -3542,6 +3555,7 @@ loop:
 		}
 
 		controller.concurrentEstablishTunnelsMutex.Unlock()
+		concurrentEstablishTunnelsMutexLocked = false
 
 		startStagger := time.Now()
 
