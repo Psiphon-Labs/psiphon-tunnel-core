@@ -90,7 +90,7 @@ func ExportExchangePayload(config *Config) string {
 			"ExportExchangePayload skipped due to DisableTunnels")
 		return ""
 	}
-	if config.networkIDGetter.config.IsInproxyClientPersonalPairingMode() {
+	if config.IsInproxyClientPersonalPairingMode() {
 		NoticeWarning(
 			"ExportExchangePayload skipped due to IsInproxyClientPersonalPairingMode")
 		return ""

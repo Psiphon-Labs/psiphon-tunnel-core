@@ -100,6 +100,11 @@ func encryptFeedback(diagnostics, b64EncodedPublicKey string) ([]byte, error) {
 
 // Encrypt feedback and upload to server. If upload fails
 // the routine will sleep and retry multiple times.
+//
+// In the default case, including VPN apps, no device binder is applied, so
+// that the feedback upload will be tunneled, indirectly, if it routes
+// through the VPN. When the config specifies a split-interface
+// configuration, the upstream device binder is applied to all dials.
 func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath string) error {
 
 	if !config.EnableFeedbackUpload {
@@ -110,13 +115,13 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 		return errors.TraceNew("error diagnostics empty")
 	}
 
-	// Initialize a resolver to use for dials. No DeviceBinder is applied
-	// so that the feedback upload will be tunneled, indirectly, if it
-	// routes through the VPN.
-	//
-	// config.SetResolver makes this resolver available to MakeDialParameters
-	// in GetTactics.
-	resolver := NewResolver(config, nil)
+	// Initialize a resolver to use for dials. config.SetResolver makes this
+	// resolver available to MakeDialParameters in GetTactics.
+	var deviceBinder DeviceBinder
+	if config.splitInterface != nil {
+		deviceBinder = config.deviceBinder()
+	}
+	resolver := NewResolver(config, deviceBinder)
 	defer resolver.Stop()
 	config.SetResolver(resolver)
 
@@ -156,12 +161,12 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	transferURLs := p.TransferURLs(parameters.FeedbackUploadURLs)
 	p.Close()
 
-	// Initialize the feedback upload dial configuration. config.DeviceBinder
-	// is not applied; see resolver comment above.
+	// Initialize the feedback upload dial configuration. See the device
+	// binder comment above.
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyURL: config.UpstreamProxyURL,
 		CustomHeaders:    config.CustomHeaders,
-		DeviceBinder:     nil,
+		DeviceBinder:     deviceBinder,
 		IPv6Synthesizer:  config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
 			// Note: when domain fronting would be used for untunneled dials a
@@ -215,9 +220,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			dialConfig = untunneledDialConfig
 		}
 
-		// Do not use device binder when domain fronting is used. See resolver
-		// comment above.
-		frontingUseDeviceBinder := false
+		frontingUseDeviceBinder := deviceBinder != nil
 
 		// Limitation: when SendFeedback is called without the datastore
 		// already open, as is the case in MobileLibrary, for example, then
@@ -231,7 +234,6 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 
 		payloadSecure := true
 		client, _, err := MakeUntunneledHTTPClient(
-			feedbackUploadCtx,
 			config,
 			dialConfig,
 			tlsCache,
