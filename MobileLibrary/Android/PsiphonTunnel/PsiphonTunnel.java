@@ -178,10 +178,10 @@ public class PsiphonTunnel {
          */
         default void onLightProxyAvailable() {}
         /**
-         * Called when a persisted opaque DSL access token is available to fetch with
-         * getDSLAccessToken.
+         * Called when a persisted opaque access token is available to fetch with getAccessToken.
+         * The token may be used for push notifications; it is not an FCM or APNs device token.
          */
-        default void onDSLAccessTokenAvailable() {}
+        default void onAccessTokenAvailable() {}
         default void onExiting() {}
     }
 
@@ -324,10 +324,11 @@ public class PsiphonTunnel {
     }
 
     /**
-     * Returns the persisted opaque DSL access token, or an empty string when
-     * Psiphon is not running or no token has been registered.
+     * Returns the persisted opaque access token. The token may be used for push notifications; it
+     * is not an FCM or APNs device token. Returns an empty string when Psiphon is not running, no
+     * token has been registered, or retrieval fails; retrieval errors are logged to diagnostics.
      */
-    public String getDSLAccessToken() throws Exception {
+    public String getAccessToken() {
         return Psi.getDSLAccessToken();
     }
 
@@ -1009,7 +1010,7 @@ public class PsiphonTunnel {
             } else if (noticeType.equals("LightProxyAvailable")) {
                 mHostService.onLightProxyAvailable();
             } else if (noticeType.equals("DSLAccessTokenAvailable")) {
-                mHostService.onDSLAccessTokenAvailable();
+                mHostService.onAccessTokenAvailable();
             }
 
             if (diagnostic) {
