@@ -142,6 +142,7 @@ func openDataStore(config *Config, retryAndReset bool) error {
 		isNil := activeDatastoreDB == nil
 		datastoreMutex.RUnlock()
 		if isNil {
+			datastoreReferenceCountMutex.Unlock()
 			return errors.TraceNew("datastore unexpectedly closed")
 		}
 
@@ -1666,25 +1667,64 @@ func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
 	// transaction overhead. Other operations such as ServerEntryIterator
 	// amortize the cost of JSON unmarshalling over many other operations.
 
-	err := datastoreView(func(tx *datastoreTx) error {
+	// Snapshot all server entry IDs in one read transaction, then fetch
+	// server entries in small batches, each batch in its own short read
+	// transaction, as in ServerEntryIterator. This avoids holding a
+	// datastore lock for the duration of a slow scan, which, for certain
+	// adapters, including SQLite, blocks concurrent writers.
 
-		bucket := tx.bucket(datastoreServerEntriesBucket)
-		cursor := bucket.cursor()
-		n := 0
+	const batchSize = 10
 
-		for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+	var serverEntryIDs [][]byte
+	err := getBucketKeys(
+		datastoreServerEntryKeysBucket,
+		func(key []byte) {
+			serverEntryIDs = append(
+				serverEntryIDs, append([]byte(nil), key...))
+		})
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-			var serverEntry *protocol.ServerEntry
-			err := json.Unmarshal(value, &serverEntry)
-			if err != nil {
-				// In case of data corruption or a bug causing this condition,
-				// do not stop iterating.
-				NoticeWarning("ScanServerEntries: %s", errors.Trace(err))
-				continue
+	n := 0
+	for start := 0; start < len(serverEntryIDs); start += batchSize {
+
+		end := start + batchSize
+		if end > len(serverEntryIDs) {
+			end = len(serverEntryIDs)
+		}
+
+		var serverEntries []*protocol.ServerEntry
+
+		err := datastoreView(func(tx *datastoreTx) error {
+			bucket := tx.bucket(datastoreServerEntriesBucket)
+			for _, serverEntryID := range serverEntryIDs[start:end] {
+				value := bucket.get(serverEntryID)
+				if value == nil {
+					// Deleted after the snapshot; skip.
+					continue
+				}
+				// Must unmarshal here as the slice is only valid within
+				// the transaction.
+				var serverEntry *protocol.ServerEntry
+				err := json.Unmarshal(value, &serverEntry)
+				if err != nil {
+					// In case of data corruption or a bug causing this
+					// condition, do not stop iterating.
+					NoticeWarning("ScanServerEntries: %s", errors.Trace(err))
+					continue
+				}
+				serverEntries = append(serverEntries, serverEntry)
 			}
+			return nil
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		for _, serverEntry := range serverEntries {
 
 			if !callback(serverEntry) {
-				cursor.close()
 				return errors.TraceNew("scan cancelled")
 			}
 
@@ -1694,12 +1734,6 @@ func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
 				n = 0
 			}
 		}
-		cursor.close()
-		return nil
-	})
-
-	if err != nil {
-		return errors.Trace(err)
 	}
 
 	return nil

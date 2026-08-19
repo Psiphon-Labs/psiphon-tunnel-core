@@ -50,6 +50,7 @@ require (
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 	github.com/huin/goupnp v1.3.0
 	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
+	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/miekg/dns v1.1.56
 	github.com/minio/crc64nvme v1.1.1
 	github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
