@@ -177,7 +177,10 @@ func openDataStore(config *Config, retryAndReset bool) error {
 	datastoreMutex.Unlock()
 	datastoreReferenceCountMutex.Unlock()
 
-	_ = resetAllPersistentStatsToUnreported()
+	err = resetAllPersistentStatsToUnreported()
+	if err != nil {
+		NoticeWarning("resetAllPersistentStatsToUnreported failed: %v", errors.Trace(err))
+	}
 
 	return nil
 }
@@ -2075,15 +2078,49 @@ func ClearReportedPersistentStats(stats map[string][][]byte) error {
 // persistent records in StateReporting were reported or not.
 func resetAllPersistentStatsToUnreported() error {
 
-	err := datastoreUpdate(func(tx *datastoreTx) error {
+	resetRequired := false
+
+	err := datastoreView(func(tx *datastoreTx) error {
+
+		for _, statType := range persistentStatTypes {
+
+			bucket := tx.bucket([]byte(statType))
+			cursor := bucket.cursor()
+			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+				if !bytes.Equal(value, persistentStatStateUnreported) {
+					resetRequired = true
+					break
+				}
+			}
+			cursor.close()
+
+			if resetRequired {
+				break
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !resetRequired {
+		return nil
+	}
+
+	err = datastoreUpdate(func(tx *datastoreTx) error {
 
 		for _, statType := range persistentStatTypes {
 
 			bucket := tx.bucket([]byte(statType))
 			resetKeys := make([][]byte, 0)
 			cursor := bucket.cursor()
-			for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
-				resetKeys = append(resetKeys, key)
+			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+				if !bytes.Equal(value, persistentStatStateUnreported) {
+					resetKeys = append(resetKeys, key)
+				}
 			}
 			cursor.close()
 			// TODO: data mutation is done outside cursor. Is this
