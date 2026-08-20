@@ -2270,12 +2270,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if runConfig.testDSLAccessToken {
 			waitOnNotification(t, dslAccessTokenAvailable, timeoutSignal, "DSL access token timeout exceeded")
 
-			token, err := controller.GetDSLAccessToken()
-			if err != nil {
-				t.Fatalf("GetDSLAccessToken failed: %v", err)
-			}
-			if !bytes.Equal(token, testDSLAccessToken) {
-				t.Fatalf("unexpected DSL access token: %x", token)
+			token := controller.GetDSLAccessToken()
+			if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {
+				t.Fatalf("unexpected DSL access token: %s", token)
 			}
 
 			requests := dslTestConfig.backend.GetDSLAccessTokenRegistrationRequests()
