@@ -1,5 +1,5 @@
-//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB
-// +build !PSIPHON_USE_BADGER_DB,!PSIPHON_USE_FILES_DB
+//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB && !PSIPHON_USE_SQLITE_DB
+// +build !PSIPHON_USE_BADGER_DB,!PSIPHON_USE_FILES_DB,!PSIPHON_USE_SQLITE_DB
 
 /*
  * Copyright (c) 2018, Psiphon Inc.
@@ -203,27 +203,74 @@ func tryDatastoreOpenDB(
 		return nil, errors.Trace(err)
 	}
 
-	err = newDB.Update(func(tx *bolt.Tx) error {
+	// Create missing buckets.
+	//
+	// datastoreServerEntryKeysBucket and datastoreDialParameterKeysBucket
+	// are omitted; their absence is used below to detect and upgrade an
+	// existing datastore.
+	requiredBuckets := [][]byte{
+		datastoreServerEntriesBucket,
+		datastoreServerEntryTagsBucket,
+		datastoreServerEntryTombstoneTagsBucket,
+		datastoreUrlETagsBucket,
+		datastoreKeyValueBucket,
+		datastoreRemoteServerListStatsBucket,
+		datastoreFailedTunnelStatsBucket,
+		datastoreSLOKsBucket,
+		datastoreTacticsBucket,
+		datastoreSpeedTestSamplesBucket,
+		datastoreDialParametersBucket,
+		datastoreNetworkReplayParametersBucket,
+		datastoreDSLOSLStatesBucket,
+	}
 
-		// datastoreServerEntryKeysBucket and datastoreDialParameterKeysBucket
-		// are omitted; their absence is used below to detect and upgrade an
-		// existing datastore.
+	// Cleanup obsolete buckets.
+	obsoleteBuckets := [][]byte{
+		[]byte("tunnelStats"),
+		[]byte("rankedServerEntries"),
+		[]byte("splitTunnelRouteETags"),
+		[]byte("splitTunnelRouteData"),
+	}
 
-		requiredBuckets := [][]byte{
-			datastoreServerEntriesBucket,
-			datastoreServerEntryTagsBucket,
-			datastoreServerEntryTombstoneTagsBucket,
-			datastoreUrlETagsBucket,
-			datastoreKeyValueBucket,
-			datastoreRemoteServerListStatsBucket,
-			datastoreFailedTunnelStatsBucket,
-			datastoreSLOKsBucket,
-			datastoreTacticsBucket,
-			datastoreSpeedTestSamplesBucket,
-			datastoreDialParametersBucket,
-			datastoreNetworkReplayParametersBucket,
-			datastoreDSLOSLStatesBucket,
+	updateRequired := false
+
+	err = newDB.View(func(tx *bolt.Tx) error {
+
+		for _, bucket := range requiredBuckets {
+			if tx.Bucket(bucket) == nil {
+				updateRequired = true
+				return nil
+			}
 		}
+
+		if tx.Bucket(datastoreServerEntryKeysBucket) == nil ||
+			tx.Bucket(datastoreDialParameterKeysBucket) == nil {
+
+			updateRequired = true
+			return nil
+		}
+
+		for _, obsoleteBucket := range obsoleteBuckets {
+			if tx.Bucket(obsoleteBucket) != nil {
+				updateRequired = true
+				return nil
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if !updateRequired {
+		return &datastoreDB{
+			boltDB:   newDB,
+			filename: filename,
+		}, nil
+	}
+
+	err = newDB.Update(func(tx *bolt.Tx) error {
 
 		for _, bucket := range requiredBuckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)
@@ -282,21 +329,6 @@ func tryDatastoreOpenDB(
 			}
 		}
 
-		return nil
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// Cleanup obsolete buckets
-
-	err = newDB.Update(func(tx *bolt.Tx) error {
-		obsoleteBuckets := [][]byte{
-			[]byte("tunnelStats"),
-			[]byte("rankedServerEntries"),
-			[]byte("splitTunnelRouteETags"),
-			[]byte("splitTunnelRouteData"),
-		}
 		for _, obsoleteBucket := range obsoleteBuckets {
 			if tx.Bucket(obsoleteBucket) != nil {
 				err := tx.DeleteBucket(obsoleteBucket)
@@ -306,6 +338,7 @@ func tryDatastoreOpenDB(
 				}
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
