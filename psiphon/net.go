@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -488,8 +489,9 @@ func UntunneledResolveIP(
 // if non-nil, can be called after each request made with the net/http.Client
 // completes to retrieve the set of API parameter values applied to the request.
 //
-// The context is applied to underlying TCP dials. The caller is responsible
-// for applying the context to requests made with the returned http.Client.
+// The caller is responsible for applying a context to requests made with the
+// returned http.Client. Each request establishes its own meek connection,
+// which is dialed with the request context.
 //
 // payloadSecure must only be set if all HTTP plaintext payloads sent through
 // the returned net/http.Client will be wrapped in their own transport security
@@ -555,10 +557,11 @@ func (meek *meekHTTPResponseReadCloser) Close() error {
 // net/http.Client completes to retrieve the set of API parameter values
 // applied to the request.
 //
-// The context is applied to underlying TCP dials. The caller is responsible
-// for applying the context to requests made with the returned http.Client.
+// The caller is responsible for applying a context to requests made with the
+// returned http.Client. The request context is applied to underlying TCP and
+// TLS dials when domain fronting is not used; fronted requests also use the
+// request context for dialing.
 func MakeUntunneledHTTPClient(
-	ctx context.Context,
 	config *Config,
 	untunneledDialConfig *DialConfig,
 	tlsCache utls.ClientSessionCache,
@@ -611,10 +614,10 @@ func MakeUntunneledHTTPClient(
 	tlsDialer := tlsdialer.NewDialer(tlsConfig)
 
 	transport := &http.Transport{
-		Dial: func(network, addr string) (net.Conn, error) {
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer(ctx, network, addr)
 		},
-		DialTLS: func(network, addr string) (net.Conn, error) {
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return tlsDialer(ctx, network, addr)
 		},
 	}
@@ -626,12 +629,12 @@ func MakeUntunneledHTTPClient(
 	return httpClient, nil, nil
 }
 
-// MakeTunneledHTTPClient returns a net/http.Client which is
-// configured to use custom dialing features including tunneled
-// dialing and, optionally, UseTrustedCACertificatesForStockTLS.
-// This http.Client uses stock TLS for HTTPS.
+// MakeTunneledHTTPClient returns a net/http.Client which is configured to use
+// custom dialing features including tunneled dialing and, optionally,
+// UseTrustedCACertificatesForStockTLS. This http.Client uses stock TLS for
+// HTTPS. The caller is responsible for applying a context to requests made
+// with the returned http.Client.
 func MakeTunneledHTTPClient(
-	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
 	tlsCache utls.ClientSessionCache,
@@ -702,7 +705,6 @@ func MakeTunneledHTTPClient(
 // made with the http.Client completes to retrieve the set of API
 // parameter values applied to the request.
 func MakeDownloadHTTPClient(
-	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
@@ -723,7 +725,6 @@ func MakeDownloadHTTPClient(
 	if tunneled {
 
 		httpClient, getParams, err = MakeTunneledHTTPClient(
-			ctx,
 			config,
 			tunnel,
 			tlsCache,
@@ -745,7 +746,6 @@ func MakeDownloadHTTPClient(
 		}
 
 		httpClient, getParams, err = MakeUntunneledHTTPClient(
-			ctx,
 			config,
 			dialConfig,
 			tlsCache,
@@ -948,4 +948,194 @@ func ResumeDownload(
 	os.Remove(partialETagFilename)
 
 	return n, responseETag, nil
+}
+
+// UntunneledTransferHTTPClientFactory creates HTTP clients for successive
+// untunneled transfer attempts. Each attempt selects a URL from the
+// TransferURLs input, adhering to OnlyAfterAttempts, and applying fronting
+// specs where configured.
+//
+// Fronted HTTP dial parameter replay implicitly uses any already open
+// datastore and proceeds without replay when the datastore is unavailable.
+// See SendFeedback for details and limitations.
+//
+// Downloaded payloads are expected to be independently authenticated by the
+// caller as some TransferURL configurations may not authenticate the origin
+// server.
+//
+// The caller owns every HTTP client returned by NextHTTPClient. Before
+// calling the factory Close, the caller must stop using factory HTTP clients
+// as Close stops their shared resolver.
+//
+// The device binder is always applied to all dials. When the config specifies
+// a split-interface configuration, the upstream device binder is applied.
+// Unlike SendFeedback, there is no VPN mode that skips the device binder.
+//
+// UntunneledTransferHTTPClientFactory is not safe for concurrent use.
+type UntunneledTransferHTTPClientFactory struct {
+	config               *Config
+	transferURLs         parameters.TransferURLs
+	nextAttempt          int
+	resolver             *resolver.Resolver
+	untunneledDialConfig *DialConfig
+	tlsCache             utls.ClientSessionCache
+	closed               bool
+}
+
+// NewUntunneledTransferHTTPClientFactory creates an
+// UntunneledTransferHTTPClientFactory using the specified transferURLs.
+//
+// The input transferURLs must have already been decoded with
+// TransferURLs.DecodeAndValidate
+//
+// The config must not be used concurrently by a running Controller or other
+// operation.
+//
+// The returned factory is not safe for concurrent use.
+func NewUntunneledTransferHTTPClientFactory(
+	config *Config,
+	transferURLs parameters.TransferURLs) (*UntunneledTransferHTTPClientFactory, error) {
+
+	networkResolver := NewResolver(config, config.deviceBinder())
+
+	factory, err := newUntunneledTransferHTTPClientFactoryWithResolver(
+		config, transferURLs, networkResolver)
+	if err != nil {
+		// On error, the resolver was not installed on the config.
+		networkResolver.Stop()
+		return nil, errors.Trace(err)
+	}
+
+	return factory, nil
+}
+
+func newUntunneledTransferHTTPClientFactoryWithResolver(
+	config *Config,
+	transferURLs parameters.TransferURLs,
+	networkResolver *resolver.Resolver) (*UntunneledTransferHTTPClientFactory, error) {
+
+	if len(transferURLs) == 0 {
+		return nil, errors.TraceNew("missing transfer URLs")
+	}
+
+	err := transferURLs.Validate()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	config.SetResolver(networkResolver)
+
+	untunneledDialConfig := &DialConfig{
+		UpstreamProxyURL: config.UpstreamProxyURL,
+		CustomHeaders:    config.CustomHeaders,
+		DeviceBinder:     config.deviceBinder(),
+		IPv6Synthesizer:  config.IPv6Synthesizer,
+		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := UntunneledResolveIP(
+				ctx, config, networkResolver, hostname, "")
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
+		},
+		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
+	}
+
+	return &UntunneledTransferHTTPClientFactory{
+		config:               config,
+		transferURLs:         transferURLs,
+		resolver:             networkResolver,
+		untunneledDialConfig: untunneledDialConfig,
+		tlsCache:             utls.NewLRUClientSessionCache(0),
+	}, nil
+}
+
+// NextHTTPClient creates an HTTP client for the next transfer attempt.
+//
+// The returned URL and headers must be used for requests made with the
+// client. Every request should provide its own context which controls
+// dialing and the request lifecycle.
+//
+// The returned client may be reused for multiple requests in the same attempt.
+// When fronting is used, each request establishes its own meek connection.
+//
+// The caller owns the returned client. The client must not be used after
+// Close.
+func (f *UntunneledTransferHTTPClientFactory) NextHTTPClient() (
+	*http.Client, *url.URL, http.Header, error) {
+
+	if f.closed {
+		return nil, nil, nil, errors.TraceNew(
+			"untunneled transfer HTTP client factory is closed")
+	}
+
+	transferURL := f.transferURLs.Select(f.nextAttempt)
+	if transferURL == nil {
+		return nil, nil, nil, errors.TraceNew(
+			"no transfer URL available for attempt")
+	}
+
+	// Increment even if initialization below fails; this allows a
+	// OnlyAfterAttempts > 0 candidate to eventually be attempted in case of
+	// initialization errors.
+	f.nextAttempt++
+
+	requestURL, err := url.Parse(transferURL.URL)
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
+	requestHeaders := make(http.Header, len(transferURL.RequestHeaders))
+	for name, value := range transferURL.RequestHeaders {
+		requestHeaders.Set(name, value)
+	}
+
+	dialConfig := f.untunneledDialConfig
+	if len(transferURL.FrontingSpecs) > 0 {
+		dialConfig = nil
+	}
+
+	// The device binder is applied to fronted dials; see
+	// UntunneledTransferHTTPClientFactory comment.
+	frontingUseDeviceBinder := true
+
+	httpClient, _, err := MakeUntunneledHTTPClient(
+		f.config,
+		dialConfig,
+		f.tlsCache,
+		transferURL.SkipVerify,
+		f.config.DisableSystemRootCAs,
+		true, // payloadSecure
+		transferURL.FrontingSpecs,
+		frontingUseDeviceBinder,
+		func(frontingProviderID string) {
+			NoticeInfo(
+				"UntunneledTransferHTTPClientFactory.NextHTTPClient: "+
+					"selected fronting provider %s for %s",
+				frontingProviderID,
+				requestURL.String())
+		})
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
+	return httpClient, requestURL, requestHeaders, nil
+}
+
+// Close releases resources retained by the factory.
+//
+// Before calling Close, the caller must cancel or complete all requests, close
+// all response bodies, and call CloseIdleConnections on every HTTP client
+// returned by NextHTTPClient.
+//
+// Close stops the shared resolver. Returned clients must not be used after
+// Close. Close is not safe for concurrent use.
+func (f *UntunneledTransferHTTPClientFactory) Close() {
+	if f.closed {
+		return
+	}
+	f.closed = true
+
+	f.config.SetResolver(nil)
+	f.resolver.Stop()
 }

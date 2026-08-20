@@ -185,6 +185,7 @@ const (
 	FetchUpgradeStalePeriod                            = "FetchUpgradeStalePeriod"
 	UpgradeDownloadURLs                                = "UpgradeDownloadURLs"
 	UpgradeDownloadClientVersionHeader                 = "UpgradeDownloadClientVersionHeader"
+	UpgradeTacticsWaitPeriod                           = "UpgradeTacticsWaitPeriod"
 	TotalBytesTransferredNoticePeriod                  = "TotalBytesTransferredNoticePeriod"
 	TotalBytesTransferredEmitMemoryMetrics             = "TotalBytesTransferredEmitMemoryMetrics"
 	MeekDialDomainsOnly                                = "MeekDialDomainsOnly"
@@ -792,6 +793,7 @@ var defaultParameters = map[string]struct {
 	FetchUpgradeStalePeriod:            {value: 6 * time.Hour, minimum: 1 * time.Hour},
 	UpgradeDownloadURLs:                {value: TransferURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
+	UpgradeTacticsWaitPeriod:           {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 
 	TotalBytesTransferredNoticePeriod:      {value: 5 * time.Minute, minimum: 1 * time.Second},
 	TotalBytesTransferredEmitMemoryMetrics: {value: true},

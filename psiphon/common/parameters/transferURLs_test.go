@@ -26,10 +26,18 @@ import (
 
 func TestTransferURLs(t *testing.T) {
 
-	decodedA := "a.example.com"
+	decodedA := "https://a.example.com"
 	encodedA := base64.StdEncoding.EncodeToString([]byte(decodedA))
-	encodedB := base64.StdEncoding.EncodeToString([]byte("b.example.com"))
-	encodedC := base64.StdEncoding.EncodeToString([]byte("c.example.com"))
+	encodedB := base64.StdEncoding.EncodeToString(
+		[]byte("http://b.example.com"))
+	encodedC := base64.StdEncoding.EncodeToString(
+		[]byte("https://c.example.com"))
+	encodedRelative := base64.StdEncoding.EncodeToString(
+		[]byte("a.example.com"))
+	encodedFTP := base64.StdEncoding.EncodeToString(
+		[]byte("ftp://a.example.com"))
+	encodedMissingHost := base64.StdEncoding.EncodeToString(
+		[]byte("https:///path"))
 
 	testCases := []struct {
 		description                string
@@ -50,6 +58,42 @@ func TestTransferURLs(t *testing.T) {
 			1,
 			false,
 			decodedA,
+			0,
+		},
+		{
+			"relative URL",
+			TransferURLs{
+				{
+					URL: encodedRelative,
+				},
+			},
+			1,
+			false,
+			"",
+			0,
+		},
+		{
+			"unsupported URL scheme",
+			TransferURLs{
+				{
+					URL: encodedFTP,
+				},
+			},
+			1,
+			false,
+			"",
+			0,
+		},
+		{
+			"missing URL hostname",
+			TransferURLs{
+				{
+					URL: encodedMissingHost,
+				},
+			},
+			1,
+			false,
+			"",
 			0,
 		},
 		{
