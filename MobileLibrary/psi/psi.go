@@ -26,7 +26,6 @@ package psi
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -492,6 +491,21 @@ func ImportPushPayload(payload []byte) bool {
 	return controller.ImportPushPayload(payload)
 }
 
+// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
+// Base64URL text. An empty string is returned when Psiphon is not running or
+// no token has been registered, or when retrieval fails. A
+// DSLAccessTokenAvailable notice indicates that a token is available.
+func GetDSLAccessToken() string {
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller == nil {
+		return ""
+	}
+
+	return controller.GetDSLAccessToken()
+}
+
 var sendFeedbackMutex sync.Mutex
 var sendFeedbackCtx context.Context
 var stopSendFeedback context.CancelFunc
@@ -657,31 +671,6 @@ func GetBuildInfo() string {
 		return ""
 	}
 	return string(buildInfo)
-}
-
-// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
-// Base64URL text. An empty string is returned when Psiphon is not running or no
-// token has been registered, or when retrieval fails; retrieval failures are
-// logged to diagnostics. A DSLAccessTokenAvailable notice indicates that a token
-// is available.
-func GetDSLAccessToken() string {
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
-
-	if controller == nil {
-		return ""
-	}
-
-	token, err := controller.GetDSLAccessToken()
-	if err != nil {
-		psiphon.NoticeWarning("GetDSLAccessToken failed: %v", errors.Trace(err))
-		return ""
-	}
-	if len(token) == 0 {
-		return ""
-	}
-
-	return base64.RawURLEncoding.EncodeToString(token)
 }
 
 func GetPacketTunnelMTU() int {

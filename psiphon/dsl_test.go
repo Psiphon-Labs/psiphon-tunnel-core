@@ -79,11 +79,8 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	}
 
 	controller := &Controller{config: config}
-	got, err := controller.GetDSLAccessToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, token) {
+	got := controller.GetDSLAccessToken()
+	if got != base64.RawURLEncoding.EncodeToString(token) {
 		t.Fatal("unexpected stored token")
 	}
 
@@ -108,11 +105,8 @@ func TestDSLAccessTokenRegistrationPersistence(t *testing.T) {
 	}
 	datastoreOpen = true
 
-	restartedToken, err := controller.GetDSLAccessToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(restartedToken, token) {
+	restartedToken := controller.GetDSLAccessToken()
+	if restartedToken != base64.RawURLEncoding.EncodeToString(token) {
 		t.Fatal("token was not persisted across restart")
 	}
 }
@@ -145,11 +139,8 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 			if len(value.Data) != 0 {
 				t.Fatal("DSLAccessTokenAvailable notice contains data")
 			}
-			persistedToken, err := (&Controller{config: config}).GetDSLAccessToken()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(persistedToken, token) {
+			persistedToken := (&Controller{config: config}).GetDSLAccessToken()
+			if persistedToken != base64.RawURLEncoding.EncodeToString(token) {
 				t.Fatal("notice emitted before token persistence")
 			}
 			notices++
@@ -182,8 +173,8 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	}
 
 	config.EnableDSLAccessTokenRegistration = false
-	got, err := controller.GetDSLAccessToken()
-	if err != nil || len(got) != 0 {
+	got := controller.GetDSLAccessToken()
+	if got != "" {
 		t.Fatal("config-disabled access token was returned")
 	}
 	notices = 0
@@ -199,8 +190,8 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err = controller.GetDSLAccessToken()
-	if err != nil || len(got) != 0 {
+	got = controller.GetDSLAccessToken()
+	if got != "" {
 		t.Fatal("tactics-disabled access token was returned")
 	}
 	controller.announcePersistedDSLAccessToken()
@@ -290,11 +281,8 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	// GetDSLAccessToken degrades to "no token", not an error (mobile binding
 	// path).
 	setCorruptRecord(corruptRecords[0])
-	token, err := (&Controller{config: config}).GetDSLAccessToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(token) != 0 {
+	token := (&Controller{config: config}).GetDSLAccessToken()
+	if token != "" {
 		t.Fatal("GetDSLAccessToken did not tolerate corrupt record")
 	}
 
@@ -304,11 +292,8 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	if err := handleDSLAccessTokenRegistrationResponse([]byte("token")); err != nil {
 		t.Fatal(err)
 	}
-	token, err = (&Controller{config: config}).GetDSLAccessToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(token, []byte("token")) {
+	token = (&Controller{config: config}).GetDSLAccessToken()
+	if token != base64.RawURLEncoding.EncodeToString([]byte("token")) {
 		t.Fatal("registration did not overwrite corrupt record")
 	}
 }
