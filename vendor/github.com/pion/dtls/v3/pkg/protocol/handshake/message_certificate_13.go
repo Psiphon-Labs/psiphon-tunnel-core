@@ -72,6 +72,7 @@ func (m *MessageCertificate13) Marshal() ([]byte, error) {
 	}
 
 	// Start with certificate_request_context (1-byte length prefix)
+	//nolint:gosec // G115: certificate_request_context length is validated to be <= 255 above.
 	out := []byte{byte(len(m.CertificateRequestContext))}
 	out = append(out, m.CertificateRequestContext...)
 

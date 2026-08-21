@@ -396,6 +396,7 @@ func TestAppResumed(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			protocol:                 protocol.TUNNEL_PROTOCOL_SSH,
+			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
 			doAppResumed:             true,
 		})
@@ -495,10 +496,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// TODO: vary this option
 	modifyConfig["CompressTactics"] = false
 
-	appResumedReconnectMilliseconds := 1
 	if runConfig.doAppResumed {
-		modifyConfig["SSHKeepAliveResumeReconnectInactivePeriodMilliseconds"] =
-			appResumedReconnectMilliseconds
+		// A zero inactivity threshold always triggers reconnect on app resume.
+		modifyConfig["SSHKeepAliveResumeReconnectInactivePeriodMilliseconds"] = 0
 	}
 
 	configJSON, _ = json.Marshal(modifyConfig)
@@ -778,10 +778,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		if runConfig.doAppResumed {
 
 			// Test: AppResumed must trigger reestablishment
-
-			time.Sleep(
-				1*time.Second +
-					time.Duration(appResumedReconnectMilliseconds)*time.Millisecond)
 
 			controller.AppResumed()
 

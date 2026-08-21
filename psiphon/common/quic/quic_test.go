@@ -324,6 +324,7 @@ func runQUIC(
 	expectedDanglingGoroutines := []string{
 		"quic-go.(*packetHandlerMap).Retire.func1",
 		"quic-go.(*packetHandlerMap).ReplaceWithClosed.func1",
+		"quic-go.(*packetHandlerMap).ReplaceWithClosed.func2",
 		"quic-go.(*packetHandlerMap).RetireResetToken.func1",
 		"gquic-go.(*packetHandlerMap).removeByConnectionIDAsString.func1",
 	}

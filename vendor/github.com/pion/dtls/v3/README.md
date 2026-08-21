@@ -21,6 +21,11 @@ Native [DTLS 1.2][rfc6347] implementation in the Go programming language.
 
 A long term goal is a professional security review, and maybe an inclusion in stdlib.
 
+> [!WARNING]
+> This branch is currently frozen from tagging while DTLS 1.3 work is underway.
+>
+> DTLS 1.3 and breaking changes should target the `main` branch. Bug fixes and DTLS 1.2 improvments should target the `v3` branch, which can be used for tags until DTLS 1.3 is ready.
+
 ### RFCs
 #### Implemented
 - **RFC 6347**: [Datagram Transport Layer Security Version 1.2][rfc6347]
@@ -36,6 +41,7 @@ A long term goal is a professional security review, and maybe an inclusion in st
 [rfc6655]: https://tools.ietf.org/html/rfc6655
 [rfc7301]: https://tools.ietf.org/html/rfc7301
 [rfc7627]: https://tools.ietf.org/html/rfc7627
+[rfc7905]: https://tools.ietf.org/html/rfc7905
 [rfc8422]: https://tools.ietf.org/html/rfc8422
 [rfc9147]: https://tools.ietf.org/html/rfc9147
 
@@ -64,6 +70,8 @@ We would love contributions that fall under the 'Planned Features' and any bug f
 * TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 ([RFC 5289][rfc5289])
 * TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA ([RFC 8422][rfc8422])
 * TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA ([RFC 8422][rfc8422])
+* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 ([RFC 7905][rfc7905])
+* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 ([RFC 7905][rfc7905])
 
 ##### PSK
 
@@ -72,6 +80,7 @@ We would love contributions that fall under the 'Planned Features' and any bug f
 * TLS_PSK_WITH_AES_256_CCM_8 ([RFC 6655][rfc6655])
 * TLS_PSK_WITH_AES_128_GCM_SHA256 ([RFC 5487][rfc5487])
 * TLS_PSK_WITH_AES_128_CBC_SHA256 ([RFC 5487][rfc5487])
+* TLS_PSK_WITH_CHACHA20_POLY1305_SHA256 ([RFC 7905][rfc7905])
 
 ##### ECDHE & PSK
 
@@ -79,7 +88,6 @@ We would love contributions that fall under the 'Planned Features' and any bug f
 
 #### Planned Features
 * DTLS 1.3 ([RFC 9147][rfc9147])
-* Chacha20Poly1305
 
 #### Excluded Features
 * DTLS 1.0

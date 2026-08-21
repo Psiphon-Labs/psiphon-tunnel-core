@@ -307,7 +307,8 @@ func flight3Generate(
 
 	if len(cfg.localSRTPProtectionProfiles) > 0 {
 		extensions = append(extensions, &extension.UseSRTP{
-			ProtectionProfiles: cfg.localSRTPProtectionProfiles,
+			ProtectionProfiles:  cfg.localSRTPProtectionProfiles,
+			MasterKeyIdentifier: cfg.localSRTPMasterKeyIdentifier,
 		})
 	}
 

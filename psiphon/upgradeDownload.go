@@ -92,7 +92,6 @@ func DownloadUpgrade(
 	payloadSecure := true
 	frontingUseDeviceBinder := true
 	httpClient, _, _, err := MakeDownloadHTTPClient(
-		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
@@ -198,4 +197,74 @@ func DownloadUpgrade(
 	// DNS cache extension, does not use this side-load upgrade mechanism.
 
 	return nil
+}
+
+// NewUntunneledUpgradeHTTPClientFactory creates a
+// UntunneledTransferHTTPClientFactory with additional upgrade
+// functionality:
+//
+//   - It first invokes GetTactics, including a possible fetch, similar to
+//     SendFeedback.
+//   - Tactics or config UpgradeDownloadURLs will override the transferURLs
+//     input.
+//
+// The downloaded payload is expected to be independently authenticated by the
+// caller as some TransferURL configurations may not authenticate the origin
+// server.
+//
+// The input context is used only for the GetTactics operation. As with
+// SendFeedback, tactics datastore operations open and close the datastore as
+// needed. See SendFeedback for details and limitations.
+//
+// See UntunneledTransferHTTPClientFactory and
+// NewUntunneledTransferHTTPClientFactory docs for additional information.
+func NewUntunneledUpgradeHTTPClientFactory(
+	ctx context.Context,
+	config *Config,
+	transferURLs parameters.TransferURLs) (*UntunneledTransferHTTPClientFactory, error) {
+
+	if ctx == nil {
+		return nil, errors.TraceNew("nil context")
+	}
+
+	// This resolver is used for the GetTactics dials and then, retained by
+	// the factory, for transfer dials. It must be installed on the config
+	// before GetTactics: fetch dials require a resolver; see
+	// MakeDialParameters.
+	//
+	// After the tactics step, ownership of the resolver is transferred to
+	// newUntunneledTransferHTTPClientFactoryWithResolver.
+
+	networkResolver := NewResolver(config, config.deviceBinder())
+	config.SetResolver(networkResolver)
+
+	if !config.DisableTactics {
+
+		p := config.GetParameters().Get()
+		timeout := p.Duration(parameters.UpgradeTacticsWaitPeriod)
+		p.Close()
+
+		getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
+		GetTactics(getTacticsCtx, config, true)
+		cancelFunc()
+	}
+
+	// Get the latest config or tactics parameters
+	p := config.GetParameters().Get()
+	upgradeTransferURLs := p.TransferURLs(parameters.UpgradeDownloadURLs)
+	p.Close()
+
+	if len(upgradeTransferURLs) > 0 {
+		transferURLs = upgradeTransferURLs
+	}
+
+	factory, err := newUntunneledTransferHTTPClientFactoryWithResolver(
+		config, transferURLs, networkResolver)
+	if err != nil {
+		config.SetResolver(nil)
+		networkResolver.Stop()
+		return nil, errors.Trace(err)
+	}
+
+	return factory, nil
 }

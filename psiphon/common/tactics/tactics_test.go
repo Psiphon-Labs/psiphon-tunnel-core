@@ -82,6 +82,7 @@ func TestTactics(t *testing.T) {
             "Regions": ["R1"],
             "ASNs": ["1"],
             "APIParameters" : {"client_platform" : ["P1"]},
+            "ClientFeatures": ["feature-a", "feature-b"],
             "MinClientVersion" : 4,
             "MaxClientVersion" : 10,
             "SpeedTestRTTMilliseconds" : {
@@ -262,7 +263,9 @@ func TestTactics(t *testing.T) {
 
 	apiParams := common.APIParameters{
 		"client_platform": "P1",
-		"client_version":  "5"}
+		"client_version":  "5",
+		"client_features": []string{"feature-b"},
+	}
 
 	storer := newTestStorer()
 
@@ -366,6 +369,64 @@ func TestTactics(t *testing.T) {
 			}
 		}
 	}
+
+	clientFeatureFilterAPIParams := common.APIParameters{
+		"client_platform": "P1",
+		"client_version":  "5",
+		SPEED_TEST_SAMPLES_PARAMETER_NAME: []SpeedTestSample{
+			{RTTMilliseconds: 1},
+		},
+	}
+
+	clientFeatureFilterTestCases := []struct {
+		description    string
+		clientFeatures interface{}
+		expectedMatch  bool
+	}{
+		{"missing", nil, false},
+		{"empty", []string{}, false},
+		{"native string array", []string{"feature-a"}, true},
+		{"JSON-decoded array", []interface{}{"feature-b"}, true},
+		{"any matching value", []string{"other", "feature-b"}, true},
+		{"no matching value", []string{"other"}, false},
+		{"case-sensitive mismatch", []string{"FEATURE-A"}, false},
+	}
+
+	for _, testCase := range clientFeatureFilterTestCases {
+		t.Run("client features/"+testCase.description, func(t *testing.T) {
+
+			filterAPIParams := make(common.APIParameters)
+			for name, value := range clientFeatureFilterAPIParams {
+				filterAPIParams[name] = value
+			}
+			if testCase.clientFeatures != nil {
+				filterAPIParams["client_features"] = testCase.clientFeatures
+			}
+
+			server.cachedTacticsData.Flush()
+
+			_, _, err := server.GetTacticsWithTag(
+				false, clientGeoIPData, filterAPIParams)
+			if err != nil {
+				t.Fatalf("GetTacticsWithTag failed: %s", err)
+			}
+
+			expectedFilterMatches := []bool{
+				true, testCase.expectedMatch, false, false, false, false,
+			}
+			cacheItems := server.cachedTacticsData.Items()
+			if len(cacheItems) != 1 {
+				t.Fatalf("unexpected cachedTacticsData size: %d", len(cacheItems))
+			}
+			cacheKey := getCacheKey(false, true, expectedFilterMatches)
+			if _, ok := server.cachedTacticsData.Get(cacheKey); !ok {
+				t.Fatalf("missing cache entry for filter matches: %v",
+					expectedFilterMatches)
+			}
+		})
+	}
+
+	server.cachedTacticsData.Flush()
 
 	// Initial tactics request; will also run a speed test
 
@@ -572,7 +633,9 @@ func TestTactics(t *testing.T) {
 
 	handshakeParams := common.APIParameters{
 		"client_platform": "P1",
-		"client_version":  "5"}
+		"client_version":  "5",
+		"client_features": []string{"feature-a"},
+	}
 
 	err = SetTacticsAPIParameters(storer, networkID, handshakeParams)
 	if err != nil {

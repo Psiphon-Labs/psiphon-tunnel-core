@@ -26,21 +26,29 @@ const (
 
 // Marshal encodes the Handshake.
 func (m *MessageCertificate) Marshal() ([]byte, error) {
-	out := make([]byte, handshakeMessageCertificateLengthFieldSize)
+	total := handshakeMessageCertificateLengthFieldSize
 
-	for _, r := range m.Certificate {
-		// Certificate Length
-		//nolint:makezero // todo: fix
-		out = append(out, make([]byte, handshakeMessageCertificateLengthFieldSize)...)
-		//nolint:gosec // G115
-		util.PutBigEndianUint24(out[len(out)-handshakeMessageCertificateLengthFieldSize:], uint32(len(r)))
-
-		// Certificate body
-		out = append(out, append([]byte{}, r...)...) //nolint:makezero // todo: fix
+	for _, cert := range m.Certificate {
+		total += handshakeMessageCertificateLengthFieldSize + len(cert)
 	}
 
+	out := make([]byte, total)
+
 	// Total Payload Size
-	util.PutBigEndianUint24(out[0:], uint32(len(out[handshakeMessageCertificateLengthFieldSize:]))) //nolint:gosec //G115
+	//nolint:gosec // G115
+	util.PutBigEndianUint24(out, uint32(total-handshakeMessageCertificateLengthFieldSize))
+	offset := handshakeMessageCertificateLengthFieldSize
+
+	for _, cert := range m.Certificate {
+		// Certificate Length
+		//nolint:gosec // G115
+		util.PutBigEndianUint24(out[offset:], uint32(len(cert)))
+		offset += handshakeMessageCertificateLengthFieldSize
+
+		// Certificate body
+		copy(out[offset:], cert)
+		offset += len(cert)
+	}
 
 	return out, nil
 }

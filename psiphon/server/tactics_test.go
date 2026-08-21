@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
@@ -353,4 +354,215 @@ func TestServerTacticsParametersCache(t *testing.T) {
 	if paramRefsSize != 1 {
 		t.Fatalf("unexpected parameterReferences size after lookup: %d", paramRefsSize)
 	}
+}
+
+func TestReloadHomepageURLQueryParameterClientFeatures(t *testing.T) {
+
+	tacticsConfigFilename := filepath.Join(
+		t.TempDir(), "homepage_tactics_config.json")
+
+	tacticsConfigJSONFormat := `
+    {
+      "DefaultTactics": {
+        "TTL": "60s",
+        "Parameters": {
+          "HomepageURLQueryParameterClientFeatures": %s
+        }
+      }
+    }
+    `
+
+	writeTacticsConfig := func(value string) {
+		t.Helper()
+		tacticsConfigJSON := fmt.Sprintf(tacticsConfigJSONFormat, value)
+		err := ioutil.WriteFile(
+			tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
+		if err != nil {
+			t.Fatalf("WriteFile failed: %s", err)
+		}
+	}
+
+	writeTacticsConfig(`{
+        "feature-x": ["feature-x-a", "feature-x-b", "feature-x-c"],
+        "feature-y": ["feature-y-a", "feature-y-b", "feature-y-c"],
+        "feature-z": []
+    }`)
+
+	tacticsServer, err := tactics.NewServer(
+		nil, nil, nil, tacticsConfigFilename, "", "", "")
+	if err != nil {
+		t.Fatalf("NewServer failed: %s", err)
+	}
+
+	support := &SupportServices{
+		TacticsServer: tacticsServer,
+	}
+	support.ServerTacticsParametersCache =
+		NewServerTacticsParametersCache(support)
+
+	sshServer := &sshServer{support: support}
+
+	err = sshServer.reloadHomepageURLQueryParameterClientFeatures()
+	if err != nil {
+		t.Fatalf(
+			"reloadHomepageURLQueryParameterClientFeatures failed: %s", err)
+	}
+
+	assertLookup := func(
+		expectedQueryParameters []string,
+		expectedClientFeatures map[string]string) {
+
+		t.Helper()
+
+		lookup :=
+			sshServer.homepageURLQueryParameterClientFeatures.Load()
+		if lookup == nil {
+			t.Fatal("lookup is nil")
+		}
+
+		if len(lookup.queryParameters) != len(expectedQueryParameters) {
+			t.Fatalf("unexpected query parameter count: %d",
+				len(lookup.queryParameters))
+		}
+		if lookup.queryParameterByClientFeature.Len() !=
+			len(expectedClientFeatures) {
+
+			t.Fatalf("unexpected client feature count: %d",
+				lookup.queryParameterByClientFeature.Len())
+		}
+
+		for _, queryParameter := range expectedQueryParameters {
+			if !common.Contains(lookup.queryParameters, queryParameter) {
+				t.Fatalf("missing query parameter: %s", queryParameter)
+			}
+		}
+
+		for clientFeature, queryParameter := range expectedClientFeatures {
+			actual, ok :=
+				lookup.queryParameterByClientFeature.Get(clientFeature)
+			if !ok || actual != queryParameter {
+				t.Fatalf("unexpected lookup for %s: %s",
+					clientFeature, actual)
+			}
+		}
+	}
+
+	assertLookup(
+		[]string{"feature-x", "feature-y", "feature-z"},
+		map[string]string{
+			"feature-x-a": "feature-x",
+			"feature-x-b": "feature-x",
+			"feature-x-c": "feature-x",
+			"feature-y-a": "feature-y",
+			"feature-y-b": "feature-y",
+			"feature-y-c": "feature-y",
+		})
+
+	clientFeatureValues := sshServer.selectHomepageURLQueryParameterClientFeatures(
+		[]string{
+			"feature-x-a",
+			"feature-y-a",
+			"unconfigured",
+			"feature-x-c",
+			"feature-y-b",
+		})
+
+	expectedClientFeatureValues := map[string]string{
+		"feature-x": "feature-x-c",
+		"feature-y": "feature-y-b",
+		"feature-z": "",
+	}
+	if len(clientFeatureValues) != len(expectedClientFeatureValues) {
+		t.Fatalf(
+			"unexpected client feature value count: %d",
+			len(clientFeatureValues))
+	}
+	for queryParameter, expectedValue := range expectedClientFeatureValues {
+		if clientFeatureValues[queryParameter] != expectedValue {
+			t.Fatalf(
+				"unexpected client feature value for %s: %s",
+				queryParameter, clientFeatureValues[queryParameter])
+		}
+	}
+
+	clientTactics, _, err := tacticsServer.GetTacticsWithTag(
+		false, common.GeoIPData{}, make(common.APIParameters))
+	if err != nil {
+		t.Fatalf("GetTacticsWithTag failed: %s", err)
+	}
+	if _, ok := clientTactics.Parameters[parameters.HomepageURLQueryParameterClientFeatures]; ok {
+
+		t.Fatal("server-side parameter included in client tactics")
+	}
+
+	reload := func(value string) {
+		t.Helper()
+
+		writeTacticsConfig(value)
+		reloaded, err := tacticsServer.Reload()
+		if err != nil {
+			t.Fatalf("TacticsServer.Reload failed: %s", err)
+		}
+		if !reloaded {
+			t.Fatal("tactics configuration was not reloaded")
+		}
+
+		support.ServerTacticsParametersCache.Flush()
+		err = sshServer.reloadHomepageURLQueryParameterClientFeatures()
+		if err != nil {
+			t.Fatalf(
+				"reloadHomepageURLQueryParameterClientFeatures failed: %s", err)
+		}
+	}
+
+	reload(`{"feature-z": ["feature-z-a"]}`)
+	assertLookup(
+		[]string{"feature-z"},
+		map[string]string{
+			"feature-z-a": "feature-z",
+		})
+
+	// An invalid configuration must fail the rebuild and retain the
+	// previous lookup.
+
+	reloadExpectError := func(value string) {
+		t.Helper()
+
+		writeTacticsConfig(value)
+		reloaded, err := tacticsServer.Reload()
+		if err != nil {
+			t.Fatalf("TacticsServer.Reload failed: %s", err)
+		}
+		if !reloaded {
+			t.Fatal("tactics configuration was not reloaded")
+		}
+
+		support.ServerTacticsParametersCache.Flush()
+		err = sshServer.reloadHomepageURLQueryParameterClientFeatures()
+		if err == nil {
+			t.Fatal("unexpected reload success")
+		}
+	}
+
+	// Duplicate feature assigned to multiple query parameters.
+	reloadExpectError(
+		`{"feature-w": ["feature-dup"], "feature-z": ["feature-dup"]}`)
+	assertLookup(
+		[]string{"feature-z"},
+		map[string]string{
+			"feature-z-a": "feature-z",
+		})
+
+	// Empty or URL-unsafe query parameter and empty client feature.
+	reloadExpectError(`{"": ["feature-w-a"]}`)
+	reloadExpectError(`{"feature w": ["feature-w-a"]}`)
+	reloadExpectError(`{"feature-w": [""]}`)
+	assertLookup(
+		[]string{"feature-z"},
+		map[string]string{
+			"feature-z-a": "feature-z",
+		})
+
+	reload(`{}`)
+	assertLookup([]string{}, map[string]string{})
 }

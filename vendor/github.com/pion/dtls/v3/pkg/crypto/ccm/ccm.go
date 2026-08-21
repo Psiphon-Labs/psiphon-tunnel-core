@@ -101,7 +101,7 @@ func MaxNonceLength(pdatalen int) int {
 }
 
 func (c *ccm) cbcRound(mac, data []byte) {
-	for i := 0; i < ccmBlockSize; i++ {
+	for i := range ccmBlockSize {
 		mac[i] ^= data[i]
 	}
 	c.b.Encrypt(mac, mac)

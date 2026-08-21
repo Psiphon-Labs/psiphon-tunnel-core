@@ -70,6 +70,24 @@ go test -tags=bench -bench=BenchmarkCBCEncrypt -benchmem
 go test -tags=bench -bench=BenchmarkCBCDecrypt -benchmem
 ```
 
+- ChaCha20Poly1305 benchmarks only:
+
+```bash
+go test -tags=bench -bench=BenchmarkChaCha20Poly1305 -benchmem
+```
+
+- ChaCha20Poly1305 `Encrypt` benchmark only:
+
+```bash
+go test -tags=bench -bench=BenchmarkChaCha20Poly1305Encrypt -benchmem
+```
+
+- ChaCha20Poly1305 `Decrypt` benchmark only:
+
+```bash
+go test -tags=bench -bench=BenchmarkChaCha20Poly1305Decrypt -benchmem
+```
+
 - All ciphers, with 1KB payloads only
 
 ```bash

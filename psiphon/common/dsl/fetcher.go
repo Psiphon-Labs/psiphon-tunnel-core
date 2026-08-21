@@ -47,7 +47,9 @@ type FetcherRoundTripper func(
 type FetcherConfig struct {
 	Logger common.Logger
 
-	BaseAPIParameters common.APIParameters
+	BaseAPIParameters                  common.APIParameters
+	DSLAccessTokenRegistration         bool
+	DSLAccessTokenRegistrationResponse func([]byte) error
 
 	Tunneled     bool
 	RoundTripper FetcherRoundTripper
@@ -127,6 +129,9 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher.
 func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
+	if config.DSLAccessTokenRegistration && config.DSLAccessTokenRegistrationResponse == nil {
+		return nil, errors.TraceNew("missing DSL access token registration callback")
+	}
 
 	packedAPIParameters, err := protocol.EncodePackedAPIParameters(
 		config.BaseAPIParameters)
@@ -213,13 +218,30 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		f.config.DiscoverServerEntriesMinCount,
 		f.config.DiscoverServerEntriesMaxCount)
 
-	versionedTags, err := f.doDiscoverServerEntriesRequest(
+	discoverResponse, err := f.doDiscoverServerEntriesRequest(
 		ctx,
 		OSLKeys,
-		discoverCount)
+		discoverCount,
+		f.config.DSLAccessTokenRegistration)
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	if f.config.DSLAccessTokenRegistration {
+		if len(discoverResponse.DSLAccessToken) == 0 {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: access token registration response omitted access token")
+		} else if err := f.config.DSLAccessTokenRegistrationResponse(
+			discoverResponse.DSLAccessToken); err != nil {
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+				"error":    err.Error(),
+			}).Warning("DSL: access token registration persistence failed")
+		}
+	}
+
+	versionedTags := discoverResponse.VersionedServerEntryTags
 
 	// Check each discovered server entry tag and version. Skip when the
 	// tag/version is already in the local datastore. Fetch the unknown or
@@ -570,7 +592,8 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
-	discoverCount int) ([]*VersionedServerEntryTag, error) {
+	discoverCount int,
+	dslAccessTokenRegistration bool) (*DiscoverServerEntriesResponse, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger
@@ -582,9 +605,10 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		// of active OSL IDs is expected to be relatively small.
 
 		request := &DiscoverServerEntriesRequest{
-			BaseAPIParameters: f.packedAPIParameters,
-			OSLKeys:           keys,
-			DiscoverCount:     int32(discoverCount),
+			BaseAPIParameters:          f.packedAPIParameters,
+			OSLKeys:                    keys,
+			DiscoverCount:              int32(discoverCount),
+			DSLAccessTokenRegistration: dslAccessTokenRegistration,
 		}
 
 		var response DiscoverServerEntriesResponse
@@ -592,7 +616,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 			ctx, requestTypeDiscoverServerEntries, request, &response)
 
 		if err == nil {
-			return response.VersionedServerEntryTags, nil
+			return &response, nil
 		}
 
 		if i >= f.config.RequestRetryCount || !doRetry || ctx.Err() != nil {

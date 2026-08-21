@@ -387,8 +387,7 @@ func makeFrontedHTTPDialParameters(
 		skipVerify,
 		disableSystemRootCAs,
 		payloadSecure,
-		tlsCache,
-	)
+		tlsCache)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -400,9 +399,9 @@ func makeFrontedHTTPDialParameters(
 		p,
 		false,
 		tunnel,
+		useDeviceBinder,
 		skipVerify,
 		disableSystemRootCAs,
-		useDeviceBinder,
 		payloadSecure,
 		tlsCache)
 	if err != nil {

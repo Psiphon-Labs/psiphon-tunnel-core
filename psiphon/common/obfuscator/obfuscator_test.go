@@ -630,7 +630,7 @@ func TestIrregularConnections(t *testing.T) {
 
 	preamble, _ = client.SendPreamble()
 	seedInd = 100 + PREFIX_TERMINATOR_LENGTH
-	preamble[seedInd+OBFUSCATE_SEED_LENGTH] = 0x00 // mutate magic value
+	preamble[seedInd+OBFUSCATE_SEED_LENGTH] ^= 0xff // mutate magic value
 
 	clientReader = WrapConnWithSkipReader(newConn(preamble))
 	server, err = NewServerObfuscator(config, clientIP, clientReader)
@@ -653,7 +653,7 @@ func TestIrregularConnections(t *testing.T) {
 
 	preamble, _ = client.SendPreamble()
 	seedInd = 100 + PREFIX_TERMINATOR_LENGTH
-	preamble[seedInd+OBFUSCATE_SEED_LENGTH+4] = 0x00 // mutate padding length
+	preamble[seedInd+OBFUSCATE_SEED_LENGTH+4] ^= 0xff // mutate padding length
 
 	clientReader = WrapConnWithSkipReader(newConn(preamble))
 	server, err = NewServerObfuscator(config, clientIP, clientReader)

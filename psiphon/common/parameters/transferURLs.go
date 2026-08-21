@@ -21,6 +21,7 @@ package parameters
 
 import (
 	"encoding/base64"
+	"net/url"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -65,19 +66,56 @@ type TransferURL struct {
 // TransferURLs is a list of transfer URLs.
 type TransferURLs []*TransferURL
 
-// DecodeAndValidate validates a list of transfer URLs.
+// DecodeAndValidate decodes and validates a list of transfer URLs. The
+// base64 obfuscated URL values are replaced with their decoded values.
 //
 // At least one TransferURL in the list must have OnlyAfterAttempts of 0,
 // or no TransferURL would be selected on the first attempt.
 func (t TransferURLs) DecodeAndValidate() error {
 
+	for _, transferURL := range t {
+		decodedURL, err := base64.StdEncoding.DecodeString(transferURL.URL)
+		if err != nil {
+			return errors.Tracef("failed to decode URL: %s", err)
+		}
+
+		transferURL.URL = string(decodedURL)
+	}
+
+	return errors.Trace(t.Validate())
+}
+
+// Validate validates a list of already decoded transfer URLs.
+//
+// At least one TransferURL in the list must have OnlyAfterAttempts of 0,
+// or no TransferURL would be selected on the first attempt.
+func (t TransferURLs) Validate() error {
+
 	hasOnlyAfterZero := false
 	for _, transferURL := range t {
+
+		parsedURL, err := url.Parse(transferURL.URL)
+		if err != nil {
+			// Don't log the URL in the error.
+			return errors.TraceNew("invalid URL")
+		}
+
+		if !parsedURL.IsAbs() {
+			return errors.TraceNew("URL must be absolute")
+		}
+
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return errors.TraceNew("unsupported URL scheme")
+		}
+
+		if parsedURL.Hostname() == "" {
+			return errors.TraceNew("missing URL hostname")
+		}
 
 		// TransferURL FrontingSpecs are permitted to specify SkipVerify
 		// because transfers have additional security at the payload level.
 		allowSkipVerify := true
-		err := transferURL.FrontingSpecs.Validate(allowSkipVerify)
+		err = transferURL.FrontingSpecs.Validate(allowSkipVerify)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -85,12 +123,6 @@ func (t TransferURLs) DecodeAndValidate() error {
 		if transferURL.OnlyAfterAttempts == 0 {
 			hasOnlyAfterZero = true
 		}
-		decodedURL, err := base64.StdEncoding.DecodeString(transferURL.URL)
-		if err != nil {
-			return errors.Tracef("failed to decode URL: %s", err)
-		}
-
-		transferURL.URL = string(decodedURL)
 	}
 
 	if !hasOnlyAfterZero {

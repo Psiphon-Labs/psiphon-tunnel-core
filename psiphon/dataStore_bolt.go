@@ -1,5 +1,5 @@
-//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB
-// +build !PSIPHON_USE_BADGER_DB,!PSIPHON_USE_FILES_DB
+//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB && !PSIPHON_USE_SQLITE_DB
+// +build !PSIPHON_USE_BADGER_DB,!PSIPHON_USE_FILES_DB,!PSIPHON_USE_SQLITE_DB
 
 /*
  * Copyright (c) 2018, Psiphon Inc.
@@ -39,6 +39,12 @@ import (
 const (
 	OPEN_DB_RETRIES = 2
 )
+
+// For bolt, the key-only buckets datastoreServerEntryKeysBucket and
+// datastoreDialParameterKeysBucket can use empty values, but that's not the
+// case with all adapters. See dataStore_badger.go and dataStore_files.go.
+var datastoreServerEntryKeyValue = []byte{}
+var datastoreDialParameterKeyValue = []byte{}
 
 type datastoreDB struct {
 	boltDB   *bolt.DB
@@ -91,7 +97,7 @@ func datastoreOpenDB(
 		// the file lock, as the datastore is simply locked by another
 		// process and not corrupt. As the file lock is advisory, deleting
 		// the file would succeed despite the lock. In this case, still retry
-		// in case the the lock is released.
+		// in case the lock is released.
 
 		reset = !std_errors.Is(err, bolt.ErrTimeout)
 	}
@@ -100,7 +106,36 @@ func datastoreOpenDB(
 }
 
 func tryDatastoreOpenDB(
-	rootDataDirectory string, reset bool) (retdb *datastoreDB, reterr error) {
+	rootDataDirectory string, reset bool) (retDB *datastoreDB, retErr error) {
+
+	var newDB *bolt.DB
+
+	defer func() {
+		if retErr == nil || newDB == nil {
+			return
+		}
+
+		// Close datastore on any error return, including the panic recovery
+		// below this deferred function. Here we set up another panic
+		// recovery since Close itself may panic/fault.
+
+		// Begin recovery preamble
+		panicOnFault := debug.SetPanicOnFault(true)
+		defer debug.SetPanicOnFault(panicOnFault)
+		defer func() {
+			if r := recover(); r != nil {
+				NoticeWarning(
+					"tryDatastoreOpenDB: failed to close datastore: %v", r)
+			}
+		}()
+		// End recovery preamble
+
+		err := newDB.Close()
+		if err != nil {
+			NoticeWarning(
+				"tryDatastoreOpenDB: failed to close datastore: %v", errors.Trace(err))
+		}
+	}()
 
 	// Testing indicates that the bolt Check function can raise SIGSEGV due to
 	// invalid mmap buffer accesses in cases such as opening a valid but
@@ -121,8 +156,8 @@ func tryDatastoreOpenDB(
 
 	defer func() {
 		if r := recover(); r != nil {
-			retdb = nil
-			reterr = errors.Tracef("panic: %v", r)
+			retDB = nil
+			retErr = errors.Tracef("panic: %v", r)
 		}
 	}()
 	// End recovery preamble
@@ -162,48 +197,138 @@ func tryDatastoreOpenDB(
 	// Note that ErrInvalid/ErrChecksum surface as panics in View/Update,
 	// after Open.
 
-	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	newDB, err := bolt.Open(
+		filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	err = newDB.Update(func(tx *bolt.Tx) error {
-		requiredBuckets := [][]byte{
-			datastoreServerEntriesBucket,
-			datastoreServerEntryTagsBucket,
-			datastoreServerEntryTombstoneTagsBucket,
-			datastoreUrlETagsBucket,
-			datastoreKeyValueBucket,
-			datastoreRemoteServerListStatsBucket,
-			datastoreFailedTunnelStatsBucket,
-			datastoreSLOKsBucket,
-			datastoreTacticsBucket,
-			datastoreSpeedTestSamplesBucket,
-			datastoreDialParametersBucket,
-			datastoreNetworkReplayParametersBucket,
-			datastoreDSLOSLStatesBucket,
-		}
+	// Create missing buckets.
+	//
+	// datastoreServerEntryKeysBucket and datastoreDialParameterKeysBucket
+	// are omitted; their absence is used below to detect and upgrade an
+	// existing datastore.
+	requiredBuckets := [][]byte{
+		datastoreServerEntriesBucket,
+		datastoreServerEntryTagsBucket,
+		datastoreServerEntryTombstoneTagsBucket,
+		datastoreUrlETagsBucket,
+		datastoreKeyValueBucket,
+		datastoreRemoteServerListStatsBucket,
+		datastoreFailedTunnelStatsBucket,
+		datastoreSLOKsBucket,
+		datastoreTacticsBucket,
+		datastoreSpeedTestSamplesBucket,
+		datastoreDialParametersBucket,
+		datastoreNetworkReplayParametersBucket,
+		datastoreDSLOSLStatesBucket,
+	}
+
+	// Cleanup obsolete buckets.
+	obsoleteBuckets := [][]byte{
+		[]byte("tunnelStats"),
+		[]byte("rankedServerEntries"),
+		[]byte("splitTunnelRouteETags"),
+		[]byte("splitTunnelRouteData"),
+	}
+
+	updateRequired := false
+
+	err = newDB.View(func(tx *bolt.Tx) error {
+
 		for _, bucket := range requiredBuckets {
-			_, err := tx.CreateBucketIfNotExists(bucket)
-			if err != nil {
-				return err
+			if tx.Bucket(bucket) == nil {
+				updateRequired = true
+				return nil
 			}
 		}
+
+		if tx.Bucket(datastoreServerEntryKeysBucket) == nil ||
+			tx.Bucket(datastoreDialParameterKeysBucket) == nil {
+
+			updateRequired = true
+			return nil
+		}
+
+		for _, obsoleteBucket := range obsoleteBuckets {
+			if tx.Bucket(obsoleteBucket) != nil {
+				updateRequired = true
+				return nil
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// Cleanup obsolete buckets
+	if !updateRequired {
+		return &datastoreDB{
+			boltDB:   newDB,
+			filename: filename,
+		}, nil
+	}
 
 	err = newDB.Update(func(tx *bolt.Tx) error {
-		obsoleteBuckets := [][]byte{
-			[]byte("tunnelStats"),
-			[]byte("rankedServerEntries"),
-			[]byte("splitTunnelRouteETags"),
-			[]byte("splitTunnelRouteData"),
+
+		for _, bucket := range requiredBuckets {
+			_, err := tx.CreateBucketIfNotExists(bucket)
+			if err != nil {
+				return err
+			}
 		}
+
+		// Initialize the key-only buckets datastoreServerEntryKeysBucket
+		// and datastoreDialParameterKeysBucket, populating them with the
+		// existing server entry and dial parameter keys.
+		//
+		// Limitation: these two bucket upgrades run only once, when the
+		// buckets don't exist. This can potentially result in orphaned
+		// server entries or dial parameters in a downgrade/upgrade scenario:
+		// downgrade to an older client that doesn't update the key-only
+		// buckets; store new server entries or dial parameters, including DSL
+		// prioritizations; then upgrade again to a new client that will
+		// iterate using the key-only buckets.
+
+		if tx.Bucket(datastoreServerEntryKeysBucket) == nil {
+
+			serverEntryKeys, err := tx.CreateBucket(
+				datastoreServerEntryKeysBucket)
+			if err != nil {
+				return err
+			}
+
+			serverEntries := tx.Bucket(datastoreServerEntriesBucket)
+			cursor := serverEntries.Cursor()
+			for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+				err := serverEntryKeys.Put(
+					key, datastoreServerEntryKeyValue)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if tx.Bucket(datastoreDialParameterKeysBucket) == nil {
+
+			dialParameterKeys, err := tx.CreateBucket(
+				datastoreDialParameterKeysBucket)
+			if err != nil {
+				return err
+			}
+
+			dialParameters := tx.Bucket(datastoreDialParametersBucket)
+			cursor := dialParameters.Cursor()
+			for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+				err := dialParameterKeys.Put(
+					key, datastoreDialParameterKeyValue)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
 		for _, obsoleteBucket := range obsoleteBuckets {
 			if tx.Bucket(obsoleteBucket) != nil {
 				err := tx.DeleteBucket(obsoleteBucket)
@@ -213,6 +338,7 @@ func tryDatastoreOpenDB(
 				}
 			}
 		}
+
 		return nil
 	})
 	if err != nil {

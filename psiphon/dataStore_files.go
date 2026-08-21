@@ -35,6 +35,13 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+// The key-only buckets datastoreServerEntryKeysBucket and
+// datastoreDialParameterKeysBucket require non-empty values in order for
+// bucket.get to succeed when used as an existence check. These values are a
+// workaround for this limitation so that this adapter doesn't break.
+var datastoreServerEntryKeyValue = []byte{0}
+var datastoreDialParameterKeyValue = []byte{0}
+
 // datastoreDB is a simple filesystem-backed key/value store that implements
 // the datastore interface.
 //
@@ -42,7 +49,7 @@ import (
 //
 // Buckets are subdirectories, keys are file names (hex-encoded), and values
 // are file contents. Unlike other datastores, update transactions are neither
-// atomic not isolcated; only each put is individually atomic.
+// atomic nor isolated; only each put is individually atomic.
 //
 // A buffer pool is used to reduce memory allocation/GC churn from loading
 // file values into memory. Transactions and cursors track and release shared

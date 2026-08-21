@@ -480,7 +480,6 @@ func downloadRemoteServerListFile(
 	payloadSecure := true
 	frontingUseDeviceBinder := true
 	httpClient, tunneled, getParams, err := MakeDownloadHTTPClient(
-		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,

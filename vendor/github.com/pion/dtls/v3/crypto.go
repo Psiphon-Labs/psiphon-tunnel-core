@@ -30,6 +30,7 @@ func valueKeyMessage(clientRandom, serverRandom, publicKey []byte, namedCurve el
 	serverECDHParams := make([]byte, 4)
 	serverECDHParams[0] = 3 // named curve
 	binary.BigEndian.PutUint16(serverECDHParams[1:], uint16(namedCurve))
+	//nolint:gosec // G115, no risk of overflow, the biggest supported curve is 97 bytes.
 	serverECDHParams[3] = byte(len(publicKey))
 
 	plaintext := []byte{}

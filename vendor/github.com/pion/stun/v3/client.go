@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v3"
+	"github.com/pion/logging"
 	"github.com/pion/transport/v4"
 	"github.com/pion/transport/v4/stdnet"
 )
@@ -37,7 +38,7 @@ func Dial(network, address string) (*Client, error) {
 
 // DialConfig is used to pass configuration to DialURI().
 type DialConfig struct {
-	DTLSConfig dtls.Config
+	DTLSConfig dtls.Config //nolint:staticcheck
 	TLSConfig  tls.Config
 
 	Net transport.Net
@@ -89,7 +90,7 @@ func DialURI(uri *URI, cfg *DialConfig) (*Client, error) { //nolint:cyclop
 			return nil, fmt.Errorf("failed to dial: %w", err)
 		}
 
-		if conn, err = dtls.Client(udpConn, udpConn.RemoteAddr(), &dtlsCfg); err != nil {
+		if conn, err = dtls.Client(udpConn, udpConn.RemoteAddr(), &dtlsCfg); err != nil { //nolint:staticcheck
 			return nil, fmt.Errorf("failed to connect to '%s': %w", addr, err)
 		}
 
@@ -171,6 +172,25 @@ func WithCollector(coll Collector) ClientOption {
 func WithNoConnClose() ClientOption {
 	return func(c *Client) {
 		c.closeConn = false
+	}
+}
+
+// WithStrictMode sets strict decode behavior for messages decoded by the client.
+func WithStrictMode(strict bool) ClientOption {
+	return func(c *Client) {
+		c.strict = strict
+	}
+}
+
+// WithLoggerFactory sets logger used by the client and decoded messages.
+func WithLoggerFactory(loggerFactory logging.LoggerFactory) ClientOption {
+	return func(c *Client) {
+		if loggerFactory == nil {
+			c.logger = nil
+
+			return
+		}
+		c.logger = loggerFactory.NewLogger("stun")
 	}
 }
 
@@ -293,6 +313,8 @@ type Client struct {
 	handler     Handler
 	collector   Collector
 	t           map[transactionID]*clientTransaction
+	logger      logging.LeveledLogger
+	strict      bool
 
 	// mux guards closed and t
 	mux sync.RWMutex
@@ -413,7 +435,13 @@ func (c CloseErr) Error() string {
 
 func (c *Client) readUntilClosed() {
 	defer c.wg.Done()
-	m := new(Message)
+	options := []MessageOption{
+		WithStrict(c.strict),
+	}
+	if c.logger != nil {
+		options = append(options, withMessageLogger(c.logger))
+	}
+	m := NewWithOptions(options...)
 	m.Raw = make([]byte, 1024)
 	for {
 		select {

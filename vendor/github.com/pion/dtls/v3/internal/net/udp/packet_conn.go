@@ -157,17 +157,30 @@ type ListenConfig struct {
 	// the identifier is not already associated with the connection, it will be
 	// added.
 	ConnectionIdentifier func([]byte) (string, bool)
+
+	// Internal listen config used to open the UDP socket.
+	ListenConfig net.ListenConfig
 }
 
 // Listen creates a new listener based on the ListenConfig.
+//
+//nolint:contextcheck
 func (lc *ListenConfig) Listen(network string, laddr *net.UDPAddr) (dtlsnet.PacketListener, error) {
 	if lc.Backlog == 0 {
 		lc.Backlog = defaultListenBacklog
 	}
 
-	conn, err := net.ListenUDP(network, laddr)
+	laddrStr := ":0"
+	if laddr != nil {
+		laddrStr = laddr.String()
+	}
+	innerConn, err := lc.ListenConfig.ListenPacket(context.Background(), network, laddrStr)
 	if err != nil {
 		return nil, err
+	}
+	conn, ok := innerConn.(*net.UDPConn)
+	if !ok {
+		return nil, errors.New("listen packet not a *net.UDPConn") //nolint:err113
 	}
 
 	packetListener := &listener{

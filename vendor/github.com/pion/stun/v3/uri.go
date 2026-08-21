@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -116,7 +116,7 @@ func NewProtoType(raw string) ProtoType {
 func (t ProtoType) String() string {
 	switch t {
 	case ProtoTypeUDP:
-		return "udp"
+		return "udp" //nolint:goconst
 	case ProtoTypeTCP:
 		return "tcp"
 	default:
@@ -130,7 +130,7 @@ type URI struct {
 	Host     string
 	Port     int
 	Username string
-	Password string
+	Password string //nolint:gosec // G117 -- no hardcoded credentials.
 	Proto    ProtoType
 }
 

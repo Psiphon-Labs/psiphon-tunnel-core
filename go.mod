@@ -28,7 +28,7 @@ require (
 	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
-	github.com/Psiphon-Labs/utls v1.1.1-0.20260602140907-e3b959a8340b
+	github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/axiomhq/hyperloglog v0.2.6
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
@@ -50,6 +50,7 @@ require (
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 	github.com/huin/goupnp v1.3.0
 	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
+	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/miekg/dns v1.1.56
 	github.com/minio/crc64nvme v1.1.1
 	github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
@@ -61,8 +62,8 @@ require (
 	github.com/pion/rtp v1.10.1
 	github.com/pion/sctp v1.9.2
 	github.com/pion/sdp/v3 v3.0.18
-	github.com/pion/stun/v3 v3.1.1
-	github.com/pion/transport/v4 v4.0.1
+	github.com/pion/stun/v3 v3.1.6
+	github.com/pion/transport/v4 v4.0.2
 	github.com/pires/go-proxyproto v0.11.0
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
@@ -79,7 +80,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	golang.org/x/time v0.10.0
+	golang.org/x/time v0.14.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	golang.zx2c4.com/wireguard/windows v0.5.3
 	google.golang.org/protobuf v1.36.6
@@ -117,7 +118,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
-	github.com/pion/dtls/v3 v3.1.2 // indirect
+	github.com/pion/dtls/v3 v3.1.5 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.16 // indirect

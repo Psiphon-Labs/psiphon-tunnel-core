@@ -185,6 +185,7 @@ const (
 	FetchUpgradeStalePeriod                            = "FetchUpgradeStalePeriod"
 	UpgradeDownloadURLs                                = "UpgradeDownloadURLs"
 	UpgradeDownloadClientVersionHeader                 = "UpgradeDownloadClientVersionHeader"
+	UpgradeTacticsWaitPeriod                           = "UpgradeTacticsWaitPeriod"
 	TotalBytesTransferredNoticePeriod                  = "TotalBytesTransferredNoticePeriod"
 	TotalBytesTransferredEmitMemoryMetrics             = "TotalBytesTransferredEmitMemoryMetrics"
 	MeekDialDomainsOnly                                = "MeekDialDomainsOnly"
@@ -568,6 +569,8 @@ const (
 	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
 	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
+	DSLAccessTokenDisableRegistration                  = "DSLAccessTokenDisableRegistration"
+	DSLAccessTokenRegistrationRefreshTTL               = "DSLAccessTokenRegistrationRefreshTTL"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
 	DSLPrioritizeDialRetainFailedProbability           = "DSLPrioritizeDialRetainFailedProbability"
@@ -594,6 +597,7 @@ const (
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 	LightProxyPersonalPairingConnectionWorkerPoolSize  = "LightProxyPersonalPairingConnectionWorkerPoolSize"
+	HomepageURLQueryParameterClientFeatures            = "HomepageURLQueryParameterClientFeatures"
 
 	// Retired parameters
 
@@ -789,6 +793,7 @@ var defaultParameters = map[string]struct {
 	FetchUpgradeStalePeriod:            {value: 6 * time.Hour, minimum: 1 * time.Hour},
 	UpgradeDownloadURLs:                {value: TransferURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
+	UpgradeTacticsWaitPeriod:           {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 
 	TotalBytesTransferredNoticePeriod:      {value: 5 * time.Minute, minimum: 1 * time.Second},
 	TotalBytesTransferredEmitMemoryMetrics: {value: true},
@@ -1244,6 +1249,8 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
+	DSLAccessTokenDisableRegistration:                 {value: false},
+	DSLAccessTokenRegistrationRefreshTTL:              {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
 	DSLPrioritizeDialRetainFailedProbability:          {value: 0.0, minimum: 0.0},
@@ -1278,6 +1285,8 @@ var defaultParameters = map[string]struct {
 	LightProxyDialTimeout:                             {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	LightProxyLimitDestinationAddresses:               {value: []string{}},
 	LightProxyPersonalPairingConnectionWorkerPoolSize: {value: 2, minimum: 1},
+
+	HomepageURLQueryParameterClientFeatures: {value: KeyStrings{}, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

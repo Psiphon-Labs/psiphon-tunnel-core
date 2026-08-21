@@ -350,6 +350,12 @@ followed by a tunnel-core shutdown.
  */
 - (void)onLightProxyAvailable;
 
+/*!
+ Called when a persisted opaque access token is available to fetch with getAccessToken. The token
+ may be used for push notifications; it is not an FCM or APNs device token.
+ */
+- (void)onAccessTokenAvailable;
+
 @end
 
 /*!
@@ -487,6 +493,24 @@ Returns the path where the rotated notices file will be created.
  @return  The build info json as a string.
  */
 + (NSString * _Nonnull)getBuildInfo;
+
+/*!
+ Returns the uppercase region identifier that the device is probably located in. This is the same
+ best-effort approximation that the Psiphon library reports as the DeviceRegion metric.
+
+ On iOS and Mac Catalyst 16 and later, the Contacts country code is preferred. On earlier versions,
+ the carrier country code is preferred. The system time zone and current locale are then used as
+ fallbacks. Native macOS starts with the system time zone because carrier information is not
+ available. If no source yields a region, an empty string is returned.
+
+ @note This is an approximation, not authoritative geolocation, and the returned identifier is not
+ guaranteed to be a two-letter ISO 3166-1 country code.
+ @return An uppercase region identifier, or an empty string if none can be determined.
+ */
++ (NSString * _Nonnull)getDeviceRegion;
+
+/*! Returns the persisted opaque access token. The token may be used for push notifications; it is not an FCM or APNs device token. Returns an empty string when Psiphon is not running, no token has been registered, or retrieval fails; retrieval errors are logged to diagnostics. */
+- (NSString * _Nonnull)getAccessToken;
 
 #pragma mark - Profiling utitlities
 

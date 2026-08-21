@@ -28,10 +28,15 @@ func (s SupportedPointFormats) TypeValue() TypeValue {
 
 // Marshal encodes the extension.
 func (s *SupportedPointFormats) Marshal() ([]byte, error) {
+	if len(s.PointFormats) > 255 {
+		return nil, errPointFormatsTooLarge
+	}
+
 	out := make([]byte, supportedPointFormatsSize)
 
 	binary.BigEndian.PutUint16(out, uint16(s.TypeValue()))
 	binary.BigEndian.PutUint16(out[2:], uint16(1+(len(s.PointFormats)))) //nolint:gosec // G115
+	//nolint:gosec // G115: point format count is validated to be <= 255 above.
 	out[4] = byte(len(s.PointFormats))
 
 	for _, v := range s.PointFormats {
@@ -43,20 +48,25 @@ func (s *SupportedPointFormats) Marshal() ([]byte, error) {
 
 // Unmarshal populates the extension from encoded data.
 func (s *SupportedPointFormats) Unmarshal(data []byte) error {
-	if len(data) <= supportedPointFormatsSize {
+	if len(data) < supportedPointFormatsSize {
 		return errBufferTooSmall
 	}
 
-	if TypeValue(binary.BigEndian.Uint16(data)) != s.TypeValue() {
-		return errInvalidExtensionType
-	}
-
+	declaredLength := int(binary.BigEndian.Uint16(data[2:4]))
 	pointFormatCount := int(data[4])
-	if supportedPointFormatsSize+pointFormatCount > len(data) {
+
+	switch {
+	case TypeValue(binary.BigEndian.Uint16(data)) != s.TypeValue():
+		return errInvalidExtensionType
+	case declaredLength > len(data)-4: // type + declared length = 4
+		return errLengthMismatch
+	case supportedPointFormatsSize+pointFormatCount > len(data):
+		return errLengthMismatch
+	case pointFormatCount+1 != declaredLength:
 		return errLengthMismatch
 	}
 
-	for i := 0; i < pointFormatCount; i++ {
+	for i := range pointFormatCount {
 		p := elliptic.CurvePointFormat(data[supportedPointFormatsSize+i])
 		switch p {
 		case elliptic.CurvePointFormatUncompressed:

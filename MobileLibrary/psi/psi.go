@@ -491,6 +491,21 @@ func ImportPushPayload(payload []byte) bool {
 	return controller.ImportPushPayload(payload)
 }
 
+// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
+// Base64URL text. An empty string is returned when Psiphon is not running or
+// no token has been registered, or when retrieval fails. A
+// DSLAccessTokenAvailable notice indicates that a token is available.
+func GetDSLAccessToken() string {
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller == nil {
+		return ""
+	}
+
+	return controller.GetDSLAccessToken()
+}
+
 var sendFeedbackMutex sync.Mutex
 var sendFeedbackCtx context.Context
 var stopSendFeedback context.CancelFunc

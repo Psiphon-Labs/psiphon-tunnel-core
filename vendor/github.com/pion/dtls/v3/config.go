@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v3/pkg/crypto/elliptic"
+	"github.com/pion/dtls/v3/pkg/protocol"
 	"github.com/pion/dtls/v3/pkg/protocol/handshake"
 	"github.com/pion/logging"
 )
@@ -233,6 +234,13 @@ type Config struct { //nolint:dupl
 	// checking against a list of blocked IPs, or counting the attempts to prevent brute force attacks.
 	// If the callback function returns an error, the connection attempt will be aborted.
 	OnConnectionAttempt func(net.Addr) error
+
+	// ListenConfig used to create the underlying listener socket.
+	listenConfig net.ListenConfig
+
+	minVersion protocol.Version
+
+	maxVersion protocol.Version
 }
 
 func (c *Config) includeCertificateSuites() bool {

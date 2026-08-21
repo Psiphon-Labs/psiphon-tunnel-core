@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -104,20 +104,17 @@ func (i MessageIntegrity) Check(msg *Message) error {
 	// Adjusting length in header to match m.Raw that was
 	// used when computing HMAC.
 	var (
-		length         = msg.Length
-		afterIntegrity = false
-		sizeReduced    int
+		length      = msg.Length
+		sizeReduced int
 	)
 	for _, a := range msg.Attributes {
-		if afterIntegrity {
-			sizeReduced += nearestPaddedValueLength(int(a.Length))
-			sizeReduced += attributeHeaderSize
-		}
+		sizeReduced += attributeHeaderSize
+		sizeReduced += nearestPaddedValueLength(int(a.Length))
 		if a.Type == AttrMessageIntegrity {
-			afterIntegrity = true
+			break
 		}
 	}
-	msg.Length -= uint32(sizeReduced) //nolint:gosec // G115
+	msg.Length = uint32(sizeReduced) // /nolint:gosec
 	msg.WriteLength()
 	// startOfHMAC should be first byte of integrity attribute.
 	startOfHMAC := messageHeaderSize + msg.Length - (attributeHeaderSize + messageIntegritySize)

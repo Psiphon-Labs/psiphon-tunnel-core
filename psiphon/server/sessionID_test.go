@@ -173,13 +173,13 @@ func TestDuplicateSessionID(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
 			func(_ *protocol.ServerEntry, _ string) (string, bool) { return "OSSH", true },
 			serverEntry,
 			nil,
 			nil,
 			false,
-			0,
 			0)
 		if err != nil {
 			t.Fatalf("MakeDialParameters failed: %s", err)

@@ -177,6 +177,11 @@ public class PsiphonTunnel {
          * Called when a light proxy is available to use even when no tunnel is connected.
          */
         default void onLightProxyAvailable() {}
+        /**
+         * Called when a persisted opaque access token is available to fetch with getAccessToken.
+         * The token may be used for push notifications; it is not an FCM or APNs device token.
+         */
+        default void onAccessTokenAvailable() {}
         default void onExiting() {}
     }
 
@@ -316,6 +321,15 @@ public class PsiphonTunnel {
     // successful, the imported server entries are retained and prioritized.
     public boolean importPushPayload(byte[] payload) {
         return Psi.importPushPayload(payload);
+    }
+
+    /**
+     * Returns the persisted opaque access token. The token may be used for push notifications; it
+     * is not an FCM or APNs device token. Returns an empty string when Psiphon is not running, no
+     * token has been registered, or retrieval fails; retrieval errors are logged to diagnostics.
+     */
+    public String getAccessToken() {
+        return Psi.getDSLAccessToken();
     }
 
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
@@ -995,6 +1009,8 @@ public class PsiphonTunnel {
                         commonRegionActivity);
             } else if (noticeType.equals("LightProxyAvailable")) {
                 mHostService.onLightProxyAvailable();
+            } else if (noticeType.equals("DSLAccessTokenAvailable")) {
+                mHostService.onAccessTokenAvailable();
             }
 
             if (diagnostic) {
@@ -1030,25 +1046,60 @@ public class PsiphonTunnel {
         return result;
     }
 
-    private static String getDeviceRegion(Context context) {
+    /**
+     * Returns the uppercase region identifier that the device is probably located in. This is the
+     * same best-effort approximation that the Psiphon library reports as the DeviceRegion metric.
+     *
+     * The value is derived, in order of preference, from the current mobile network, the SIM, and
+     * the default locale. The network country is skipped for CDMA devices, where it is not
+     * meaningful. This is an approximation, not authoritative geolocation, and locale-derived
+     * identifiers are not guaranteed to be two-letter ISO 3166-1 country codes.
+     *
+     * @param context an Android Context used to obtain the telephony service.
+     * @return an uppercase region identifier, or an empty string if none can be determined.
+     * @throws NullPointerException if context is null.
+     */
+    public static String getDeviceRegion(Context context) {
+        if (context == null) {
+            throw new NullPointerException("context");
+        }
+
         String region = "";
-        TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+        TelephonyManager telephonyManager = null;
+        try {
+            telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
+        } catch (RuntimeException e) {
+            // Some OEM implementations may throw while obtaining the telephony service.
+            // Fall through to the locale.
+        }
+
         if (telephonyManager != null) {
             // getNetworkCountryIso, when present, is preferred over
             // getSimCountryIso, since getNetworkCountryIso is the network
             // the device is currently on, while getSimCountryIso is the home
             // region of the SIM. While roaming, only getNetworkCountryIso
             // may more accurately represent the actual device region.
-            if (telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
-                region = telephonyManager.getNetworkCountryIso();
-                if (region == null) {
-                    region = "";
+            try {
+                if (telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
+                    String networkCountry = telephonyManager.getNetworkCountryIso();
+                    if (networkCountry != null) {
+                        region = networkCountry;
+                    }
                 }
+            } catch (RuntimeException e) {
+                // May get exceptions due to missing permissions or OEM implementations.
+                // Fall through and try the SIM country.
             }
+
             if (region.length() == 0) {
-                region = telephonyManager.getSimCountryIso();
-                if (region == null) {
-                    region = "";
+                try {
+                    String simCountry = telephonyManager.getSimCountryIso();
+                    if (simCountry != null) {
+                        region = simCountry;
+                    }
+                } catch (RuntimeException e) {
+                    // May get exceptions due to missing permissions or OEM implementations.
+                    // Fall through to the locale.
                 }
             }
         }

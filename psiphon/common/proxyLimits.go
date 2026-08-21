@@ -72,6 +72,9 @@ type ProxyLimitsConfig struct {
 // TryAcquireCommonClient and TryAcquirePersonalClient. Max announcement
 // values are advisory: each announcing proxy instance applies the max value
 // independently.
+//
+// SetCommonLimits, SetPersonalLimits, and reduced schedule transitions
+// rethrottle registered connections.
 type ProxyLimits struct {
 	mutex sync.Mutex
 
@@ -95,6 +98,14 @@ type ProxyLimits struct {
 
 	activeCommonClients   int
 	activePersonalClients int
+
+	commonConns   map[*ThrottledConn]struct{}
+	personalConns map[*ThrottledConn]struct{}
+	reducedTimer  *proxyLimitsReducedTimer
+}
+
+type proxyLimitsReducedTimer struct {
+	timer *time.Timer
 }
 
 // ProxyLimitReleaseFunc releases a proxy client slot acquired from
@@ -123,7 +134,10 @@ func NewProxyLimits(config *ProxyLimitsConfig) (*ProxyLimits, error) {
 			"invalid MaxCommonClients and MaxPersonalClients")
 	}
 
-	proxyLimits := &ProxyLimits{}
+	proxyLimits := &ProxyLimits{
+		commonConns:   make(map[*ThrottledConn]struct{}),
+		personalConns: make(map[*ThrottledConn]struct{}),
+	}
 
 	err := proxyLimits.setCommonLimitsLocked(
 		config.MaxCommonClients,
@@ -222,25 +236,8 @@ func (limits *ProxyLimits) GetPersonalLimits() (
 	limits.mutex.Lock()
 	defer limits.mutex.Unlock()
 
-	maxAnnouncements = limits.maxPersonalClients
-	if limits.overrideMaxPersonalAnnouncements > 0 &&
-		limits.overrideMaxPersonalAnnouncements < maxAnnouncements {
-		maxAnnouncements = limits.overrideMaxPersonalAnnouncements
-	}
-
-	upstreamBytesPerSecond = limits.personalUpstreamBytesPerSecond
-	downstreamBytesPerSecond = limits.personalDownstreamBytesPerSecond
-
-	if limits.isReducedLocked(time.Now().UTC()) {
-
-		// Reduced rate values of 0 mean the base rates apply.
-		if limits.reducedUpstreamBytesPerSecond != 0 {
-			upstreamBytesPerSecond = limits.reducedUpstreamBytesPerSecond
-		}
-		if limits.reducedDownstreamBytesPerSecond != 0 {
-			downstreamBytesPerSecond = limits.reducedDownstreamBytesPerSecond
-		}
-	}
+	maxAnnouncements, upstreamBytesPerSecond, downstreamBytesPerSecond =
+		limits.getPersonalLimitsLocked(time.Now().UTC())
 
 	return maxAnnouncements,
 		limits.maxPersonalClients,
@@ -249,10 +246,10 @@ func (limits *ProxyLimits) GetPersonalLimits() (
 		downstreamBytesPerSecond
 }
 
-// SetCommonLimits sets common pairing proxy limits. Active clients are not
-// disconnected or rethrottled when the limits change. Setting max clients to
-// 0, disabling common pairing, is invalid when personal pairing is also
-// disabled. Calls fail when reduced limits were configured.
+// SetCommonLimits sets common pairing proxy limits. Registered connections
+// are rethrottled; active clients are not disconnected. Setting max clients
+// to 0 is invalid when personal pairing is also disabled. Calls fail when
+// reduced limits were configured.
 func (limits *ProxyLimits) SetCommonLimits(
 	maxClients int,
 	upstreamBytesPerSecond int,
@@ -269,16 +266,31 @@ func (limits *ProxyLimits) SetCommonLimits(
 		return errors.TraceNew("invalid proxy limits")
 	}
 
-	return errors.Trace(limits.setCommonLimitsLocked(
+	err := limits.setCommonLimitsLocked(
 		maxClients,
 		upstreamBytesPerSecond,
-		downstreamBytesPerSecond))
+		downstreamBytesPerSecond)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	rateLimits := MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond)
+
+	// Rethrottling registered connections together may produce correlated
+	// traffic shape changes across flows that are observable to the proxy
+	// operator's ISP.
+	for conn := range limits.commonConns {
+		conn.SetLimits(rateLimits)
+	}
+
+	return nil
 }
 
-// SetPersonalLimits sets personal pairing proxy limits. Active clients are
-// not disconnected or rethrottled when the limits change. Setting max
-// clients to 0, disabling personal pairing, is invalid when common pairing
-// is also disabled. Calls fail when reduced limits were configured.
+// SetPersonalLimits sets personal pairing proxy limits. Registered connections
+// are rethrottled; active clients are not disconnected. Setting max clients
+// to 0 is invalid when common pairing is also disabled. Calls fail when
+// reduced limits were configured.
 func (limits *ProxyLimits) SetPersonalLimits(
 	maxClients int,
 	upstreamBytesPerSecond int,
@@ -295,10 +307,24 @@ func (limits *ProxyLimits) SetPersonalLimits(
 		return errors.TraceNew("invalid proxy limits")
 	}
 
-	return errors.Trace(limits.setPersonalLimitsLocked(
+	err := limits.setPersonalLimitsLocked(
 		maxClients,
 		upstreamBytesPerSecond,
-		downstreamBytesPerSecond))
+		downstreamBytesPerSecond)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	rateLimits := MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond)
+
+	// See SetCommonLimits for a note about rethrottling registered
+	// connections together.
+	for conn := range limits.personalConns {
+		conn.SetLimits(rateLimits)
+	}
+
+	return nil
 }
 
 // OverrideMaxAnnouncements sets or clears common and personal max
@@ -330,6 +356,33 @@ func (limits *ProxyLimits) TryAcquireCommonClient() (ProxyLimitReleaseFunc, bool
 // TryAcquirePersonalClient attempts to acquire one personal client slot.
 func (limits *ProxyLimits) TryAcquirePersonalClient() (ProxyLimitReleaseFunc, bool) {
 	return limits.tryAcquireClient(true)
+}
+
+// RegisterCommonConn registers conn for common rate updates and applies the
+// current limits. UnregisterConn must be called when conn closes.
+func (limits *ProxyLimits) RegisterCommonConn(conn *ThrottledConn) {
+	limits.registerConn(conn, false)
+}
+
+// RegisterPersonalConn registers conn for personal rate updates and applies
+// the current limits. UnregisterConn must be called when conn closes.
+func (limits *ProxyLimits) RegisterPersonalConn(conn *ThrottledConn) {
+	limits.registerConn(conn, true)
+}
+
+// UnregisterConn stops rate updates for conn.
+func (limits *ProxyLimits) UnregisterConn(conn *ThrottledConn) {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	delete(limits.commonConns, conn)
+	delete(limits.personalConns, conn)
+
+	// The last unregister stops the timer and releases all timer resources.
+	if len(limits.commonConns) == 0 && len(limits.personalConns) == 0 {
+		limits.stopReducedTimerLocked()
+	}
 }
 
 func (limits *ProxyLimits) setCommonLimitsLocked(
@@ -410,6 +463,34 @@ func (limits *ProxyLimits) getCommonLimitsLocked(now time.Time) (
 	return
 }
 
+func (limits *ProxyLimits) getPersonalLimitsLocked(now time.Time) (
+	maxAnnouncements int,
+	upstreamBytesPerSecond int,
+	downstreamBytesPerSecond int) {
+
+	maxAnnouncements = limits.maxPersonalClients
+	if limits.overrideMaxPersonalAnnouncements > 0 &&
+		limits.overrideMaxPersonalAnnouncements < maxAnnouncements {
+		maxAnnouncements = limits.overrideMaxPersonalAnnouncements
+	}
+
+	upstreamBytesPerSecond = limits.personalUpstreamBytesPerSecond
+	downstreamBytesPerSecond = limits.personalDownstreamBytesPerSecond
+
+	if limits.isReducedLocked(now) {
+
+		// Reduced rate values of 0 mean the base rates apply.
+		if limits.reducedUpstreamBytesPerSecond != 0 {
+			upstreamBytesPerSecond = limits.reducedUpstreamBytesPerSecond
+		}
+		if limits.reducedDownstreamBytesPerSecond != 0 {
+			downstreamBytesPerSecond = limits.reducedDownstreamBytesPerSecond
+		}
+	}
+
+	return
+}
+
 func (limits *ProxyLimits) isReducedLocked(now time.Time) bool {
 
 	if !limits.reducedEnabled {
@@ -462,6 +543,126 @@ func (limits *ProxyLimits) tryAcquireClient(
 	}, true
 }
 
+func (limits *ProxyLimits) registerConn(
+	conn *ThrottledConn,
+	isPersonal bool) {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	now := time.Now().UTC()
+	var upstreamBytesPerSecond, downstreamBytesPerSecond int
+	if isPersonal {
+		_, upstreamBytesPerSecond, downstreamBytesPerSecond =
+			limits.getPersonalLimitsLocked(now)
+	} else {
+		_, _, upstreamBytesPerSecond, downstreamBytesPerSecond =
+			limits.getCommonLimitsLocked(now)
+	}
+
+	conn.SetLimits(MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond))
+
+	if isPersonal {
+		delete(limits.commonConns, conn)
+		limits.personalConns[conn] = struct{}{}
+	} else {
+		delete(limits.personalConns, conn)
+		limits.commonConns[conn] = struct{}{}
+	}
+
+	limits.scheduleReducedTimerLocked(now)
+}
+
+func (limits *ProxyLimits) applyScheduledRateLimitsLocked(now time.Time) {
+
+	// See SetCommonLimits for a note about rethrottling registered
+	// connections together.
+	_, _, upstreamBytesPerSecond, downstreamBytesPerSecond :=
+		limits.getCommonLimitsLocked(now)
+	rateLimits := MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond)
+	for conn := range limits.commonConns {
+		conn.SetLimits(rateLimits)
+	}
+
+	_, upstreamBytesPerSecond, downstreamBytesPerSecond =
+		limits.getPersonalLimitsLocked(now)
+	rateLimits = MakeProxyRateLimits(
+		upstreamBytesPerSecond, downstreamBytesPerSecond)
+	for conn := range limits.personalConns {
+		conn.SetLimits(rateLimits)
+	}
+}
+
+func (limits *ProxyLimits) scheduleReducedTimerLocked(now time.Time) {
+
+	if !limits.reducedEnabled ||
+		limits.reducedTimer != nil ||
+		(len(limits.commonConns) == 0 && len(limits.personalConns) == 0) {
+		return
+	}
+
+	next := limits.nextReducedTransitionLocked(now)
+
+	// The proxyLimitsReducedTimer wrapper allows the timer callback to check that
+	// the current timer is itself, and avoid replacing a newer timer which could
+	// happen due to a race between timer.Stop and a pending callback.
+	reducedTimer := &proxyLimitsReducedTimer{}
+	limits.reducedTimer = reducedTimer
+	reducedTimer.timer = time.AfterFunc(next.Sub(now), func() {
+		limits.handleReducedTimer(reducedTimer)
+	})
+}
+
+func (limits *ProxyLimits) stopReducedTimerLocked() {
+
+	if limits.reducedTimer != nil {
+		limits.reducedTimer.timer.Stop()
+		limits.reducedTimer = nil
+	}
+}
+
+func (limits *ProxyLimits) handleReducedTimer(
+	reducedTimer *proxyLimitsReducedTimer) {
+
+	limits.mutex.Lock()
+	defer limits.mutex.Unlock()
+
+	if limits.reducedTimer != reducedTimer {
+		return
+	}
+	limits.reducedTimer = nil
+
+	if len(limits.commonConns) == 0 && len(limits.personalConns) == 0 {
+		return
+	}
+
+	now := time.Now().UTC()
+	limits.applyScheduledRateLimitsLocked(now)
+	limits.scheduleReducedTimerLocked(now)
+}
+
+func (limits *ProxyLimits) nextReducedTransitionLocked(now time.Time) time.Time {
+
+	transition := func(minute int) time.Time {
+		next := time.Date(
+			now.Year(), now.Month(), now.Day(),
+			minute/60, minute%60, 0, 0, time.UTC)
+		if !next.After(now) {
+			next = next.AddDate(0, 0, 1)
+		}
+		return next
+	}
+
+	start := transition(limits.reducedStartMinute)
+	end := transition(limits.reducedEndMinute)
+	if start.Before(end) {
+		return start
+	}
+	return end
+}
+
 func validateProxyLimits(
 	maxClients int,
 	upstreamBytesPerSecond int,
@@ -474,4 +675,18 @@ func validateProxyLimits(
 	}
 
 	return nil
+}
+
+// MakeProxyRateLimits converts proxy upstream/downstream rates into
+// RateLimits.
+func MakeProxyRateLimits(
+	upstreamBytesPerSecond int,
+	downstreamBytesPerSecond int) RateLimits {
+
+	// Throttling is applied to the proxy-to-destination connection, where
+	// writes flow upstream and reads flow downstream.
+	return RateLimits{
+		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
+		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
+	}
 }

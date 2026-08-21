@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -26,6 +26,7 @@ const (
 	errorCodeReasonStart = 4
 	errorCodeClassByte   = 2
 	errorCodeNumberByte  = 3
+	errorCodeClassMax    = 255
 	errorCodeReasonMaxB  = 763
 	errorCodeModulo      = 100
 )
@@ -39,11 +40,14 @@ func (c ErrorCodeAttribute) AddTo(msg *Message) error {
 	); err != nil {
 		return err
 	}
+	class := int(c.Code) / errorCodeModulo
+	number := int(c.Code) % errorCodeModulo
+	if class < 0 || class > errorCodeClassMax || number < 0 {
+		return errInvalidErrorCode
+	}
 	value = value[:errorCodeReasonStart+len(c.Reason)]
-	number := byte(c.Code % errorCodeModulo) // error code modulo 100
-	class := byte(c.Code / errorCodeModulo)  // hundred digit
-	value[errorCodeClassByte] = class
-	value[errorCodeNumberByte] = number
+	value[errorCodeClassByte] = byte(class)   // hundred digit
+	value[errorCodeNumberByte] = byte(number) // error code modulo 100
 	copy(value[errorCodeReasonStart:], c.Reason)
 	msg.Add(AttrErrorCode, value)
 

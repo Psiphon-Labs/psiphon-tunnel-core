@@ -26,14 +26,23 @@ var (
 	errInvalidClientKeyExchange = &protocol.FatalError{
 		Err: errors.New("unable to determine if ClientKeyExchange is a public key or PSK Identity"), //nolint:err113
 	}
-	errInvalidHashAlgorithm = &protocol.FatalError{
-		Err: errors.New("invalid hash algorithm"), //nolint:err113
-	}
-	errInvalidSignatureAlgorithm = &protocol.FatalError{
-		Err: errors.New("invalid signature algorithm"), //nolint:err113
+	errInvalidSignHashAlgorithm = &protocol.FatalError{
+		Err: errors.New("invalid signature/hash algorithm"), //nolint:err113
 	}
 	errCookieTooLong = &protocol.FatalError{
-		Err: errors.New("cookie must not be longer then 255 bytes"), //nolint:err113
+		Err: errors.New("cookie must not be longer than 255 bytes"), //nolint:err113
+	}
+	errSessionIDTooLong = &protocol.FatalError{
+		Err: errors.New("session ID must not be longer than 255 bytes"), //nolint:err113
+	}
+	errCertificateTypesTooLong = &protocol.FatalError{
+		Err: errors.New("certificate types must not be longer than 255 entries"), //nolint:err113
+	}
+	errCompressionMethodsTooLong = &protocol.FatalError{
+		Err: errors.New("compression methods must not be longer than 255 entries"), //nolint:err113
+	}
+	errPublicKeyTooLong = &protocol.FatalError{
+		Err: errors.New("public key must not be longer than 255 bytes"), //nolint:err113
 	}
 	errInvalidEllipticCurveType = &protocol.FatalError{
 		Err: errors.New("invalid or unknown elliptic curve type"), //nolint:err113
