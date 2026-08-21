@@ -3,7 +3,7 @@
 
 package ciphersuite
 
-import ( //nolint:gci
+import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -90,8 +90,8 @@ func (c *CBC) Encrypt(pkt *recordlayer.RecordLayer, raw []byte) ([]byte, error) 
 	// Generate + Append padding
 	padding := make([]byte, blockSize-len(payload)%blockSize)
 	paddingLen := len(padding)
-	for i := 0; i < paddingLen; i++ {
-		padding[i] = byte(paddingLen - 1)
+	for i := range paddingLen {
+		padding[i] = byte(paddingLen - 1) //nolint:gosec //G115
 	}
 	payload = append(payload, padding...)
 
@@ -232,7 +232,7 @@ func (c *CBC) hmacCID(
 	msg.AddUint8(protocolVersion.Major)
 	msg.AddUint8(protocolVersion.Minor)
 	msg.AddUint16(epoch)
-	util.AddUint48(&msg, sequenceNumber)
+	msg.AddUint48(sequenceNumber)
 	msg.AddBytes(cid)
 	msg.AddUint16(uint16(len(payload))) //nolint:gosec //G115
 	msg.AddBytes(ip.Content)

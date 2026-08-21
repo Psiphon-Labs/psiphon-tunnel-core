@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -64,3 +64,6 @@ var ErrAttributeSizeInvalid = errors.New("attribute size is invalid")
 
 // ErrAttributeSizeOverflow means that decoded attribute size is too big.
 var ErrAttributeSizeOverflow = errors.New("attribute size overflow")
+
+// errInvalidErrorCode means that ErrorCode can't be encoded in ERROR-CODE.
+var errInvalidErrorCode = errors.New("invalid ErrorCode")

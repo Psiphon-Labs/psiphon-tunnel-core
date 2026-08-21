@@ -5,8 +5,8 @@
 package extension
 
 import (
-	"github.com/pion/dtls/v3/pkg/crypto/hash"
-	"github.com/pion/dtls/v3/pkg/crypto/signature"
+	"crypto/tls"
+
 	"github.com/pion/dtls/v3/pkg/crypto/signaturehash"
 	"golang.org/x/crypto/cryptobyte"
 )
@@ -20,16 +20,7 @@ func marshalGenericSignatureHashAlgorithm(typeValue TypeValue, sigHashAlgs []sig
 	builder.AddUint16LengthPrefixed(func(extBuilder *cryptobyte.Builder) {
 		extBuilder.AddUint16LengthPrefixed(func(algBuilder *cryptobyte.Builder) {
 			for _, v := range sigHashAlgs {
-				// For PSS schemes, write the full uint16 SignatureScheme value
-				// For other schemes, write hash (high byte) + signature (low byte) in TLS 1.2 style
-				if v.Signature.IsPSS() {
-					// TLS 1.3 PSS: full uint16 is the signature scheme
-					algBuilder.AddUint16(uint16(v.Signature))
-				} else {
-					// TLS 1.2 style: hash byte + signature byte
-					algBuilder.AddUint8(byte(v.Hash))
-					algBuilder.AddUint8(byte(v.Signature))
-				}
+				algBuilder.AddBytes(v.Marshal())
 			}
 		})
 	})
@@ -53,7 +44,7 @@ func unmarshalGenericSignatureHashAlgorithm(typeValue TypeValue, data []byte, ds
 	}
 
 	var algData cryptobyte.String
-	if !extData.ReadUint16LengthPrefixed(&algData) {
+	if !extData.ReadUint16LengthPrefixed(&algData) || !extData.Empty() {
 		return errLengthMismatch
 	}
 
@@ -63,17 +54,10 @@ func unmarshalGenericSignatureHashAlgorithm(typeValue TypeValue, data []byte, ds
 			return errLengthMismatch
 		}
 
-		// Parse the signature scheme (handles both TLS 1.2 and TLS 1.3 PSS encoding)
-		supportedHashAlgorithm, supportedSignatureAlgorithm := parseSignatureScheme(scheme)
-
-		// Validate both hash and signature algorithms
-		if _, ok := hash.Algorithms()[supportedHashAlgorithm]; ok {
-			if _, ok := signature.Algorithms()[supportedSignatureAlgorithm]; ok {
-				*dst = append(*dst, signaturehash.Algorithm{
-					Hash:      supportedHashAlgorithm,
-					Signature: supportedSignatureAlgorithm,
-				})
-			}
+		var alg signaturehash.Algorithm
+		err := alg.Unmarshal(tls.SignatureScheme(scheme))
+		if err == nil {
+			*dst = append(*dst, alg)
 		}
 	}
 

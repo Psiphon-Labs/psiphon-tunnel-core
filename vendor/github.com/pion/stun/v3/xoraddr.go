@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
@@ -38,7 +38,7 @@ func isIPv4(ip net.IP) bool {
 
 // Is p all zeros?
 func isZeros(p net.IP) bool {
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		if p[i] != 0 {
 			return false
 		}
@@ -91,6 +91,9 @@ func (a *XORMappedAddress) GetFromAs(msg *Message, attr AttrType) error {
 	if err != nil {
 		return err
 	}
+	if len(value) <= 4 {
+		return io.ErrUnexpectedEOF
+	}
 	family := bin.Uint16(value[0:2])
 	if family != familyIPv6 && family != familyIPv4 {
 		return newDecodeErr("xor-mapped address", "family",
@@ -111,9 +114,6 @@ func (a *XORMappedAddress) GetFromAs(msg *Message, attr AttrType) error {
 		}
 	}
 
-	if len(value) <= 4 {
-		return io.ErrUnexpectedEOF
-	}
 	if err := CheckOverflow(attr, len(value[4:]), len(a.IP)); err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ func decodeCipherSuiteIDs(buf []byte) ([]uint16, error) {
 	}
 	cipherSuitesCount := int(binary.BigEndian.Uint16(buf[0:])) / 2
 	rtrn := make([]uint16, cipherSuitesCount)
-	for i := 0; i < cipherSuitesCount; i++ {
+	for i := range cipherSuitesCount {
 		if len(buf) < (i*2 + 4) {
 			return nil, errBufferTooSmall
 		}

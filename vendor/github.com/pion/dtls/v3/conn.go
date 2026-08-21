@@ -6,6 +6,7 @@ package dtls
 import (
 	"bytes"
 	"context"
+	"crypto/fips140"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +32,6 @@ const (
 	initialTickerInterval = time.Second
 	cookieLength          = 20
 	sessionLength         = 32
-	defaultNamedCurve     = elliptic.X25519
 	inboundBufferSize     = 8192
 	// Default replay protection window is specified by RFC 6347 Section 4.1.2.6.
 	defaultReplayProtectionWindow = 64
@@ -75,6 +75,7 @@ type Conn struct {
 	handshakeCompletedSuccessfully atomic.Bool
 	handshakeMutex                 sync.Mutex
 	handshakeDone                  chan struct{}
+	writeLock                      sync.Mutex
 
 	encryptedPackets []addrPkt
 
@@ -180,6 +181,27 @@ func createConn(
 		curves = defaultCurves
 	}
 
+	if fips140.Enabled() {
+		// On FIPS systems, filter out non-approved curves
+		filtered := make([]elliptic.Curve, 0, len(curves))
+		for _, c := range curves {
+			if c != elliptic.X25519 {
+				filtered = append(filtered, c)
+			}
+		}
+		curves = filtered
+	}
+
+	minVersion := config.minVersion
+	if !minVersion.Equal(protocol.Version1_2) || !minVersion.Equal(protocol.Version1_3) {
+		minVersion = protocol.Version1_2
+	}
+
+	maxVersion := config.minVersion
+	if !maxVersion.Equal(protocol.Version1_2) || !maxVersion.Equal(protocol.Version1_3) {
+		maxVersion = protocol.Version1_2
+	}
+
 	handshakeConfig := &handshakeConfig{
 		localPSKCallback:              config.PSK,
 		localPSKIdentityHint:          config.PSKIdentityHint,
@@ -215,6 +237,8 @@ func createConn(
 		serverHelloMessageHook:        config.ServerHelloMessageHook,
 		certificateRequestMessageHook: config.CertificateRequestMessageHook,
 		resumeState:                   resumeState,
+		minVersion:                    minVersion,
+		maxVersion:                    maxVersion,
 	}
 
 	conn := &Conn{
@@ -434,6 +458,8 @@ func (c *Conn) Read(buff []byte) (n int, err error) { //nolint:cyclop
 
 	for {
 		select {
+		case <-c.closed.Done():
+			return 0, io.EOF
 		case <-c.readDeadline.Done():
 			return 0, errDeadlineExceeded
 		case out, ok := <-c.decrypted:
@@ -471,7 +497,10 @@ func (c *Conn) Write(payload []byte) (int, error) {
 		return 0, err
 	}
 
-	return len(payload), c.writePackets(c.writeDeadline, []*packet{
+	ctx, cancel := c.contextWithClose(c.writeDeadline)
+	defer cancel()
+
+	return len(payload), c.writePackets(ctx, []*packet{
 		{
 			record: &recordlayer.RecordLayer{
 				Header: recordlayer.Header{
@@ -534,55 +563,147 @@ func (c *Conn) RemoteSRTPMasterKeyIdentifier() ([]byte, bool) {
 }
 
 func (c *Conn) writePackets(ctx context.Context, pkts []*packet) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
+	compactedRawPackets, rAddr, err := c.prepareRawPackets(pkts)
+	if err != nil {
+		return err
+	}
+
+	for _, compactedRawPacket := range compactedRawPackets {
+		if _, err = c.nextConn.WriteToContext(ctx, compactedRawPacket, rAddr); err != nil {
+			if errors.Is(err, context.Canceled) && c.isConnectionClosed() {
+				return ErrConnClosed
+			}
+
+			return netError(err)
+		}
+	}
+
+	return nil
+}
+
+func (c *Conn) prepareRawPackets(pkts []*packet) ([][]byte, net.Addr, error) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	var rawPackets [][]byte
 
 	for _, pkt := range pkts {
-		if dtlsHandshake, ok := pkt.record.Content.(*handshake.Handshake); ok {
-			handshakeRaw, err := pkt.record.Marshal()
-			if err != nil {
-				return err
-			}
-
-			c.log.Tracef("[handshake:%v] -> %s (epoch: %d, seq: %d)",
-				srvCliStr(c.state.isClient), dtlsHandshake.Header.Type.String(),
-				pkt.record.Header.Epoch, dtlsHandshake.Header.MessageSequence)
-
-			c.handshakeCache.push(
-				handshakeRaw[recordlayer.FixedHeaderSize:],
-				pkt.record.Header.Epoch,
-				dtlsHandshake.Header.MessageSequence,
-				dtlsHandshake.Header.Type,
-				c.state.isClient,
-			)
-
-			rawHandshakePackets, err := c.processHandshakePacket(pkt, dtlsHandshake)
-			if err != nil {
-				return err
-			}
-			rawPackets = append(rawPackets, rawHandshakePackets...)
-		} else {
-			rawPacket, err := c.processPacket(pkt)
-			if err != nil {
-				return err
-			}
-			rawPackets = append(rawPackets, rawPacket)
+		pktRawPackets, err := c.prepareRawPacket(pkt)
+		if err != nil {
+			return nil, nil, err
 		}
+
+		rawPackets = append(rawPackets, pktRawPackets...)
 	}
 	if len(rawPackets) == 0 {
-		return nil
+		return nil, nil, nil
 	}
-	compactedRawPackets := c.compactRawPackets(rawPackets)
 
-	for _, compactedRawPackets := range compactedRawPackets {
-		if _, err := c.nextConn.WriteToContext(ctx, compactedRawPackets, c.rAddr); err != nil {
-			return netError(err)
+	return c.compactRawPackets(rawPackets), c.rAddr, nil
+}
+
+func (c *Conn) prepareRawPacket(pkt *packet) ([][]byte, error) {
+	dtlsHandshake, ok := pkt.record.Content.(*handshake.Handshake)
+	if ok {
+		if err := c.cacheHandshakePacket(pkt, dtlsHandshake); err != nil {
+			return nil, err
 		}
+
+		return c.processHandshakePacket(pkt, dtlsHandshake)
 	}
+
+	rawPacket, err := c.processPacket(pkt)
+	if err != nil {
+		return nil, err
+	}
+
+	return [][]byte{rawPacket}, nil
+}
+
+func (c *Conn) cacheHandshakePacket(pkt *packet, dtlsHandshake *handshake.Handshake) error {
+	handshakeRaw, err := pkt.record.Marshal()
+	if err != nil {
+		return err
+	}
+
+	c.log.Tracef("[handshake:%v] -> %s (epoch: %d, seq: %d)",
+		srvCliStr(c.state.isClient), dtlsHandshake.Header.Type.String(),
+		pkt.record.Header.Epoch, dtlsHandshake.Header.MessageSequence)
+
+	c.handshakeCache.push(
+		handshakeRaw[recordlayer.FixedHeaderSize:],
+		pkt.record.Header.Epoch,
+		dtlsHandshake.Header.MessageSequence,
+		dtlsHandshake.Header.Type,
+		c.state.isClient,
+	)
 
 	return nil
+}
+
+type closeContext struct {
+	context.Context //nolint:containedctx
+	done            chan struct{}
+	errMu           sync.RWMutex
+	err             error
+	doneOnce        sync.Once
+}
+
+func (c *closeContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *closeContext) Err() error {
+	c.errMu.RLock()
+	err := c.err
+	c.errMu.RUnlock()
+	if err != nil {
+		return err
+	}
+
+	return c.Context.Err()
+}
+
+func (c *closeContext) close(err error) {
+	c.doneOnce.Do(func() {
+		c.errMu.Lock()
+		c.err = err
+		c.errMu.Unlock()
+		close(c.done)
+	})
+}
+
+func (c *Conn) contextWithClose(ctx context.Context) (context.Context, context.CancelFunc) {
+	closeCtx := &closeContext{
+		Context: ctx,
+		done:    make(chan struct{}),
+	}
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-c.closed.Done():
+			closeCtx.close(context.Canceled)
+		case <-ctx.Done():
+			err := ctx.Err()
+			if err == nil {
+				err = context.DeadlineExceeded
+			}
+			closeCtx.close(err)
+		case <-stop:
+		}
+	}()
+
+	var stopOnce sync.Once
+	cancel := func() {
+		stopOnce.Do(func() {
+			close(stop)
+		})
+	}
+
+	return closeCtx, cancel
 }
 
 func (c *Conn) compactRawPackets(rawPackets [][]byte) [][]byte {
@@ -1301,33 +1422,27 @@ func (c *Conn) close(byUser bool) error {
 	c.closeLock.Lock()
 	cancelHandshaker := c.cancelHandshaker
 	cancelHandshakeReader := c.cancelHandshakeReader
-	c.closeLock.Unlock()
-
-	cancelHandshaker()
-	cancelHandshakeReader()
-
-	if c.isHandshakeCompletedSuccessfully() && byUser {
-		// Discard error from notify() to return non-error on the first user call of Close()
-		// even if the underlying connection is already closed.
-		_ = c.notify(context.Background(), alert.Warning, alert.CloseNotify)
-	}
-
-	c.closeLock.Lock()
-	// Don't return ErrConnClosed at the first time of the call from user.
 	closedByUser := c.connectionClosedByUser
 	if byUser {
 		c.connectionClosedByUser = true
 	}
 	isClosed := c.isConnectionClosed()
-	c.closed.Close()
+	if !isClosed {
+		c.closed.Close()
+	}
 	c.closeLock.Unlock()
 
-	if closedByUser {
-		return ErrConnClosed
+	cancelHandshaker()
+	cancelHandshakeReader()
+
+	if closedByUser || isClosed {
+		return nil
 	}
 
-	if isClosed {
-		return nil
+	if c.isHandshakeCompletedSuccessfully() && byUser {
+		// Discard error from notify() to return non-error on user Close()
+		// even if the underlying connection is already closed.
+		_ = c.notify(context.Background(), alert.Warning, alert.CloseNotify)
 	}
 
 	return c.nextConn.Close()

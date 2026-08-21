@@ -31,6 +31,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -430,6 +431,8 @@ type sshServer struct {
 	sshHostKey              ssh.Signer
 	obfuscatorSeedHistory   *obfuscator.SeedHistory
 	inproxyBrokerSessions   *inproxy.ServerBrokerSessions
+
+	homepageURLQueryParameterClientFeatures atomic.Pointer[homepageURLQueryParameterClientFeatureLookup]
 
 	clientsMutex         sync.Mutex
 	stoppingClients      bool
@@ -1628,7 +1631,118 @@ func (sshServer *sshServer) reloadTactics() error {
 		return errors.Trace(err)
 	}
 
+	err = sshServer.reloadHomepageURLQueryParameterClientFeatures()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
+}
+
+type homepageURLQueryParameterClientFeatureLookup struct {
+	queryParameters               []string
+	queryParameterByClientFeature common.StringValueLookup[string]
+}
+
+func (sshServer *sshServer) reloadHomepageURLQueryParameterClientFeatures() error {
+
+	// Assumes no GeoIP targeting for HomepageURLQueryParameterClientFeatures.
+
+	p, err := sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if p.IsNil() {
+		sshServer.homepageURLQueryParameterClientFeatures.Store(
+			&homepageURLQueryParameterClientFeatureLookup{})
+		return nil
+	}
+
+	configuration := p.KeyStringsValue(parameters.HomepageURLQueryParameterClientFeatures)
+
+	queryParameters := make([]string, 0, len(configuration))
+	clientFeatures := make([]string, 0)
+	queryParametersByClientFeature := make([]string, 0)
+	seenClientFeatures := make(map[string]struct{})
+
+	for queryParameter, candidates := range configuration {
+		if queryParameter == "" {
+			return errors.TraceNew("empty query parameter")
+		}
+
+		if url.QueryEscape(queryParameter) != queryParameter {
+			return errors.Tracef(
+				"query parameter requires URL encoding: %s", queryParameter)
+		}
+
+		queryParameters = append(queryParameters, queryParameter)
+
+		for _, clientFeature := range candidates {
+			if clientFeature == "" {
+				return errors.Tracef(
+					"empty client feature for query parameter: %s",
+					queryParameter)
+			}
+
+			if _, ok := seenClientFeatures[clientFeature]; ok {
+				return errors.Tracef(
+					"duplicate client feature: %s", clientFeature)
+			}
+
+			seenClientFeatures[clientFeature] = struct{}{}
+			clientFeatures = append(clientFeatures, clientFeature)
+			queryParametersByClientFeature = append(
+				queryParametersByClientFeature, queryParameter)
+		}
+	}
+
+	clientFeatureLookup, err := common.NewStringValueLookup(
+		clientFeatures, queryParametersByClientFeature)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	lookup := &homepageURLQueryParameterClientFeatureLookup{
+		queryParameters:               queryParameters,
+		queryParameterByClientFeature: clientFeatureLookup,
+	}
+
+	sshServer.homepageURLQueryParameterClientFeatures.Store(lookup)
+
+	return nil
+}
+
+func (sshServer *sshServer) selectHomepageURLQueryParameterClientFeatures(
+	clientFeatures []string) map[string]string {
+
+	lookup := sshServer.homepageURLQueryParameterClientFeatures.Load()
+	if lookup == nil {
+		return nil
+	}
+
+	clientFeatureValues := make(
+		map[string]string, len(lookup.queryParameters))
+
+	// Supply the value "" for any configured client feature query parameter
+	// with no corresponding value found in the client input.
+	for _, queryParameter := range lookup.queryParameters {
+		clientFeatureValues[queryParameter] = ""
+	}
+
+	for _, clientFeature := range clientFeatures {
+		queryParameter, ok :=
+			lookup.queryParameterByClientFeature.Get(clientFeature)
+		if !ok {
+			continue
+		}
+
+		// Later qualifying client features replace earlier values for the
+		// same query parameter.
+		clientFeatureValues[queryParameter] = clientFeature
+	}
+
+	return clientFeatureValues
 }
 
 func (sshServer *sshServer) revokeClientAuthorizations(sessionID string) {
@@ -2120,6 +2234,7 @@ type handshakeState struct {
 	completed                 bool
 	apiProtocol               string
 	apiParams                 common.APIParameters
+	clientFeatures            []string
 	activeAuthorizationIDs    []string
 	authorizedAccessTypes     []string
 	authorizationsRevoked     bool
@@ -4105,11 +4220,16 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 		sshClient.handshakeState.apiParams, "sponsor_id")
 	clientPlatform, _ := getStringRequestParam(
 		sshClient.handshakeState.apiParams, "client_platform")
+	clientFeatures := sshClient.handshakeState.clientFeatures
 	clientGeoIPData := sshClient.clientGeoIPData
 	deviceRegion := sshClient.handshakeState.deviceRegion
 	sshClient.Unlock()
 
 	normalizedClientPlatform := normalizeClientPlatform(clientPlatform)
+
+	clientFeatureValues :=
+		sshClient.sshServer.selectHomepageURLQueryParameterClientFeatures(
+			clientFeatures)
 
 	return sshClient.sshServer.support.PsinetDatabase.GetAlertActionURLs(
 		alertReason,
@@ -4117,7 +4237,8 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
-		normalizedClientPlatform)
+		normalizedClientPlatform,
+		clientFeatureValues)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {

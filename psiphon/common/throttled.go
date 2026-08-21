@@ -134,11 +134,59 @@ func (conn *ThrottledConn) SetLimits(limits RateLimits) {
 	atomic.StoreInt32(&conn.closeAfterExhausted, closeAfterExhausted)
 }
 
+// updateRateLimiter preserves the existing token balance when changing
+// between nonzero rates. Transitions to or from an unlimited rate necessarily
+// remove or create the limiter. Any token debt carried across a rate change
+// is bounded to at most one new burst.
+func updateRateLimiter(
+	limiter *rate.Limiter,
+	bytesPerSecond int64) *rate.Limiter {
+
+	if bytesPerSecond == 0 {
+		return nil
+	}
+
+	limit := rate.Limit(bytesPerSecond)
+	burst := int(bytesPerSecond)
+
+	if limiter == nil {
+		return rate.NewLimiter(limit, burst)
+	}
+
+	if limiter.Limit() == limit && limiter.Burst() == burst {
+		return limiter
+	}
+
+	now := time.Now()
+
+	// A token debt exceeding one new burst, which is possible only when the
+	// burst is reduced, could stall the next I/O for up to oldRate/newRate
+	// seconds. Instead, replace the limiter and consume its initial full
+	// burst, so the bucket starts empty: no free burst of unthrottled bytes
+	// is granted, and the next I/O waits at most ~1 second.
+	//
+	// Otherwise, update in place. Updating the burst first and then the
+	// limit at the same timestamp keeps the retained token balance within a
+	// reduced burst, as SetLimitAt caps the balance at the updated burst,
+	// without granting additional tokens when the burst is increased.
+
+	if limiter.TokensAt(now) < -float64(burst) {
+		limiter = rate.NewLimiter(limit, burst)
+		limiter.ReserveN(now, burst)
+		return limiter
+	}
+
+	limiter.SetBurstAt(now, burst)
+	limiter.SetLimitAt(now, limit)
+
+	return limiter
+}
+
 func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 
 	// A mutex is used to ensure conformance with net.Conn concurrency semantics.
-	// The atomic.SwapInt64 and subsequent assignment of readRateLimiter or
-	// readDelayTimer could be a race condition with concurrent reads.
+	// The atomic CompareAndSwap and subsequent assignment of readRateLimiter
+	// or readDelayTimer could be a race condition with concurrent reads.
 	conn.readLock.Lock()
 	defer conn.readLock.Unlock()
 
@@ -161,21 +209,19 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	readRate := conn.readBytesPerSecond.Swap(-1)
+	// A Load, with CompareAndSwap only when SetLimits has stored a new rate,
+	// avoids an atomic read-modify-write from Swap on every Read.
+	readRate := conn.readBytesPerSecond.Load()
 
-	if readRate != -1 {
+	if readRate != -1 &&
+		conn.readBytesPerSecond.CompareAndSwap(readRate, -1) {
 		// SetLimits has been called and a new rate limiter
 		// must be initialized. When no limit is specified,
 		// the reader/writer is simply the base conn.
-		// No state is retained from the previous rate limiter,
-		// so a pending I/O throttle sleep may be skipped when
-		// the old and new rate are similar.
-		if readRate == 0 {
-			conn.readRateLimiter = nil
-		} else {
-			conn.readRateLimiter =
-				rate.NewLimiter(rate.Limit(readRate), int(readRate))
-		}
+		// Existing token-bucket state is retained when changing
+		// between nonzero limits.
+		conn.readRateLimiter =
+			updateRateLimiter(conn.readRateLimiter, readRate)
 	}
 
 	// The number of bytes read cannot exceed the rate limiter burst size,
@@ -265,15 +311,13 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	writeRate := conn.writeBytesPerSecond.Swap(-1)
+	// See rate Load/CompareAndSwap comment in Read.
+	writeRate := conn.writeBytesPerSecond.Load()
 
-	if writeRate != -1 {
-		if writeRate == 0 {
-			conn.writeRateLimiter = nil
-		} else {
-			conn.writeRateLimiter =
-				rate.NewLimiter(rate.Limit(writeRate), int(writeRate))
-		}
+	if writeRate != -1 &&
+		conn.writeBytesPerSecond.CompareAndSwap(writeRate, -1) {
+		conn.writeRateLimiter =
+			updateRateLimiter(conn.writeRateLimiter, writeRate)
 	}
 
 	if conn.writeRateLimiter == nil {

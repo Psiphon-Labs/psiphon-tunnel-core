@@ -28,6 +28,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,7 +266,8 @@ func TestTLSDialerCompatibility(t *testing.T) {
 	//
 	// An optional config file, when supplied, enables testing against remote
 	// servers. Config should be newline delimited list of domain/IP:port TLS
-	// host addresses to connect to.
+	// host addresses to connect to. ClientHello wire assertions also run for
+	// these remote servers.
 
 	var configAddresses []string
 	config, err := ioutil.ReadFile("tlsDialerCompatibility_test.config")
@@ -288,7 +290,10 @@ func TestTLSDialerCompatibility(t *testing.T) {
 		}
 	}
 
-	t.Run("psiphon", runner("", false))
+	for _, fragmentClientHello := range []bool{false, true} {
+		t.Run(fmt.Sprintf("psiphon (fragmentClientHello: %v)", fragmentClientHello),
+			runner("", fragmentClientHello))
+	}
 }
 
 func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHello bool) {
@@ -319,28 +324,55 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 		}
 
 		tlsListener := tls.NewListener(tcpListener, config)
-		defer tlsListener.Close()
 
 		address = tlsListener.Addr().String()
 
+		// Handle each accepted conn on its own goroutine, with a handshake
+		// deadline. A sequential accept loop stalls every subsequent dial if a
+		// client connects without completing a handshake, which happens whenever
+		// Dial fails after dialing but before handshaking. acceptDone gates
+		// logging, which panics if it occurs after the test completes.
+		acceptDone := make(chan struct{})
+		var acceptWaitGroup sync.WaitGroup
+		acceptWaitGroup.Add(1)
 		go func() {
+			defer acceptWaitGroup.Done()
 			for {
 				conn, err := tlsListener.Accept()
 				if err != nil {
 					return
 				}
-				err = conn.(*tls.Conn).Handshake()
-				if err != nil {
-					t.Logf("tls.Conn.Handshake failed: %v", err)
-				}
-				conn.Close()
+				acceptWaitGroup.Add(1)
+				go func(conn net.Conn) {
+					defer acceptWaitGroup.Done()
+					defer conn.Close()
+					_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+					err := conn.(*tls.Conn).Handshake()
+					if err != nil {
+						select {
+						case <-acceptDone:
+						default:
+							t.Logf("tls.Conn.Handshake failed: %v", err)
+						}
+					}
+				}(conn)
 			}
+		}()
+		defer func() {
+			close(acceptDone)
+			tlsListener.Close()
+			acceptWaitGroup.Wait()
 		}()
 	}
 
+	var recordedConn *clientHelloRecordingConn
 	dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := &net.Dialer{}
-		return d.DialContext(ctx, network, address)
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		recordedConn = &clientHelloRecordingConn{Conn: conn}
+		return recordedConn, nil
 	}
 
 	params := makeCustomTLSProfilesParameters(t, false, "")
@@ -377,6 +409,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 			ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
 
+			recordedConn = nil
 			conn, err := Dial(ctx, "tcp", address, tlsConfig)
 
 			if err != nil {
@@ -385,7 +418,8 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			} else {
 
 				tlsVersion := ""
-				version := conn.(*tlsConn).Conn.(*utls.UConn).ConnectionState().Version
+				tlsConn := conn.(*tlsConn)
+				version := tlsConn.Conn.(*utls.UConn).ConnectionState().Version
 				if version == utls.VersionTLS12 {
 					tlsVersion = "TLS 1.2"
 				} else if version == utls.VersionTLS13 {
@@ -395,6 +429,23 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 				}
 				if !common.Contains(tlsVersions, tlsVersion) {
 					tlsVersions = append(tlsVersions, tlsVersion)
+				}
+
+				dialHostname, _, splitHostPortErr := net.SplitHostPort(address)
+				if splitHostPortErr != nil {
+					t.Fatal(splitHostPortErr)
+				}
+				usingSNI := transformHostname || net.ParseIP(dialHostname) == nil
+				expectFragmented := fragmentClientHello && usingSNI
+				if tlsConn.fragmented != expectFragmented {
+					t.Errorf("unexpected ClientHello fragmentation for %s: got %v, want %v",
+						tlsProfile, tlsConn.fragmented, expectFragmented)
+				}
+				if expectFragmented {
+					if recordedConn == nil {
+						t.Fatal("missing recorded TLS conn")
+					}
+					assertClientHelloFragmentedOnWire(t, recordedConn)
 				}
 
 				conn.Close()
@@ -415,6 +466,89 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 		} else {
 			t.Error(result)
 		}
+	}
+}
+
+type clientHelloRecordingConn struct {
+	net.Conn
+	mutex   sync.Mutex
+	written []byte
+}
+
+func (c *clientHelloRecordingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		c.mutex.Lock()
+		c.written = append(c.written, b[:n]...)
+		c.mutex.Unlock()
+	}
+	return n, err
+}
+
+func (c *clientHelloRecordingConn) writtenBytes() []byte {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return append([]byte(nil), c.written...)
+}
+
+// assertClientHelloFragmentedOnWire checks TLS record boundaries in the byte
+// stream written to the underlying TCP conn. It does not assert TCP packet or
+// Write call boundaries.
+func assertClientHelloFragmentedOnWire(t *testing.T, conn *clientHelloRecordingConn) {
+	t.Helper()
+
+	const (
+		tlsRecordHeaderLength  = 5
+		tlsRecordTypeHandshake = 22
+	)
+
+	written := conn.writtenBytes()
+	readRecord := func(position int) ([]byte, int) {
+		if len(written)-position < tlsRecordHeaderLength {
+			t.Fatalf("partial TLS record header at offset %d", position)
+		}
+		if written[position] != tlsRecordTypeHandshake {
+			t.Fatalf("unexpected TLS record type %d at offset %d",
+				written[position], position)
+		}
+
+		payloadLength := int(written[position+3])<<8 | int(written[position+4])
+		recordEnd := position + tlsRecordHeaderLength + payloadLength
+		if recordEnd > len(written) {
+			t.Fatalf("partial TLS record at offset %d: got %d bytes, want %d",
+				position, len(written)-position, tlsRecordHeaderLength+payloadLength)
+		}
+		return written[position+tlsRecordHeaderLength : recordEnd], recordEnd
+	}
+
+	first, position := readRecord(0)
+	if len(first) < 4 || first[0] != tlsHandshakeTypeClientHello {
+		t.Fatalf("first TLS record does not begin with a ClientHello: %x", first)
+	}
+
+	messageLength := 4 +
+		(int(first[1]) << 16) +
+		(int(first[2]) << 8) +
+		int(first[3])
+	if len(first) >= messageLength {
+		t.Fatalf("ClientHello was not fragmented: first record has %d of %d bytes",
+			len(first), messageLength)
+	}
+
+	second, _ := readRecord(position)
+	clientHello := append(append([]byte(nil), first...), second...)
+	if len(clientHello) != messageLength {
+		t.Fatalf("unexpected ClientHello length: got %d, want %d",
+			len(clientHello), messageLength)
+	}
+
+	split := sniFragmentOffset(clientHello)
+	if split == 0 {
+		t.Fatal("missing SNI fragment offset in recorded ClientHello")
+	}
+	if len(first) != split {
+		t.Fatalf("first ClientHello record ends at %d, want SNI fragment offset %d",
+			len(first), split)
 	}
 }
 
@@ -603,7 +737,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 }
 
-func TestTLSFragmentorWithoutSNI(t *testing.T) {
+func TestTLSFragmentationWithoutSNI(t *testing.T) {
 	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
 	if err != nil {
 		t.Fatalf("TempDir failed: %v", err)
@@ -626,7 +760,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
-	// Test: missing SNI, the TLS dial fails
+	// Test: missing SNI, the TLS dial succeeds without fragmentation.
 
 	conn, err := Dial(
 		context.Background(), "tcp", serverAddr,
@@ -640,8 +774,12 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 			FragmentClientHello:           true,
 		})
 
-	if err == nil {
-		t.Errorf("unexpected success without SNI")
+	if err != nil {
+		t.Errorf("Dial failed without SNI: %v", err)
+	} else {
+		if conn.(*tlsConn).fragmented {
+			t.Error("unexpected ClientHello fragmentation without SNI")
+		}
 		conn.Close()
 	}
 
@@ -662,6 +800,9 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 	if err != nil {
 		t.Errorf("Dial failed: %v", err)
 	} else {
+		if !conn.(*tlsConn).fragmented {
+			t.Error("expected ClientHello fragmentation with SNI")
+		}
 		conn.Close()
 	}
 

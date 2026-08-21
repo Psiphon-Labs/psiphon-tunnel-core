@@ -555,7 +555,16 @@ func NewProxy(
 	}
 
 	tlsConfig.PassthroughAddress = config.PassthroughAddress
-	tlsConfig.PassthroughDialer = proxy.dialer.Dial
+	if isLoopbackAddress(config.PassthroughAddress) {
+		// A split-mode dialer is bound to the upstream interface and cannot
+		// reach a loopback passthrough service on the proxy host.
+		// TODO: If passthrough targets become user-configurable, consider a
+		// SplitPassthroughInterfaceName and dedicated dialer for independently
+		// routing passthrough through the upstream, downstream, or default route.
+		tlsConfig.PassthroughDialer = net.Dial
+	} else {
+		tlsConfig.PassthroughDialer = proxy.dialer.Dial
+	}
 
 	tlsConfig.PassthroughVerifyMessage = func(message []byte) bool {
 		return obfuscator.VerifyTLSPassthroughMessage(
@@ -597,6 +606,18 @@ func NewProxy(
 	return proxy, nil
 }
 
+func isLoopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	IP := net.ParseIP(host)
+	return IP != nil && IP.IsLoopback()
+}
+
 func newProxyLimitsFromConfig(
 	config *ProxyConfig,
 	maxConcurrent int) (*common.ProxyLimits, error) {
@@ -627,9 +648,7 @@ func (proxy *Proxy) Resume() {
 
 // SetLimits sets new values for MaxConcurrent, LimitUpstreamBytesPerSecond,
 // and LimitDownstreamBytesPerSecond. If MaxConcurrent is nil or 0, a default
-// value is used. These values will be applied rolling forward; no active
-// connections are closed and the rate limits for active connections do not
-// change.
+// value is used. Active connections are not closed but are rethrottled.
 func (proxy *Proxy) SetLimits(
 	maxConcurrent *int,
 	limitUpstreamBytesPerSecond int,
@@ -1078,17 +1097,22 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		}
 	}
 
-	rateLimits, apply := proxy.getTrafficRateLimits()
-	if apply {
+	// Throttling does not apply to the TLS handshake, reading the light proxy
+	// header, or writing the PROXY protocol header, just the relay.
+	//
+	// Current rate limits are applied by Register.
 
-		// Throttling does not apply to the TLS handshake, reading the light
-		// proxy header, or writing the PROXY protocol header, just the relay.
-
-		upstreamConn = common.NewThrottledConn(
-			upstreamConn,
-			true,
-			rateLimits)
+	throttledConn := common.NewThrottledConn(
+		upstreamConn, true, common.RateLimits{})
+	switch proxy.proxyLimitKind {
+	case ProxyLimitKindCommon:
+		proxy.proxyLimits.RegisterCommonConn(throttledConn)
+	case ProxyLimitKindPersonal:
+		proxy.proxyLimits.RegisterPersonalConn(throttledConn)
 	}
+	defer proxy.proxyLimits.UnregisterConn(throttledConn)
+
+	upstreamConn = throttledConn
 
 	copyWithRelayBuffer := func(dst net.Conn, src net.Conn) (int64, error) {
 		relayBuffer := proxy.relayBufferPool.Get().(*[]byte)
@@ -1239,34 +1263,6 @@ func (proxy *Proxy) acquireProxyLimit() (common.ProxyLimitReleaseFunc, error) {
 	}
 
 	return release, nil
-}
-
-func (proxy *Proxy) getTrafficRateLimits() (common.RateLimits, bool) {
-
-	var upstreamBytesPerSecond, downstreamBytesPerSecond int
-	switch proxy.proxyLimitKind {
-	case ProxyLimitKindCommon:
-		_, _, _, upstreamBytesPerSecond, downstreamBytesPerSecond =
-			proxy.proxyLimits.GetCommonLimits()
-
-	case ProxyLimitKindPersonal:
-		_, _, _, upstreamBytesPerSecond, downstreamBytesPerSecond =
-			proxy.proxyLimits.GetPersonalLimits()
-
-	default:
-		return common.RateLimits{}, false
-	}
-
-	if upstreamBytesPerSecond == 0 && downstreamBytesPerSecond == 0 {
-		return common.RateLimits{}, false
-	}
-
-	// Throttling is applied to the proxy-to-destination connection, where
-	// writes flow upstream and reads flow downstream.
-	return common.RateLimits{
-		ReadBytesPerSecond:  int64(downstreamBytesPerSecond),
-		WriteBytesPerSecond: int64(upstreamBytesPerSecond),
-	}, true
 }
 
 func (proxy *Proxy) applyRateLimit(limitIP string) error {

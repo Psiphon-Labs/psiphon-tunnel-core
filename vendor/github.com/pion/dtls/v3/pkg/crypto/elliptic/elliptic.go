@@ -27,7 +27,7 @@ const (
 type Keypair struct {
 	Curve      Curve
 	PublicKey  []byte
-	PrivateKey []byte
+	PrivateKey []byte //nolint:gosec // no real risk of exporting the private key.
 }
 
 // CurveType is used to represent the IANA registered curve types for TLS

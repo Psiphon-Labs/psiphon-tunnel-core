@@ -1,9 +1,12 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package stun
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // UnknownAttributes represents UNKNOWN-ATTRIBUTES attribute.
 //
@@ -11,30 +14,30 @@ import "errors"
 type UnknownAttributes []AttrType
 
 func (a UnknownAttributes) String() string {
-	s := ""
+	var s strings.Builder
 	if len(a) == 0 {
 		return "<nil>"
 	}
 	last := len(a) - 1
 	for i, t := range a {
-		s += t.String()
+		s.WriteString(t.String())
 		if i != last {
-			s += ", "
+			s.WriteString(", ")
 		}
 	}
 
-	return s
+	return s.String()
 }
 
 // type size is 16 bit.
-const attrTypeSize = 4
+const attrTypeSize = 2
 
 // AddTo adds UNKNOWN-ATTRIBUTES attribute to message.
 func (a UnknownAttributes) AddTo(m *Message) error {
 	v := make([]byte, 0, attrTypeSize*20) // 20 should be enough
 	// If len(a.Types) > 20, there will be allocations.
 	for i, t := range a {
-		v = append(v, 0, 0, 0, 0) // 4 times by 0 (16 bits)
+		v = append(v, 0, 0) // 2 times by 0 (16 bits)
 		first := attrTypeSize * i
 		last := first + attrTypeSize
 		bin.PutUint16(v[first:last], t.Value())

@@ -443,6 +443,7 @@ func TestInproxyOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doTargetBrokerSpecs:  true,
+			testDSLAccessToken:   true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -885,6 +886,7 @@ type runServerConfig struct {
 	doProxyProtocolHeader        bool
 	doReplaceProxyProtocolHeader bool
 	usePersonalLightProxyTunnel  bool
+	testDSLAccessToken           bool
 }
 
 var (
@@ -894,7 +896,8 @@ var (
 	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
 	testClientVersion                    = 1
 	testClientPlatform                   = "Android_10_com.test.app"
-	testClientFeatures                   = []string{"feature 1", "feature 2"}
+	testRequiredClientFeature            = "required-client-feature"
+	testClientFeatures                   = []string{"feature 1", "feature 2", testRequiredClientFeature}
 	testDeviceRegion                     = "US"
 	testServerRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
@@ -968,8 +971,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// requests and not dial a tunnel, so the DSL request must succeed.
 
 	doDSL := doInproxy && inproxyTestConfig.addMeekServerForBroker
+	if runConfig.testDSLAccessToken && !doDSL {
+		t.Fatal("DSL access token test requires DSL")
+	}
 
 	var dslTestConfig *dslTestConfig
+	var testDSLAccessToken []byte
 	enableDSLFetcher := "false"
 	if doDSL {
 
@@ -978,6 +985,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		dslTestConfig, err = generateDSLTestConfig()
 		if err != nil {
 			t.Fatalf("error generating DSL test config: %s", err)
+		}
+		if runConfig.testDSLAccessToken {
+			testDSLAccessToken = []byte{0xff, 0x00, 0x80, 0x2b, 0x2f}
+			dslTestConfig.backend.SetDSLAccessToken(testDSLAccessToken)
 		}
 
 		err = dslTestConfig.backend.Start()
@@ -1760,6 +1771,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
+	clientConfig.EnableDSLAccessTokenRegistration = runConfig.testDSLAccessToken
 
 	// In the classic test path, TargetServerEntry is used to specify the
 	// server enrty. In the DSL test case, the server entry is fetched from
@@ -2087,6 +2099,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	untunneledPortForward := make(chan struct{}, 1)
 	discardTunnel := make(chan struct{}, 1)
 	tunneledDSLFetched := make(chan struct{}, 1)
+	dslAccessTokenAvailable := make(chan struct{}, 1)
 
 	psiphon.ResetNoticeWriter()
 	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
@@ -2147,6 +2160,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 			case "Untunneled":
 				sendNotificationReceived(untunneledPortForward)
+
+			case "DSLAccessTokenAvailable":
+				if !runConfig.testDSLAccessToken {
+					t.Errorf("unexpected DSL access token notice")
+				} else if len(payload) != 0 {
+					t.Errorf("DSL access token notice contains data")
+				} else {
+					sendNotificationReceived(dslAccessTokenAvailable)
+				}
 
 			case "InproxyProxyTotalActivity":
 
@@ -2244,6 +2266,44 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 		if doDSL {
 			waitOnNotification(t, tunneledDSLFetched, timeoutSignal, "tunneled DSL timeout exceeded")
+		}
+		if runConfig.testDSLAccessToken {
+			waitOnNotification(t, dslAccessTokenAvailable, timeoutSignal, "DSL access token timeout exceeded")
+
+			token := controller.GetDSLAccessToken()
+			if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {
+				t.Fatalf("unexpected DSL access token: %s", token)
+			}
+
+			requests := dslTestConfig.backend.GetDSLAccessTokenRegistrationRequests()
+			responses := dslTestConfig.backend.GetDSLAccessTokenResponses()
+			if len(requests) != len(responses) {
+				t.Fatalf("unexpected DSL access token request/response counts: %d/%d", len(requests), len(responses))
+			}
+
+			var foundUntunneled, foundTunneled bool
+			for i, request := range requests {
+				if request.Tunneled {
+					if !request.Registration {
+						t.Fatal("tunneled DSL request did not register an access token")
+					}
+					foundTunneled = true
+					if !bytes.Equal(responses[i], testDSLAccessToken) {
+						t.Fatalf("unexpected tunneled DSL access token response: %x", responses[i])
+					}
+				} else {
+					if request.Registration {
+						t.Fatal("untunneled DSL request registered an access token")
+					}
+					foundUntunneled = true
+					if len(responses[i]) != 0 {
+						t.Fatalf("unexpected untunneled DSL access token response: %x", responses[i])
+					}
+				}
+			}
+			if !foundUntunneled || !foundTunneled {
+				t.Fatalf("missing expected DSL access token requests: %v", requests)
+			}
 		}
 
 		// The tunnel connected, so the local last_connected has been updated.
@@ -2536,10 +2596,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
 	//
-	// Limitation: this check is disabled in the in-proxy case since, in the
-	// self-proxy scheme, the proxy shuts down before the client can send its
-	// final status request.
-	expectDomainDestBytes := !runConfig.doChangeBytesConfig && !doInproxy
+	// In the in-proxy self-proxy scheme, the final status request races with
+	// proxy shutdown and domain bytes may or may not arrive.
+	allowDomainDestBytes := !runConfig.doChangeBytesConfig
+	requireDomainDestBytes := allowDomainDestBytes && !doInproxy
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -2621,7 +2681,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	if expectDomainDestBytes {
+	if requireDomainDestBytes {
 		select {
 		case logFields := <-domainDestBytesLog:
 			err := checkExpectedDomainDestBytesLogFields(
@@ -2632,6 +2692,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		default:
 			t.Fatalf("missing domain bytes log")
+		}
+	} else if allowDomainDestBytes {
+		select {
+		case logFields := <-domainDestBytesLog:
+			err := checkExpectedDomainDestBytesLogFields(
+				runConfig,
+				logFields)
+			if err != nil {
+				t.Fatalf("invalid domain dest bytes log fields: %s", err)
+			}
+		default:
 		}
 	} else {
 		select {
@@ -4504,6 +4575,7 @@ func paveTrafficRulesFile(
         "FilteredRules" : [
             {
                 "Filter" : {
+                    "ClientFeatures" : ["%s"],
                     "HandshakeParameters" : {
                         "propagation_channel_id" : ["%s"]
                     }%s
@@ -4526,6 +4598,7 @@ func paveTrafficRulesFile(
 	trafficRulesJSON := fmt.Sprintf(
 		trafficRulesJSONFormat,
 		livenessTestSize, livenessTestSize,
+		testRequiredClientFeature,
 		propagationChannelID, authorizationFilter,
 		allowTCPPorts, allowUDPPorts, disallowTCPPorts, disallowUDPPorts)
 
@@ -4713,6 +4786,7 @@ func paveTacticsConfigFile(
         {
           "Filter" : {
             "APIParameters" : {"propagation_channel_id" : ["%s"]},
+            "ClientFeatures" : ["%s"],
             "SpeedTestRTTMilliseconds" : {
               "Aggregation" : "Median",
               "AtLeast" : 1
@@ -4814,6 +4888,7 @@ func paveTacticsConfigFile(
 		discoveryStategy,
 		enableDSLFetcher,
 		propagationChannelID,
+		testRequiredClientFeature,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
 
@@ -5393,6 +5468,7 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
@@ -5401,7 +5477,6 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			false,
-			0,
 			0)
 		if err != nil {
 			t.Fatalf("MakeDialParameters failed: %s", err)

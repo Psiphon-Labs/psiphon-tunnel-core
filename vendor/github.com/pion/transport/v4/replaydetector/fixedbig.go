@@ -1,10 +1,11 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package replaydetector
 
 import (
 	"fmt"
+	"strings"
 )
 
 // fixedBigInt is the fix-sized multi-word integer.
@@ -75,10 +76,10 @@ func (s *fixedBigInt) SetBit(i uint) {
 
 // String returns string representation of fixedBigInt.
 func (s *fixedBigInt) String() string {
-	var out string
+	var out strings.Builder
 	for i := len(s.bits) - 1; i >= 0; i-- {
-		out += fmt.Sprintf("%016X", s.bits[i])
+		_, _ = fmt.Fprintf(&out, "%016X", s.bits[i])
 	}
 
-	return out
+	return out.String()
 }

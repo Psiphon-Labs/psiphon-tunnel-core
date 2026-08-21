@@ -46,8 +46,12 @@ type Conn struct {
 	// zero or one.
 	handshakes      int
 	extMasterSecret bool
-	// [Psiphon]
-	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello
+
+	// [Psiphon] Begin
+	clientSentTicket      bool // client sent a TLS 1.2 ticket or TLS 1.3 PSK
+	clientHelloFragmented bool // any eligible ClientHello was fragmented
+	// [Psiphon] End
+
 	didResume        bool // whether this connection was a session resumption
 	didHRR           bool // whether a HelloRetryRequest was sent/received
 	cipherSuite      uint16
@@ -1060,6 +1064,11 @@ func (c *Conn) writeHandshakeRecord(msg handshakeMessage, transcript transcriptH
 		transcript.Write(data)
 	}
 
+	// [Psiphon]
+	if c.shouldFragmentClientHello(data) {
+		return c.writeFragmentedClientHello(data)
+	}
+
 	return c.writeRecordLocked(recordTypeHandshake, data)
 }
 
@@ -1708,5 +1717,6 @@ func (c *Conn) ConnectionMetrics() ConnectionMetrics {
 	defer c.handshakeMutex.Unlock()
 	var metrics ConnectionMetrics
 	metrics.ClientSentTicket = c.clientSentTicket
+	metrics.ClientHelloFragmented = c.clientHelloFragmented
 	return metrics
 }

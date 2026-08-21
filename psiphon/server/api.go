@@ -41,8 +41,8 @@ import (
 )
 
 const (
-	MAX_API_PARAMS_SIZE = 256 * 1024 // 256KB
-	PADDING_MAX_BYTES   = 16 * 1024
+	MAX_API_PARAM_ARRAY_ENTRIES = 256
+	PADDING_MAX_BYTES           = 16 * 1024
 
 	PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL         = 1024
 	PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL = 16
@@ -106,8 +106,9 @@ func sshAPIRequestHandler(
 
 	// Notes:
 	//
-	// - For SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
-	//   by max SSH request packet size.
+	// - For SSH requests, the request size is implicitly capped by the
+	//   max SSH packet size, 256KB; see maxPacket in
+	//   psiphon/common/crypto/ssh.
 	//
 	// - The param protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS is an
 	//   array of base64-encoded strings; the base64 representation should
@@ -268,6 +269,15 @@ func handshakeAPIRequestHandler(
 	isMobile := isMobileClientPlatform(clientPlatform)
 	normalizedPlatform := normalizeClientPlatform(clientPlatform)
 
+	var clientFeatures []string
+	if params["client_features"] != nil {
+		clientFeatures, err = getStringArrayRequestParam(
+			params, "client_features")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	// establishedTunnelsCount is used in traffic rule selection. When omitted by
 	// the client, a value of 0 will be used.
 	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
@@ -344,6 +354,7 @@ func handshakeAPIRequestHandler(
 			completed:               true,
 			apiProtocol:             apiProtocol,
 			apiParams:               apiParams,
+			clientFeatures:          clientFeatures,
 			domainBytesChecksum:     domainBytesChecksum,
 			hasDomainBytesRegexes:   len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
@@ -429,13 +440,18 @@ func handshakeAPIRequestHandler(
 	// the JSON response, return an empty array instead of null for legacy
 	// clients.
 
+	clientFeatureValues :=
+		sshClient.sshServer.selectHomepageURLQueryParameterClientFeatures(
+			clientFeatures)
+
 	homepages := db.GetRandomizedHomepages(
 		sponsorID,
 		clientGeoIPData.Country,
 		clientGeoIPData.ASN,
 		deviceRegion,
 		normalizedPlatform,
-		isMobile)
+		isMobile,
+		clientFeatureValues)
 
 	clientAddress := ""
 	if protocol.TunnelProtocolIsDirect(sshClient.tunnelProtocol) {
@@ -1403,6 +1419,10 @@ var sessionBaseParams = append(
 // and are populated by the server; other fields, such as last_connected, are
 // only sent by the client for certain API requests.
 //
+// Overall request size is not checked here; packedParams is already
+// deserialized, and the caller's transport is expected to enforce a
+// maximum message size.
+//
 // Note that the underlying protobuf converter code may intentionally panic in
 // unexpected cases such as a mismatch in log field and protobuf struct field
 // types.
@@ -1716,6 +1736,26 @@ func validateStringArrayRequestParam(
 	if !ok {
 		return errors.Tracef("unexpected array param type: %s", expectedParam.name)
 	}
+
+	// Sanity cap on the number of entries in client-supplied arrays.
+	//
+	// This cap applies to all requestParamArray parameters in
+	// requestParamSpec specs. The primary purpose of this limit is to
+	// prevent excessive work that scales with the number of entries.
+	//
+	// Individual entry sizes are implicitly bounded by the overall API
+	// request size limits: the max SSH packet size, 256KB (see maxPacket in
+	// psiphon/common/crypto/ssh) and the meek and tactics 64KB body limits
+	// (see MEEK_MAX_REQUEST_PAYLOAD_LENGTH and
+	// tactics.MAX_REQUEST_BODY_SIZE). So a few long entries remain allowed.
+	//
+	// split_tunnel_regions is further limited to 250 entries; see
+	// newSplitTunnelLookup.
+	if len(arrayValue) > MAX_API_PARAM_ARRAY_ENTRIES {
+		return errors.Tracef(
+			"too many array param entries: %s", expectedParam.name)
+	}
+
 	for _, value := range arrayValue {
 		err := validateStringRequestParam(expectedParam, value)
 		if err != nil {

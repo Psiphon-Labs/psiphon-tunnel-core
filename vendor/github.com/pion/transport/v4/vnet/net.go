@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package vnet
@@ -19,8 +19,15 @@ import (
 
 const (
 	lo0String = "lo0String"
+	ip        = "ip"
+	ip4       = "ip4"
+	ip6       = "ip6"
 	udp       = "udp"
 	udp4      = "udp4"
+	udp6      = "udp6"
+	tcp       = "tcp"
+	tcp4      = "tcp4"
+	tcp6      = "tcp6"
 )
 
 var (
@@ -136,7 +143,11 @@ func (v *Net) getAllIPAddrs(ipv6 bool) []net.IP {
 				continue
 			}
 
-			if !ipv6 {
+			if ipv6 {
+				if ip.To4() == nil {
+					ips = append(ips, ip)
+				}
+			} else {
 				if ip.To4() != nil {
 					ips = append(ips, ip)
 				}
@@ -213,16 +224,18 @@ func (v *Net) onInboundChunk(c Chunk) {
 // caller must hold the mutex.
 func (v *Net) _dialUDP(network string, locAddr, remAddr *net.UDPAddr) (transport.UDPConn, error) { //nolint:cyclop
 	// validate network
-	if network != udp && network != udp4 {
+	switch network {
+	case udp, udp4, udp6:
+	default:
 		return nil, fmt.Errorf("%w: %s", errUnexpectedNetwork, network)
 	}
 
 	if locAddr == nil {
 		locAddr = &net.UDPAddr{
-			IP: net.IPv4zero,
+			IP: udpZeroIP(network),
 		}
 	} else if locAddr.IP == nil {
-		locAddr.IP = net.IPv4zero
+		locAddr.IP = udpZeroIP(network)
 	}
 
 	// validate address. do we have that address?
@@ -317,15 +330,33 @@ func (v *Net) Dial(network string, address string) (net.Conn, error) {
 }
 
 // ResolveIPAddr returns an address of IP end point.
-func (v *Net) ResolveIPAddr(_, address string) (*net.IPAddr, error) {
+func (v *Net) ResolveIPAddr(network, address string) (*net.IPAddr, error) {
 	var err error
+
+	switch network {
+	case "", ip, ip4, ip6:
+	default:
+		return nil, fmt.Errorf("%w %s", errUnknownNetwork, network)
+	}
+
+	if address == "" {
+		if network == ip6 {
+			return &net.IPAddr{IP: net.IPv6unspecified}, nil
+		}
+
+		return &net.IPAddr{IP: net.IPv4zero}, nil
+	}
 
 	// Check if host is a domain name
 	ip := net.ParseIP(address)
 	if ip == nil { //nolint:nestif
 		address = strings.ToLower(address)
 		if address == "localhost" {
-			ip = net.IPv4(127, 0, 0, 1)
+			if network == ip6 {
+				ip = net.IPv6loopback
+			} else {
+				ip = net.IPv4(127, 0, 0, 1)
+			}
 		} else {
 			// host is a domain name. resolve IP address by the name
 			if v.router == nil {
@@ -346,7 +377,13 @@ func (v *Net) ResolveIPAddr(_, address string) (*net.IPAddr, error) {
 
 // ResolveUDPAddr returns an address of UDP end point.
 func (v *Net) ResolveUDPAddr(network, address string) (*net.UDPAddr, error) {
-	if network != udp && network != udp4 {
+	var ipNetwork string
+	switch network {
+	case udp, udp4:
+		ipNetwork = ip4
+	case udp6:
+		ipNetwork = ip6
+	default:
 		return nil, fmt.Errorf("%w %s", errUnknownNetwork, network)
 	}
 
@@ -355,7 +392,7 @@ func (v *Net) ResolveUDPAddr(network, address string) (*net.UDPAddr, error) {
 		return nil, err
 	}
 
-	ipAddress, err := v.ResolveIPAddr("ip", host)
+	ipAddress, err := v.ResolveIPAddr(ipNetwork, host)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +413,13 @@ func (v *Net) ResolveUDPAddr(network, address string) (*net.UDPAddr, error) {
 
 // ResolveTCPAddr returns an address of TCP end point.
 func (v *Net) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
-	if network != udp && network != "udp4" {
+	var ipNetwork string
+	switch network {
+	case tcp, tcp4:
+		ipNetwork = ip4
+	case tcp6:
+		ipNetwork = ip6
+	default:
 		return nil, fmt.Errorf("%w %s", errUnknownNetwork, network)
 	}
 
@@ -385,7 +428,7 @@ func (v *Net) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
 		return nil, err
 	}
 
-	ipAddr, err := v.ResolveIPAddr("ip", host)
+	ipAddr, err := v.ResolveIPAddr(ipNetwork, host)
 	if err != nil {
 		return nil, err
 	}
@@ -402,6 +445,14 @@ func (v *Net) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
 	}
 
 	return udpAddr, nil
+}
+
+func udpZeroIP(network string) net.IP {
+	if network == udp6 {
+		return net.IPv6unspecified
+	}
+
+	return net.IPv4zero
 }
 
 func (v *Net) write(chunk Chunk) error {
@@ -447,7 +498,18 @@ func (v *Net) determineSourceIP(locIP, dstIP net.IP) net.IP { //nolint:cyclop
 	var srcIP net.IP
 
 	if dstIP.IsLoopback() { //nolint:nestif
-		srcIP = net.ParseIP("127.0.0.1")
+		switch {
+		case locIP == nil:
+			if dstIP.To4() == nil {
+				srcIP = net.IPv6loopback
+			} else {
+				srcIP = net.IPv4(127, 0, 0, 1)
+			}
+		case locIP.To4() == nil:
+			srcIP = net.IPv6loopback
+		default:
+			srcIP = net.IPv4(127, 0, 0, 1)
+		}
 	} else {
 		ifc, err2 := v._getInterface("eth0")
 		if err2 != nil {
@@ -568,7 +630,7 @@ func (v *Net) assignPort(ip net.IP, start, end int) (int, error) {
 
 	space := end + 1 - start
 	offset := rand.Intn(space) //nolint:gosec
-	for i := 0; i < space; i++ {
+	for i := range space {
 		port := ((offset + i) % space) + start
 
 		err := v.allocateLocalAddr(ip, port)
@@ -595,7 +657,7 @@ type NetConfig struct {
 // NewNet creates an instance of a virtual network.
 //
 // By design, it always have lo0 and eth0 interfaces.
-// The lo0 has the address 127.0.0.1 assigned by default.
+// The lo0 has the addresses 127.0.0.1 and ::1 assigned by default.
 // IP address for eth0 will be assigned when this Net is added to a router.
 func NewNet(config *NetConfig) (*Net, error) {
 	lo0 := transport.NewInterface(net.Interface{
@@ -608,6 +670,10 @@ func NewNet(config *NetConfig) (*Net, error) {
 	lo0.AddAddress(&net.IPNet{
 		IP:   net.ParseIP("127.0.0.1"),
 		Mask: net.CIDRMask(8, 32),
+	})
+	lo0.AddAddress(&net.IPNet{
+		IP:   net.IPv6loopback,
+		Mask: net.CIDRMask(128, 128),
 	})
 
 	eth0 := transport.NewInterface(net.Interface{

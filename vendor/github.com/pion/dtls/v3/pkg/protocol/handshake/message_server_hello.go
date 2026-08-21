@@ -36,33 +36,35 @@ func (m MessageServerHello) Type() Type {
 
 // Marshal encodes the Handshake.
 func (m *MessageServerHello) Marshal() ([]byte, error) {
-	if m.CipherSuiteID == nil {
+	switch {
+	case m.CipherSuiteID == nil:
 		return nil, errCipherSuiteUnset
-	} else if m.CompressionMethod == nil {
+	case m.CompressionMethod == nil:
 		return nil, errCompressionMethodUnset
+	case len(m.SessionID) > 255:
+		return nil, errSessionIDTooLong
 	}
-
-	out := make([]byte, messageServerHelloVariableWidthStart)
-	out[0] = m.Version.Major
-	out[1] = m.Version.Minor
-
-	rand := m.Random.MarshalFixed()
-	copy(out[2:], rand[:])
-
-	out = append(out, byte(len(m.SessionID))) //nolint:makezero // todo: fix
-	out = append(out, m.SessionID...)         //nolint:makezero // todo: fix
-
-	out = append(out, []byte{0x00, 0x00}...) //nolint:makezero // todo: fix
-	binary.BigEndian.PutUint16(out[len(out)-2:], *m.CipherSuiteID)
-
-	out = append(out, byte(m.CompressionMethod.ID)) //nolint:makezero // todo: fix
 
 	extensions, err := extension.Marshal(m.Extensions)
 	if err != nil {
 		return nil, err
 	}
 
-	return append(out, extensions...), nil //nolint:makezero // todo: fix
+	out := make([]byte, 0, messageServerHelloVariableWidthStart+1+len(m.SessionID)+2+1+len(extensions))
+	out = append(out, m.Version.Major, m.Version.Minor)
+
+	rand := m.Random.MarshalFixed()
+	out = append(out, rand[:]...)
+
+	out = append(out, byte(len(m.SessionID))) //nolint:gosec // G115: session ID length is validated to be <= 255 above.
+	out = append(out, m.SessionID...)
+
+	out = append(out, 0x00, 0x00)
+	binary.BigEndian.PutUint16(out[len(out)-2:], *m.CipherSuiteID)
+
+	out = append(out, byte(m.CompressionMethod.ID))
+
+	return append(out, extensions...), nil
 }
 
 // Unmarshal populates the message from encoded data.
