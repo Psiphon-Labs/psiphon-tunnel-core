@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/stretchr/testify/suite"
@@ -835,6 +836,54 @@ func TestUseUnixDomainSocketsValidation(t *testing.T) {
 		err := config.Commit(false)
 		if err != nil {
 			t.Fatalf("expected success when only one proxy is enabled, got: %s", err)
+		}
+	})
+}
+
+// newDeviceRegionTestConfig returns a minimal committable Config.
+func newDeviceRegionTestConfig(t *testing.T) *Config {
+	dataRootDirectory, err := ioutil.TempDir("", "psiphon-device-region-config-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dataRootDirectory) })
+
+	return &Config{
+		DataRootDirectory:    dataRootDirectory,
+		PropagationChannelId: "ABCDEFGH",
+		SponsorId:            "12345678",
+		ClientVersion:        "1",
+	}
+}
+
+func TestConfigDeviceRegion(t *testing.T) {
+
+	// A host application that supplies the region, as the mobile libraries do,
+	// keeps its value.
+	t.Run("supplied region is retained", func(t *testing.T) {
+		config := newDeviceRegionTestConfig(t)
+		config.DeviceRegion = "CA"
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("Commit failed: %s", err)
+		}
+		if config.DeviceRegion != "CA" {
+			t.Fatalf("expected DeviceRegion CA, got %q", config.DeviceRegion)
+		}
+	})
+
+	// Otherwise the region is approximated from operating system settings. The
+	// expected value depends on how the machine running this test is
+	// configured, and is empty when no setting yields a region.
+	t.Run("blank region is approximated", func(t *testing.T) {
+		config := newDeviceRegionTestConfig(t)
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("Commit failed: %s", err)
+		}
+		if config.DeviceRegion != deviceregion.Get() {
+			t.Fatalf("expected DeviceRegion %q, got %q",
+				deviceregion.Get(), config.DeviceRegion)
 		}
 	})
 }
