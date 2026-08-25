@@ -224,6 +224,53 @@ gomobile_build_for_platform "-target 'maccatalyst' -iosversion '13.1'"
 xcodebuild_for_platform "maccatalyst.xcarchive" "-destination 'generic/platform=macOS,variant=Mac Catalyst'"
 
 #
+# Strip framework binaries. "strip -x -S" removes only local and debug symbols;
+# exported symbols and the separately generated dSYMs are preserved.
+#
+function strip_framework_binary() {
+  local archive_name=$1
+
+  local framework_path="${BUILD_DIR}/${archive_name}/Products/Library/Frameworks/PsiphonTunnel.framework"
+  local binary_path="${framework_path}/PsiphonTunnel"
+
+  if [[ ! -e "${binary_path}" ]]; then
+    echo "FAILURE: framework binary not found: ${binary_path}"
+    exit 1
+  fi
+
+  # Resolve versioned macOS framework symlinks before stripping.
+  local real_binary_path="${binary_path}"
+  while [[ -L "${real_binary_path}" ]]; do
+    local link_target
+    link_target=$(readlink "${real_binary_path}")
+    if [[ "${link_target}" != /* ]]; then
+      link_target="$(dirname "${real_binary_path}")/${link_target}"
+    fi
+    real_binary_path="${link_target}"
+  done
+
+  if [[ ! -f "${real_binary_path}" ]]; then
+    echo "FAILURE: framework binary is not a regular file: ${real_binary_path}"
+    exit 1
+  fi
+
+  local size_before
+  size_before=$(stat -f%z "${real_binary_path}")
+
+  xcrun strip -x -S "${real_binary_path}"
+
+  local size_after
+  size_after=$(stat -f%z "${real_binary_path}")
+
+  echo "Stripped ${archive_name}: ${size_before} -> ${size_after} bytes"
+}
+
+strip_framework_binary "ios.xcarchive"
+strip_framework_binary "iossimulator.xcarchive"
+strip_framework_binary "maccatalyst.xcarchive"
+strip_framework_binary "macos.xcarchive"
+
+#
 # Bundles the generated frameworks into a single PsiphonTunnel.xcframework
 #
 xcodebuild -create-xcframework \
