@@ -64,7 +64,8 @@ func FuzzRegionFromLocaleName(f *testing.F) {
 	for _, seed := range []string{
 		"", "C", "POSIX", "en", "ja_JP", "en_CA.UTF-8", "en_GB@euro", "zh_Hans_CN",
 		"es_419", "en_US_POSIX", "_", "__", "a_b_c_d", "en-", "-CA", "en_UK",
-		"........", "@@@@", "\x00", "ru_RU.utf8@modifier",
+		"........", "@@@@", "\x00", "ru_RU.utf8@modifier", "en_US@rg=cazzzz",
+		"en_US@rg=", "en_US@rg=419zzzz", "en_US@calendar=buddhist;rg=jpzzzz",
 	} {
 		f.Add(seed)
 	}
@@ -115,6 +116,8 @@ func FuzzIANAZoneFromPath(f *testing.F) {
 		"/var/db/timezone/zoneinfo/America/Toronto", "zoneinfo/", "zoneinfo//",
 		"/zoneinfo/../../etc/passwd", "zoneinfo/zoneinfo/UTC", "\x00zoneinfo/X",
 		"zoneinfo/\x00", "zoneinfo/ ", "zoneinfo/A\nB",
+		"/usr/share/zoneinfo/posix/Europe/Kyiv", "zoneinfo/right/UTC",
+		"zoneinfo/posix/", "zoneinfo/posix/../../etc/passwd",
 	} {
 		f.Add(seed)
 	}

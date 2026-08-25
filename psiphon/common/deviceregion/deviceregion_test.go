@@ -85,6 +85,21 @@ func TestRegionFromLocaleName(t *testing.T) {
 		{"posix no charset", "ja_JP", "JP"},
 		{"posix with modifier", "en_GB@euro", "GB"},
 		{"posix charset and modifier", "de_DE.UTF-8@euro", "DE"},
+
+		// A Unicode "rg" region override supersedes the region subtag: this is
+		// US English with Canada selected as the region.
+		{"region override", "en_US@rg=cazzzz", "CA"},
+		{"region override uppercase", "en_US@rg=CAZZZZ", "CA"},
+		{"region override with charset", "en_US.UTF-8@rg=cazzzz", "CA"},
+		{"region override in keyword list", "en_US@calendar=buddhist;rg=jpzzzz", "JP"},
+		{"region override without a region subtag", "en@rg=trzzzz", "TR"},
+		{"region override alias", "en_US@rg=ukzzzz", "GB"},
+
+		// An override that is not shaped like a region code leaves the region
+		// subtag in place.
+		{"malformed region override", "en_US@rg=ca", "US"},
+		{"m49 region override", "es_ES@rg=419zzzz", "ES"},
+
 		{"bcp47", "en-US", "US"},
 		{"bcp47 with script", "zh-Hans-CN", "CN"},
 		{"posix with script", "sr_Latn_RS", "RS"},
@@ -406,10 +421,16 @@ func TestIANAZoneFromPath(t *testing.T) {
 		{"three part zone", "/usr/share/zoneinfo/America/Argentina/Salta", "America/Argentina/Salta"},
 		{"single component zone", "/usr/share/zoneinfo/UTC", "UTC"},
 
+		// The posix/ and right/ subtrees name the same zones.
+		{"posix subtree", "/usr/share/zoneinfo/posix/Europe/Kyiv", "Europe/Kyiv"},
+		{"right subtree", "/usr/share/zoneinfo/right/America/Toronto", "America/Toronto"},
+
 		{"no marker", "/etc/localtime", ""},
 		{"empty", "", ""},
 		{"marker only", "/usr/share/zoneinfo/", ""},
+		{"posix subtree only", "/usr/share/zoneinfo/posix/", ""},
 		{"traversal rejected", "/usr/share/zoneinfo/../../etc/passwd", ""},
+		{"posix subtree traversal rejected", "/usr/share/zoneinfo/posix/../../etc/passwd", ""},
 
 		// Not shaped like a zone name. The NUL case was found by
 		// FuzzIANAZoneFromPath; such a value would otherwise reach the

@@ -177,7 +177,8 @@ func regionFromTimezoneID(id string) (string, bool) {
 }
 
 // regionFromLocaleName extracts the region subtag of a POSIX or BCP 47 locale
-// name, such as the CA in "en_CA.UTF-8".
+// name, such as the CA in "en_CA.UTF-8". A region override keyword, as handled
+// by regionFromLocaleKeywords, supersedes the subtag.
 //
 // A bare language such as "pt" yields no region: inferring a country from a
 // language is unreliable, as Portuguese is used in several countries. The
@@ -186,11 +187,15 @@ func regionFromLocaleName(s string) (string, bool) {
 
 	s = strings.TrimSpace(s)
 
-	// Strip a POSIX modifier, as in "en_GB@euro", then a character set, as in
+	// Everything after "@" is a POSIX modifier, as in "en_GB@euro", or an ICU
+	// keyword list, as in "en_US@rg=cazzzz". A region override keyword
+	// supersedes the region subtag. Then strip a character set, as in
 	// "en_CA.UTF-8".
-	if i := strings.IndexByte(s, '@'); i >= 0 {
-		s = s[:i]
+	name, keywords, _ := strings.Cut(s, "@")
+	if region, ok := regionFromLocaleKeywords(keywords); ok {
+		return region, true
 	}
+	s = name
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		s = s[:i]
 	}
@@ -226,6 +231,38 @@ func regionFromLocaleName(s string) (string, bool) {
 		if region, ok := parseRegionCode(subtag); ok {
 			return region, true
 		}
+	}
+
+	return "", false
+}
+
+// regionFromLocaleKeywords extracts the region of a Unicode "rg" region
+// override keyword in an ICU locale keyword list, such as the CA in
+// "rg=cazzzz;calendar=buddhist".
+//
+// The override is how a user selects a region that does not follow from their
+// language: macOS reports "en_US@rg=cazzzz" for US English with Canada as the
+// region. Its value is a region code followed by the "zzzz" subdivision
+// placeholder, per UTS #35.
+//
+// The equivalent BCP 47 form, "en-US-u-rg-cazzzz", is not handled: no platform
+// reading in this package uses it, and the extension is already excluded from
+// the region subtag search in regionFromLocaleName.
+func regionFromLocaleKeywords(keywords string) (string, bool) {
+
+	for _, keyword := range strings.Split(keywords, ";") {
+
+		key, value, found := strings.Cut(keyword, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "rg") {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		if len(value) != 6 || !strings.EqualFold(value[2:], "zzzz") {
+			continue
+		}
+
+		return parseRegionCode(value[:2])
 	}
 
 	return "", false
@@ -280,6 +317,17 @@ func ianaZoneFromPath(path string) string {
 	}
 
 	zone := path[i+len(marker):]
+
+	// The posix/ and right/ subtrees duplicate the zone tree with different
+	// leap second handling, so "zoneinfo/posix/Europe/Kyiv" names the same zone
+	// as "zoneinfo/Europe/Kyiv".
+	for _, prefix := range []string{"posix/", "right/"} {
+		if trimmed := strings.TrimPrefix(zone, prefix); trimmed != zone {
+			zone = trimmed
+			break
+		}
+	}
+
 	if zone == "" || strings.HasPrefix(zone, "/") || strings.Contains(zone, "..") {
 		return ""
 	}

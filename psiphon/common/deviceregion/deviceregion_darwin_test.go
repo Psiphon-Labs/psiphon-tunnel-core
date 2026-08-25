@@ -93,6 +93,17 @@ func TestDarwinSignalsFallbacks(t *testing.T) {
 			wantLocaleName: "und-TR",
 		},
 		{
+			// An identifier carrying a region override is used as-is; the
+			// region reading, which reports the region of the language, must
+			// not replace it. regionFromLocaleName resolves the override.
+			name:           "locale identifier with a region override",
+			cfTimeZone:     "America/Toronto",
+			cfLocale:       "en_US@rg=cazzzz",
+			cfCountry:      "US",
+			wantTimezoneID: "America/Toronto",
+			wantLocaleName: "en_US@rg=cazzzz",
+		},
+		{
 			name:           "empty locale identifier",
 			cfTimeZone:     "Europe/Kyiv",
 			cfLocale:       "",

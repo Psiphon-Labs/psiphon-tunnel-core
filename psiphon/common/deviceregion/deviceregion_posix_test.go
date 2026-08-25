@@ -174,6 +174,7 @@ func TestZoneFromSymlink(t *testing.T) {
 		{"macos zoneinfo", "/var/db/timezone/zoneinfo/America/Toronto", "America/Toronto"},
 		{"relative target", "../usr/share/zoneinfo/Europe/Kyiv", "Europe/Kyiv"},
 		{"multi component zone", "/usr/share/zoneinfo/America/Argentina/Salta", "America/Argentina/Salta"},
+		{"posix subtree", "/usr/share/zoneinfo/posix/Europe/Kyiv", "Europe/Kyiv"},
 		{"not a zoneinfo path", "/dev/null", ""},
 	}
 

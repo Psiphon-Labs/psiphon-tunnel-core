@@ -207,6 +207,13 @@ func TestSimulatedPosixTimezoneID(t *testing.T) {
 			want: "Asia/Tbilisi",
 		},
 		{
+			// The posix/ subtree names the same zones, and is the only source
+			// when there is no timezone file.
+			name:   "posix subtree symlink",
+			system: simulatedSystem{localtime: "/usr/share/zoneinfo/posix/Europe/Kyiv"},
+			want:   "Europe/Kyiv",
+		},
+		{
 			// A copied rather than symlinked /etc/localtime is common, and the
 			// timezone file is then the only usable source.
 			name: "unresolvable symlink falls through to the timezone file",
