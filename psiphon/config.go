@@ -1361,6 +1361,7 @@ type Config struct {
 	LightProxyCustomHostNameProbability           *float64 `json:",omitempty"`
 	LightProxyTunnelInactiveThresholdMilliseconds *int     `json:",omitempty"`
 	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
+	LightProxyInactivityTimeoutMilliseconds       *int     `json:",omitempty"`
 
 	TacticsWaitPeriodMilliseconds  *int     `json:",omitempty"`
 	TacticsRetryPeriodMilliseconds *int     `json:",omitempty"`
@@ -1406,7 +1407,7 @@ type Config struct {
 
 	serverEntryIterationMetricsUpdater atomic.Value
 
-	lightProxyClient                    atomic.Value
+	lightProxyClient                    atomic.Pointer[light.Client]
 	lightProxyDialParams                atomic.Value
 	lightProxyTunnelInactiveThreshold   atomic.Int64
 	lightProxyDialTimeout               atomic.Int64
@@ -2512,9 +2513,17 @@ func (config *Config) SetLightProxy(
 	config.lightProxyLimitDestinationAddresses.Store(limitDestinationAddresses)
 }
 
+func (config *Config) ClearLightProxy() {
+	config.lightProxyClient.Store(nil)
+	config.lightProxyDialParams.Store(&lightDialParameters{})
+	config.lightProxyTunnelInactiveThreshold.Store(0)
+	config.lightProxyDialTimeout.Store(0)
+	limitDestinationAddresses := common.NewStringLookup(nil)
+	config.lightProxyLimitDestinationAddresses.Store(&limitDestinationAddresses)
+}
+
 func (config *Config) GetLightProxyClient() *light.Client {
-	client, _ := config.lightProxyClient.Load().(*light.Client)
-	return client
+	return config.lightProxyClient.Load()
 }
 
 func (config *Config) GetLightProxyDialParameters() *lightDialParameters {
@@ -3686,6 +3695,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LightProxyDialTimeoutMilliseconds != nil {
 		applyParameters[parameters.LightProxyDialTimeout] = fmt.Sprintf("%dms", *config.LightProxyDialTimeoutMilliseconds)
+	}
+
+	if config.LightProxyInactivityTimeoutMilliseconds != nil {
+		applyParameters[parameters.LightProxyInactivityTimeout] = fmt.Sprintf("%dms", *config.LightProxyInactivityTimeoutMilliseconds)
 	}
 
 	if config.LightProxyPersonalPairingConnectionWorkerPoolSize != 0 {

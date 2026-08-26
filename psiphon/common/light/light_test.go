@@ -137,21 +137,23 @@ func runTestLightProxyPassthrough() error {
 
 	receiver := newTestProxyEventReceiver(false, 0, false, "")
 
-	// Use a short inactivity timeout to check that passthrough relays are
-	// exempt from it.
-	inactivityTimeout := 1 * time.Second
+	// Use a short deadline and inactivity timeout value to check that
+	// passthrough relays are exempt from these timeouts.
+	timeout := 1 * time.Second
 
 	proxy, err := NewProxy(
 		&ProxyConfig{
-			Protocol:           LIGHT_PROTOCOL_TLS,
-			ListenAddresses:    []string{proxyAddress},
-			DialAddressIPv4:    proxyAddress,
-			ObfuscationKey:     prng.HexString(32),
-			TLSCertificate:     proxyCertPEM,
-			TLSPrivateKey:      proxyKeyPEM,
-			PassthroughAddress: webListener.Addr().String(),
-			AllowBogons:        true,
-			InactivityTimeout:  inactivityTimeout.String(),
+			Protocol:             LIGHT_PROTOCOL_TLS,
+			ListenAddresses:      []string{proxyAddress},
+			DialAddressIPv4:      proxyAddress,
+			ObfuscationKey:       prng.HexString(32),
+			TLSCertificate:       proxyCertPEM,
+			TLSPrivateKey:        proxyKeyPEM,
+			PassthroughAddress:   webListener.Addr().String(),
+			AllowBogons:          true,
+			PreHeaderDeadlineMin: timeout.String(),
+			PreHeaderDeadlineMax: timeout.String(),
+			InactivityTimeout:    timeout.String(),
 		},
 		func(string) common.GeoIPData { return common.GeoIPData{} },
 		receiver)
@@ -212,7 +214,7 @@ func runTestLightProxyPassthrough() error {
 		return errors.Trace(err)
 	}
 
-	time.Sleep(2 * inactivityTimeout)
+	time.Sleep(2 * timeout)
 
 	err = echo("passthrough echo 2")
 	if err != nil {
@@ -596,6 +598,7 @@ func runTestLightProxy(
 	_, err = clients[0].Dial(
 		ctx,
 		nil,
+		0,
 		testNetworkType,
 		testTLSProfile,
 		nil,
@@ -612,6 +615,7 @@ func runTestLightProxy(
 	conn, err := clients[0].Dial(
 		ctx,
 		nil,
+		0,
 		testNetworkType,
 		testTLSProfile,
 		nil,
@@ -653,6 +657,7 @@ func runLightClient(
 	conn, err := client.Dial(
 		ctx,
 		nil,
+		0,
 		networkType,
 		tlsProfile,
 		nil,

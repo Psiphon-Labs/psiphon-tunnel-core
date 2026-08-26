@@ -21,6 +21,7 @@ package light
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	std_errors "errors"
 	"net"
@@ -35,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -45,7 +47,10 @@ const (
 	LIGHT_PROTOCOL_TLS = "TLS"
 
 	obfuscationKeySize              = 32
-	defaultInactivityTimeout        = 60 * time.Second
+	defaultPreHeaderDeadlineMin     = 30 * time.Second
+	defaultPreHeaderDeadlineMax     = 120 * time.Second
+	preHeaderDeadlineStep           = 10 * time.Second
+	defaultInactivityTimeout        = 5 * time.Minute // Matches server.SSH_CONNECTION_READ_DEADLINE
 	defaultUpstreamDialTimeout      = 5 * time.Second
 	defaultRelayBufferSize          = 8192
 	rateLimiterReapHistoryFrequency = 300 * time.Second
@@ -80,6 +85,8 @@ type ProxyConfig struct {
 	TLSPrivateKey                                 []byte              `json:",omitempty"`
 	PassthroughAddress                            string              `json:",omitempty"`
 	AllowedDestinations                           []string            `json:",omitempty"`
+	PreHeaderDeadlineMin                          string              `json:",omitempty"`
+	PreHeaderDeadlineMax                          string              `json:",omitempty"`
 	InactivityTimeout                             string              `json:",omitempty"`
 	UpstreamDialTimeout                           string              `json:",omitempty"`
 	RelayBufferSize                               int                 `json:",omitempty"`
@@ -219,6 +226,7 @@ type Proxy struct {
 	obfuscatorSeedHistory      *obfuscator.SeedHistory
 	allowedDestinations        common.StringLookup
 	proxyProtocolHeaderConfigs map[string]proxyProtocolHeaderConfig
+	preHeaderDeadline          time.Duration
 	inactivityTimeout          time.Duration
 	upstreamDialTimeout        time.Duration
 	relayBufferSize            int
@@ -313,6 +321,39 @@ func NewProxy(
 		return nil, errors.Trace(err)
 	}
 
+	preHeaderDeadlineMin := defaultPreHeaderDeadlineMin
+	if config.PreHeaderDeadlineMin != "" {
+		var err error
+		preHeaderDeadlineMin, err = time.ParseDuration(config.PreHeaderDeadlineMin)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	preHeaderDeadlineMax := defaultPreHeaderDeadlineMax
+	if config.PreHeaderDeadlineMax != "" {
+		var err error
+		preHeaderDeadlineMax, err = time.ParseDuration(config.PreHeaderDeadlineMax)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	if preHeaderDeadlineMin < 0 || preHeaderDeadlineMax < preHeaderDeadlineMin {
+		return nil, errors.TraceNew("invalid pre-header deadline")
+	}
+
+	// Vary the pre-header deadline per proxy, using the selected value
+	// consistently.
+	seed := prng.Seed(sha256.Sum256([]byte(config.ObfuscationKey)))
+	deadlinePRNG, err := prng.NewPRNGWithSaltedSeed(&seed, "light-proxy-pre-header-deadline")
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	steps := int((preHeaderDeadlineMax - preHeaderDeadlineMin) / preHeaderDeadlineStep)
+	preHeaderDeadline := preHeaderDeadlineMin +
+		time.Duration(deadlinePRNG.Range(0, steps))*preHeaderDeadlineStep
+
 	inactivityTimeout := defaultInactivityTimeout
 	if config.InactivityTimeout != "" {
 		var err error
@@ -320,6 +361,10 @@ func NewProxy(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	if inactivityTimeout < 0 {
+		return nil, errors.TraceNew("invalid inactivity timeout")
 	}
 
 	upstreamDialTimeout := defaultUpstreamDialTimeout
@@ -528,6 +573,7 @@ func NewProxy(
 		obfuscatorSeedHistory:      obfuscator.NewSeedHistory(nil),
 		allowedDestinations:        common.NewStringLookup(normalizedAllowedDestinations),
 		proxyProtocolHeaderConfigs: proxyProtocolHeaderConfigs,
+		preHeaderDeadline:          preHeaderDeadline,
 		inactivityTimeout:          inactivityTimeout,
 		upstreamDialTimeout:        upstreamDialTimeout,
 		relayBufferSize:            relayBufferSize,
@@ -887,14 +933,25 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		}
 	}
 
+	// Pre-header there is a fixed deadline and no inactivity timeout.
+
 	activityConn, err := common.NewActivityMonitoredConn(
 		conn,
-		proxy.inactivityTimeout,
+		0,
 		false,
 		nil,
 		bytesCounter)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	if proxy.preHeaderDeadline > 0 {
+		// Assumes ActivityMonitoredConn doesn't modify the deadline, which it
+		// doesn't with inactivityTimeout set to 0.
+		err := activityConn.SetDeadline(time.Now().Add(proxy.preHeaderDeadline))
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	// For TLS passthrough, the underlying client conn wrapped with tls.Server
@@ -938,9 +995,7 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
 
-		// Disable the inactivity timeout to support the passthrough relay
-		// case. For genuine handshake failures this is inconsequential, as
-		// the conn is closed on return.
+		// Clear the pre-header deadline to support the passthrough relay case.
 		_ = activityConn.SetInactivityTimeout(0)
 
 		return errors.Trace(err)
@@ -971,6 +1026,12 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	unassociateAfter()
 
 	completedLightHeader = time.Now().UTC()
+
+	// Replace the pre-header deadline with the inactivity timeout for an
+	// authentic client.
+	if err := activityConn.SetInactivityTimeout(proxy.inactivityTimeout); err != nil {
+		return errors.Trace(err)
+	}
 
 	// Apply limits after reading the header so that the ConnectionFailure
 	// will be accompanied by client characteristics such as sponsor ID. A
