@@ -20,8 +20,6 @@
 package networkid
 
 import (
-	"net"
-	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,67 +35,6 @@ import (
 
 func Enabled() bool {
 	return true
-}
-
-// Get address associated with the default interface.
-func getDefaultLocalAddr() (net.IP, error) {
-	// Note that this function has no Windows-specific code and could be used elsewhere.
-
-	// This approach is described in psiphon/common/inproxy/pionNetwork.Interfaces()
-	// The basic idea is that we initialize a UDP connection and see what local
-	// address the system decides to use.
-	// Note that no actual network request is made by these calls. They can be performed
-	// with no network connectivity at all.
-	// TODO: Use common test IP addresses in that function and this.
-
-	// We'll prefer IPv4 and check it first (both might be available)
-	ipv4UDPAddr := net.UDPAddrFromAddrPort(netip.MustParseAddrPort("93.184.216.34:3478"))
-	ipv4UDPConn, ipv4Err := net.DialUDP("udp4", nil, ipv4UDPAddr)
-	if ipv4Err == nil {
-		ip := ipv4UDPConn.LocalAddr().(*net.UDPAddr).IP
-		ipv4UDPConn.Close()
-		return ip, nil
-	}
-
-	ipv6UDPAddr := net.UDPAddrFromAddrPort(netip.MustParseAddrPort("[2606:2800:220:1:248:1893:25c8:1946]:3478"))
-	ipv6UDPConn, ipv6Err := net.DialUDP("udp6", nil, ipv6UDPAddr)
-	if ipv6Err == nil {
-		ip := ipv6UDPConn.LocalAddr().(*net.UDPAddr).IP
-		ipv6UDPConn.Close()
-		return ip, nil
-	}
-
-	return nil, errors.Trace(ipv4Err)
-}
-
-// Given the IP of a local interface, get that interface info.
-func getInterfaceForLocalIP(ip net.IP) (*net.Interface, error) {
-	// Note that this function has no Windows-specific code and could be used elsewhere.
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		for _, addr := range addrs {
-			addrIP, _, err := net.ParseCIDR(addr.String())
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-
-			if addrIP.Equal(ip) {
-				return &iface, nil
-			}
-		}
-	}
-
-	return nil, errors.TraceNew("not found")
 }
 
 // Given the interface index, get info about the interface and its network.
