@@ -140,13 +140,8 @@ func getConnectionType(ifType winipcfg.IfType, description string) string {
 	return connectionType
 }
 
-func getNetworkID() (string, error) {
-	localAddr, err := getDefaultLocalAddr()
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-
-	iface, err := getInterfaceForLocalIP(localAddr)
+func getNetworkID(interfaceName string) (string, error) {
+	iface, err := getInterface(interfaceName)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
@@ -168,24 +163,30 @@ type result struct {
 	err       error
 }
 
+type request struct {
+	interfaceName string
+	resCh         chan<- result
+}
+
 var workThread struct {
 	init sync.Once
-	reqs chan (chan<- result)
-	err  error
+	reqs chan request
 }
 
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for details.
+// interfaceName selects the network to describe; when it is empty, the interface
+// carrying the default route is used.
 // This function is safe to call concurrently from multiple goroutines.
 // Note that if this function is called immediately after a network change (within ~2000ms)
 // a transitory Network ID may be returned that will change on the next call. The caller
 // may wish to delay responding to a new Network ID until the value is confirmed.
-func Get() (string, error) {
+func Get(interfaceName string) (string, error) {
 
 	// It is not clear if the COM NetworkListManager calls are threadsafe.
 	// We're using them read-only and they're probably fine, but we're not
 	// sure. We'll restrict our work to single thread.
 	workThread.init.Do(func() {
-		workThread.reqs = make(chan (chan<- result))
+		workThread.reqs = make(chan request)
 
 		go func() {
 			// Go can switch the execution of a goroutine from one OS thread to another
@@ -196,22 +197,31 @@ func Get() (string, error) {
 			runtime.LockOSThread()
 			defer runtime.UnlockOSThread()
 
-			if err := windows.CoInitializeEx(0, windows.COINIT_MULTITHREADED); err != nil {
-				workThread.err = errors.Trace(err)
-				close(workThread.reqs)
-				return
+			// The worker continues to serve requests when initialization fails,
+			// as Get sends to reqs unconditionally. S_FALSE reports that the
+			// thread was already initialized with the same apartment model,
+			// which is success and still requires CoUninitialize.
+			initErr := windows.CoInitializeEx(0, windows.COINIT_MULTITHREADED)
+			if initErr == nil || initErr == syscall.Errno(windows.S_FALSE) {
+				initErr = nil
+				defer windows.CoUninitialize()
+			} else {
+				initErr = errors.Trace(initErr)
 			}
-			defer windows.CoUninitialize()
 
-			for resCh := range workThread.reqs {
-				networkID, err := getNetworkID()
-				resCh <- result{networkID, err}
+			for req := range workThread.reqs {
+				if initErr != nil {
+					req.resCh <- result{"", initErr}
+					continue
+				}
+				networkID, err := getNetworkID(req.interfaceName)
+				req.resCh <- result{networkID, err}
 			}
 		}()
 	})
 
 	resCh := make(chan result)
-	workThread.reqs <- resCh
+	workThread.reqs <- request{interfaceName: interfaceName, resCh: resCh}
 	res := <-resCh
 
 	if res.err != nil {

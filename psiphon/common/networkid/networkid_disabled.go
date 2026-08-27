@@ -27,6 +27,6 @@ func Enabled() bool {
 	return false
 }
 
-func Get() (string, error) {
+func Get(interfaceName string) (string, error) {
 	return "", fmt.Errorf("operation is not enabled")
 }

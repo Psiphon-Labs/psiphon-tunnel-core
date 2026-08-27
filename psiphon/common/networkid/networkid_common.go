@@ -28,6 +28,31 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+// getInterface returns the named interface, or the one carrying the default
+// route when interfaceName is empty.
+func getInterface(interfaceName string) (*net.Interface, error) {
+
+	if interfaceName != "" {
+		iface, err := net.InterfaceByName(interfaceName)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return iface, nil
+	}
+
+	localAddr, err := getDefaultLocalAddr()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	iface, err := getInterfaceForLocalIP(localAddr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return iface, nil
+}
+
 // Get address associated with the default interface.
 func getDefaultLocalAddr() (net.IP, error) {
 	// This approach is described in psiphon/common/inproxy/pionNetwork.Interfaces()

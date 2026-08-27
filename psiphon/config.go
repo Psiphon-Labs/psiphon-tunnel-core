@@ -2121,7 +2121,11 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if networkIDGetter == nil {
 		if networkid.Enabled() {
-			networkIDGetter = newCommonNetworkIDGetter()
+			// Limitation: only this getter describes the split-interface
+			// downstream network. A NetworkIDGetter supplied by the host
+			// application takes no interface and describes the default route.
+			networkIDGetter = newCommonNetworkIDGetter(
+				config.splitInterfaceDownstreamInterfaceName())
 		} else {
 			// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
 			// this method of network identification is not dynamic and will not reflect
@@ -4804,15 +4808,22 @@ func (n *staticNetworkIDGetter) GetNetworkID() string {
 	return n.networkID
 }
 
+// commonNetworkIDGetter describes the network reached through interfaceName,
+// or, when that is empty, the default route. In split-interface mode it is the
+// downstream interface: the side that establishes in-proxy WebRTC connections,
+// whose network type is used in broker matching based on NAT assumptions. The
+// upstream network is deliberately not described, as nothing consumes it yet.
 type commonNetworkIDGetter struct {
+	interfaceName string
 }
 
-func newCommonNetworkIDGetter() *commonNetworkIDGetter {
-	return &commonNetworkIDGetter{}
+func newCommonNetworkIDGetter(interfaceName string) *commonNetworkIDGetter {
+	return &commonNetworkIDGetter{interfaceName: interfaceName}
 }
 
 func (n *commonNetworkIDGetter) GetNetworkID() string {
-	networkID, err := networkid.Get()
+
+	networkID, err := networkid.Get(n.interfaceName)
 	if err != nil {
 		NoticeError("networkid.Get failed: %v", errors.Trace(err))
 		return unknownNetworkID
@@ -4849,11 +4860,11 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 
 // cachingNetworkIDGetter caches the GetNetworkID result from the underlying
 // network ID getter. The current GetNetworkID implementations take in the
-// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows) to execute, on
-// modern devices. To minimize delaying dials and other operations that start
-// with fetching the current network ID, the return values are cached for a
-// short time. On platforms that invoke NetworkChanged, the cache is flushed
-// immediately upon a network change.
+// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows); ~0.25ms (macOS);
+// ~0.15ms (Linux) to execute, on modern devices. To minimize delaying dials
+// and other operations that start with fetching the current network ID, the
+// return values are cached for a short time. On platforms that invoke
+// NetworkChanged, the cache is flushed immediately upon a network change.
 type cachingNetworkIDGetter struct {
 	config *Config
 	n      NetworkIDGetter

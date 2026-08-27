@@ -27,9 +27,19 @@ import (
 	"testing"
 )
 
+// Get("") requires a default route, which an isolated environment may not have.
+func skipWithoutDefaultRoute(t *testing.T) {
+	t.Helper()
+	if _, err := getDefaultLocalAddr(); err != nil {
+		t.Skipf("no default route: %v", err)
+	}
+}
+
 func TestGet(t *testing.T) {
 
-	networkID, err := Get()
+	skipWithoutDefaultRoute(t)
+
+	networkID, err := Get("")
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -39,14 +49,51 @@ func TestGet(t *testing.T) {
 		t.Fatalf("no suffix in network ID")
 	}
 
-	switch prefix {
-	case "WIFI", "MOBILE", "WIRED", "VPN", "UNKNOWN":
-	default:
-		t.Errorf("unexpected network type %q", prefix)
-	}
+	assertConnectionType(t, prefix)
 
 	if net.ParseIP(suffix) == nil {
 		t.Errorf("suffix is not an IP address")
+	}
+}
+
+func assertConnectionType(t *testing.T, connectionType string) {
+	t.Helper()
+	switch connectionType {
+	case "WIFI", "MOBILE", "WIRED", "VPN", "UNKNOWN":
+	default:
+		t.Errorf("unexpected network type %q", connectionType)
+	}
+}
+
+// An interface with no address yields the connection type alone.
+func TestGetTypeOnly(t *testing.T) {
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	for _, iface := range ifaces {
+		if _, err := getInterfaceIP(&iface); err == nil {
+			continue
+		}
+		networkID, err := Get(iface.Name)
+		if err != nil {
+			t.Fatalf("%s: error: %v", iface.Name, err)
+		}
+		if strings.Contains(networkID, "-") {
+			t.Errorf("%s: expected type only, got %q", iface.Name, networkID)
+		}
+		assertConnectionType(t, networkID)
+		return
+	}
+
+	t.Skip("no interface without an address")
+}
+
+func TestGetInterfaceNotFound(t *testing.T) {
+	if _, err := Get("no-such-interface"); err == nil {
+		t.Error("unexpected success")
 	}
 }
 

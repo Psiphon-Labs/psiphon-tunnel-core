@@ -33,35 +33,32 @@ func Enabled() bool {
 }
 
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for
-// details.
+// details. interfaceName selects the network to describe; when it is empty, the
+// interface carrying the default route is used.
 //
-// This file serves both macOS and Linux. It also serves iOS, as the ios target
-// implies darwin, where it is a fallback for the case where the native network
-// ID implementation is unavailable.
-func Get() (string, error) {
+// This serves iOS as well, as the ios target implies darwin, where it is a
+// fallback for when the native network ID implementation is unavailable.
+func Get(interfaceName string) (string, error) {
 
-	localAddr, err := getDefaultLocalAddr()
+	iface, err := getInterface(interfaceName)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
 
-	iface, err := getInterfaceForLocalIP(localAddr)
-	if err != nil {
-		return "", errors.Trace(err)
-	}
+	connectionType := getConnectionType(iface)
 
+	// The connection type alone remains a valid network ID.
 	ip, err := getInterfaceIP(iface)
 	if err != nil {
-		return "", errors.Trace(err)
+		return connectionType, nil
 	}
 
-	return getConnectionType(iface) + "-" + ip.String(), nil
+	return connectionType + "-" + ip.String(), nil
 }
 
-// getInterfaceIP returns the address that distinguishes one network from
-// another on the same interface. IPv4 is preferred since IPv6 privacy
-// addresses are periodically regenerated, which would otherwise present a
-// stable network as a new one.
+// getInterfaceIP returns the address distinguishing one network from another on
+// the same interface. IPv4 is preferred, as IPv6 privacy addresses are
+// periodically regenerated, presenting a stable network as a new one.
 func getInterfaceIP(iface *net.Interface) (net.IP, error) {
 
 	addrs, err := iface.Addrs()
@@ -92,8 +89,9 @@ func getInterfaceIP(iface *net.Interface) (net.IP, error) {
 }
 
 // isVPNInterfaceName reports whether the interface name is one used for
-// tunnelled networks. The name is the only signal available for these
-// interfaces, as they report no media type and no distinguishing device type.
+// tunnelled networks. The name is checked because these interfaces are not
+// otherwise distinguishable: they report no media type on Darwin, and tap
+// devices are indistinguishable from ethernet on Linux.
 func isVPNInterfaceName(interfaceName string) bool {
 	for _, prefix := range []string{"utun", "tun", "tap", "ipsec", "ppp", "wg"} {
 		if strings.HasPrefix(interfaceName, prefix) {
