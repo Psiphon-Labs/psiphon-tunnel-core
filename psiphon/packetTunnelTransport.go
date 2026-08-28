@@ -222,7 +222,7 @@ func (p *PacketTunnelTransport) UseTunnel(tunnel *Tunnel) {
 		defer p.workers.Done()
 
 		// channelConn is a net.Conn, since some layering has been applied
-		// (e.g., transferstats.Conn). PacketTunnelTransport assumes the
+		// (e.g., bytesTransferredConn). PacketTunnelTransport assumes the
 		// channelConn is ultimately an ssh.Channel, which is not a fully
 		// functional net.Conn.
 

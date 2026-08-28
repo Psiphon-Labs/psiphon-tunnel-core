@@ -176,9 +176,8 @@ type TrafficRulesFilter struct {
 	// match this filter. When omitted or empty, any client city matches.
 	Cities []string
 
-	// APIProtocol specifies whether the client must use the SSH
-	// API protocol (when "ssh") or the web API protocol (when "web").
-	// When omitted or blank, any API protocol matches.
+	// APIProtocol specifies whether the client must use the SSH API protocol
+	// (when "ssh"). When omitted or blank, any API protocol matches.
 	APIProtocol string
 
 	// HandshakeParameters specifies handshake API parameter names and

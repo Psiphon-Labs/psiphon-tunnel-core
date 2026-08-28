@@ -20,8 +20,6 @@
 package psiphon
 
 import (
-	"crypto/x509"
-	"encoding/base64"
 	std_errors "errors"
 	"fmt"
 	"net"
@@ -58,18 +56,6 @@ func MakePsiphonUserAgent(config *Config) string {
 		userAgent += fmt.Sprintf(" (%s)", config.ClientPlatform)
 	}
 	return userAgent
-}
-
-func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate, err error) {
-	derEncodedCertificate, err := base64.StdEncoding.DecodeString(encodedCertificate)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	certificate, err = x509.ParseCertificate(derEncodedCertificate)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return certificate, nil
 }
 
 // TrimError removes the middle of over-long error message strings

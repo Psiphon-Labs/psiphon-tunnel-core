@@ -91,7 +91,6 @@ jobs:
           go test -v -race ./psiphon/common/transforms
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
-          go test -v -race ./psiphon/transferstats
           sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -race ./psiphon/server/psinet
           go test -v -timeout 30m -race ./psiphon
@@ -128,7 +127,6 @@ jobs:
           go test -v -covermode=count -coverprofile=transforms.coverprofile ./psiphon/common/transforms
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
-          go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
           sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
           go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon

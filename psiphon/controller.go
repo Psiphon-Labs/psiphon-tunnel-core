@@ -1158,11 +1158,6 @@ func (controller *Controller) signalServerEntriesReporter(
 func (controller *Controller) connectedReporter() {
 	defer controller.runWaitGroup.Done()
 
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
-
 	select {
 	case <-controller.signalReportConnected:
 		// Make the initial connected request
@@ -1217,11 +1212,6 @@ loop:
 }
 
 func (controller *Controller) signalConnectedReporter() {
-
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
 
 	select {
 	case controller.signalReportConnected <- struct{}{}:
@@ -1351,9 +1341,9 @@ loop:
 				}
 
 				// In the case of multi-tunnels, only the first tunnel will send status requests,
-				// including transfer stats (domain bytes), persistent stats, and prune checks.
-				// While transfer stats and persistent stats use a "take out" scheme that would
-				// allow for multiple, concurrent requesters, the prune check does not.
+				// including persistent stats and prune checks. While persistent stats use a
+				// "take out" scheme that allows multiple concurrent requesters, the prune
+				// check does not.
 
 				isStatusReporter := isFirstTunnel
 
@@ -1422,10 +1412,7 @@ loop:
 
 				// If the handshake indicated that a new client version is available,
 				// trigger an upgrade download.
-				// Note: serverContext is nil when DisableApi is set
-				if connectedTunnel.serverContext != nil &&
-					connectedTunnel.serverContext.clientUpgradeVersion != "" {
-
+				if connectedTunnel.serverContext.clientUpgradeVersion != "" {
 					handshakeVersion := connectedTunnel.serverContext.clientUpgradeVersion
 					select {
 					case controller.signalDownloadUpgrade <- handshakeVersion:
@@ -2098,7 +2085,8 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return p.hasInitialProtocols() &&
+	return serverEntry.SupportsSSHAPIRequests() &&
+		p.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
 			p.config.TunnelDialsUseUpstreamProxy(),
@@ -2112,13 +2100,14 @@ func (p *protocolSelectionConstraints) isCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return len(serverEntry.GetSupportedProtocols(
-		conditionallyEnabledComponents{},
-		p.config.TunnelDialsUseUpstreamProxy(),
-		p.limitTunnelProtocols,
-		p.limitTunnelDialPortNumbers,
-		p.limitQUICVersions,
-		excludeIntensive)) > 0
+	return serverEntry.SupportsSSHAPIRequests() &&
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.config.TunnelDialsUseUpstreamProxy(),
+			p.limitTunnelProtocols,
+			p.limitTunnelDialPortNumbers,
+			p.limitQUICVersions,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
@@ -3045,8 +3034,7 @@ loop:
 				break
 			}
 
-			if controller.config.TargetAPIProtocol == protocol.PSIPHON_API_PROTOCOL_SSH &&
-				!serverEntry.SupportsSSHAPIRequests() {
+			if !serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}
 

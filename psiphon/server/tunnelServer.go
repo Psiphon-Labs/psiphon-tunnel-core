@@ -2238,8 +2238,6 @@ type handshakeState struct {
 	activeAuthorizationIDs    []string
 	authorizedAccessTypes     []string
 	authorizationsRevoked     bool
-	domainBytesChecksum       []byte
-	hasDomainBytesRegexes     bool
 	establishedTunnelsCount   int
 	splitTunnelLookup         *common.StringLookup
 	deviceRegion              string
@@ -4588,42 +4586,6 @@ func (sshClient *sshClient) updateAPIParameters(
 	for name, value := range apiParams {
 		sshClient.handshakeState.apiParams[name] = value
 	}
-}
-
-func (sshClient *sshClient) acceptDomainBytes() bool {
-	sshClient.Lock()
-	defer sshClient.Unlock()
-
-	// Drop domain bytes when no regexes were configured for the client at
-	// handshake.
-	if !sshClient.handshakeState.hasDomainBytesRegexes {
-		return false
-	}
-
-	// When the domain bytes checksum differs from the checksum sent to the
-	// client in the handshake response, the psinet regex configuration has
-	// changed. In this case, drop the stats so we don't continue to record
-	// stats as previously configured.
-	//
-	// Limitations:
-	// - The checksum comparison may result in dropping some stats for a
-	//   domain that remains in the new configuration.
-	// - We don't push new regexs to the clients, so clients that remain
-	//   connected will continue to send stats that will be dropped; and
-	//   those clients will not send stats as newly configured until after
-	//   reconnecting.
-	// - Due to the design of
-	//   transferstats.ReportRecentBytesTransferredForServer in the client,
-	//   the client may accumulate stats, reconnect before its next status
-	//   request, get a new regex configuration, and then send the previously
-	//   accumulated stats in its next status request. The checksum scheme
-	//   won't prevent the reporting of those stats.
-
-	sponsorID, _ := getStringRequestParam(sshClient.handshakeState.apiParams, "sponsor_id")
-
-	domainBytesChecksum := sshClient.sshServer.support.PsinetDatabase.GetDomainBytesChecksum(sponsorID)
-
-	return bytes.Equal(sshClient.handshakeState.domainBytesChecksum, domainBytesChecksum)
 }
 
 // setOSLConfig resets the client's OSL seed state based on the latest OSL config

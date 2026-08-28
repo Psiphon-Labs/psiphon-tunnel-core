@@ -51,7 +51,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/wildcard"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -114,6 +113,8 @@ type Tunnel struct {
 	establishDuration              time.Duration
 	establishedTime                time.Time
 	handledSSHKeepAliveFailure     int32
+	recentBytesSent                atomic.Int64
+	recentBytesReceived            atomic.Int64
 	inFlightConnectedRequestSignal chan struct{}
 }
 
@@ -235,126 +236,124 @@ func (tunnel *Tunnel) Activate(
 	// Create a new Psiphon API server context for this tunnel. This includes
 	// performing a handshake request. If the handshake fails, this activation
 	// fails.
-	var serverContext *ServerContext
-	if !tunnel.config.DisableApi {
-		NoticeInfo(
-			"starting server context for %s",
-			tunnel.dialParams.ServerEntry.GetDiagnosticID())
 
-		// Call NewServerContext in a goroutine, as it blocks on a network operation,
-		// the handshake request, and would block shutdown. If the shutdown signal is
-		// received, close the tunnel, which will interrupt the handshake request
-		// that may be blocking NewServerContext.
-		//
-		// Timeout after PsiphonApiServerTimeoutSeconds. NewServerContext may not
-		// return if the tunnel network connection is unstable during the handshake
-		// request. At this point, there is no operateTunnel monitor that will detect
-		// this condition with SSH keep alives.
+	NoticeInfo(
+		"starting server context for %s",
+		tunnel.dialParams.ServerEntry.GetDiagnosticID())
 
-		doInproxy := protocol.TunnelProtocolUsesInproxy(tunnel.dialParams.TunnelProtocol)
+	// Call NewServerContext in a goroutine, as it blocks on a network operation,
+	// the handshake request, and would block shutdown. If the shutdown signal is
+	// received, close the tunnel, which will interrupt the handshake request
+	// that may be blocking NewServerContext.
+	//
+	// Timeout after PsiphonApiServerTimeoutSeconds. NewServerContext may not
+	// return if the tunnel network connection is unstable during the handshake
+	// request. At this point, there is no operateTunnel monitor that will detect
+	// this condition with SSH keep alives.
 
-		var timeoutParameter string
-		if doInproxy {
-			// Optionally allow more time in case the broker/server relay
-			// requires additional round trips to establish a new session.
-			timeoutParameter = parameters.InproxyPsiphonAPIRequestTimeout
-		} else {
-			timeoutParameter = parameters.PsiphonAPIRequestTimeout
-		}
-		timeout := tunnel.getCustomParameters().Duration(timeoutParameter)
+	doInproxy := protocol.TunnelProtocolUsesInproxy(tunnel.dialParams.TunnelProtocol)
 
-		var handshakeCtx context.Context
-		var cancelFunc context.CancelFunc
-		if timeout > 0 {
-			handshakeCtx, cancelFunc = context.WithTimeout(ctx, timeout)
-		} else {
-			handshakeCtx, cancelFunc = context.WithCancel(ctx)
-		}
+	var timeoutParameter string
+	if doInproxy {
+		// Optionally allow more time in case the broker/server relay
+		// requires additional round trips to establish a new session.
+		timeoutParameter = parameters.InproxyPsiphonAPIRequestTimeout
+	} else {
+		timeoutParameter = parameters.PsiphonAPIRequestTimeout
+	}
+	timeout := tunnel.getCustomParameters().Duration(timeoutParameter)
 
-		type newServerContextResult struct {
-			serverContext *ServerContext
-			err           error
-		}
+	var handshakeCtx context.Context
+	var cancelFunc context.CancelFunc
+	if timeout > 0 {
+		handshakeCtx, cancelFunc = context.WithTimeout(ctx, timeout)
+	} else {
+		handshakeCtx, cancelFunc = context.WithCancel(ctx)
+	}
 
-		resultChannel := make(chan newServerContextResult)
+	type newServerContextResult struct {
+		serverContext *ServerContext
+		err           error
+	}
 
-		wg := new(sync.WaitGroup)
+	resultChannel := make(chan newServerContextResult)
 
-		if doInproxy {
+	wg := new(sync.WaitGroup)
 
-			// Launch a handler to handle broker/server relay SSH requests,
-			// which will occur when the broker needs to establish a new
-			// session with the server.
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				notice := true
-				for {
-					select {
-					case serverRequest := <-tunnel.sshServerRequests:
-						if serverRequest != nil {
-							if serverRequest.Type == protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME {
+	if doInproxy {
 
-								if notice {
-									NoticeInfo(
-										"relaying inproxy broker packets for %s",
-										tunnel.dialParams.ServerEntry.GetDiagnosticID())
-									notice = false
-								}
-								err := tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
-								if err != nil {
-									NoticeWarning(
-										"relay inproxy broker packets failed: %v",
-										errors.Trace(err))
-									// Continue
-								}
-
-							} else {
-
-								// There's a potential race condition in which
-								// post-handshake SSH requests, such as OSL or
-								// alert requests, arrive to this handler instead
-								// of operateTunnel, so invoke HandleServerRequest here.
-								HandleServerRequest(tunnelOwner, tunnel, serverRequest)
-							}
-						}
-					case <-handshakeCtx.Done():
-						return
-					}
-				}
-			}()
-		}
-
+		// Launch a handler to handle broker/server relay SSH requests,
+		// which will occur when the broker needs to establish a new
+		// session with the server.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serverContext, err := NewServerContext(tunnel)
-			resultChannel <- newServerContextResult{
-				serverContext: serverContext,
-				err:           err,
+			notice := true
+			for {
+				select {
+				case serverRequest := <-tunnel.sshServerRequests:
+					if serverRequest != nil {
+						if serverRequest.Type == protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME {
+
+							if notice {
+								NoticeInfo(
+									"relaying inproxy broker packets for %s",
+									tunnel.dialParams.ServerEntry.GetDiagnosticID())
+								notice = false
+							}
+							err := tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
+							if err != nil {
+								NoticeWarning(
+									"relay inproxy broker packets failed: %v",
+									errors.Trace(err))
+								// Continue
+							}
+
+						} else {
+
+							// There's a potential race condition in which
+							// post-handshake SSH requests, such as OSL or
+							// alert requests, arrive to this handler instead
+							// of operateTunnel, so invoke HandleServerRequest here.
+							HandleServerRequest(tunnelOwner, tunnel, serverRequest)
+						}
+					}
+				case <-handshakeCtx.Done():
+					return
+				}
 			}
 		}()
-
-		var result newServerContextResult
-
-		select {
-		case result = <-resultChannel:
-		case <-handshakeCtx.Done():
-			result.err = handshakeCtx.Err()
-			// Interrupt the goroutine
-			tunnel.Close(true)
-			<-resultChannel
-		}
-
-		cancelFunc()
-		wg.Wait()
-
-		if result.err != nil {
-			return errors.Trace(result.err)
-		}
-
-		serverContext = result.serverContext
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		serverContext, err := NewServerContext(tunnel)
+		resultChannel <- newServerContextResult{
+			serverContext: serverContext,
+			err:           err,
+		}
+	}()
+
+	var result newServerContextResult
+
+	select {
+	case result = <-resultChannel:
+	case <-handshakeCtx.Done():
+		result.err = handshakeCtx.Err()
+		// Interrupt the goroutine
+		tunnel.Close(true)
+		<-resultChannel
+	}
+
+	cancelFunc()
+	wg.Wait()
+
+	if result.err != nil {
+		return errors.Trace(result.err)
+	}
+
+	serverContext := result.serverContext
 
 	// The activation succeeded.
 	activationSucceeded = true
@@ -645,7 +644,7 @@ func (tunnel *Tunnel) DialTCPChannel(
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
-	return tunnel.wrapWithTransferStats(conn), false, nil
+	return newBytesTransferredConn(conn, tunnel), false, nil
 }
 
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
@@ -664,16 +663,9 @@ func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
 
 	conn := newChannelConn(sshChannel)
 
-	// wrapWithTransferStats will track bytes transferred for the
-	// packet tunnel. It will count packet overhead (TCP/UDP/IP headers).
-	//
-	// Since the data in the channel is not HTTP or TLS, no domain bytes
-	// counting is expected.
-	//
-	// transferstats are also used to determine that there's been recent
-	// activity and skip periodic SSH keep alives; see Tunnel.operateTunnel.
+	// Packet tunnel byte counts include TCP/UDP/IP headers.
 
-	return tunnel.wrapWithTransferStats(conn), nil
+	return newBytesTransferredConn(conn, tunnel), nil
 }
 
 func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, error) {
@@ -756,18 +748,30 @@ func isSplitTunnelRejectReason(err error) bool {
 	return false
 }
 
-func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
+type bytesTransferredConn struct {
+	net.Conn
+	tunnel *Tunnel
+}
 
-	// Tunnel does not have a serverContext when DisableApi is set. We still use
-	// transferstats.Conn to count bytes transferred for monitoring tunnel
-	// quality.
-	var regexps *transferstats.Regexps
-	if tunnel.serverContext != nil {
-		regexps = tunnel.serverContext.StatsRegexps()
+func newBytesTransferredConn(
+	conn net.Conn, tunnel *Tunnel) *bytesTransferredConn {
+
+	return &bytesTransferredConn{
+		Conn:   conn,
+		tunnel: tunnel,
 	}
+}
 
-	return transferstats.NewConn(
-		conn, tunnel.dialParams.ServerEntry.IpAddress, regexps)
+func (conn *bytesTransferredConn) Write(buffer []byte) (int, error) {
+	n, err := conn.Conn.Write(buffer)
+	conn.tunnel.recentBytesSent.Add(int64(n))
+	return n, err
+}
+
+func (conn *bytesTransferredConn) Read(buffer []byte) (int, error) {
+	n, err := conn.Conn.Read(buffer)
+	conn.tunnel.recentBytesReceived.Add(int64(n))
+	return n, err
 }
 
 // SignalComponentFailure notifies the tunnel that an associated component has failed.
@@ -1778,8 +1782,8 @@ func performLivenessTest(
 // BytesTransferred and TotalBytesTransferred notices are emitted
 // for live reporting and diagnostics reporting, respectively.
 //
-// Status requests are sent to the Psiphon API to report bytes
-// transferred.
+// Status requests are sent to the Psiphon API to report persistent stats
+// and check server entries for pruning.
 //
 // Periodic SSH keep alive packets are sent to ensure the underlying
 // TCP connection isn't terminated by NAT, or other network
@@ -2017,8 +2021,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	for !shutdown && err == nil {
 		select {
 		case <-noticeBytesTransferredTicker.C:
-			sent, received := transferstats.ReportRecentBytesTransferredForServer(
-				tunnel.dialParams.ServerEntry.IpAddress)
+			sent := tunnel.recentBytesSent.Swap(0)
+			received := tunnel.recentBytesReceived.Swap(0)
 
 			bytesUp := atomic.AddInt64(&totalSent, sent)
 			bytesDown := atomic.AddInt64(&totalReceived, received)
@@ -2162,8 +2166,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	requestsWaitGroup.Wait()
 
 	// Capture bytes transferred since the last noticeBytesTransferredTicker tick
-	sent, received := transferstats.ReportRecentBytesTransferredForServer(
-		tunnel.dialParams.ServerEntry.IpAddress)
+	sent := tunnel.recentBytesSent.Swap(0)
+	received := tunnel.recentBytesReceived.Swap(0)
 	bytesUp := atomic.AddInt64(&totalSent, sent)
 	bytesDown := atomic.AddInt64(&totalReceived, received)
 
@@ -2180,7 +2184,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		// requests to complete.
 
 		// Send a final status request in order to report any outstanding persistent
-		// stats and domain bytes transferred as soon as possible.
+		// stats as soon as possible.
 
 		sendStats(tunnel)
 
@@ -2406,11 +2410,6 @@ loop:
 
 // sendStats is a helper for sending session stats to the server.
 func sendStats(tunnel *Tunnel) bool {
-
-	// Tunnel does not have a serverContext when DisableApi is set
-	if tunnel.serverContext == nil {
-		return true
-	}
 
 	// Skip when tunnel is discarded
 	if tunnel.IsDiscarded() {
