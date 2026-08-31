@@ -313,6 +313,10 @@ func (d *RefractionNetworkingDialer) DialContext(
 // LocalProxyRelay must close localConn in order to interrupt blocking
 // I/O calls when the upstream port forward is closed. remoteConn is
 // also closed before returning.
+//
+// Limitation: if one copy is blocked writing localConn while the other is
+// blocked reading it, closing only the remote transport may not promptly stop
+// the relay.
 func LocalProxyRelay(config *Config, proxyType string, localConn, remoteConn net.Conn) {
 
 	closing := int32(0)

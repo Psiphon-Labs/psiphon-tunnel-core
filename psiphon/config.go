@@ -39,6 +39,7 @@ import (
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
@@ -525,6 +526,11 @@ type Config struct {
 	// When provided, this value may be used, pre-connection, to select
 	// performance or circumvention optimization strategies for the given
 	// region.
+	//
+	// When not provided, Commit sets DeviceRegion to a best effort
+	// approximation made from operating system settings. see the deviceregion
+	// package. Host applications with a better signal, as the mobile libraries
+	// have, should continue to provide this value.
 	DeviceRegion string `json:",omitempty"`
 
 	// EmitDiagnosticNotices indicates whether to output notices containing
@@ -1361,6 +1367,7 @@ type Config struct {
 	LightProxyCustomHostNameProbability           *float64 `json:",omitempty"`
 	LightProxyTunnelInactiveThresholdMilliseconds *int     `json:",omitempty"`
 	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
+	LightProxyInactivityTimeoutMilliseconds       *int     `json:",omitempty"`
 
 	TacticsWaitPeriodMilliseconds  *int     `json:",omitempty"`
 	TacticsRetryPeriodMilliseconds *int     `json:",omitempty"`
@@ -1406,7 +1413,7 @@ type Config struct {
 
 	serverEntryIterationMetricsUpdater atomic.Value
 
-	lightProxyClient                    atomic.Value
+	lightProxyClient                    atomic.Pointer[light.Client]
 	lightProxyDialParams                atomic.Value
 	lightProxyTunnelInactiveThreshold   atomic.Int64
 	lightProxyDialTimeout               atomic.Int64
@@ -1684,6 +1691,21 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 	if config.TunnelPoolSize == 0 {
 		config.TunnelPoolSize = TUNNEL_POOL_SIZE
+	}
+
+	// The mobile libraries normally supply DeviceRegion, using signals such as
+	// the mobile network and SIM that are unavailable here. Otherwise,
+	// approximate the region from operating system settings, so that desktop
+	// clients and inproxy proxies report it as well. The value remains empty
+	// when no setting yields a region.
+	//
+	// Limitation: the source is logged as a diagnostic but is not reported, so
+	// the metric does not distinguish a region derived from a locale from one
+	// derived from a SIM.
+	if config.DeviceRegion == "" {
+		detail := deviceregion.GetDetail()
+		config.DeviceRegion = detail.Region
+		NoticeInfo("DeviceRegion: '%s' from '%s'", detail.Region, detail.Source)
 	}
 
 	// Validate config fields.
@@ -2512,9 +2534,17 @@ func (config *Config) SetLightProxy(
 	config.lightProxyLimitDestinationAddresses.Store(limitDestinationAddresses)
 }
 
+func (config *Config) ClearLightProxy() {
+	config.lightProxyClient.Store(nil)
+	config.lightProxyDialParams.Store(&lightDialParameters{})
+	config.lightProxyTunnelInactiveThreshold.Store(0)
+	config.lightProxyDialTimeout.Store(0)
+	limitDestinationAddresses := common.NewStringLookup(nil)
+	config.lightProxyLimitDestinationAddresses.Store(&limitDestinationAddresses)
+}
+
 func (config *Config) GetLightProxyClient() *light.Client {
-	client, _ := config.lightProxyClient.Load().(*light.Client)
-	return client
+	return config.lightProxyClient.Load()
 }
 
 func (config *Config) GetLightProxyDialParameters() *lightDialParameters {
@@ -3686,6 +3716,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.LightProxyDialTimeoutMilliseconds != nil {
 		applyParameters[parameters.LightProxyDialTimeout] = fmt.Sprintf("%dms", *config.LightProxyDialTimeoutMilliseconds)
+	}
+
+	if config.LightProxyInactivityTimeoutMilliseconds != nil {
+		applyParameters[parameters.LightProxyInactivityTimeout] = fmt.Sprintf("%dms", *config.LightProxyInactivityTimeoutMilliseconds)
 	}
 
 	if config.LightProxyPersonalPairingConnectionWorkerPoolSize != 0 {

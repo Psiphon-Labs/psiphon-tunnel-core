@@ -26,6 +26,7 @@ package psiphon
 import (
 	"context"
 	"encoding/json"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -121,7 +122,7 @@ type Controller struct {
 
 	currentNetworkMutex      sync.Mutex
 	currentNetworkCtx        context.Context
-	currentNetworkCancelFunc context.CancelFunc
+	currentNetworkCancelFunc context.CancelCauseFunc
 
 	signalLightProxyTestFetch chan struct{}
 }
@@ -214,7 +215,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// interface changes.
 
 	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
-		context.WithCancel(context.Background())
+		context.WithCancelCause(context.Background())
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
 	// remote server list and upgrade downloads.
@@ -263,6 +264,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 		controller.packetTunnelClient = packetTunnelClient
 		controller.packetTunnelTransport = packetTunnelTransport
 	}
+
+	// As a failsafe, clear any light proxy state stored by a previous
+	// Controller sharing this Config.
+	config.ClearLightProxy()
 
 	if config.EnableLightProxyFallback {
 
@@ -575,7 +580,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	}
 
 	// Cleanup current network context
-	controller.currentNetworkCancelFunc()
+	controller.currentNetworkCancelFunc(nil)
 
 	// All workers -- runTunnels, establishment workers, and auxilliary
 	// workers such as fetch remote server list and untunneled uprade
@@ -648,10 +653,10 @@ func (controller *Controller) NetworkChanged() {
 	controller.currentNetworkMutex.Lock()
 	defer controller.currentNetworkMutex.Unlock()
 
-	controller.currentNetworkCancelFunc()
+	controller.currentNetworkCancelFunc(std_errors.New("network changed"))
 
 	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
-		context.WithCancel(context.Background())
+		context.WithCancelCause(context.Background())
 }
 
 func (controller *Controller) getCurrentNetworkContext() context.Context {

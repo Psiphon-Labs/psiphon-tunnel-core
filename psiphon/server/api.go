@@ -547,6 +547,7 @@ func getProxyProtocolHeaderConfig(
 	if !ok {
 		return nil
 	}
+	customTLV := support.Config.proxyProtocolHeaderCustomTLVs[sponsorID]
 
 	enable := false
 	enableProxyProtocolHeaders, ok := getOptionalBoolStringRequestParam(
@@ -579,6 +580,7 @@ func getProxyProtocolHeaderConfig(
 
 	return &proxyProtocolHeaderConfig{
 		macKey:                     macKey,
+		customTLV:                  customTLV,
 		targetDestinationAddresses: common.NewStringLookup(normalizedTargets),
 	}
 }

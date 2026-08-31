@@ -33,6 +33,25 @@ func generateAEADAdditionalData(h *recordlayer.Header, payloadLen int) []byte {
 	return additionalData[:]
 }
 
+// [Psiphon]
+// Backport of https://github.com/pion/dtls/commit/61762dee8217991882c5eb79856b9e7a73ee349f. In
+// newer pion/dtls, AEAD nonce generation has moved to common code in aead.encrypt. In this older
+// fork, apply the fix to both CCM.Encrypt and GCM.Encrypt via this helper function.
+//
+// As in the upstream fix, nonce generation is changed from random bytes, which is more vulnerable
+// to reuse, to instead follow the scheme recommended in
+// https://www.rfc-editor.org/rfc/rfc9325#name-nonce-reuse-in-tls-12.
+func generateAEADNonce(writeIV []byte, h *recordlayer.Header) []byte {
+	if gcmNonceLength != 12 || ccmNonceLength != 12 {
+		panic("unexpected nonce length")
+	}
+	nonce := make([]byte, 12)
+	copy(nonce, writeIV[:4])
+	seq64 := (uint64(h.Epoch) << 48) | (h.SequenceNumber & 0x0000ffffffffffff)
+	binary.BigEndian.PutUint64(nonce[4:], seq64)
+	return nonce
+}
+
 // examinePadding returns, in constant time, the length of the padding to remove
 // from the end of payload. It also returns a byte which is equal to 255 if the
 // padding was valid and 0 otherwise. See RFC 2246, Section 6.2.3.2.
