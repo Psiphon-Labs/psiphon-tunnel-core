@@ -102,6 +102,7 @@ type ProxyConfig struct {
 	SplitUpstreamInterfaceName                    string              `json:",omitempty"`
 	SplitDownstreamInterfaceName                  string              `json:",omitempty"`
 	ProxyProtocolHeaderMACKeys                    map[string]string   `json:",omitempty"`
+	ProxyProtocolHeaderCustomTLVs                 map[string]string   `json:",omitempty"`
 	ProxyProtocolHeaderTargetDestinationAddresses map[string][]string `json:",omitempty"`
 	ProxyLimits                                   *common.ProxyLimits `json:"-"`
 	ProxyLimitKind                                ProxyLimitKind      `json:"-"`
@@ -316,6 +317,7 @@ func NewProxy(
 
 	proxyProtocolHeaderConfigs, err := prepareProxyProtocolHeaderConfigs(
 		config.ProxyProtocolHeaderMACKeys,
+		config.ProxyProtocolHeaderCustomTLVs,
 		config.ProxyProtocolHeaderTargetDestinationAddresses)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1137,6 +1139,7 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 		wireHeader, err := proxyheader.MakeProxyProtocolHeader(
 			macKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
 			macKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
+			proxyProtocolHeaderConfig.customTLV,
 			sourceTCPAddr.IP,
 			upstreamTCPAddr.IP,
 			upstreamTCPAddr.Port)

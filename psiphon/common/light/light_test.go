@@ -286,6 +286,8 @@ func runTestLightProxy(
 	var proxyProtocolHeaderKeyID []byte
 	var proxyProtocolHeaderKey []byte
 	var proxyProtocolHeaderMACKeys map[string]string
+	var proxyProtocolHeaderCustomTLV []byte
+	var proxyProtocolHeaderCustomTLVs map[string]string
 	var proxyProtocolHeaderTargetDestinationAddresses map[string][]string
 
 	if addProxyHeader {
@@ -296,6 +298,11 @@ func runTestLightProxy(
 			proxyProtocolHeaderKey...)
 		proxyProtocolHeaderMACKeys = map[string]string{
 			testSponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
+		proxyProtocolHeaderCustomTLV = append(
+			[]byte{byte(proxyproto.PP2_TYPE_MAX_CUSTOM)}, prng.Bytes(16)...)
+		proxyProtocolHeaderCustomTLVs = map[string]string{
+			testSponsorID: base64.StdEncoding.EncodeToString(
+				proxyProtocolHeaderCustomTLV)}
 		proxyProtocolHeaderTargetDestinationAddresses = map[string][]string{
 			testSponsorID: {echoAddress}}
 
@@ -334,6 +341,17 @@ func runTestLightProxy(
 					destinationPort != echoPort {
 
 					return errors.TraceNew("unexpected PROXY header value")
+				}
+
+				tlvs, err := header.TLVs()
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if len(tlvs) != 2 ||
+					tlvs[0].Type != proxyproto.PP2Type(proxyProtocolHeaderCustomTLV[0]) ||
+					!bytes.Equal(tlvs[0].Value, proxyProtocolHeaderCustomTLV[1:]) {
+
+					return errors.TraceNew("unexpected PROXY header custom TLV")
 				}
 				proxyProtocolHeaderCount.Add(1)
 				return nil
@@ -395,6 +413,7 @@ func runTestLightProxy(
 		0,
 		[]string{echoAddress},
 		proxyProtocolHeaderMACKeys,
+		proxyProtocolHeaderCustomTLVs,
 		proxyProtocolHeaderTargetDestinationAddresses,
 		echoListener.Addr().String())
 	if err != nil {

@@ -271,6 +271,7 @@ func main() {
 				[]string(allowedDestinations),
 				nil,
 				nil,
+				nil,
 				passthroughAddress)
 			if err != nil {
 				return errors.Trace(err)
