@@ -1328,6 +1328,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	var proxyProtocolHeaderMACKey []byte
+	var proxyProtocolHeaderCustomTLV []byte
 	if runConfig.doProxyProtocolHeader {
 		if runConfig.doDefaultSponsorID {
 			t.Fatalf("invalid test configuration")
@@ -1337,6 +1338,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			keyID, prng.Bytes(proxyheader.ProxyProtocolHeaderMACKeySize)...)
 		serverConfig["ProxyProtocolHeaderMACKeys"] = map[string]string{
 			sponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
+		proxyProtocolHeaderCustomTLV = append(
+			[]byte{byte(proxyproto.PP2_TYPE_MAX_CUSTOM)}, prng.Bytes(16)...)
+		serverConfig["ProxyProtocolHeaderCustomTLVs"] = map[string]string{
+			sponsorID: base64.StdEncoding.EncodeToString(
+				proxyProtocolHeaderCustomTLV)}
 	} else if runConfig.doReplaceProxyProtocolHeader {
 		t.Fatalf("invalid test configuration")
 	}
@@ -2360,7 +2366,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.doTunneledWebRequest {
 
 		// Check any configured PROXY protocol header, including verifying the
-		// MAC as well as inspecting the expected header address values. In
+		// MAC and inspecting the expected address and custom TLV values. In
 		// the doReplaceProxyProtocolHeader case, this also checks that the
 		// replacement succeeds.
 
@@ -2382,6 +2388,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					strconv.Itoa(destinationPort) != mockWebServerPort {
 
 					return errors.TraceNew("unexpected PROXY header value")
+				}
+
+				tlvs, err := header.TLVs()
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if len(tlvs) != 2 ||
+					tlvs[0].Type != proxyproto.PP2Type(proxyProtocolHeaderCustomTLV[0]) ||
+					!bytes.Equal(tlvs[0].Value, proxyProtocolHeaderCustomTLV[1:]) {
+
+					return errors.TraceNew("unexpected PROXY header custom TLV")
 				}
 				validProxyProtocolHeader.Store(true)
 				return nil
@@ -5953,6 +5970,7 @@ func startLightProxy(
 		0,
 		0,
 		[]string{allowedDestination},
+		nil,
 		nil,
 		nil,
 		allowedDestination)

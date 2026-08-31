@@ -66,8 +66,9 @@ import (
 // empty, any destination is allowed. This list is not distributed in the proxy
 // entry.
 //
-// proxyProtocolHeaderMACKeys/proxyProtocolHeaderTargetDestinationAddresses
-// enable adding PROXY protocol headers to upstream connections.
+// proxyProtocolHeaderMACKeys/proxyProtocolHeaderCustomTLVs/
+// proxyProtocolHeaderTargetDestinationAddresses enable adding PROXY protocol
+// headers to upstream connections. All values are selected by sponsor ID.
 //
 // passthroughAddress is a psiphon-tls PassthroughAddress and is required.
 func Generate(
@@ -87,6 +88,7 @@ func Generate(
 	proxyEntryTTL time.Duration,
 	allowedDestinations []string,
 	proxyProtocolHeaderMACKeys map[string]string,
+	proxyProtocolHeaderCustomTLVs map[string]string,
 	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
 	passthroughAddress string) (*ProxyConfig, []byte, error) {
 
@@ -158,6 +160,7 @@ func Generate(
 
 	_, err = prepareProxyProtocolHeaderConfigs(
 		proxyProtocolHeaderMACKeys,
+		proxyProtocolHeaderCustomTLVs,
 		proxyProtocolHeaderTargetDestinationAddresses)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
@@ -180,17 +183,18 @@ func Generate(
 	}
 
 	config := &ProxyConfig{
-		Protocol:                   LIGHT_PROTOCOL_TLS,
-		ProviderID:                 providerID,
-		ListenAddresses:            append([]string(nil), listenAddresses...),
-		DialAddressIPv4:            dialAddressIPv4,
-		DialAddressIPv6:            dialAddressIPv6,
-		ObfuscationKey:             obfuscationKey,
-		TLSCertificate:             cert,
-		TLSPrivateKey:              privateKey,
-		PassthroughAddress:         passthroughAddress,
-		AllowedDestinations:        allowedDestinations,
-		ProxyProtocolHeaderMACKeys: proxyProtocolHeaderMACKeys,
+		Protocol:                      LIGHT_PROTOCOL_TLS,
+		ProviderID:                    providerID,
+		ListenAddresses:               append([]string(nil), listenAddresses...),
+		DialAddressIPv4:               dialAddressIPv4,
+		DialAddressIPv6:               dialAddressIPv6,
+		ObfuscationKey:                obfuscationKey,
+		TLSCertificate:                cert,
+		TLSPrivateKey:                 privateKey,
+		PassthroughAddress:            passthroughAddress,
+		AllowedDestinations:           allowedDestinations,
+		ProxyProtocolHeaderMACKeys:    proxyProtocolHeaderMACKeys,
+		ProxyProtocolHeaderCustomTLVs: proxyProtocolHeaderCustomTLVs,
 		ProxyProtocolHeaderTargetDestinationAddresses: proxyProtocolHeaderTargetDestinationAddresses,
 	}
 

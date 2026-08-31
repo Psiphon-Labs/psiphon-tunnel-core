@@ -2254,6 +2254,7 @@ type handshakeState struct {
 
 type proxyProtocolHeaderConfig struct {
 	macKey                     []byte
+	customTLV                  []byte
 	targetDestinationAddresses common.StringLookup
 }
 
@@ -5760,9 +5761,11 @@ func (sshClient *sshClient) handleTCPChannel(
 		// proxyheader.AddOrReplaceProxyProtocolHeader.
 
 		macKey := sshClient.handshakeState.proxyProtocolHeaderConfig.macKey
+		customTLV := sshClient.handshakeState.proxyProtocolHeaderConfig.customTLV
 		wireHeader, err := proxyheader.MakeProxyProtocolHeader(
 			macKey[:proxyheader.ProxyProtocolHeaderKeyIDSize],
 			macKey[proxyheader.ProxyProtocolHeaderKeyIDSize:],
+			customTLV,
 			net.ParseIP(sshClient.clientIP),
 			IP,
 			portToConnect)
