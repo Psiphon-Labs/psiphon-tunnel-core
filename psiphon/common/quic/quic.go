@@ -1366,8 +1366,7 @@ func (conn *muxPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 
 		// If b is too short, the packet is truncated. This won't happen as long as
 		// muxPacketBufferSize matches quic-go.MaxReceivePacketSize.
-		copy(b, p.data[0:p.size])
-		n := p.size
+		n := copy(b, p.data[0:p.size])
 		addr := p.addr
 
 		// Clear and replace packet buffer.

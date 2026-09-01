@@ -1409,6 +1409,10 @@ func (conn *webRTCConn) IsClosed() bool {
 
 func (conn *webRTCConn) Read(p []byte) (int, error) {
 
+	if len(p) == 0 {
+		return 0, nil
+	}
+
 	if !conn.config.UseMediaStreams {
 		// Data channel mode.
 		n, err := conn.readDataChannel(p)
