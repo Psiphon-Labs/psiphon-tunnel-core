@@ -76,17 +76,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// create a server
 	//
 
-	serverIPv4Address, serverIPv6Address, err := common.GetRoutableInterfaceIPAddresses()
-	if err != nil {
-		t.Fatalf("error getting server IP address: %s", err)
-	}
-	serverIPAddress := ""
-	if serverIPv4Address != nil {
-		serverIPAddress = serverIPv4Address.String()
-	} else {
-		serverIPAddress = serverIPv6Address.String()
-	}
-
+	serverIPAddress := "127.0.0.1"
 	serverConfigJSON, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
 			ServerIPAddress:     serverIPAddress,
