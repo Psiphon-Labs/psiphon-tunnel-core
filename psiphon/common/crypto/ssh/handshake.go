@@ -1105,8 +1105,13 @@ func (t *handshakeTransport) sendKexInit() error {
 
 	// Prefer an obfuscated SSH-compatible cipher.
 	if t.config.ObfuscatedSSHMode && !isServer && !testLegacyClient {
-		ciphers := preferCommon(
-			msg.CiphersClientServer,
+		ciphers := msg.CiphersClientServer
+		if t.config.KEXPRNGSeed == nil {
+			// Don't clobber t.config.Ciphers.
+			ciphers = slices.Clone(ciphers)
+		}
+		ciphers = preferCommon(
+			ciphers,
 			defaultCiphers,
 			obfuscatedSSHCompatibleCiphers)
 		msg.CiphersClientServer = ciphers

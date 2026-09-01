@@ -2898,8 +2898,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.lengthStructureCheck {
 
-		serverFound := findLengthPrefixedStructure(t, inspectedFlows[0].streamDump.Bytes(), 4)
-		clientFound := findLengthPrefixedStructure(t, inspectedFlows[1].streamDump.Bytes(), 4)
+		serverStream := inspectedFlows[0].streamDump.Bytes()
+		clientStream := inspectedFlows[1].streamDump.Bytes()
+
+		// Check that this is the main established tunnel connection rather
+		// than other potential shorter, non-tunnel connections through the
+		// UpstreamProxyURL, such as tactics fetches.
+		minimumInspectedTunnelBytes := len(mockWebServerExpectedResponse)
+		if len(serverStream) < minimumInspectedTunnelBytes {
+			t.Fatalf(
+				"inspected server flow is too short to be the tunnel: got %d bytes, want at least %d",
+				len(serverStream),
+				minimumInspectedTunnelBytes)
+		}
+
+		serverFound := findLengthPrefixedStructure(t, serverStream, 4)
+		clientFound := findLengthPrefixedStructure(t, clientStream, 4)
 		if serverFound || clientFound {
 			t.Fatalf(
 				"unexpected length-prefixed structure: server=%v client=%v", serverFound, clientFound)

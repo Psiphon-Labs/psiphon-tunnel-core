@@ -382,7 +382,7 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 
 	// Expect to read either "ICY" or "HTT".
 
-	n, err := conn.Conn.Read(b[:3])
+	n, err := io.ReadFull(conn.Conn, b[:3])
 	if err != nil {
 		return n, err
 	}
