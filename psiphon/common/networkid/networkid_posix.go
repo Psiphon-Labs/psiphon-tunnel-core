@@ -1,4 +1,4 @@
-//go:build (darwin && cgo) || (linux && !android)
+//go:build (darwin && !ios && cgo) || (linux && !android)
 
 /*
  * Copyright (c) 2026, Psiphon Inc.
@@ -35,9 +35,6 @@ func Enabled() bool {
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for
 // details. interfaceName selects the network to describe; when it is empty, the
 // interface carrying the default route is used.
-//
-// This serves iOS as well, as the ios target implies darwin, where it is a
-// fallback for when the native network ID implementation is unavailable.
 func Get(interfaceName string) (string, error) {
 
 	iface, err := getInterface(interfaceName)

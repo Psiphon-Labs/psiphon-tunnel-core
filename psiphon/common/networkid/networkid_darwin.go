@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && !ios && cgo
 
 /*
  * Copyright (c) 2026, Psiphon Inc.
@@ -20,6 +20,13 @@
  */
 
 package networkid
+
+// There is deliberately no darwin && !cgo implementation. Distinguishing Wi-Fi
+// from wired requires the SIOCGIFMEDIA ioctl, and no libc-routed ioctl in
+// golang.org/x/sys/unix can carry struct ifmediareq. The only pure-Go path is
+// its generic Syscall, which makes a direct SVC kernel trap. A pure-Go build
+// could still name match VPN interfaces, but would report UNKNOWN for every
+// physical network, so darwin without cgo falls back to networkid_disabled.go.
 
 /*
 #include <errno.h>

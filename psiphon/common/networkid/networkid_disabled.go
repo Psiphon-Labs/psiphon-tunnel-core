@@ -1,4 +1,4 @@
-//go:build !windows && (!darwin || !cgo) && (!linux || android)
+//go:build !windows && (!darwin || ios || !cgo) && (!linux || android)
 
 /*
  * Copyright (c) 2024, Psiphon Inc.

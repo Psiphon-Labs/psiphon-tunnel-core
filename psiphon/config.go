@@ -2122,8 +2122,11 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if networkIDGetter == nil {
 		if networkid.Enabled() {
 			// Limitation: only this getter describes the split-interface
-			// downstream network. A NetworkIDGetter supplied by the host
-			// application takes no interface and describes the default route.
+			// downstream network. NetworkIDGetter takes no interface name, so a
+			// host application supplying one such as the Android and iOS libraries,
+			// describes the default route instead. Adding split-interface
+			// mode to a mobile host will require extending that interface and
+			// its native implementations.
 			networkIDGetter = newCommonNetworkIDGetter(
 				config.splitInterfaceDownstreamInterfaceName())
 		} else {
