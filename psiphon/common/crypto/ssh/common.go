@@ -553,9 +553,9 @@ type Config struct {
 
 	// [Psiphon]
 
-	// NoEncryptThenMACHash is used to disable Encrypt-then-MAC hash
-	// algorithms.
-	NoEncryptThenMACHash bool
+	// ObfuscatedSSHMode configures algorithm selection for compatibility
+	// with obfuscated SSH.
+	ObfuscatedSSHMode bool
 
 	// KEXPRNGSeed is used for KEX randomization and replay.
 	KEXPRNGSeed *prng.Seed

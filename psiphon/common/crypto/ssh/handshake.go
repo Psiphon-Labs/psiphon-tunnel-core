@@ -601,8 +601,9 @@ func (t *handshakeTransport) sendKexInit() error {
 	// its KEX using the specified seed; deterministically adjust own
 	// randomized KEX to ensure negotiation succeeds.
 	//
-	// When NoEncryptThenMACHash is specified, do not use Encrypt-then-MAC
-	// hash algorithms.
+	// When ObfuscatedSSHMode is specified, adjust algorithm selection to
+	// avoid transmitting packet lengths in plaintext while remaining
+	// compatible with older clients.
 	//
 	// Limitations:
 	//
@@ -627,33 +628,76 @@ func (t *handshakeTransport) sendKexInit() error {
 		return true
 	}
 
+	toFront := func(list []string, item string) []string {
+		for index, existingItem := range list {
+			if existingItem == item {
+				list[0], list[index] = list[index], list[0]
+				return list
+			}
+		}
+		return append([]string{item}, list...)
+	}
+
+	firstInList := func(list, allowed []string) (string, bool) {
+		for _, item := range list {
+			if common.Contains(allowed, item) {
+				return item, true
+			}
+		}
+		return "", false
+	}
+
+	preferCommon := func(clientList, serverList, preferredList []string) []string {
+		for _, item := range clientList {
+			if common.Contains(preferredList, item) && common.Contains(serverList, item) {
+				return toFront(clientList, item)
+			}
+		}
+		if item, ok := firstInList(serverList, preferredList); ok {
+			return toFront(clientList, item)
+		}
+		return clientList
+	}
+
+	// KEX prediction via PeerKEXPRNGSeed does not support ObfuscatedSSHMode
+	// algorithm adjustments.
+	if t.config.ObfuscatedSSHMode && t.config.PeerKEXPRNGSeed != nil {
+		return errors.New("ssh: ObfuscatedSSHMode is incompatible with PeerKEXPRNGSeed")
+	}
+
 	// Psiphon transforms assume that default algorithms are configured.
-	if (t.config.NoEncryptThenMACHash || t.config.KEXPRNGSeed != nil) &&
+	if (t.config.ObfuscatedSSHMode || t.config.KEXPRNGSeed != nil) &&
 		(!equal(t.config.KeyExchanges, defaultKexAlgos) ||
 			!equal(t.config.Ciphers, defaultCiphers) ||
 			!equal(t.config.MACs, defaultMACs)) {
 		return errors.New("ssh: custom algorithm preferences not supported")
 	}
 
-	// This is the list of supported non-Encrypt-then-MAC algorithms from
-	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3ef11effe6acd9
-	// 2c3aefd140ee09c42a1f15630b/psiphon/common/crypto/ssh/common.go#L60
-	//
-	// With Encrypt-then-MAC hash algorithms, packet length is transmitted in
-	// plaintext, which aids in traffic analysis.
-	//
-	// When using obfuscated SSH, where only the initial, unencrypted
-	// packets are obfuscated, NoEncryptThenMACHash should be set.
-	noEncryptThenMACs := []string{
+	// Obfuscated SSH compatibility requires MAC algorithms with encrypted
+	// packet lengths.
+	obfuscatedSSHCompatibleMACs := []string{
 		HMACSHA256,
 		HMACSHA512,
 		HMACSHA1,
 		InsecureHMACSHA196,
 	}
 
-	if t.config.NoEncryptThenMACHash {
-		msg.MACsClientServer = noEncryptThenMACs
-		msg.MACsServerClient = noEncryptThenMACs
+	// Obfuscated SSH compatibility requires ciphers with encrypted packet
+	// lengths.
+	obfuscatedSSHCompatibleCiphers := []string{
+		CipherChaCha20Poly1305,
+		CipherAES128CTR,
+		CipherAES192CTR,
+		CipherAES256CTR,
+	}
+
+	// Do not restrict the server to this list: older clients may randomize
+	// their cipher offer down to only AES-GCM. Upgraded clients ensure that
+	// an obfuscated SSH-compatible cipher is preferred.
+
+	if t.config.ObfuscatedSSHMode {
+		msg.MACsClientServer = obfuscatedSSHCompatibleMACs
+		msg.MACsServerClient = obfuscatedSSHCompatibleMACs
 	}
 
 	if t.config.KEXPRNGSeed != nil {
@@ -731,25 +775,6 @@ func (t *handshakeTransport) sendKexInit() error {
 			return newList
 		}
 
-		toFront := func(list []string, item string) []string {
-			for index, existingItem := range list {
-				if existingItem == item {
-					list[0], list[index] = list[index], list[0]
-					return list
-				}
-			}
-			return append([]string{item}, list...)
-		}
-
-		firstInList := func(list, allowed []string) (string, bool) {
-			for _, item := range list {
-				if common.Contains(allowed, item) {
-					return item, true
-				}
-			}
-			return "", false
-		}
-
 		ensureHasOne := func(list, requiredList []string) []string {
 			if _, ok := firstInList(list, requiredList); ok {
 				return list
@@ -758,18 +783,6 @@ func (t *handshakeTransport) sendKexInit() error {
 				return toFront(list, requiredList[0])
 			}
 			return list
-		}
-
-		preferCommon := func(clientList, serverList, preferredList []string) []string {
-			for _, item := range clientList {
-				if common.Contains(preferredList, item) && common.Contains(serverList, item) {
-					return toFront(clientList, item)
-				}
-			}
-			if item, ok := firstInList(serverList, preferredList); ok {
-				return toFront(clientList, item)
-			}
-			return clientList
 		}
 
 		firstKexAlgo := func(kexAlgos []string) (string, bool) {
@@ -826,13 +839,13 @@ func (t *handshakeTransport) sendKexInit() error {
 			HMACSHA1,
 			InsecureHMACSHA196,
 		}
-		legacyServerNoEncryptThenMACs := []string{
+		legacyServerObfuscatedSSHCompatibleMACs := []string{
 			HMACSHA256,
 			HMACSHA1,
 			InsecureHMACSHA196,
 		}
-		if t.config.NoEncryptThenMACHash {
-			legacyServerMACs = legacyServerNoEncryptThenMACs
+		if t.config.ObfuscatedSSHMode {
+			legacyServerMACs = legacyServerObfuscatedSSHCompatibleMACs
 		}
 
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
@@ -849,8 +862,8 @@ func (t *handshakeTransport) sendKexInit() error {
 			startingKexAlgos = legacyServerKexAlgos
 			startingCiphers = legacyServerCiphers
 			startingMACs = legacyServerMACs
-			if t.config.NoEncryptThenMACHash {
-				startingMACs = legacyServerNoEncryptThenMACs
+			if t.config.ObfuscatedSSHMode {
+				startingMACs = legacyServerObfuscatedSSHCompatibleMACs
 			}
 		}
 
@@ -909,11 +922,11 @@ func (t *handshakeTransport) sendKexInit() error {
 			HMACSHA512ETM,
 			HMACSHA512,
 		}
-		newServerNoEncryptThenMACs := []string{
+		newServerObfuscatedSSHCompatibleMACs := []string{
 			HMACSHA512,
 		}
-		if t.config.NoEncryptThenMACHash {
-			newServerMACs = newServerNoEncryptThenMACs
+		if t.config.ObfuscatedSSHMode {
+			newServerMACs = newServerObfuscatedSSHCompatibleMACs
 		}
 
 		nonSHA1KexAlgos := []string{
@@ -954,9 +967,8 @@ func (t *handshakeTransport) sendKexInit() error {
 			// would fail. This assumes that PeerKEXPRNGSeed remains static
 			// (in Psiphon, the peer is the server and PeerKEXPRNGSeed is
 			// derived from the server entry); and that the PRNG is invoked
-			// in the exact same order on the server (i.e., the code block
-			// immediately above is what the peer runs); and that the server
-			// sets NoEncryptThenMACHash in the same cases.
+			// in the exact same order on the server (the code block immediately
+			// above is what the peer runs).
 			//
 			// Note that only the client sends "ext-info-c"
 			// and "kex-strict-c-v00@openssh.com" and only the server
@@ -968,9 +980,6 @@ func (t *handshakeTransport) sendKexInit() error {
 			startingKexAlgos := legacyServerKexAlgos
 			startingCiphers := legacyServerCiphers
 			startingMACs := legacyServerMACs
-			if t.config.NoEncryptThenMACHash {
-				startingMACs = legacyServerNoEncryptThenMACs
-			}
 
 			// The server populates msg.ServerHostKeyAlgos based on the host
 			// key type, which, for Psiphon servers, is "ssh-rsa", so
@@ -1063,8 +1072,8 @@ func (t *handshakeTransport) sendKexInit() error {
 			// default algorithm lists to avoid SHA-1 algorithm negotiation.
 
 			serverMACs := defaultMACs
-			if t.config.NoEncryptThenMACHash {
-				serverMACs = noEncryptThenMACs
+			if t.config.ObfuscatedSSHMode {
+				serverMACs = obfuscatedSSHCompatibleMACs
 			}
 
 			kexAlgos = preferCommon(kexAlgos, defaultKexAlgos, nonSHA1KexAlgos)
@@ -1092,6 +1101,16 @@ func (t *handshakeTransport) sendKexInit() error {
 			msg.CompressionClientServer = compressions
 			msg.CompressionServerClient = compressions
 		}
+	}
+
+	// Prefer an obfuscated SSH-compatible cipher.
+	if t.config.ObfuscatedSSHMode && !isServer && !testLegacyClient {
+		ciphers := preferCommon(
+			msg.CiphersClientServer,
+			defaultCiphers,
+			obfuscatedSSHCompatibleCiphers)
+		msg.CiphersClientServer = ciphers
+		msg.CiphersServerClient = ciphers
 	}
 
 	packet := Marshal(msg)
@@ -1243,6 +1262,19 @@ func (t *handshakeTransport) enterKeyExchange(otherInitPacket []byte) error {
 	}
 
 	// [Psiphon]
+	// Fail the dial if AES-GCM is selected in obfuscated SSH mode.
+	// TODO: synchronize with obfuscatedSSHCompatibleCiphers.
+	if isClient && !testLegacyClient && t.config.ObfuscatedSSHMode &&
+		(t.algorithms.Read.Cipher == CipherAES128GCM ||
+			t.algorithms.Read.Cipher == CipherAES256GCM ||
+			t.algorithms.Write.Cipher == CipherAES128GCM ||
+			t.algorithms.Write.Cipher == CipherAES256GCM) {
+		return fmt.Errorf(
+			"ssh: unexpected AES-GCM cipher negotiated: read_cipher=%q write_cipher=%q",
+			t.algorithms.Read.Cipher,
+			t.algorithms.Write.Cipher)
+	}
+
 	// Fail the dial if SHA-1 is used unexpectedly.
 	isSHA1 := func(s string) bool {
 		return strings.Contains(s, "sha1") ||
