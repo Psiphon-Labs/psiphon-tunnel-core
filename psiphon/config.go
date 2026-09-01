@@ -1051,13 +1051,10 @@ type Config struct {
 	MeekPayloadPaddingMaxSize           *int     `json:",omitempty"`
 	MeekPayloadPaddingOmitProbability   *float64 `json:",omitempty"`
 
-	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
-	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
-	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
-	// key algorithm.
-	ObfuscatedSSHAlgorithms []string `json:",omitempty"`
-	ObfuscatedSSHMinPadding *int     `json:",omitempty"`
-	ObfuscatedSSHMaxPadding *int     `json:",omitempty"`
+	// ObfuscatedSSHMinPadding and ObfuscatedSSHMaxPadding are for testing
+	// purposes.
+	ObfuscatedSSHMinPadding *int `json:",omitempty"`
+	ObfuscatedSSHMaxPadding *int `json:",omitempty"`
 
 	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
 	// testing purposes.
@@ -1769,12 +1766,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.FeedbackEncryptionPublicKey == "" {
 			return errors.TraceNew("missing FeedbackEncryptionPublicKey")
 		}
-	}
-
-	if config.ObfuscatedSSHAlgorithms != nil &&
-		len(config.ObfuscatedSSHAlgorithms) != 4 {
-		// TODO: validate each algorithm?
-		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
 	splitInterfaceMode := config.InproxyProxySplitUpstreamInterfaceName != "" ||
