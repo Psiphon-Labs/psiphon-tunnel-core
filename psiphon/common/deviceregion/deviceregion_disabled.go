@@ -1,4 +1,4 @@
-//go:build !windows && !(darwin && cgo) && !ios && !android
+//go:build ios || android
 
 /*
  * Copyright (c) 2026, Psiphon Inc.
@@ -21,11 +21,24 @@
 
 package deviceregion
 
-// platformSignals serves Linux, Android, and the BSDs, and Darwin when cgo is
-// disabled.
-func platformSignals() rawSignals {
-	return rawSignals{
-		TimezoneID: posixTimezoneID(),
-		LocaleName: posixLocaleName(),
-	}
+// iOS and Android obtain the device region from getDeviceRegion in their
+// respective mobile libraries, so the detection implemented in this package,
+// along with its time zone tables, is left out of those builds. Get returns an
+// empty region, which callers already handle: see deviceregion.go, which
+// declares the API reproduced here and must be kept in agreement with it.
+
+type Source string
+
+type Detail struct {
+	Region     string
+	Source     Source
+	Candidates map[Source]string
+}
+
+func Get() string {
+	return ""
+}
+
+func GetDetail() Detail {
+	return Detail{}
 }
