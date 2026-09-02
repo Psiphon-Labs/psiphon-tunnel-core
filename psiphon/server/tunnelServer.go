@@ -2723,14 +2723,15 @@ func (sshClient *sshClient) run(
 		var err error
 
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// With Encrypt-then-MAC hash algorithms, packet length is
-			// transmitted in plaintext, which aids in traffic analysis;
-			// clients may still send Encrypt-then-MAC algorithms in their
-			// KEX_INIT message, but do not select these algorithms.
+			// Ensure SSH algorithm selection conforms to the obfuscated SSH
+			// expectation that everything after the obfuscated KEX is fully
+			// random. Full compliance depends on clients with the latest
+			// ObfuscatedSSHMode logic; for legacy client compatibility, the
+			// server allows non-conforming selections.
 			//
 			// The exception is TUNNEL_PROTOCOL_SSH, which is intended to appear
 			// like SSH on the wire.
-			sshServerConfig.NoEncryptThenMACHash = true
+			sshServerConfig.ObfuscatedSSHMode = true
 
 		} else {
 			// For TUNNEL_PROTOCOL_SSH only, randomize KEX.

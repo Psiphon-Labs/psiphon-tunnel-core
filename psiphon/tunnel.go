@@ -1186,20 +1186,14 @@ func dialTunnel(
 	sshClientConfig.PacketTunnelChannelWindowSize = sshPacketTunnelChannelWindowSize
 
 	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
-		if config.ObfuscatedSSHAlgorithms != nil {
-			sshClientConfig.KeyExchanges = []string{config.ObfuscatedSSHAlgorithms[0]}
-			sshClientConfig.Ciphers = []string{config.ObfuscatedSSHAlgorithms[1]}
-			sshClientConfig.MACs = []string{config.ObfuscatedSSHAlgorithms[2]}
-			sshClientConfig.HostKeyAlgorithms = []string{config.ObfuscatedSSHAlgorithms[3]}
-
-		} else {
-			// With Encrypt-then-MAC hash algorithms, packet length is
-			// transmitted in plaintext, which aids in traffic analysis.
-			//
-			// TUNNEL_PROTOCOL_SSH is excepted since its KEX appears in plaintext,
-			// and the protocol is intended to look like SSH on the wire.
-			sshClientConfig.NoEncryptThenMACHash = true
-		}
+		// Ensure SSH algorithm selection conforms to the obfuscated SSH
+		// expectation that everything after the obfuscated KEX is fully
+		// random.
+		//
+		// TUNNEL_PROTOCOL_SSH is excepted since its KEX appears in
+		// plaintext, and the protocol is intended to look like SSH on the
+		// wire.
+		sshClientConfig.ObfuscatedSSHMode = true
 	} else {
 		// For TUNNEL_PROTOCOL_SSH only, the server is expected to randomize
 		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation

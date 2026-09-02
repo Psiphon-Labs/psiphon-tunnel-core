@@ -852,6 +852,20 @@ func runTestInproxy(doMustUpgrade bool) error {
 				case <-testCtx.Done():
 				}
 
+				// Unreliable data channels must continue framing every
+				// message after traffic shaping ends.
+
+				if !isTCP && !webRTCCoordinator.UseMediaStreams() {
+					conn.webRTCConn.writeMutex.Lock()
+					paddingHeadersDone := conn.webRTCConn.trafficShapingDone
+					conn.webRTCConn.writeMutex.Unlock()
+
+					if paddingHeadersDone {
+						return errors.TraceNew(
+							"unreliable data channel stopped sending padding headers")
+					}
+				}
+
 				fmt.Printf("[%s][%s] closing\n",
 					time.Now().UTC().Format(time.RFC3339), name)
 
@@ -1049,6 +1063,12 @@ func runTestInproxy(doMustUpgrade bool) error {
 			isMobile, useMediaStreams)
 		if err != nil {
 			return errors.Trace(err)
+		}
+
+		// Exercise unreliable data channel framing both with and without
+		// configured traffic shaping.
+		if !isTCP && !useMediaStreams && !isPersonalClient {
+			webRTCCoordinator.trafficShapingParameters = nil
 		}
 
 		clientsGroup.Go(

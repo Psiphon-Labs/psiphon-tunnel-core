@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	std_errors "errors"
@@ -192,6 +193,7 @@ func TestOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -206,6 +208,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			forceFragmenting:     true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -221,6 +224,7 @@ func TestPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -237,6 +241,7 @@ func TestFragmentedPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -875,6 +880,7 @@ type runServerConfig struct {
 	doChangeDestBytesConfig      bool
 	doLogHostProvider            bool
 	inspectFlows                 bool
+	lengthStructureCheck         bool
 	doSteeringIP                 bool
 	doTargetBrokerSpecs          bool
 	useLegacyAPIEncoding         bool
@@ -1534,7 +1540,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// run flow inspector if requested
 	var flowInspectorProxy *flowInspectorProxy
-	if runConfig.inspectFlows {
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
 		flowInspectorProxy, err = newFlowInspectorProxy()
 		if err != nil {
 			t.Fatalf("error starting flow inspector: %s", err)
@@ -1793,7 +1799,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
 	clientConfig.NetworkConnectivityChecker = &networkConnectivityChecker{}
 
-	if runConfig.inspectFlows {
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
 		trueVal := true
 		clientConfig.UpstreamProxyURL = fmt.Sprintf("socks5://%s", flowInspectorProxy.listener.Addr())
 		clientConfig.UpstreamProxyAllowAllServerEntrySources = &trueVal
@@ -2780,12 +2786,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 
+	var inspectedFlows []*flows
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
+		inspectedFlows = <-flowInspectorProxy.ch
+	}
+
 	// Inspect OSSH prefix flows, if applicable.
 	if runConfig.inspectFlows && runConfig.applyPrefix && protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
 
-		flows := <-flowInspectorProxy.ch
-		serverFlows := flows[0]
-		clientFlows := flows[1]
+		serverFlows := inspectedFlows[0]
+		clientFlows := inspectedFlows[1]
 
 		expectedClientPrefix := bytes.Repeat([]byte{0x00}, 200)
 		expectedServerPrefix := bytes.Repeat([]byte{0x01}, 200)
@@ -2832,6 +2842,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				t.Fatalf("server write delay after prefix too high: %f ms",
 					serverFlows.flows[1].timeDelta.Seconds()*1e3)
 			}
+		}
+	}
+
+	if runConfig.lengthStructureCheck {
+
+		serverStream := inspectedFlows[0].streamDump.Bytes()
+		clientStream := inspectedFlows[1].streamDump.Bytes()
+
+		// Check that this is the main established tunnel connection rather
+		// than other potential shorter, non-tunnel connections through the
+		// UpstreamProxyURL, such as tactics fetches.
+		minimumInspectedTunnelBytes := len(mockWebServerExpectedResponse)
+		if len(serverStream) < minimumInspectedTunnelBytes {
+			t.Fatalf(
+				"inspected server flow is too short to be the tunnel: got %d bytes, want at least %d",
+				len(serverStream),
+				minimumInspectedTunnelBytes)
+		}
+
+		serverFound := findLengthPrefixedStructure(t, serverStream, 4)
+		clientFound := findLengthPrefixedStructure(t, clientStream, 4)
+		if serverFound || clientFound {
+			t.Fatalf(
+				"unexpected length-prefixed structure: server=%v client=%v", serverFound, clientFound)
 		}
 	}
 
@@ -5588,6 +5622,56 @@ func testSampleInUniformRange[V Number](sample, a, b, stddev V) bool {
 	lower := math.Abs(float64(sample-a) / float64(stddev))
 	higher := math.Abs(float64(sample-b) / float64(stddev))
 	return lower <= 2.0 || higher <= 2.0
+}
+
+func findLengthPrefixedStructure(t *testing.T, stream []byte, minimumRecords int) bool {
+	t.Helper()
+
+	const (
+		maximumRecordLength = 256 * 1024
+		recordAlignment     = 8
+	)
+
+	// This test covers cipher/hash constructs with plaintext 4-byte length
+	// headers, block sizes that are a multiple of 8, and a selection of
+	// trailing values, typically authentication tags.
+	//
+	// As a potential future enhancement, consider a general entropy test.
+
+	trailerLengths := []int{0, 8, 12, 16, 20, 32, 64}
+
+	for start := 0; start+4 <= len(stream); start++ {
+		for _, trailerLength := range trailerLengths {
+			offset := start
+			var lengths []uint32
+			for offset+4 <= len(stream) {
+				recordLength := binary.BigEndian.Uint32(stream[offset : offset+4])
+				if recordLength < recordAlignment ||
+					recordLength > maximumRecordLength ||
+					recordLength%recordAlignment != 0 {
+					break
+				}
+
+				nextOffset := offset + 4 + int(recordLength) + trailerLength
+				if nextOffset > len(stream) {
+					break
+				}
+
+				lengths = append(lengths, recordLength)
+				if len(lengths) >= minimumRecords {
+					t.Logf(
+						"found length-prefixed structure: offset=%d trailerLength=%d lengths=%v",
+						start,
+						trailerLength,
+						lengths)
+					return true
+				}
+				offset = nextOffset
+			}
+		}
+	}
+
+	return false
 }
 
 type flowInspectorProxy struct {
