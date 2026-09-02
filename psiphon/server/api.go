@@ -139,7 +139,7 @@ func sshAPIRequestHandler(
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		responsePayload, err := handshakeAPIRequestHandler(
-			support, protocol.PSIPHON_API_PROTOCOL_SSH, sshClient, params)
+			support, sshClient, params)
 		if err != nil {
 			// Handshake failed, disconnect the client.
 			go sshClient.stop()
@@ -182,7 +182,6 @@ var handshakeRequestParams = append(
 // stats to record, etc.
 func handshakeAPIRequestHandler(
 	support *SupportServices,
-	apiProtocol string,
 	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
@@ -320,8 +319,6 @@ func handshakeAPIRequestHandler(
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 
-	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
-
 	// When compressed tactics are requested, use CBOR binary encoding for the
 	// response.
 
@@ -352,11 +349,9 @@ func handshakeAPIRequestHandler(
 	handshakeStateInfo, err := sshClient.setHandshakeState(
 		handshakeState{
 			completed:               true,
-			apiProtocol:             apiProtocol,
+			apiProtocol:             protocol.PSIPHON_API_PROTOCOL_SSH,
 			apiParams:               apiParams,
 			clientFeatures:          clientFeatures,
-			domainBytesChecksum:     domainBytesChecksum,
-			hasDomainBytesRegexes:   len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
 			splitTunnelLookup:       splitTunnelLookup,
 			deviceRegion:            deviceRegion,
@@ -436,10 +431,6 @@ func handshakeAPIRequestHandler(
 		}
 	}
 
-	// PageViewRegexes is obsolete and not used by any tunnel-core clients. In
-	// the JSON response, return an empty array instead of null for legacy
-	// clients.
-
 	clientFeatureValues :=
 		sshClient.sshServer.selectHomepageURLQueryParameterClientFeatures(
 			clientFeatures)
@@ -484,8 +475,6 @@ func handshakeAPIRequestHandler(
 	handshakeResponse := protocol.HandshakeResponse{
 		Homepages:                homepages,
 		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
-		PageViewRegexes:          make([]map[string]string, 0),
-		HttpsRequestRegexes:      httpsRequestRegexes,
 		EncodedServerList:        encodedServerList,
 		ClientRegion:             clientGeoIPData.Country,
 		ClientAddress:            clientAddress,
@@ -936,11 +925,8 @@ var failedTunnelStatParams = append(
 	baseAndDialParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
-// Clients make periodic status requests which deliver client-side
-// recorded data transfer and tunnel duration stats.
-// Note from psi_web implementation: no input validation on domains;
-// any string is accepted (regex transform may result in arbitrary
-// string). Stats processor must handle this input with care.
+// Clients make periodic status requests which deliver persistent client
+// metrics and server-entry checks.
 func statusAPIRequestHandler(
 	support *SupportServices,
 	sshClient *sshClient,
@@ -973,34 +959,6 @@ func statusAPIRequestHandler(
 	loggedRemoteServerListStatDropped := false
 	loggedFailedTunnelStatDropped := false
 	droppedLogCount := 0
-
-	// Domain bytes transferred stats
-	// Older clients may not submit this data
-
-	// Clients are expected to send host_bytes/domain_bytes stats only when
-	// configured to do so in the handshake reponse. Legacy clients may still
-	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
-
-	if sshClient.acceptDomainBytes() && statusData["host_bytes"] != nil {
-
-		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		for domain, bytes := range hostBytes {
-			if bytes < 0 {
-				continue
-			}
-
-			// Limitation: only TCP bytes are reported.
-			support.destBytesLogger.AddDomainBytes(
-				domain,
-				sshClient.getClientGeoIPData(),
-				sshClient.handshakeState.apiParams,
-				bytes,
-				0)
-		}
-	}
 
 	// Limitation: for "persistent" stats, host_id and geolocation is time-of-sending
 	// not time-of-recording.
@@ -2095,28 +2053,6 @@ func getJSONObjectArrayRequestParam(params common.APIParameters, name string) ([
 			return nil, errors.Tracef("invalid param: %s", name)
 		}
 		result[i] = common.APIParameters(resultItem)
-	}
-
-	return result, nil
-}
-
-func getMapStringInt64RequestParam(params common.APIParameters, name string) (map[string]int64, error) {
-	if params[name] == nil {
-		return nil, errors.Tracef("missing param: %s", name)
-	}
-	// TODO: can't use common.APIParameters type?
-	value, ok := params[name].(map[string]interface{})
-	if !ok {
-		return nil, errors.Tracef("invalid param: %s", name)
-	}
-
-	result := make(map[string]int64)
-	for k, v := range value {
-		numValue, ok := v.(float64)
-		if !ok {
-			return nil, errors.Tracef("invalid param: %s", name)
-		}
-		result[k] = int64(numValue)
 	}
 
 	return result, nil

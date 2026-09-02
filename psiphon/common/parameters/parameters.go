@@ -92,7 +92,6 @@ const (
 	LimitIntensiveConnectionWorkers                    = "LimitIntensiveConnectionWorkers"
 	UpstreamProxyErrorMinWaitDuration                  = "UpstreamProxyErrorMinWaitDuration"
 	UpstreamProxyErrorMaxWaitDuration                  = "UpstreamProxyErrorMaxWaitDuration"
-	IgnoreHandshakeStatsRegexps                        = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocolsProbability               = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                          = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount            = "PrioritizeTunnelProtocolsCandidateCount"
@@ -658,7 +657,6 @@ var defaultParameters = map[string]struct {
 	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
 	UpstreamProxyErrorMinWaitDuration:        {value: 10 * time.Second, minimum: time.Duration(0)},
 	UpstreamProxyErrorMaxWaitDuration:        {value: 30 * time.Second, minimum: time.Duration(0)},
-	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	PacketTunnelReadTimeout:                  {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},

@@ -312,9 +312,6 @@ type Config struct {
 	// LimitRelayBufferSizes selects smaller buffers for port forward relaying.
 	LimitRelayBufferSizes bool `json:",omitempty"`
 
-	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
-	IgnoreHandshakeStatsRegexps bool `json:",omitempty"`
-
 	// UpstreamProxyURL is a URL specifying an upstream proxy to use for all
 	// outbound connections. The URL should include proxy type and
 	// authentication information, as required. See example URLs here:
@@ -389,22 +386,7 @@ type Config struct {
 	// the pool size is 1.
 	TargetServerEntry string `json:",omitempty"`
 
-	// DisableApi disables Psiphon server API calls including handshake,
-	// connected, status, etc. This is used for special case temporary tunnels
-	// (Windows VPN mode).
-	DisableApi bool `json:",omitempty"`
-
-	// TargetAPIProtocol specifies whether to force use of "ssh" or "web" API
-	// protocol. When blank, the default, the optimal API protocol is used.
-	// Note that this capability check is not applied before the
-	// "CandidateServers" count is emitted.
-	//
-	// This parameter is intended for testing and debugging only. Not all
-	// parameters are supported in the legacy "web" API protocol, including
-	// speed test samples.
-	TargetAPIProtocol string `json:",omitempty"`
-
-	// TargetAPIProtocol specifies whether to use "json" or "cbor" API
+	// TargetAPIEncoding specifies whether to use "json" or "cbor" API
 	// protocol parameter encodings. When blank, the default is to use "cbor"
 	// where supported.
 	TargetAPIEncoding string `json:",omitempty"`
@@ -1014,6 +996,19 @@ type Config struct {
 	//
 	// Deprecated: Use EnableLightProxyFallback.
 	EnableLightProxy bool `json:",omitempty"`
+
+	// DisableApi disables Psiphon server API calls including handshake,
+	// connected, status, etc. This is used for special case temporary tunnels
+	// (Windows VPN mode).
+	//
+	// Deprecated and no longer supported: Psiphon API calls may no longer be
+	// disabled.
+	DisableApi bool `json:",omitempty"`
+
+	// TargetAPIProtocol must be blank or "ssh"; both select SSH.
+	//
+	// Deprecated: SSH is the only supported Psiphon API protocol.
+	TargetAPIProtocol string `json:",omitempty"`
 
 	//
 	// The following parameters are for testing purposes.
@@ -1724,6 +1719,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	_, err = strconv.Atoi(config.ClientVersion)
 	if err != nil {
 		return errors.Tracef("invalid client version: %s", err)
+	}
+
+	if config.DisableApi {
+		return errors.TraceNew("DisableApi is not supported")
 	}
 
 	if config.TargetAPIProtocol != "" &&
@@ -2652,8 +2651,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	applyParameters[parameters.MeekLimitBufferSizes] = config.LimitMeekBufferSizes
-
-	applyParameters[parameters.IgnoreHandshakeStatsRegexps] = config.IgnoreHandshakeStatsRegexps
 
 	if config.EstablishTunnelTimeoutSeconds != nil {
 		applyParameters[parameters.EstablishTunnelTimeout] = fmt.Sprintf("%ds", *config.EstablishTunnelTimeoutSeconds)
