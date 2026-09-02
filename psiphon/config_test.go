@@ -119,6 +119,29 @@ func (suite *ConfigTestSuite) Test_LoadConfig_DSLAccessTokenRegistration() {
 	suite.True(config.EnableDSLAccessTokenRegistration)
 }
 
+type configTestNetworkIDGetter string
+
+func (g configTestNetworkIDGetter) GetNetworkID() string {
+	return string(g)
+}
+
+func (suite *ConfigTestSuite) Test_NetworkIDPrecedence() {
+	config, err := LoadConfig(suite.confStubBlob)
+	suite.Require().NoError(err)
+
+	config.NetworkID = "WIFI-test"
+	suite.Require().NoError(config.Commit(false))
+	suite.Equal("WIFI-test", config.GetNetworkID())
+
+	config, err = LoadConfig(suite.confStubBlob)
+	suite.Require().NoError(err)
+
+	config.NetworkID = "WIFI-test"
+	config.NetworkIDGetter = configTestNetworkIDGetter("MOBILE-getter")
+	suite.Require().NoError(config.Commit(false))
+	suite.Equal("MOBILE-getter", config.GetNetworkID())
+}
+
 // Tests non-JSON file contents
 func (suite *ConfigTestSuite) Test_LoadConfig_BadFileContents() {
 	_, err := LoadConfig([]byte(`this is not JSON`))

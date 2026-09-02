@@ -366,10 +366,10 @@ type Config struct {
 	// network. See: NetworkIDGetter doc.
 	NetworkIDGetter NetworkIDGetter `json:",omitempty"`
 
-	// NetworkID, when not blank, is used as the identifier for the host's
-	// current active network.
-	// NetworkID is ignored when NetworkIDGetter is set, or when
-	// common/networkid is enabled.
+	// NetworkID, when set, specifies an identifier for the host's current
+	// network. For valid values, see the NetworkIDGetter type doc.
+	// NetworkID is ignored when NetworkIDGetter is set. When NetworkID is blank
+	// and no NetworkIDGetter is set, common/networkid is used when enabled.
 	NetworkID string `json:",omitempty"`
 
 	// DisableTactics disables tactics operations including requests, payload
@@ -2110,7 +2110,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	networkIDGetter := config.NetworkIDGetter
 
 	if networkIDGetter == nil {
-		if networkid.Enabled() {
+		if config.NetworkID != "" {
+			// Limitation: unlike NetworkIDGetter and common/networkid, this method
+			// of network identification is not dynamic and will not reflect network
+			// changes that occur while running.
+			networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
+		} else if networkid.Enabled() {
 			// Limitation: only this getter describes the split-interface
 			// downstream network. NetworkIDGetter takes no interface name, so a
 			// host application supplying one such as the Android and iOS libraries,
@@ -2120,14 +2125,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			networkIDGetter = newCommonNetworkIDGetter(
 				config.splitInterfaceDownstreamInterfaceName())
 		} else {
-			// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
-			// this method of network identification is not dynamic and will not reflect
-			// network changes that occur while running.
-			if config.NetworkID != "" {
-				networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
-			} else {
-				networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
-			}
+			networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
 		}
 	}
 
