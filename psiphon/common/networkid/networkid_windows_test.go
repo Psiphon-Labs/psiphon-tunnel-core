@@ -31,7 +31,7 @@ var err error
 // This test doesn't show anything very useful, as it will mostly be getting cached results
 func BenchmarkGet(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		networkID, err = Get()
+		networkID, err = Get("")
 		if err != nil {
 			b.Fatalf("error: %v", err)
 		}
@@ -39,7 +39,7 @@ func BenchmarkGet(b *testing.B) {
 }
 
 func TestGet(t *testing.T) {
-	gotNetworkID, err := Get()
+	gotNetworkID, err := Get("")
 	if err != nil {
 		t.Errorf("error: %v", err)
 		return
@@ -49,7 +49,7 @@ func TestGet(t *testing.T) {
 	}
 
 	// Call again immediately to get a cached result
-	gotNetworkID, err = Get()
+	gotNetworkID, err = Get("")
 	if err != nil {
 		t.Errorf("error: %v", err)
 		return
@@ -61,7 +61,7 @@ func TestGet(t *testing.T) {
 	// Wait until the cached result expires, so we get another fresh value
 	time.Sleep(2 * time.Second)
 
-	gotNetworkID, err = Get()
+	gotNetworkID, err = Get("")
 	if err != nil {
 		t.Errorf("error: %v", err)
 		return

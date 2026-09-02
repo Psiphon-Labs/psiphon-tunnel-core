@@ -1,7 +1,7 @@
-//go:build !windows && (!darwin || ios || !cgo) && (!linux || android)
+//go:build ios || android
 
 /*
- * Copyright (c) 2024, Psiphon Inc.
+ * Copyright (c) 2026, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,14 +19,26 @@
  *
  */
 
-package networkid
+package deviceregion
 
-import "fmt"
+// iOS and Android obtain the device region from getDeviceRegion in their
+// respective mobile libraries, so the detection implemented in this package,
+// along with its time zone tables, is left out of those builds. Get returns an
+// empty region, which callers already handle: see deviceregion.go, which
+// declares the API reproduced here and must be kept in agreement with it.
 
-func Enabled() bool {
-	return false
+type Source string
+
+type Detail struct {
+	Region     string
+	Source     Source
+	Candidates map[Source]string
 }
 
-func Get(interfaceName string) (string, error) {
-	return "", fmt.Errorf("operation is not enabled")
+func Get() string {
+	return ""
+}
+
+func GetDetail() Detail {
+	return Detail{}
 }

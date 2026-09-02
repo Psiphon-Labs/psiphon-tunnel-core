@@ -20,8 +20,6 @@
 package networkid
 
 import (
-	"net"
-	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,67 +35,6 @@ import (
 
 func Enabled() bool {
 	return true
-}
-
-// Get address associated with the default interface.
-func getDefaultLocalAddr() (net.IP, error) {
-	// Note that this function has no Windows-specific code and could be used elsewhere.
-
-	// This approach is described in psiphon/common/inproxy/pionNetwork.Interfaces()
-	// The basic idea is that we initialize a UDP connection and see what local
-	// address the system decides to use.
-	// Note that no actual network request is made by these calls. They can be performed
-	// with no network connectivity at all.
-	// TODO: Use common test IP addresses in that function and this.
-
-	// We'll prefer IPv4 and check it first (both might be available)
-	ipv4UDPAddr := net.UDPAddrFromAddrPort(netip.MustParseAddrPort("93.184.216.34:3478"))
-	ipv4UDPConn, ipv4Err := net.DialUDP("udp4", nil, ipv4UDPAddr)
-	if ipv4Err == nil {
-		ip := ipv4UDPConn.LocalAddr().(*net.UDPAddr).IP
-		ipv4UDPConn.Close()
-		return ip, nil
-	}
-
-	ipv6UDPAddr := net.UDPAddrFromAddrPort(netip.MustParseAddrPort("[2606:2800:220:1:248:1893:25c8:1946]:3478"))
-	ipv6UDPConn, ipv6Err := net.DialUDP("udp6", nil, ipv6UDPAddr)
-	if ipv6Err == nil {
-		ip := ipv6UDPConn.LocalAddr().(*net.UDPAddr).IP
-		ipv6UDPConn.Close()
-		return ip, nil
-	}
-
-	return nil, errors.Trace(ipv4Err)
-}
-
-// Given the IP of a local interface, get that interface info.
-func getInterfaceForLocalIP(ip net.IP) (*net.Interface, error) {
-	// Note that this function has no Windows-specific code and could be used elsewhere.
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		for _, addr := range addrs {
-			addrIP, _, err := net.ParseCIDR(addr.String())
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-
-			if addrIP.Equal(ip) {
-				return &iface, nil
-			}
-		}
-	}
-
-	return nil, errors.TraceNew("not found")
 }
 
 // Given the interface index, get info about the interface and its network.
@@ -203,13 +140,8 @@ func getConnectionType(ifType winipcfg.IfType, description string) string {
 	return connectionType
 }
 
-func getNetworkID() (string, error) {
-	localAddr, err := getDefaultLocalAddr()
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-
-	iface, err := getInterfaceForLocalIP(localAddr)
+func getNetworkID(interfaceName string) (string, error) {
+	iface, err := getInterface(interfaceName)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
@@ -231,24 +163,30 @@ type result struct {
 	err       error
 }
 
+type request struct {
+	interfaceName string
+	resCh         chan<- result
+}
+
 var workThread struct {
 	init sync.Once
-	reqs chan (chan<- result)
-	err  error
+	reqs chan request
 }
 
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for details.
+// interfaceName selects the network to describe; when it is empty, the interface
+// carrying the default route is used.
 // This function is safe to call concurrently from multiple goroutines.
 // Note that if this function is called immediately after a network change (within ~2000ms)
 // a transitory Network ID may be returned that will change on the next call. The caller
 // may wish to delay responding to a new Network ID until the value is confirmed.
-func Get() (string, error) {
+func Get(interfaceName string) (string, error) {
 
 	// It is not clear if the COM NetworkListManager calls are threadsafe.
 	// We're using them read-only and they're probably fine, but we're not
 	// sure. We'll restrict our work to single thread.
 	workThread.init.Do(func() {
-		workThread.reqs = make(chan (chan<- result))
+		workThread.reqs = make(chan request)
 
 		go func() {
 			// Go can switch the execution of a goroutine from one OS thread to another
@@ -259,22 +197,31 @@ func Get() (string, error) {
 			runtime.LockOSThread()
 			defer runtime.UnlockOSThread()
 
-			if err := windows.CoInitializeEx(0, windows.COINIT_MULTITHREADED); err != nil {
-				workThread.err = errors.Trace(err)
-				close(workThread.reqs)
-				return
+			// The worker continues to serve requests when initialization fails,
+			// as Get sends to reqs unconditionally. S_FALSE reports that the
+			// thread was already initialized with the same apartment model,
+			// which is success and still requires CoUninitialize.
+			initErr := windows.CoInitializeEx(0, windows.COINIT_MULTITHREADED)
+			if initErr == nil || initErr == syscall.Errno(windows.S_FALSE) {
+				initErr = nil
+				defer windows.CoUninitialize()
+			} else {
+				initErr = errors.Trace(initErr)
 			}
-			defer windows.CoUninitialize()
 
-			for resCh := range workThread.reqs {
-				networkID, err := getNetworkID()
-				resCh <- result{networkID, err}
+			for req := range workThread.reqs {
+				if initErr != nil {
+					req.resCh <- result{"", initErr}
+					continue
+				}
+				networkID, err := getNetworkID(req.interfaceName)
+				req.resCh <- result{networkID, err}
 			}
 		}()
 	})
 
 	resCh := make(chan result)
-	workThread.reqs <- resCh
+	workThread.reqs <- request{interfaceName: interfaceName, resCh: resCh}
 	res := <-resCh
 
 	if res.err != nil {
