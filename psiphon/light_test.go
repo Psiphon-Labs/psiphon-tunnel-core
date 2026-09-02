@@ -398,13 +398,16 @@ func makeUnreachableTargetServerEntry() (string, error) {
 	}
 
 	serverEntry := &protocol.ServerEntry{
-		IpAddress:            host,
-		WebServerPort:        "0",
-		SshPort:              sshPort,
-		SshUsername:          "unused",
-		SshPassword:          "unused",
-		SshHostKey:           base64.StdEncoding.EncodeToString([]byte("unused")),
-		Capabilities:         []string{protocol.GetCapability(protocol.TUNNEL_PROTOCOL_SSH)},
+		IpAddress:     host,
+		WebServerPort: "0",
+		SshPort:       sshPort,
+		SshUsername:   "unused",
+		SshPassword:   "unused",
+		SshHostKey:    base64.StdEncoding.EncodeToString([]byte("unused")),
+		Capabilities: []string{
+			protocol.GetCapability(protocol.TUNNEL_PROTOCOL_SSH),
+			protocol.CAPABILITY_SSH_API_REQUESTS,
+		},
 		Region:               "US",
 		ConfigurationVersion: 1,
 	}
