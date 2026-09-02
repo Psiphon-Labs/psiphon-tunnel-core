@@ -93,9 +93,6 @@ func TestStandAloneGetTactics(t *testing.T) {
 	}
 	defer ResetNoticeWriter()
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelFunc()
-
 	err = OpenDataStore(config)
 	if err != nil {
 		t.Fatalf("error committing initializing datastore: %s", err)
@@ -115,7 +112,16 @@ func TestStandAloneGetTactics(t *testing.T) {
 
 	tlsCache := utls.NewLRUClientSessionCache(0)
 
-	err = FetchCommonRemoteServerList(ctx, config, 0, nil, untunneledDialConfig, tlsCache)
+	const retryCount = 3
+	for attempt := 0; attempt < retryCount; attempt++ {
+		fetchCtx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+		err = FetchCommonRemoteServerList(fetchCtx, config, attempt, nil, untunneledDialConfig, tlsCache)
+		cancelFunc()
+		if err == nil || attempt == retryCount-1 {
+			break
+		}
+		t.Logf("retrying remote server list fetch: %s", err)
+	}
 	if err != nil {
 		t.Fatalf("error fetching remote server list: %s", err)
 	}
@@ -124,7 +130,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 	// operations in GetTactics.
 	CloseDataStore()
 
-	GetTactics(ctx, config, true)
+	tacticsCtx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelFunc()
+
+	GetTactics(tacticsCtx, config, true)
 
 	if atomic.LoadInt32(&gotTactics) != 1 {
 		t.Fatalf("failed to get tactics")
