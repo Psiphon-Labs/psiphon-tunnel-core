@@ -33,6 +33,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -724,6 +725,79 @@ func TestConfigGetSplitResolverFallback(t *testing.T) {
 	if got := c.GetResolver(); got != main {
 		t.Fatalf("GetResolver: expected main resolver, got %p", got)
 	}
+}
+
+// TestInproxySplitInterfaceCommonClients checks that split-interface mode
+// rejects common client capacity while still serving personal clients.
+func TestInproxySplitInterfaceCommonClients(t *testing.T) {
+
+	if !tun.IsBindToDeviceSupported() {
+		t.Skip("split interface mode is not supported on this platform")
+	}
+
+	newConfig := func(t *testing.T) *Config {
+		dataRootDirectory, err := ioutil.TempDir("", "psiphon-split-config-test")
+		if err != nil {
+			t.Fatalf("TempDir failed: %s", err)
+		}
+		t.Cleanup(func() { os.RemoveAll(dataRootDirectory) })
+
+		return &Config{
+			DataRootDirectory:                        dataRootDirectory,
+			PropagationChannelId:                     "ABCDEFGH",
+			SponsorId:                                "12345678",
+			ClientVersion:                            "1",
+			DisableTunnels:                           true,
+			InproxyEnableProxy:                       true,
+			InproxyProxySplitUpstreamInterfaceName:   "upstream0",
+			InproxyProxySplitDownstreamInterfaceName: "downstream0",
+			InproxyMaxPersonalClients:                1,
+		}
+	}
+
+	t.Run("personal only", func(t *testing.T) {
+		config := newConfig(t)
+		if err := config.Commit(false); err != nil {
+			t.Fatalf("expected success, got: %s", err)
+		}
+	})
+
+	t.Run("common clients rejected", func(t *testing.T) {
+		config := newConfig(t)
+		config.InproxyMaxCommonClients = 1
+		if err := config.Commit(false); err == nil {
+			t.Fatalf("expected error for InproxyMaxCommonClients in split interface mode")
+		}
+	})
+
+	t.Run("common clients via proxy limits rejected", func(t *testing.T) {
+		config := newConfig(t)
+		limits, err := common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxCommonClients:   1,
+			MaxPersonalClients: 1,
+		})
+		if err != nil {
+			t.Fatalf("NewProxyLimits failed: %s", err)
+		}
+		config.InproxyProxyLimits = limits
+		if err := config.Commit(false); err == nil {
+			t.Fatalf("expected error for common clients in shared proxy limits in split interface mode")
+		}
+	})
+
+	t.Run("personal only via proxy limits", func(t *testing.T) {
+		config := newConfig(t)
+		limits, err := common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxPersonalClients: 1,
+		})
+		if err != nil {
+			t.Fatalf("NewProxyLimits failed: %s", err)
+		}
+		config.InproxyProxyLimits = limits
+		if err := config.Commit(false); err != nil {
+			t.Fatalf("expected success, got: %s", err)
+		}
+	})
 }
 
 // newUnixSocketTestConfig returns a minimal committable Config configured to
