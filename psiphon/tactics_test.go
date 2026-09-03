@@ -114,7 +114,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 
 	const retryCount = 3
 	for attempt := 0; attempt < retryCount; attempt++ {
-		fetchCtx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+		fetchCtx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
 		err = FetchCommonRemoteServerList(fetchCtx, config, attempt, nil, untunneledDialConfig, tlsCache)
 		cancelFunc()
 		if err == nil || attempt == retryCount-1 {
