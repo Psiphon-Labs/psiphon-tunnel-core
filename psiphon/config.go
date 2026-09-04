@@ -693,6 +693,12 @@ type Config struct {
 	// more than two eligible interfaces; setting both fields explicitly is
 	// recommended.
 	//
+	// Limitation: Split-interface mode serves personal clients only:
+	// InproxyMaxCommonClients must be 0. The broker requires common client
+	// answer candidates to match the GeoIP of the proxy's broker connection,
+	// which the two interfaces cannot both satisfy; only personal pairing is
+	// exempt from that check.
+	//
 	// Cannot be used with DeviceBinder.
 	// On Windows, interface names must match the FriendlyName that Go
 	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
@@ -1868,12 +1874,25 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			}
 		}
 
+		maxCommonClients := config.InproxyMaxCommonClients
 		maxPersonalClients := config.InproxyMaxPersonalClients
 		if config.InproxyProxyLimits != nil {
+			_, maxCommonClients, _, _, _ = config.InproxyProxyLimits.GetCommonLimits()
 			_, maxPersonalClients, _, _, _ = config.InproxyProxyLimits.GetPersonalLimits()
 		}
 		if len(config.InproxyProxyPersonalCompartmentID) > 0 && maxPersonalClients <= 0 {
 			return errors.TraceNew("invalid InproxyMaxPersonalClients when personal compartment IDs are provided")
+		}
+
+		// In split-interface mode, the broker connection egresses via the
+		// upstream interface while ICE candidates are gathered on the
+		// downstream interface. The broker requires common client answer
+		// candidates to match the GeoIP country and ASN of the proxy's broker
+		// connection, so, common connection cannot establish as is in split
+		// interface mode.
+		if splitInterfaceMode && maxCommonClients > 0 {
+			return errors.TraceNew(
+				"InproxyMaxCommonClients must be 0 in split interface mode")
 		}
 
 		if config.InproxyProxyLimits == nil &&
