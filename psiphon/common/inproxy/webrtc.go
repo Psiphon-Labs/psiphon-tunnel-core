@@ -778,6 +778,8 @@ func newWebRTCConn(
 		//   Limitation: in states of low tunnel traffic, the video frame and
 		//   timestamp progression won't look realistic.
 		//
+		// - Marker is set on the final packet of each video frame.
+		//
 		// - PayloadType is the codec and is auto-populated by pion.
 		//
 		// - SequenceNumber is a packet sequence number and populated by
@@ -2312,11 +2314,13 @@ func (conn *webRTCConn) writeMediaTrackPacket(p []byte, decoy bool) (int, error)
 	// Send the RTP packet.
 
 	// Dynamic plaintext RTP header values are set here: the sequence number
-	// is set when sending the packet; the timestamp, initialized in
+	// is set when sending the packet; Marker is set if this packet completes
+	// the current video frame; the timestamp, initialized in
 	// newWebRTCConn, is updated once payload equivalent to a complete
 	// video "frame" has been sent. See the "Plaintext RTP header fields"
 	// comment in newWebRTCConn.
 
+	conn.sendMediaTrackPacket.Marker = len(paddedPayload) >= conn.sendMediaTrackRemainingFrameSize
 	conn.sendMediaTrackPacket.SequenceNumber = conn.sendMediaTrackSequencer.NextSequenceNumber()
 	conn.sendMediaTrackPacket.Payload = paddedPayload
 	err := sendMediaTrack.WriteRTP(conn.sendMediaTrackPacket)
