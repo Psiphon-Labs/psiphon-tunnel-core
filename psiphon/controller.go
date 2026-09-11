@@ -113,7 +113,6 @@ type Controller struct {
 	inproxyHandleTacticsMutex               sync.Mutex
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
-	inproxyClientDialRateLimiter            *rate.Limiter
 
 	serverEntryIterationMetricsMutex                    sync.Mutex
 	serverEntryIterationUniqueCandidates                *hyperloglog.Sketch
@@ -2121,7 +2120,7 @@ func (p *protocolSelectionConstraints) canReplay(
 	serverEntry *protocol.ServerEntry,
 	replayProtocol string) bool {
 
-	if p.replayCandidateCount != -1 && connectTunnelCount > p.replayCandidateCount {
+	if p.replayCandidateCount != -1 && connectTunnelCount >= p.replayCandidateCount {
 		return false
 	}
 
@@ -2495,8 +2494,6 @@ func (controller *Controller) launchEstablishing() {
 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
 
 		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
-
-		inproxyClientDialRateLimiter: controller.inproxyClientDialRateLimiter,
 	}
 
 	// Adjust protocol limits for in-proxy personal proxy mode. In this mode,
@@ -2541,7 +2538,7 @@ func (controller *Controller) launchEstablishing() {
 	inproxyRateLimitQuantity := p.Int(parameters.InproxyClientDialRateLimitQuantity)
 	inproxyRateLimitInterval := p.Duration(parameters.InproxyClientDialRateLimitInterval)
 	if inproxyRateLimitQuantity > 0 {
-		controller.inproxyClientDialRateLimiter = rate.NewLimiter(
+		controller.protocolSelectionConstraints.inproxyClientDialRateLimiter = rate.NewLimiter(
 			rate.Limit(float64(inproxyRateLimitQuantity)/inproxyRateLimitInterval.Seconds()),
 			inproxyRateLimitQuantity)
 	}
@@ -2776,7 +2773,7 @@ func (controller *Controller) doConstraintsScan(ctx context.Context) {
 	// Make adjustments based on candidate counts.
 
 	if tunnelPoolSize > candidates && candidates > 0 {
-		tunnelPoolSize = candidates
+		controller.setTunnelPoolSize(candidates)
 	}
 
 	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
@@ -2833,7 +2830,6 @@ func (controller *Controller) stopEstablishing() {
 	controller.candidateServerEntries = nil
 	controller.serverAffinityDoneBroadcast = nil
 	controller.establishSignalForceTacticsFetch = nil
-	controller.inproxyClientDialRateLimiter = nil
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
@@ -3395,7 +3391,40 @@ loop:
 			return controller.establishConnectTunnelCount
 		}
 
+		// The dial rate limit delay, determined by protocolSelectionConstraints.selectProtocol, is
+		// not applied within that function since this worker holds the concurrentEstablishTunnelsMutex
+		// lock when that's called. Instead, the required delay is passed out and applied below.
+		// It's safe for the selectProtocol callback to write to dialRateLimitDelay without
+		// synchronization since this worker goroutine invokes the callback.
+
+		var dialRateLimitDelay time.Duration
+
 		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+
+			if !controller.protocolSelectionConstraints.canReplay(
+				controller.establishConnectTunnelCount,
+				excludeIntensive,
+				serverEntry,
+				replayProtocol) {
+				return false
+			}
+
+			if protocol.TunnelProtocolUsesInproxy(replayProtocol) {
+				// Since replay skips selectProtocol, call it here to invoke the rate limiter.
+				// Since concurrentEstablishTunnelsMutex remains held, selectProtocol should
+				// return replayProtocol on success.
+				selectedProtocol, rateLimitDelay, ok := controller.protocolSelectionConstraints.selectProtocol(
+					controller.establishConnectTunnelCount,
+					excludeIntensive,
+					true,
+					replayProtocol,
+					serverEntry)
+				if !ok || selectedProtocol != replayProtocol {
+					return false
+				}
+
+				dialRateLimitDelay = rateLimitDelay
+			}
 
 			if inproxyForceSelection {
 				if !protocol.TunnelProtocolUsesInproxy(replayProtocol) {
@@ -3422,20 +3451,8 @@ loop:
 				}
 			}
 
-			return controller.protocolSelectionConstraints.canReplay(
-				controller.establishConnectTunnelCount,
-				excludeIntensive,
-				serverEntry,
-				replayProtocol)
+			return true
 		}
-
-		// The dial rate limit delay, determined by protocolSelectionConstraints.selectProtocol, is
-		// not applied within that function since this worker holds the concurrentEstablishTunnelsMutex
-		// lock when that's called. Instead, the required delay is passed out and applied below.
-		// It's safe for the selectProtocol callback to write to dialRateLimitDelay without
-		// synchronization since this worker goroutine invokes the callback.
-
-		var dialRateLimitDelay time.Duration
 
 		selectProtocol := func(
 			serverEntry *protocol.ServerEntry,
