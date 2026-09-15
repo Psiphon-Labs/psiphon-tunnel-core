@@ -50,6 +50,7 @@ const (
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
+	CLIENT_PLATFORM_IPADOS  = "iPadOS"
 	CLIENT_PLATFORM_OTHER   = "Other"
 
 	SPONSOR_ID_LENGTH = 16
@@ -2154,6 +2155,11 @@ func normalizeClientPlatform(clientPlatform string) string {
 	if strings.Contains(strings.ToLower(clientPlatform), strings.ToLower(CLIENT_PLATFORM_ANDROID)) {
 		return CLIENT_PLATFORM_ANDROID
 	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IOS) {
+		return CLIENT_PLATFORM_IOS
+	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IPADOS) {
+		// iPadOS is aliased to iOS here, which currently impacts homepage
+		// selection, homepage query parameter substitution, and dest bytes
+		// aggregation buckets.
 		return CLIENT_PLATFORM_IOS
 	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_WINDOWS) {
 		return CLIENT_PLATFORM_WINDOWS
