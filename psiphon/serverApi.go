@@ -451,6 +451,21 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 
 	params["last_connected"] = lastConnected
 
+	// Report accumulated pre-tunnel light proxy client events in the
+	// connected request. This avoids an extra round trip traffic shape if we
+	// instead immediately triggered a status request.
+	//
+	// Light proxy events reported by this connected request are dropped on
+	// failure and not carried forward to a later tunnel. The intention is
+	// for server_tunnel.light_proxy_client_events to reflect light proxy
+	// fallback events that occur before a tunnel connects or during that
+	// tunnel.
+	_, lightProxyClientEvents, _ := takeClientEvents(controller, serverContext.tunnel, false)
+
+	if len(lightProxyClientEvents) > 0 {
+		params["light_proxy_client_events"] = lightProxyClientEvents
+	}
+
 	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
@@ -516,16 +531,16 @@ func getLastConnected() (string, error) {
 }
 
 // DoStatusRequest makes a "status" API request to the server.
-func (serverContext *ServerContext) DoStatusRequest() error {
+func (serverContext *ServerContext) DoStatusRequest(controller *Controller) error {
 
 	params := serverContext.getBaseAPIParameters(
 		baseParametersNoDialParameters)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
-	// payload for future attempt, in all failure cases.
+	// persistent stats for a future attempt, in all failure cases.
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
-		serverContext.tunnel.config)
+		controller, serverContext.tunnel)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -617,7 +632,10 @@ type statusRequestPayloadInfo struct {
 }
 
 func makeStatusRequestPayload(
-	config *Config) ([]byte, *statusRequestPayloadInfo, error) {
+	controller *Controller,
+	tunnel *Tunnel) ([]byte, *statusRequestPayloadInfo, error) {
+
+	config := controller.config
 
 	// The status request payload is always JSON encoded. As it is sent after
 	// the initial handshake and is multiplexed with other tunnel traffic,
@@ -625,31 +643,40 @@ func makeStatusRequestPayload(
 	//
 	// TODO: pack and CBOR encode the status request payload.
 
+	// Events sent in a status request are not resent on failure.
+	//
+	// As a potential future enhancement, retain light proxy events from
+	// failed batches and send them through the next tunnel. This could
+	// report events twice if the original server processed the request but
+	// its response was lost.
+
+	clientEvents, lightProxyClientEvents, eventsSize := takeClientEvents(controller, tunnel, true)
+
 	// GetCheckServerEntryTags returns a randomly selected set of server entry
 	// tags to be checked for pruning, or an empty list if a check is not yet
 	// due.
 	//
-	// Both persistentStats and prune check data have a max payload size
-	// allowance, and the allowance for persistentStats is reduced by the
-	// size of the prune check data, if any.
+	// The prune check allowance is reduced by the size of client events, and
+	// the persistent stats allowance is reduced by both.
 
-	checkServerEntryTags, tagsSize, err := GetCheckServerEntryTags(config)
+	checkServerEntryTags, tagsSize, err := GetCheckServerEntryTags(config, eventsSize)
 	if err != nil {
 		NoticeWarning(
 			"GetCheckServerEntryTags failed: %s", errors.Trace(err))
 		checkServerEntryTags = nil
-		// Proceed with persistent stats only.
+		// Proceed without the prune check.
 	}
 
-	persistentStats, statsSize, err := TakeOutUnreportedPersistentStats(config, tagsSize)
+	persistentStats, statsSize, err := TakeOutUnreportedPersistentStats(config, eventsSize+tagsSize)
 	if err != nil {
 		NoticeWarning(
 			"TakeOutUnreportedPersistentStats failed: %s", errors.Trace(err))
 		persistentStats = nil
-		// Proceed with the prune check only.
+		// Proceed without persistent stats.
 	}
 
-	if len(checkServerEntryTags) == 0 && len(persistentStats) == 0 {
+	if len(clientEvents) == 0 && len(lightProxyClientEvents) == 0 &&
+		len(checkServerEntryTags) == 0 && len(persistentStats) == 0 {
 		// There is no payload to send.
 		return nil, nil, nil
 	}
@@ -660,6 +687,13 @@ func makeStatusRequestPayload(
 	}
 
 	payload := make(map[string]interface{})
+
+	if len(clientEvents) > 0 {
+		payload["client_events"] = clientEvents
+	}
+	if len(lightProxyClientEvents) > 0 {
+		payload["light_proxy_client_events"] = lightProxyClientEvents
+	}
 
 	persistentStatPayloadNames := make(map[string]string)
 	persistentStatPayloadNames[datastorePersistentStatTypeRemoteServerList] = "remote_server_list_stats"
@@ -687,10 +721,87 @@ func makeStatusRequestPayload(
 	}
 
 	NoticeInfo(
-		"StatusRequestPayload: %d total bytes, %d stats bytes, %d tag bytes",
-		len(jsonPayload), statsSize, tagsSize)
+		"StatusRequestPayload: %d total bytes, %d client event bytes, %d tag bytes, %d stats bytes",
+		len(jsonPayload), eventsSize, tagsSize, statsSize)
 
 	return jsonPayload, payloadInfo, nil
+}
+
+// takeClientEvents dequeues client events for a connected or status request.
+func takeClientEvents(
+	controller *Controller,
+	tunnel *Tunnel,
+	includeTunnelEvents bool) ([]string, []string, int) {
+
+	p := controller.config.GetParameters().Get()
+	limit := p.Int(parameters.PsiphonAPIClientEventReportLimit)
+	maxSendBytes := p.Int(parameters.PersistentStatsMaxSendBytes)
+	p.Close()
+
+	// Emit notices after locks are released.
+	var dropReason string
+	defer func() {
+		if dropReason != "" {
+			NoticeClientEventDropped(dropReason)
+		}
+	}()
+
+	controller.clientEventMutex.Lock()
+	defer controller.clientEventMutex.Unlock()
+
+	eventsSize := 0
+	takeEvents := func(events *[]string, reportedCount *int) []string {
+		remaining := max(0, limit-*reportedCount)
+		if len(*events) > remaining {
+			dropReason = "report limit reached"
+			clear((*events)[remaining:])
+			*events = (*events)[:remaining]
+		}
+
+		count := 0
+		for _, event := range *events {
+			if eventsSize >= maxSendBytes {
+				break
+			}
+			// Estimate JSON encoding: two bytes per input byte for common
+			// escapes, plus quotes and a comma.
+			eventsSize += 2*len(event) + 3
+			count++
+		}
+
+		batch := (*events)[:count:count]
+		*events = (*events)[count:]
+		if len(*events) == 0 {
+			*events = nil
+		}
+		*reportedCount += count
+		return batch
+	}
+
+	var clientEvents []string
+	if includeTunnelEvents {
+		clientEvents = takeEvents(
+			&tunnel.clientEvents, &tunnel.clientEventReportedCount)
+	}
+
+	// Connected requests may report only the first light proxy events for
+	// a tunnel. This allows the server to prepend that batch if a later
+	// status request reaches it first.
+	var lightProxyClientEvents []string
+	if includeTunnelEvents || tunnel.lightProxyClientEventReportedCount == 0 {
+		lightProxyClientEvents = takeEvents(
+			&controller.lightProxyClientEvents, &tunnel.lightProxyClientEventReportedCount)
+	}
+
+	if len(controller.lightProxyClientEvents) > 0 ||
+		(includeTunnelEvents && len(tunnel.clientEvents) > 0) {
+		select {
+		case tunnel.signalClientEvents <- struct{}{}:
+		default:
+		}
+	}
+
+	return clientEvents, lightProxyClientEvents, eventsSize
 }
 
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
@@ -1314,15 +1425,15 @@ func getBaseAPIParameters(
 }
 
 func HandleServerRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) {
 
 	var err error
 
 	switch request.Type {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
-		err = HandleOSLRequest(tunnelOwner, tunnel, request)
+		err = HandleOSLRequest(controller, tunnel, request)
 	case protocol.PSIPHON_API_ALERT_REQUEST_NAME:
-		err = HandleAlertRequest(tunnelOwner, tunnel, request)
+		err = HandleAlertRequest(controller, tunnel, request)
 	default:
 		err = errors.Tracef("invalid request name")
 	}
@@ -1334,7 +1445,7 @@ func HandleServerRequest(
 }
 
 func HandleOSLRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) (retErr error) {
 
 	defer func() {
 		if retErr != nil {
@@ -1373,7 +1484,7 @@ func HandleOSLRequest(
 	}
 
 	if seededNewSLOK {
-		tunnelOwner.SignalSeededNewSLOK()
+		controller.SignalSeededNewSLOK()
 	}
 
 	err = request.Reply(true, nil)
@@ -1385,7 +1496,7 @@ func HandleOSLRequest(
 }
 
 func HandleAlertRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) (retErr error) {
 
 	defer func() {
 		if retErr != nil {

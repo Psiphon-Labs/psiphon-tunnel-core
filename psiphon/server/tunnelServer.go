@@ -2111,6 +2111,9 @@ type sshClient struct {
 	persistentStatsDroppedLogCount       int
 	blocklistHitsLogCount                int
 	proxyProtocolMetrics                 proxyProtocolMetrics
+
+	clientEvents           []string
+	lightProxyClientEvents []string
 }
 
 type trafficState struct {
@@ -3785,6 +3788,8 @@ func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPor
 	return true
 }
 
+// light_proxy_client_events is intentionally omitted; sshClient accumulates
+// these events separately.
 var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
@@ -3977,6 +3982,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["proxy_protocol_header_added"] = sshClient.proxyProtocolMetrics.added.Load()
 		logFields["proxy_protocol_header_replaced"] = sshClient.proxyProtocolMetrics.replaced.Load()
 		logFields["proxy_protocol_header_failed"] = sshClient.proxyProtocolMetrics.failed.Load()
+	}
+
+	if len(sshClient.clientEvents) > 0 {
+		logFields["client_events"] = sshClient.clientEvents
+	}
+	if len(sshClient.lightProxyClientEvents) > 0 {
+		logFields["light_proxy_client_events"] = sshClient.lightProxyClientEvents
 	}
 
 	// Merge in additional metrics from the optional metrics source

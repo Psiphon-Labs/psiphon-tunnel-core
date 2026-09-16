@@ -47,6 +47,9 @@ const (
 	PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL         = 1024
 	PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL = 16
 
+	CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL = 128
+	CLIENT_EVENTS_MAX_LENGTH           = 64
+
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
@@ -709,7 +712,8 @@ var connectedRequestParams = append(
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt}},
+		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -747,6 +751,8 @@ func connectedAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	lightProxyClientEvents, _ := getStringArrayRequestParam(params, "light_proxy_client_events")
+
 	connectedRequestTime := time.Now().UTC()
 	connectedTime := connectedRequestTime.Truncate(time.Hour)
 	connectedTimestamp := connectedTime.Format(time.RFC3339)
@@ -760,6 +766,18 @@ func connectedAPIRequestHandler(
 	// such as slices in handshakeState, is read-only after initially set.
 
 	sshClient.Lock()
+
+	// Connected requests report only the first light proxy events for a
+	// tunnel. Prepend the events in case a later status batch arrived first,
+	// keeping both the event order and the earliest events when the report
+	// limit is reached.
+	if len(lightProxyClientEvents) > 0 {
+		count := min(len(lightProxyClientEvents), CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL)
+		remaining := CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL - count
+		sshClient.lightProxyClientEvents = append(
+			lightProxyClientEvents[:count:count],
+			sshClient.lightProxyClientEvents[:min(len(sshClient.lightProxyClientEvents), remaining)]...)
+	}
 
 	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
 
@@ -868,6 +886,11 @@ func connectedAPIRequestHandler(
 
 var statusRequestParams = baseParams
 
+var statusRequestPayloadParams = []requestParamSpec{
+	{"client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged},
+	{"light_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged},
+}
+
 var remoteServerListStatParams = append(
 	[]requestParamSpec{
 		// Legacy clients don't record the session_id with remote_server_list_stats entries.
@@ -949,6 +972,14 @@ func statusAPIRequestHandler(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	err = validateRequestParams(statusData, statusRequestPayloadParams)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	clientEvents, _ := getStringArrayRequestParam(statusData, "client_events")
+	lightProxyClientEvents, _ := getStringArrayRequestParam(statusData, "light_proxy_client_events")
 
 	// Logs are queued until the input is fully validated. Otherwise, stats
 	// could be double counted if the client has a bug in its request
@@ -1146,9 +1177,16 @@ func statusAPIRequestHandler(
 		sshClient.Unlock()
 	}
 
-	if droppedLogCount > 0 {
+	if droppedLogCount > 0 || len(clientEvents) > 0 || len(lightProxyClientEvents) > 0 {
 		sshClient.Lock()
 		sshClient.persistentStatsDroppedLogCount += droppedLogCount
+		remaining := max(0, CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL-len(sshClient.clientEvents))
+		sshClient.clientEvents = append(
+			sshClient.clientEvents, clientEvents[:min(len(clientEvents), remaining)]...)
+		remaining = max(0, CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL-len(sshClient.lightProxyClientEvents))
+		sshClient.lightProxyClientEvents = append(
+			sshClient.lightProxyClientEvents,
+			lightProxyClientEvents[:min(len(lightProxyClientEvents), remaining)]...)
 		sshClient.Unlock()
 	}
 
@@ -2112,6 +2150,10 @@ func isMobileClientPlatform(clientPlatform string) bool {
 
 func isAnyString(value string) bool {
 	return true
+}
+
+func isClientEvent(value string) bool {
+	return len(value) <= CLIENT_EVENTS_MAX_LENGTH
 }
 
 // Input validators follow the legacy validations rules in psi_web.
