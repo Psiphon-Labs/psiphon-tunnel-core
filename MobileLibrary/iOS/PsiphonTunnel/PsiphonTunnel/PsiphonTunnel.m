@@ -1318,13 +1318,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
-    else if ([noticeType isEqualToString:@"DSLAccessTokenAvailable"]) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onAccessTokenAvailable)]) {
-            dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onAccessTokenAvailable];
-            });
-        }
-    }
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }
@@ -1441,6 +1434,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
     }
     return networkID;
+}
+
+- (void)onAccessToken:(NSString *)token {
+    id<TunneledAppDelegate> delegate = self.tunneledAppDelegate;
+    if ([delegate respondsToSelector:@selector(onAccessToken:)]) {
+        dispatch_async(self->callbackQueue, ^{
+            [delegate onAccessToken:token];
+        });
+    }
 }
 
 - (void)notice:(NSString *)noticeJSON {

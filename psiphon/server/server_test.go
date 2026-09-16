@@ -1778,6 +1778,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
 	clientConfig.EnableDSLAccessTokenRegistration = runConfig.testDSLAccessToken
+	dslAccessTokenReceived := make(chan struct{}, 1)
+	clientConfig.OnAccessToken = func(token string) {
+		if !runConfig.testDSLAccessToken {
+			t.Errorf("unexpected DSL access token callback")
+		} else if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {
+			t.Errorf("DSL access token callback did not deliver the expected token")
+		} else {
+			sendNotificationReceived(dslAccessTokenReceived)
+		}
+	}
 
 	// In the classic test path, TargetServerEntry is used to specify the
 	// server enrty. In the DSL test case, the server entry is fetched from
@@ -2275,6 +2285,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		if runConfig.testDSLAccessToken {
 			waitOnNotification(t, dslAccessTokenAvailable, timeoutSignal, "DSL access token timeout exceeded")
+			waitOnNotification(t, dslAccessTokenReceived, timeoutSignal, "DSL access token callback timeout exceeded")
 
 			token := controller.GetDSLAccessToken()
 			if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {

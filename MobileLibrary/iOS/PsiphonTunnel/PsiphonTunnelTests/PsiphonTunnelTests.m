@@ -21,13 +21,40 @@
 
 #import "PsiphonTunnel.h"
 
+@interface PsiphonTunnel (CallbackTesting)
+- (void)onAccessToken:(NSString *)token;
+- (void)handlePsiphonNotice:(NSString *)noticeJSON;
+@end
 
 @interface PsiphonTunnelDelegate : NSObject <TunneledAppDelegate>
+@property (nonatomic, copy) NSString *diagnosticMessage;
 @end
 @implementation PsiphonTunnelDelegate
 
 - (NSString * _Nullable)getPsiphonConfig {
     return @"";
+}
+
+- (void)onDiagnosticMessage:(NSString *)message withTimestamp:(NSString *)timestamp {
+    self.diagnosticMessage = message;
+}
+
+@end
+
+@interface PsiphonAccessTokenDelegate : PsiphonTunnelDelegate
+@property (nonatomic, copy) NSString *accessToken;
+@property (nonatomic) NSUInteger accessTokenCallbacks;
+@property (nonatomic, copy) void (^accessTokenHandler)(NSString *token);
+@end
+
+@implementation PsiphonAccessTokenDelegate
+
+- (void)onAccessToken:(NSString *)token {
+    self.accessToken = token;
+    self.accessTokenCallbacks++;
+    if (self.accessTokenHandler != nil) {
+        self.accessTokenHandler(token);
+    }
 }
 
 @end
@@ -65,5 +92,67 @@
     }];
 }
 
-@end
+- (void)testAccessTokenCallback {
+    PsiphonAccessTokenDelegate *delegate = [[PsiphonAccessTokenDelegate alloc] init];
+    PsiphonTunnel *tunnel = [PsiphonTunnel newPsiphonTunnel:delegate];
+    delegate.diagnosticMessage = nil;
+    XCTestExpectation *received = [self expectationWithDescription:@"access token received"];
+    delegate.accessTokenHandler = ^(NSString *token) {
+        [received fulfill];
+    };
 
+    [tunnel onAccessToken:@"-_8AgAE"];
+    [self waitForExpectations:@[received] timeout:5];
+
+    XCTAssertEqualObjects(delegate.accessToken, @"-_8AgAE");
+    XCTAssertEqual(delegate.accessTokenCallbacks, 1U);
+    XCTAssertNil(delegate.diagnosticMessage);
+
+    [tunnel handlePsiphonNotice:@"{\"noticeType\":\"DSLAccessTokenAvailable\",\"data\":{},\"timestamp\":\"2026-01-01T00:00:00Z\"}"];
+
+    XCTAssertEqualObjects(delegate.diagnosticMessage, @"DSLAccessTokenAvailable: {}");
+    XCTAssertEqual(delegate.accessTokenCallbacks, 1U);
+}
+
+- (void)testAccessTokenWithoutCallback {
+    PsiphonTunnel *tunnel = [PsiphonTunnel newPsiphonTunnel:self.psiphonTunnelDelegate];
+    self.psiphonTunnelDelegate.diagnosticMessage = nil;
+
+    [tunnel onAccessToken:@"-_8AgAE"];
+
+    XCTAssertNil(self.psiphonTunnelDelegate.diagnosticMessage);
+}
+
+- (void)testAccessTokenCallbacksAreAsynchronousAndOrdered {
+    PsiphonAccessTokenDelegate *delegate = [[PsiphonAccessTokenDelegate alloc] init];
+    PsiphonTunnel *tunnel = [PsiphonTunnel newPsiphonTunnel:delegate];
+    XCTestExpectation *entered = [self expectationWithDescription:@"first callback entered"];
+    XCTestExpectation *returned = [self expectationWithDescription:@"provider calls returned"];
+    XCTestExpectation *received = [self expectationWithDescription:@"both tokens received"];
+    received.expectedFulfillmentCount = 2;
+    dispatch_semaphore_t releaseCallback = dispatch_semaphore_create(0);
+    NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+
+    delegate.accessTokenHandler = ^(NSString *token) {
+        if ([token isEqualToString:@"first"]) {
+            [entered fulfill];
+            dispatch_semaphore_wait(releaseCallback, DISPATCH_TIME_FOREVER);
+        }
+        [tokens addObject:token];
+        [received fulfill];
+    };
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        [tunnel onAccessToken:@"first"];
+        [tunnel onAccessToken:@"second"];
+        [returned fulfill];
+    });
+
+    // Both provider calls must return while the first application callback is blocked.
+    [self waitForExpectations:@[entered, returned] timeout:5];
+    dispatch_semaphore_signal(releaseCallback);
+    [self waitForExpectations:@[received] timeout:5];
+    XCTAssertEqualObjects(tokens, (@[@"first", @"second"]));
+}
+
+@end

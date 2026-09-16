@@ -178,10 +178,14 @@ public class PsiphonTunnel {
          */
         default void onLightProxyAvailable() {}
         /**
-         * Called when a persisted opaque access token is available to fetch with getAccessToken.
+         * Called with a persisted opaque access token at startup, if available, and whenever a
+         * changed token has been persisted. Requires EnableDSLAccessTokenRegistration in the config.
          * The token may be used for push notifications; it is not an FCM or APNs device token.
+         * Delivered synchronously; dispatch work asynchronously before calling PsiphonTunnel APIs
+         * from this callback.
+         * @param token The access token as unpadded Base64URL text.
          */
-        default void onAccessTokenAvailable() {}
+        default void onAccessToken(String token) {}
         default void onExiting() {}
     }
 
@@ -581,6 +585,11 @@ public class PsiphonTunnel {
         @Override
         public void notice(String noticeJSON) {
             mPsiphonTunnel.notice(noticeJSON);
+        }
+
+        @Override
+        public void onAccessToken(String token) {
+            mHostService.onAccessToken(token);
         }
 
         @Override
@@ -1009,8 +1018,6 @@ public class PsiphonTunnel {
                         commonRegionActivity);
             } else if (noticeType.equals("LightProxyAvailable")) {
                 mHostService.onLightProxyAvailable();
-            } else if (noticeType.equals("DSLAccessTokenAvailable")) {
-                mHostService.onAccessTokenAvailable();
             }
 
             if (diagnostic) {

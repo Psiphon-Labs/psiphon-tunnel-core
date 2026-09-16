@@ -63,6 +63,7 @@ type PsiphonProvider interface {
 	PsiphonProviderNoticeHandler
 	PsiphonProviderNetwork
 	BindToDevice(fileDescriptor int) (string, error)
+	OnAccessToken(token string)
 
 	// TODO: move GetDNSServersAsString to PsiphonProviderNetwork to
 	// facilitate custom tunnel-core resolver support in SendFeedback.
@@ -236,6 +237,7 @@ func Start(
 	config.NetworkConnectivityChecker = wrappedProvider
 	config.NetworkIDGetter = wrappedProvider
 	config.DNSServerGetter = wrappedProvider
+	config.OnAccessToken = wrappedProvider.OnAccessToken
 
 	if useDeviceBinder {
 		config.DeviceBinder = wrappedProvider
@@ -495,6 +497,7 @@ func ImportPushPayload(payload []byte) bool {
 // Base64URL text. An empty string is returned when Psiphon is not running or
 // no token has been registered, or when retrieval fails. A
 // DSLAccessTokenAvailable notice indicates that a token is available.
+// PsiphonProvider.OnAccessToken also delivers the token directly.
 func GetDSLAccessToken() string {
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -704,6 +707,12 @@ func (p *mutexPsiphonProvider) Notice(noticeJSON string) {
 	p.Lock()
 	defer p.Unlock()
 	p.p.Notice(noticeJSON)
+}
+
+func (p *mutexPsiphonProvider) OnAccessToken(token string) {
+	p.Lock()
+	defer p.Unlock()
+	p.p.OnAccessToken(token)
 }
 
 func (p *mutexPsiphonProvider) HasNetworkConnectivity() int {
