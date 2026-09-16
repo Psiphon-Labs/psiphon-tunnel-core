@@ -2259,7 +2259,9 @@ func UpdateCheckServerEntryTagsEndTime(config *Config, checkCount int, pruneCoun
 // GetCheckServerEntryTags returns a random selection of server entry tags to
 // be checked for pruning. An empty list is returned if a check is not yet
 // due.
-func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
+func GetCheckServerEntryTags(
+	config *Config,
+	adjustMaxSendBytes int) ([]string, int, error) {
 
 	// TODO: pass in controller.runCtx. For now, PruneServerEntryIterator
 	// skips move-to-front work and the following loop is time bounded.
@@ -2279,7 +2281,7 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 	// request in a timely fashion.
 
 	p := config.GetParameters().Get()
-	maxSendBytes := p.Int(parameters.CheckServerEntryTagsMaxSendBytes)
+	maxSendBytes := p.Int(parameters.CheckServerEntryTagsMaxSendBytes) - adjustMaxSendBytes
 	maxWorkTime := p.Duration(parameters.CheckServerEntryTagsMaxWorkTime)
 	minimumAgeForPruning := p.Duration(parameters.ServerEntryMinimumAgeForPruning)
 	p.Close()
@@ -2329,7 +2331,8 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 		checkTags = append(checkTags, serverEntry.Tag)
 
 		// Approximate the size of the JSON encoding of the string array,
-		// including quotes and commas.
+		// including quotes and commas. This assumes Base64 tags, which
+		// require no additional JSON escaping.
 		bytes += len(serverEntry.Tag) + 3
 
 		if bytes >= maxSendBytes || (maxWorkTime > 0 && time.Since(startWork) > maxWorkTime) {

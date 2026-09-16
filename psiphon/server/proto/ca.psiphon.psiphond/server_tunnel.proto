@@ -109,4 +109,6 @@ message ServerTunnel {
     optional int64 light_proxy_dial_failed  = 195;
     optional int64 total_domain_port_forward_count_tcp = 196;
     optional int64 light_proxy_dial_canceled  = 197;
+    repeated string client_events = 198;
+    repeated string light_proxy_client_events = 199;
 }

@@ -1229,6 +1229,18 @@ func NoticeDSLAccessTokenAvailable() {
 	singletonNoticeLogger.outputNotice("DSLAccessTokenAvailable", 0)
 }
 
+// NoticeClientEventDropped reports a local client event drop once per reason.
+func NoticeClientEventDropped(reason string) {
+	if !GetEmitDiagnosticNotices() {
+		return
+	}
+
+	outputRepetitiveNotice(
+		"ClientEventDropped-"+reason, "", 0,
+		"ClientEventDropped", noticeIsDiagnostic,
+		"message", "dropped event: "+reason)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

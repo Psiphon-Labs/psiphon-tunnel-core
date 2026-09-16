@@ -40,14 +40,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
-// CrashTracebackLevel values configure the amount of Go runtime traceback
-// detail captured in fatal crash output.
-const (
-	CrashTracebackLevelSingle = "single"
-	CrashTracebackLevelAll    = "all"
-	CrashTracebackLevelSystem = "system"
-)
-
 type PsiphonProviderNoticeHandler interface {
 	Notice(noticeJSON string)
 }
@@ -78,124 +70,38 @@ type PsiphonProviderFeedbackHandler interface {
 	SendFeedbackCompleted(err error)
 }
 
-func NoticeUserLog(message string) {
-	psiphon.NoticeUserLog(message)
-}
-
-// HomepageFilePath returns the path where homepage files will be paved.
+// controllerLifecycleMutex serializes Start and Stop and is held across the
+// full start or stop. It also guards controllerCtx, stopController,
+// controllerWaitGroup, and embeddedServerListWaitGroup.
 //
-// rootDataDirectoryPath is the configured data root directory.
+// controllerAccessMutex guards the controller pointer for all other API
+// functions, which must not block on Start or Stop. It is write-locked only
+// to publish or clear the pointer, never across full start or stop.
+// In-flight API calls hold the read lock and complete before Stop clears the
+// pointer, so no API call runs against a stopping or stopped controller.
 //
-// Note: homepage files will only be paved if UseNoticeFiles is set in the
-// config passed to Start().
-func HomepageFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.HomepageFilename)
-}
-
-// NoticesFilePath returns the path where the notices file will be paved.
+// dropPacketTunnelTrafficMutex serializes updates to the latched
+// dropPacketTunnelTraffic value with application to the controller, so that
+// concurrent toggles cannot apply out of order.
 //
-// rootDataDirectoryPath is the configured data root directory.
-//
-// Note: notices will only be paved if UseNoticeFiles is set in the config
-// passed to Start().
-func NoticesFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.NoticesFilename)
-}
+// Lock order: controllerLifecycleMutex, then dropPacketTunnelTrafficMutex,
+// then controllerAccessMutex. Only Start and Stop take the lifecycle mutex.
+// An API function holding the read lock must not call Start or Stop.
 
-// OldNoticesFilePath returns the path where the notices file is moved to when
-// file rotation occurs.
-//
-// rootDataDirectoryPath is the configured data root directory.
-//
-// Note: notices will only be paved if UseNoticeFiles is set in the config
-// passed to Start().
-func OldNoticesFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.OldNoticesFilename)
-}
-
-// UpgradeDownloadFilePath returns the path where the downloaded upgrade file
-// will be paved.
-//
-// rootDataDirectoryPath is the configured data root directory.
-//
-// Note: upgrades will only be paved if UpgradeDownloadURLs is set in the config
-// passed to Start() and there are upgrades available.
-func UpgradeDownloadFilePath(rootDataDirectoryPath string) string {
-	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.UpgradeDownloadFilename)
-}
-
-var crashHandlingMutex sync.Mutex
-
-// ConfigureCrashHandling enables Go runtime crash output for the current
-// process and routes it to crashReportPath.
-//
-// Call this after loading the Go shared library and before invoking other
-// tunnel-core operations. The caller owns crashReportPath lifecycle: it should
-// promote or delete any previous contents, and pre-create or truncate the file
-// if it wants a fresh session header or empty sink. ConfigureCrashHandling
-// appends Go runtime crash output to the existing file.
-func ConfigureCrashHandling(crashReportPath string, tracebackLevel string) error {
-	if crashReportPath == "" {
-		return errors.TraceNew("crashReportPath is required")
-	}
-
-	if tracebackLevel == "" {
-		tracebackLevel = CrashTracebackLevelSingle
-	}
-
-	switch tracebackLevel {
-	case CrashTracebackLevelSingle, CrashTracebackLevelAll, CrashTracebackLevelSystem:
-	default:
-		return errors.Tracef("invalid tracebackLevel: %s", tracebackLevel)
-	}
-
-	crashHandlingMutex.Lock()
-	defer crashHandlingMutex.Unlock()
-
-	err := os.MkdirAll(filepath.Dir(crashReportPath), 0700)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	crashOutputFile, err := os.OpenFile(
-		crashReportPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	defer crashOutputFile.Close()
-
-	debug.SetTraceback(tracebackLevel)
-
-	err = debug.SetCrashOutput(crashOutputFile, debug.CrashOptions{})
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
-}
-
-// ResetCrashHandling disables any previously configured Go runtime crash
-// output for the current process.
-func ResetCrashHandling() error {
-	crashHandlingMutex.Lock()
-	defer crashHandlingMutex.Unlock()
-
-	err := debug.SetCrashOutput(nil, debug.CrashOptions{})
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
-}
-
-var controllerMutex sync.Mutex
+var controllerLifecycleMutex sync.Mutex
+var controllerAccessMutex sync.RWMutex
 var embeddedServerListWaitGroup *sync.WaitGroup
 var controller *psiphon.Controller
 var controllerCtx context.Context
 var stopController context.CancelFunc
 var controllerWaitGroup *sync.WaitGroup
+
+var dropPacketTunnelTrafficMutex sync.Mutex
 var dropPacketTunnelTraffic bool
 
+// Start starts the singleton controller. Start does not block other API
+// functions. API calls made before Start publishes the controller are
+// no-ops.
 func Start(
 	configJson string,
 	embeddedServerEntryList string,
@@ -205,8 +111,8 @@ func Start(
 	useIPv6Synthesizer bool,
 	useHasIPv6RouteGetter bool) error {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerLifecycleMutex.Lock()
+	defer controllerLifecycleMutex.Unlock()
 
 	if controller != nil {
 		return errors.TraceNew("already started")
@@ -311,7 +217,7 @@ func Start(
 		embeddedServerListWaitGroup.Wait()
 	}
 
-	controller, err = psiphon.NewController(config)
+	runController, err := psiphon.NewController(config)
 	if err != nil {
 		stopController()
 		embeddedServerListWaitGroup.Wait()
@@ -320,31 +226,50 @@ func Start(
 		return errors.Trace(err)
 	}
 
-	// Apply any packet tunnel traffic dropping state that was set, including
-	// before the Controller was started.
-	controller.DropPacketTunnelTraffic(dropPacketTunnelTraffic)
-
 	controllerWaitGroup = new(sync.WaitGroup)
+
+	// The new controller pointer is made available before Run starts. This
+	// ensures that GetDSLAccessToken won't fail with no controller pointer
+	// when called in response to an early NoticeDSLAccessTokenAvailable.
+	//
+	// As a consequence of this ordering, all API functions must be safe to
+	// call after NewController and before Run.
+
+	dropPacketTunnelTrafficMutex.Lock()
+	controllerAccessMutex.Lock()
+	runController.DropPacketTunnelTraffic(dropPacketTunnelTraffic)
+	controller = runController
+	controllerAccessMutex.Unlock()
+	dropPacketTunnelTrafficMutex.Unlock()
+
 	controllerWaitGroup.Add(1)
 	go func() {
 		defer controllerWaitGroup.Done()
-		controller.Run(controllerCtx)
+		runController.Run(controllerCtx)
 	}()
 
 	return nil
 }
 
+// Stop stops the singleton controller. Stop does not block other API
+// functions; calls made after Stop clears the controller are no-ops.
 func Stop() {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerLifecycleMutex.Lock()
+	defer controllerLifecycleMutex.Unlock()
 
 	if controller != nil {
+
+		// Clear the pointer before shutting down. This waits only for
+		// in-flight API calls to release the read lock.
+		controllerAccessMutex.Lock()
+		controller = nil
+		controllerAccessMutex.Unlock()
+
 		stopController()
 		controllerWaitGroup.Wait()
 		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
-		controller = nil
 		controllerCtx = nil
 		stopController = nil
 		controllerWaitGroup = nil
@@ -357,8 +282,8 @@ func Stop() {
 // running.
 func ReconnectTunnel() {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller != nil {
 		controller.TerminateNextActiveTunnel()
@@ -369,22 +294,11 @@ func ReconnectTunnel() {
 // a tunnel reconnect.
 func NetworkChanged() {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller != nil {
 		controller.NetworkChanged()
-	}
-}
-
-// AppResumed notifies Psiphon that the host app has resumed from background.
-func AppResumed() {
-
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
-
-	if controller != nil {
-		controller.AppResumed()
 	}
 }
 
@@ -397,16 +311,27 @@ func AppResumed() {
 // If PacketTunnelTunFileDescriptor is not set, this has no effect.
 func DropPacketTunnelTraffic(drop bool) {
 
-	// If no Controller is started, or if PacketTunnelTunFileDescriptor is not
-	// set, this is a no-op.
-
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	dropPacketTunnelTrafficMutex.Lock()
+	defer dropPacketTunnelTrafficMutex.Unlock()
 
 	dropPacketTunnelTraffic = drop
 
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
+
 	if controller != nil {
-		controller.DropPacketTunnelTraffic(dropPacketTunnelTraffic)
+		controller.DropPacketTunnelTraffic(drop)
+	}
+}
+
+// AppResumed notifies Psiphon that the host app has resumed from background.
+func AppResumed() {
+
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
+
+	if controller != nil {
+		controller.AppResumed()
 	}
 }
 
@@ -418,8 +343,8 @@ func DropPacketTunnelTraffic(drop bool) {
 // authorizations. This is a workaround for gobind type limitations.
 func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller != nil {
 
@@ -444,8 +369,8 @@ func SetDynamicConfig(newSponsorID, newAuthorizationsList string) {
 // when "", the export failed and a diagnostic has been logged.
 func ExportExchangePayload() string {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller == nil {
 		return ""
@@ -463,8 +388,8 @@ func ExportExchangePayload() string {
 // diagnostic notice has been logged.
 func ImportExchangePayload(payload string) bool {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller == nil {
 		return false
@@ -483,8 +408,8 @@ func ImportExchangePayload(payload string) bool {
 // successful, the imported server entries are retained and prioritized.
 func ImportPushPayload(payload []byte) bool {
 
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller == nil {
 		return false
@@ -499,14 +424,26 @@ func ImportPushPayload(payload []byte) bool {
 // DSLAccessTokenAvailable notice indicates that a token is available.
 // PsiphonProvider.OnAccessToken also delivers the token directly.
 func GetDSLAccessToken() string {
-	controllerMutex.Lock()
-	defer controllerMutex.Unlock()
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
 
 	if controller == nil {
 		return ""
 	}
 
 	return controller.GetDSLAccessToken()
+}
+
+// RecordClientEvent records a client event attributed to the current tunnel
+// or light proxy.
+func RecordClientEvent(event string) {
+
+	controllerAccessMutex.RLock()
+	defer controllerAccessMutex.RUnlock()
+
+	if controller != nil {
+		controller.RecordClientEvent(event)
+	}
 }
 
 var sendFeedbackMutex sync.Mutex
@@ -680,6 +617,10 @@ func GetPacketTunnelMTU() int {
 	return tun.DEFAULT_MTU
 }
 
+func NoticeUserLog(message string) {
+	psiphon.NoticeUserLog(message)
+}
+
 // WriteRuntimeProfiles writes Go runtime profile information to a set of
 // files in the specified output directory. See common.WriteRuntimeProfiles
 // for more details.
@@ -692,6 +633,120 @@ func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, bloc
 		"",
 		cpuSampleDurationSeconds,
 		blockSampleDurationSeconds)
+}
+
+// CrashTracebackLevel values configure the amount of Go runtime traceback
+// detail captured in fatal crash output.
+const (
+	CrashTracebackLevelSingle = "single"
+	CrashTracebackLevelAll    = "all"
+	CrashTracebackLevelSystem = "system"
+)
+
+var crashHandlingMutex sync.Mutex
+
+// ConfigureCrashHandling enables Go runtime crash output for the current
+// process and routes it to crashReportPath.
+//
+// Call this after loading the Go shared library and before invoking other
+// tunnel-core operations. The caller owns crashReportPath lifecycle: it should
+// promote or delete any previous contents, and pre-create or truncate the file
+// if it wants a fresh session header or empty sink. ConfigureCrashHandling
+// appends Go runtime crash output to the existing file.
+func ConfigureCrashHandling(crashReportPath string, tracebackLevel string) error {
+	if crashReportPath == "" {
+		return errors.TraceNew("crashReportPath is required")
+	}
+
+	if tracebackLevel == "" {
+		tracebackLevel = CrashTracebackLevelSingle
+	}
+
+	switch tracebackLevel {
+	case CrashTracebackLevelSingle, CrashTracebackLevelAll, CrashTracebackLevelSystem:
+	default:
+		return errors.Tracef("invalid tracebackLevel: %s", tracebackLevel)
+	}
+
+	crashHandlingMutex.Lock()
+	defer crashHandlingMutex.Unlock()
+
+	err := os.MkdirAll(filepath.Dir(crashReportPath), 0700)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	crashOutputFile, err := os.OpenFile(
+		crashReportPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer crashOutputFile.Close()
+
+	debug.SetTraceback(tracebackLevel)
+
+	err = debug.SetCrashOutput(crashOutputFile, debug.CrashOptions{})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// ResetCrashHandling disables any previously configured Go runtime crash
+// output for the current process.
+func ResetCrashHandling() error {
+	crashHandlingMutex.Lock()
+	defer crashHandlingMutex.Unlock()
+
+	err := debug.SetCrashOutput(nil, debug.CrashOptions{})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// HomepageFilePath returns the path where homepage files will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
+//
+// Note: homepage files will only be paved if UseNoticeFiles is set in the
+// config passed to Start().
+func HomepageFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.HomepageFilename)
+}
+
+// NoticesFilePath returns the path where the notices file will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
+//
+// Note: notices will only be paved if UseNoticeFiles is set in the config
+// passed to Start().
+func NoticesFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.NoticesFilename)
+}
+
+// OldNoticesFilePath returns the path where the notices file is moved to when
+// file rotation occurs.
+//
+// rootDataDirectoryPath is the configured data root directory.
+//
+// Note: notices will only be paved if UseNoticeFiles is set in the config
+// passed to Start().
+func OldNoticesFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.OldNoticesFilename)
+}
+
+// UpgradeDownloadFilePath returns the path where the downloaded upgrade file
+// will be paved.
+//
+// rootDataDirectoryPath is the configured data root directory.
+//
+// Note: upgrades will only be paved if UpgradeDownloadURLs is set in the config
+// passed to Start() and there are upgrades available.
+func UpgradeDownloadFilePath(rootDataDirectoryPath string) string {
+	return filepath.Join(rootDataDirectoryPath, psiphon.PsiphonDataDirectoryName, psiphon.UpgradeDownloadFilename)
 }
 
 type mutexPsiphonProvider struct {
