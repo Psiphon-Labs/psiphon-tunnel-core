@@ -342,7 +342,7 @@ func doDSLFetch(
 
 	if requestDSLAccessTokenRegistration {
 		c.DSLAccessTokenRegistrationResponse = func(token []byte) error {
-			return errors.Trace(handleDSLAccessTokenRegistrationResponse(token))
+			return errors.Trace(handleDSLAccessTokenRegistrationResponse(config, token))
 		}
 	}
 
@@ -424,14 +424,16 @@ func isDSLAccessTokenRegistrationDue(
 	return !now.Before(refreshDeadline)
 }
 
-func handleDSLAccessTokenRegistrationResponse(token []byte) error {
+func handleDSLAccessTokenRegistrationResponse(
+	config *Config, token []byte) error {
+
 	changed, err := storeDSLAccessTokenRegistration(token, time.Now().UTC())
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	if changed {
-		NoticeDSLAccessTokenAvailable()
+		announceDSLAccessToken(config, base64.RawURLEncoding.EncodeToString(token))
 	}
 
 	return nil
@@ -452,7 +454,7 @@ func isDSLAccessTokenRegistrationEnabled(config *Config) bool {
 // Base64URL text. An empty string is returned when no token has been
 // registered, or when retrieval fails; retrieval failures are logged to
 // diagnostics. A DSLAccessTokenAvailable notice indicates that a token is
-// available.
+// available. Config.OnAccessToken also delivers the token directly, if set.
 func (controller *Controller) GetDSLAccessToken() string {
 
 	if !isDSLAccessTokenRegistrationEnabled(controller.config) {
@@ -472,8 +474,8 @@ func (controller *Controller) GetDSLAccessToken() string {
 	return base64.RawURLEncoding.EncodeToString(token)
 }
 
-// announcePersistedDSLAccessToken emits a DSLAccessTokenAvailable notice when
-// a previously registered DSL access token is available to the host application.
+// announcePersistedDSLAccessToken announces a previously registered DSL access
+// token and delivers it to Config.OnAccessToken, if set.
 func (controller *Controller) announcePersistedDSLAccessToken() {
 
 	token := controller.GetDSLAccessToken()
@@ -482,7 +484,17 @@ func (controller *Controller) announcePersistedDSLAccessToken() {
 		return
 	}
 
+	announceDSLAccessToken(controller.config, token)
+}
+
+func announceDSLAccessToken(config *Config, token string) {
 	NoticeDSLAccessTokenAvailable()
+
+	// Tactics may have changed while the registration request was in flight.
+	// Apply the current policy before delivering the token to the host.
+	if config.OnAccessToken != nil && isDSLAccessTokenRegistrationEnabled(config) {
+		config.OnAccessToken(token)
+	}
 }
 
 var disableDSLFetches atomic.Bool

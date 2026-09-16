@@ -832,9 +832,17 @@ type Config struct {
 	// EnableDSLAccessTokenRegistration indicates whether DSL discovery requests ask
 	// the DSL backend to issue an opaque token. A DSLAccessTokenAvailable notice is
 	// emitted for a persisted token at startup and when a newly issued token
-	// differs from the previously stored token; the token itself is fetched with
-	// GetDSLAccessToken.
+	// differs from the previously stored token; the token itself is delivered to
+	// OnAccessToken, if set, and may also be fetched with GetDSLAccessToken.
 	EnableDSLAccessTokenRegistration bool `json:",omitempty"`
+
+	// OnAccessToken is an optional callback that receives the persisted opaque
+	// DSL access token as unpadded Base64URL text at startup, if available, and
+	// whenever a changed token has been persisted. Requires
+	// EnableDSLAccessTokenRegistration. The callback runs synchronously and
+	// should return promptly.
+	// The token is never included in notices.
+	OnAccessToken func(token string) `json:"-"`
 
 	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
 	// deobfuscate push payloads. This value is supplied by the Psiphon
