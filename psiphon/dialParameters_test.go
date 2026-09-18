@@ -1112,7 +1112,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 		for j := 0; j < 20; j++ {
 
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1135,7 +1135,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		allMoveToFront := true
 		for j := 0; j < 20; j++ {
 
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1177,7 +1177,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 		for j := 0; j < 5; j++ {
 
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1196,7 +1196,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		allMoveToFront = true
 		for j := 5; j < 20; j++ {
 
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				t.Fatalf("ServerEntryIterator.Next failed: %s", err)
 			}
@@ -1223,6 +1223,70 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		if err != nil {
 			t.Fatalf("SetParameters failed: %s", err)
 		}
+	}
+
+	_, iterator, err := NewServerEntryIterator(ctx, clientConfig)
+	if err != nil {
+		t.Fatalf("NewServerEntryIterator failed: %s", err)
+	}
+	defer iterator.Close()
+
+	nextEntry := func(expectDeferred bool) *protocol.ServerEntry {
+		t.Helper()
+		entry, isDeferred, err := iterator.Next(ctx)
+		if err != nil || entry == nil {
+			t.Fatalf("expected server entry: %v", err)
+		}
+		if isDeferred != expectDeferred {
+			t.Fatalf("expected isDeferred=%t", expectDeferred)
+		}
+		return entry
+	}
+
+	epoch := iterator.GetEpoch()
+	first := nextEntry(false)
+	iterator.Defer(first.IpAddress, epoch)
+	second := nextEntry(false)
+	if second.IpAddress == first.IpAddress {
+		t.Fatal("deferred candidate returned before being enabled")
+	}
+	iterator.Defer(second.IpAddress, epoch)
+	iterator.UseDeferred()
+	for _, expected := range []*protocol.ServerEntry{first, second} {
+		if nextEntry(true).IpAddress != expected.IpAddress {
+			t.Fatal("deferred candidates not returned first in FIFO order")
+		}
+	}
+	third := nextEntry(false)
+	if third.IpAddress == first.IpAddress || third.IpAddress == second.IpAddress {
+		t.Fatal("main iterator restarted after deferred candidate")
+	}
+
+	iterator.Defer(third.IpAddress, epoch)
+	if err := iterator.Reset(ctx); err != nil {
+		t.Fatalf("Reset failed: %s", err)
+	}
+	iterator.Defer(first.IpAddress, epoch)
+	if len(iterator.deferredServerEntryIDs) != 0 {
+		t.Fatal("Reset retained deferred candidates or accepted a stale epoch")
+	}
+
+	epoch = iterator.GetEpoch()
+	current := nextEntry(false)
+	iterator.Defer(current.IpAddress, epoch)
+	// Reset also clears useDeferred.
+	iterator.UseDeferred()
+	if nextEntry(true).IpAddress != current.IpAddress {
+		t.Fatal("current epoch candidate not prioritized after Reset")
+	}
+	if nextEntry(false).IpAddress == current.IpAddress {
+		t.Fatal("main iterator restarted after deferred candidate")
+	}
+
+	iterator.Defer(current.IpAddress, epoch)
+	iterator.Close()
+	if len(iterator.deferredServerEntryIDs) != 0 || iterator.useDeferred {
+		t.Fatal("Close retained deferred state")
 	}
 }
 

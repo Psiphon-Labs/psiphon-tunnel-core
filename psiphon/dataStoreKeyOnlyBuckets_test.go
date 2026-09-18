@@ -162,7 +162,7 @@ func runTestDatastoreKeyOnlyBuckets() error {
 		defer iterator.Close()
 		iteratedServerEntries := 0
 		for {
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				return errors.Trace(err)
 			}
