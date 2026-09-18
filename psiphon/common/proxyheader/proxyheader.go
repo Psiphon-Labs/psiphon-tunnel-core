@@ -59,6 +59,50 @@ const (
 		proxyProtocolHeaderMACDigestSize
 )
 
+// ValidateMACKey validates a concatenated key ID and MAC key.
+func ValidateMACKey(value []byte) error {
+
+	if len(value) != ProxyProtocolHeaderKeyIDSize+ProxyProtocolHeaderMACKeySize {
+		return errors.TraceNew("invalid MAC key size")
+	}
+
+	return nil
+}
+
+// ValidateCustomTLV validates an optional custom TLV encoded as a type byte
+// followed by one or more value bytes. An empty input indicates that no custom
+// TLV is configured.
+func ValidateCustomTLV(customTLV []byte) error {
+
+	if len(customTLV) == 0 {
+		return nil
+	}
+
+	if len(customTLV) == 1 {
+		return errors.TraceNew("missing custom TLV value")
+	}
+
+	// The PROXY v2 header has a 16-bit length field. In principle, the custom
+	// TLV value length cannot exceed 2^16 - (larger IPv6 address block + two
+	// TLV headers + MAC TLV value length). However, go-proxyproto enforces an
+	// even lower length limit, maxV2HeaderSize = 4096, so use that as the
+	// base here.
+
+	if len(customTLV)-1 > 4096-36-3-(3+proxyProtocolHeaderMACTLVSize) {
+		return errors.TraceNew("invalid custom TLV value size")
+	}
+
+	tlvType := proxyproto.PP2Type(customTLV[0])
+	if !tlvType.App() {
+		return errors.TraceNew("invalid custom TLV type")
+	}
+	if tlvType == proxyProtocolHeaderMACTLVType {
+		return errors.TraceNew("custom TLV type conflicts with MAC TLV type")
+	}
+
+	return nil
+}
+
 // MakeProxyProtocolHeader creates a HAProxy PROXY protocol v2 header with a
 // custom authentication TLV and returns the serialized wire format.
 //
@@ -68,6 +112,9 @@ const (
 //
 // Authentication is provided by a MAC digest using the provided MAC key. The
 // current timestamp is included in the MAC to facilitate replay detection.
+//
+// The optional custom TLV, when present, is encoded as a type byte followed by
+// its value and is included in the MAC.
 //
 // The authentication data is added as an application-specific TLV with type
 // 0xEA and the following fields:
@@ -92,6 +139,7 @@ const (
 //	+---------------------------------------------------------------------+
 //	| PROXY v2 header                                                     |
 //	| [...]                                                               |
+//	| Custom TLV (optional)                                               |
 //	| Authentication TLV (end position)                                   |
 //	|  +--------+--------+---------------------------------------------+  |
 //	|  |Version | Key ID | Timestamp | 00 00 00 00 ... 00 00           |  |
@@ -103,6 +151,7 @@ const (
 //	+---------------------------------------------------------------------+
 //	| PROXY v2 header                                                     |
 //	| [...]                                                               |
+//	| Custom TLV (optional)                                               |
 //	| Authentication TLV (end position)                                   |
 //	|  +--------+--------+---------------------------------------------+  |
 //	|  |Version | Key ID | Timestamp | Computed MAC digest             |  |
@@ -111,6 +160,7 @@ const (
 func MakeProxyProtocolHeader(
 	keyID []byte,
 	key []byte,
+	customTLV []byte,
 	sourceIP net.IP,
 	destinationIP net.IP,
 	destinationPort int) ([]byte, error) {
@@ -121,6 +171,11 @@ func MakeProxyProtocolHeader(
 
 	if len(key) != ProxyProtocolHeaderMACKeySize {
 		return nil, errors.TraceNew("invalid key size")
+	}
+
+	err := ValidateCustomTLV(customTLV)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	// Create the PROXY v2 header
@@ -137,7 +192,8 @@ func MakeProxyProtocolHeader(
 		header.TransportProtocol = proxyproto.TCPv6
 	}
 
-	// Add the authentication TLV with all-zero byte MAC digest
+	// Add the authentication TLV with all-zero byte MAC digest. The optional
+	// custom TLV is added first, so it's covered by the MAC.
 
 	offset := 0
 	var macTLV [proxyProtocolHeaderMACTLVSize]byte
@@ -154,14 +210,25 @@ func MakeProxyProtocolHeader(
 		macTLV[offset:offset+proxyProtocolHeaderTimestampSize],
 		uint64(time.Now().UTC().UnixMilli()))
 
-	tlvs := [1]proxyproto.TLV{
-		{
-			Type:  proxyProtocolHeaderMACTLVType,
-			Value: macTLV[:],
-		},
+	var tlvs [2]proxyproto.TLV
+	tlvCount := 0
+
+	if len(customTLV) > 0 {
+		tlvs[tlvCount] = proxyproto.TLV{
+			Type:  proxyproto.PP2Type(customTLV[0]),
+			Value: customTLV[1:],
+		}
+		tlvCount++
 	}
 
-	err := header.SetTLVs(tlvs[:])
+	tlvs[tlvCount] =
+		proxyproto.TLV{
+			Type:  proxyProtocolHeaderMACTLVType,
+			Value: macTLV[:],
+		}
+	tlvCount++
+
+	err = header.SetTLVs(tlvs[:tlvCount])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -57,6 +57,12 @@ func flight1Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 		return nil, nil, err
 	}
 
+	// [Psiphon]
+	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+	if state.isClient && cfg.customClientHelloRandom != nil {
+		state.localRandom.RandomBytes = cfg.customClientHelloRandom()
+	}
+
 	extensions := []extension.Extension{
 		&extension.SupportedSignatureAlgorithms{
 			SignatureHashAlgorithms: cfg.localSignatureSchemes,

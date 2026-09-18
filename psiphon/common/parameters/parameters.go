@@ -92,7 +92,6 @@ const (
 	LimitIntensiveConnectionWorkers                    = "LimitIntensiveConnectionWorkers"
 	UpstreamProxyErrorMinWaitDuration                  = "UpstreamProxyErrorMinWaitDuration"
 	UpstreamProxyErrorMaxWaitDuration                  = "UpstreamProxyErrorMaxWaitDuration"
-	IgnoreHandshakeStatsRegexps                        = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocolsProbability               = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                          = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount            = "PrioritizeTunnelProtocolsCandidateCount"
@@ -595,6 +594,7 @@ const (
 	LightProxyCustomHostNameProbability                = "LightProxyCustomHostNameProbability"
 	LightProxyTunnelInactiveThreshold                  = "LightProxyTunnelInactiveThreshold"
 	LightProxyDialTimeout                              = "LightProxyDialTimeout"
+	LightProxyInactivityTimeout                        = "LightProxyInactivityTimeout"
 	LightProxyLimitDestinationAddresses                = "LightProxyLimitDestinationAddresses"
 	LightProxyPersonalPairingConnectionWorkerPoolSize  = "LightProxyPersonalPairingConnectionWorkerPoolSize"
 	HomepageURLQueryParameterClientFeatures            = "HomepageURLQueryParameterClientFeatures"
@@ -657,7 +657,6 @@ var defaultParameters = map[string]struct {
 	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
 	UpstreamProxyErrorMinWaitDuration:        {value: 10 * time.Second, minimum: time.Duration(0)},
 	UpstreamProxyErrorMaxWaitDuration:        {value: 30 * time.Second, minimum: time.Duration(0)},
-	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	PacketTunnelReadTimeout:                  {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
@@ -1283,6 +1282,7 @@ var defaultParameters = map[string]struct {
 	LightProxyUseRecommendedSNIProbability:            {value: 0.5, minimum: 0.0},
 	LightProxyTunnelInactiveThreshold:                 {value: 30 * time.Second, minimum: 0 * time.Millisecond},
 	LightProxyDialTimeout:                             {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	LightProxyInactivityTimeout:                       {value: 2 * time.Minute, minimum: 1 * time.Second},
 	LightProxyLimitDestinationAddresses:               {value: []string{}},
 	LightProxyPersonalPairingConnectionWorkerPoolSize: {value: 2, minimum: 1},
 

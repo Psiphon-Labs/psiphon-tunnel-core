@@ -30,8 +30,10 @@ import (
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -116,6 +118,29 @@ func (suite *ConfigTestSuite) Test_LoadConfig_DSLAccessTokenRegistration() {
 	config, err := LoadConfig(configJSON)
 	suite.Require().NoError(err)
 	suite.True(config.EnableDSLAccessTokenRegistration)
+}
+
+type configTestNetworkIDGetter string
+
+func (g configTestNetworkIDGetter) GetNetworkID() string {
+	return string(g)
+}
+
+func (suite *ConfigTestSuite) Test_NetworkIDPrecedence() {
+	config, err := LoadConfig(suite.confStubBlob)
+	suite.Require().NoError(err)
+
+	config.NetworkID = "WIFI-test"
+	suite.Require().NoError(config.Commit(false))
+	suite.Equal("WIFI-test", config.GetNetworkID())
+
+	config, err = LoadConfig(suite.confStubBlob)
+	suite.Require().NoError(err)
+
+	config.NetworkID = "WIFI-test"
+	config.NetworkIDGetter = configTestNetworkIDGetter("MOBILE-getter")
+	suite.Require().NoError(config.Commit(false))
+	suite.Equal("MOBILE-getter", config.GetNetworkID())
 }
 
 // Tests non-JSON file contents
@@ -702,6 +727,79 @@ func TestConfigGetSplitResolverFallback(t *testing.T) {
 	}
 }
 
+// TestInproxySplitInterfaceCommonClients checks that split-interface mode
+// rejects common client capacity while still serving personal clients.
+func TestInproxySplitInterfaceCommonClients(t *testing.T) {
+
+	if !tun.IsBindToDeviceSupported() {
+		t.Skip("split interface mode is not supported on this platform")
+	}
+
+	newConfig := func(t *testing.T) *Config {
+		dataRootDirectory, err := ioutil.TempDir("", "psiphon-split-config-test")
+		if err != nil {
+			t.Fatalf("TempDir failed: %s", err)
+		}
+		t.Cleanup(func() { os.RemoveAll(dataRootDirectory) })
+
+		return &Config{
+			DataRootDirectory:                        dataRootDirectory,
+			PropagationChannelId:                     "ABCDEFGH",
+			SponsorId:                                "12345678",
+			ClientVersion:                            "1",
+			DisableTunnels:                           true,
+			InproxyEnableProxy:                       true,
+			InproxyProxySplitUpstreamInterfaceName:   "upstream0",
+			InproxyProxySplitDownstreamInterfaceName: "downstream0",
+			InproxyMaxPersonalClients:                1,
+		}
+	}
+
+	t.Run("personal only", func(t *testing.T) {
+		config := newConfig(t)
+		if err := config.Commit(false); err != nil {
+			t.Fatalf("expected success, got: %s", err)
+		}
+	})
+
+	t.Run("common clients rejected", func(t *testing.T) {
+		config := newConfig(t)
+		config.InproxyMaxCommonClients = 1
+		if err := config.Commit(false); err == nil {
+			t.Fatalf("expected error for InproxyMaxCommonClients in split interface mode")
+		}
+	})
+
+	t.Run("common clients via proxy limits rejected", func(t *testing.T) {
+		config := newConfig(t)
+		limits, err := common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxCommonClients:   1,
+			MaxPersonalClients: 1,
+		})
+		if err != nil {
+			t.Fatalf("NewProxyLimits failed: %s", err)
+		}
+		config.InproxyProxyLimits = limits
+		if err := config.Commit(false); err == nil {
+			t.Fatalf("expected error for common clients in shared proxy limits in split interface mode")
+		}
+	})
+
+	t.Run("personal only via proxy limits", func(t *testing.T) {
+		config := newConfig(t)
+		limits, err := common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxPersonalClients: 1,
+		})
+		if err != nil {
+			t.Fatalf("NewProxyLimits failed: %s", err)
+		}
+		config.InproxyProxyLimits = limits
+		if err := config.Commit(false); err != nil {
+			t.Fatalf("expected success, got: %s", err)
+		}
+	})
+}
+
 // newUnixSocketTestConfig returns a minimal committable Config configured to
 // use Unix domain sockets, for validation testing.
 func newUnixSocketTestConfig(t *testing.T) *Config {
@@ -835,6 +933,54 @@ func TestUseUnixDomainSocketsValidation(t *testing.T) {
 		err := config.Commit(false)
 		if err != nil {
 			t.Fatalf("expected success when only one proxy is enabled, got: %s", err)
+		}
+	})
+}
+
+// newDeviceRegionTestConfig returns a minimal committable Config.
+func newDeviceRegionTestConfig(t *testing.T) *Config {
+	dataRootDirectory, err := ioutil.TempDir("", "psiphon-device-region-config-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dataRootDirectory) })
+
+	return &Config{
+		DataRootDirectory:    dataRootDirectory,
+		PropagationChannelId: "ABCDEFGH",
+		SponsorId:            "12345678",
+		ClientVersion:        "1",
+	}
+}
+
+func TestConfigDeviceRegion(t *testing.T) {
+
+	// A host application that supplies the region, as the mobile libraries do,
+	// keeps its value.
+	t.Run("supplied region is retained", func(t *testing.T) {
+		config := newDeviceRegionTestConfig(t)
+		config.DeviceRegion = "CA"
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("Commit failed: %s", err)
+		}
+		if config.DeviceRegion != "CA" {
+			t.Fatalf("expected DeviceRegion CA, got %q", config.DeviceRegion)
+		}
+	})
+
+	// Otherwise the region is approximated from operating system settings. The
+	// expected value depends on how the machine running this test is
+	// configured, and is empty when no setting yields a region.
+	t.Run("blank region is approximated", func(t *testing.T) {
+		config := newDeviceRegionTestConfig(t)
+		err := config.Commit(false)
+		if err != nil {
+			t.Fatalf("Commit failed: %s", err)
+		}
+		if config.DeviceRegion != deviceregion.Get() {
+			t.Fatalf("expected DeviceRegion %q, got %q",
+				deviceregion.Get(), config.DeviceRegion)
 		}
 	})
 }

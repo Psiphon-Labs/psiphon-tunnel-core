@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && (!darwin || ios || !cgo) && (!linux || android)
 
 /*
  * Copyright (c) 2024, Psiphon Inc.
@@ -27,6 +27,6 @@ func Enabled() bool {
 	return false
 }
 
-func Get() (string, error) {
+func Get(interfaceName string) (string, error) {
 	return "", fmt.Errorf("operation is not enabled")
 }

@@ -337,11 +337,13 @@ func runTestMatcher() error {
 
 	// Test: announcement rate limit
 
-	m.SetLimits(
-		0, rateLimitQuantity, rateLimitInterval, []ID{}, []string{},
-		0, rateLimitQuantity, rateLimitInterval, 0)
+	// Use fresh limiters and prevent token refills during the burst.
+	rateLimitTestInterval := 1 * time.Hour
+	rateLimitProxyIP := randomIPAddress()
 
-	time.Sleep(rateLimitInterval)
+	m.SetLimits(
+		0, rateLimitQuantity, rateLimitTestInterval, []ID{}, []string{},
+		0, rateLimitQuantity, rateLimitTestInterval, 0)
 
 	maxEntries = rateLimitQuantity
 	maxEntriesProxyResultChan = make(chan error, maxEntries)
@@ -351,7 +353,7 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			proxyFunc(maxEntriesProxyResultChan, proxyIP, matchProperties, 1*time.Microsecond, nil, true)
+			proxyFunc(maxEntriesProxyResultChan, rateLimitProxyIP, matchProperties, 1*time.Microsecond, nil, true)
 		}()
 	}
 
@@ -361,13 +363,15 @@ func runTestMatcher() error {
 	waitGroup.Wait()
 
 	// the next enqueue should fail with "rate exceeded"
-	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxyResultChan, rateLimitProxyIP, matchProperties, 10*time.Millisecond, nil, true)
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
 	// Test: offer rate limit
+
+	rateLimitClientIP := randomIPAddress()
 
 	maxEntries = rateLimitQuantity
 	maxEntriesClientResultChan = make(chan error, maxEntries)
@@ -377,14 +381,14 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			clientFunc(maxEntriesClientResultChan, clientIP, matchProperties, 1*time.Microsecond)
+			clientFunc(maxEntriesClientResultChan, rateLimitClientIP, matchProperties, 1*time.Microsecond)
 		}()
 	}
 
 	waitGroup.Wait()
 
 	// enqueue should fail with "rate exceeded"
-	go clientFunc(clientResultChan, clientIP, matchProperties, 10*time.Millisecond)
+	go clientFunc(clientResultChan, rateLimitClientIP, matchProperties, 10*time.Millisecond)
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
 		return errors.Tracef("unexpected result: %v", err)

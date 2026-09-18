@@ -178,11 +178,13 @@ func validateRecommendedTLSSettings(
 
 type proxyProtocolHeaderConfig struct {
 	macKey                     []byte
+	customTLV                  []byte
 	targetDestinationAddresses common.StringLookup
 }
 
 func prepareProxyProtocolHeaderConfigs(
 	proxyProtocolHeaderMACKeys map[string]string,
+	proxyProtocolHeaderCustomTLVs map[string]string,
 	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
 ) (map[string]proxyProtocolHeaderConfig, error) {
 
@@ -192,10 +194,35 @@ func prepareProxyProtocolHeaderConfigs(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		if len(value) != proxyheader.ProxyProtocolHeaderKeyIDSize+proxyheader.ProxyProtocolHeaderMACKeySize {
-			return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
+		err = proxyheader.ValidateMACKey(value)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid ProxyProtocolHeaderMACKeys value: %v", err)
 		}
 		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig{macKey: value}
+	}
+
+	for sponsorID, base64Value := range proxyProtocolHeaderCustomTLVs {
+		proxyProtocolHeaderConfig, ok := proxyProtocolHeaderConfigs[sponsorID]
+		if !ok {
+			return nil, errors.TraceNew(
+				"missing ProxyProtocolHeaderMACKeys entry")
+		}
+
+		customTLV, err := base64.StdEncoding.DecodeString(base64Value)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid ProxyProtocolHeaderCustomTLVs value: %v", err)
+		}
+
+		err = proxyheader.ValidateCustomTLV(customTLV)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid ProxyProtocolHeaderCustomTLVs value: %v", err)
+		}
+
+		proxyProtocolHeaderConfig.customTLV = customTLV
+		proxyProtocolHeaderConfigs[sponsorID] = proxyProtocolHeaderConfig
 	}
 
 	for sponsorID, targets := range proxyProtocolHeaderTargetDestinationAddresses {

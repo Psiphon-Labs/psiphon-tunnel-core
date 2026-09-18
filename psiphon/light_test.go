@@ -343,6 +343,7 @@ func startLightTestProxy(
 		[]string{allowedWebServerAddress},
 		nil,
 		nil,
+		nil,
 		allowedWebServerAddress)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
@@ -397,13 +398,16 @@ func makeUnreachableTargetServerEntry() (string, error) {
 	}
 
 	serverEntry := &protocol.ServerEntry{
-		IpAddress:            host,
-		WebServerPort:        "0",
-		SshPort:              sshPort,
-		SshUsername:          "unused",
-		SshPassword:          "unused",
-		SshHostKey:           base64.StdEncoding.EncodeToString([]byte("unused")),
-		Capabilities:         []string{protocol.GetCapability(protocol.TUNNEL_PROTOCOL_SSH)},
+		IpAddress:     host,
+		WebServerPort: "0",
+		SshPort:       sshPort,
+		SshUsername:   "unused",
+		SshPassword:   "unused",
+		SshHostKey:    base64.StdEncoding.EncodeToString([]byte("unused")),
+		Capabilities: []string{
+			protocol.GetCapability(protocol.TUNNEL_PROTOCOL_SSH),
+			protocol.CAPABILITY_SSH_API_REQUESTS,
+		},
 		Region:               "US",
 		ConfigurationVersion: 1,
 	}
@@ -582,6 +586,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		[]string{"example.com:443"},
 		nil,
 		nil,
+		nil,
 		"example.com:443")
 	if err != nil {
 		t.Fatal(errors.Trace(err))
@@ -602,6 +607,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		0,
 		lightProxyEntryTTL,
 		[]string{"example.com:443"},
+		nil,
 		nil,
 		nil,
 		"example.com:443")
@@ -747,6 +753,7 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		0,
 		0,
 		[]string{"example.com:443"},
+		nil,
 		nil,
 		nil,
 		"example.com:443")

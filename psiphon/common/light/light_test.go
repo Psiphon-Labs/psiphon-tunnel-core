@@ -137,21 +137,23 @@ func runTestLightProxyPassthrough() error {
 
 	receiver := newTestProxyEventReceiver(false, 0, false, "")
 
-	// Use a short inactivity timeout to check that passthrough relays are
-	// exempt from it.
-	inactivityTimeout := 1 * time.Second
+	// Use a short deadline and inactivity timeout value to check that
+	// passthrough relays are exempt from these timeouts.
+	timeout := 1 * time.Second
 
 	proxy, err := NewProxy(
 		&ProxyConfig{
-			Protocol:           LIGHT_PROTOCOL_TLS,
-			ListenAddresses:    []string{proxyAddress},
-			DialAddressIPv4:    proxyAddress,
-			ObfuscationKey:     prng.HexString(32),
-			TLSCertificate:     proxyCertPEM,
-			TLSPrivateKey:      proxyKeyPEM,
-			PassthroughAddress: webListener.Addr().String(),
-			AllowBogons:        true,
-			InactivityTimeout:  inactivityTimeout.String(),
+			Protocol:             LIGHT_PROTOCOL_TLS,
+			ListenAddresses:      []string{proxyAddress},
+			DialAddressIPv4:      proxyAddress,
+			ObfuscationKey:       prng.HexString(32),
+			TLSCertificate:       proxyCertPEM,
+			TLSPrivateKey:        proxyKeyPEM,
+			PassthroughAddress:   webListener.Addr().String(),
+			AllowBogons:          true,
+			PreHeaderDeadlineMin: timeout.String(),
+			PreHeaderDeadlineMax: timeout.String(),
+			InactivityTimeout:    timeout.String(),
 		},
 		func(string) common.GeoIPData { return common.GeoIPData{} },
 		receiver)
@@ -212,7 +214,7 @@ func runTestLightProxyPassthrough() error {
 		return errors.Trace(err)
 	}
 
-	time.Sleep(2 * inactivityTimeout)
+	time.Sleep(2 * timeout)
 
 	err = echo("passthrough echo 2")
 	if err != nil {
@@ -284,6 +286,8 @@ func runTestLightProxy(
 	var proxyProtocolHeaderKeyID []byte
 	var proxyProtocolHeaderKey []byte
 	var proxyProtocolHeaderMACKeys map[string]string
+	var proxyProtocolHeaderCustomTLV []byte
+	var proxyProtocolHeaderCustomTLVs map[string]string
 	var proxyProtocolHeaderTargetDestinationAddresses map[string][]string
 
 	if addProxyHeader {
@@ -294,6 +298,11 @@ func runTestLightProxy(
 			proxyProtocolHeaderKey...)
 		proxyProtocolHeaderMACKeys = map[string]string{
 			testSponsorID: base64.StdEncoding.EncodeToString(proxyProtocolHeaderMACKey)}
+		proxyProtocolHeaderCustomTLV = append(
+			[]byte{byte(proxyproto.PP2_TYPE_MAX_CUSTOM)}, prng.Bytes(16)...)
+		proxyProtocolHeaderCustomTLVs = map[string]string{
+			testSponsorID: base64.StdEncoding.EncodeToString(
+				proxyProtocolHeaderCustomTLV)}
 		proxyProtocolHeaderTargetDestinationAddresses = map[string][]string{
 			testSponsorID: {echoAddress}}
 
@@ -332,6 +341,17 @@ func runTestLightProxy(
 					destinationPort != echoPort {
 
 					return errors.TraceNew("unexpected PROXY header value")
+				}
+
+				tlvs, err := header.TLVs()
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if len(tlvs) != 2 ||
+					tlvs[0].Type != proxyproto.PP2Type(proxyProtocolHeaderCustomTLV[0]) ||
+					!bytes.Equal(tlvs[0].Value, proxyProtocolHeaderCustomTLV[1:]) {
+
+					return errors.TraceNew("unexpected PROXY header custom TLV")
 				}
 				proxyProtocolHeaderCount.Add(1)
 				return nil
@@ -393,6 +413,7 @@ func runTestLightProxy(
 		0,
 		[]string{echoAddress},
 		proxyProtocolHeaderMACKeys,
+		proxyProtocolHeaderCustomTLVs,
 		proxyProtocolHeaderTargetDestinationAddresses,
 		echoListener.Addr().String())
 	if err != nil {
@@ -596,6 +617,7 @@ func runTestLightProxy(
 	_, err = clients[0].Dial(
 		ctx,
 		nil,
+		0,
 		testNetworkType,
 		testTLSProfile,
 		nil,
@@ -612,6 +634,7 @@ func runTestLightProxy(
 	conn, err := clients[0].Dial(
 		ctx,
 		nil,
+		0,
 		testNetworkType,
 		testTLSProfile,
 		nil,
@@ -653,6 +676,7 @@ func runLightClient(
 	conn, err := client.Dial(
 		ctx,
 		nil,
+		0,
 		networkType,
 		tlsProfile,
 		nil,

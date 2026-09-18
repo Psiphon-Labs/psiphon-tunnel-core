@@ -783,6 +783,11 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 
 	} else {
 
+		if !serverEntry.SupportsSSHAPIRequests() {
+			return false, nil, errors.TraceNew(
+				"TargetServerEntry does not support SSH API requests")
+		}
+
 		if config.EgressRegion != "" && serverEntry.Region != config.EgressRegion {
 			return false, nil, errors.TraceNew("TargetServerEntry does not support EgressRegion")
 		}

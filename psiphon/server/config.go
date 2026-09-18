@@ -607,6 +607,12 @@ type Config struct {
 	// (see proxyheader.MakeProxyProtocolHeader).
 	ProxyProtocolHeaderMACKeys map[string]string `json:",omitempty"`
 
+	// ProxyProtocolHeaderCustomTLVs are optional custom TLVs by sponsor ID.
+	// Each value is a base64-encoded concatenation of the one-byte TLV
+	// type followed by the TLV value bytes. The specified sponsor ID must
+	// also be configured in ProxyProtocolHeaderMACKeys.
+	ProxyProtocolHeaderCustomTLVs map[string]string `json:",omitempty"`
+
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
 	peakUpstreamFailureRateMinimumSampleSize       int
@@ -622,6 +628,7 @@ type Config struct {
 	runningOnlyInproxyBroker                       bool
 	destinationBytesPeriod                         time.Duration
 	proxyProtocolHeaderMACKeys                     map[string][]byte
+	proxyProtocolHeaderCustomTLVs                  map[string][]byte
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -1008,7 +1015,8 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	if len(config.ProxyProtocolHeaderMACKeys) > 0 {
 
 		// Client tunnel handlers will reference the proxyProtocolHeaderMACKeys
-		// slices directly and assumes this memory is not mutated.
+		// and proxyProtocolHeaderCustomTLVs slices directly and assume this
+		// memory is not mutated.
 
 		config.proxyProtocolHeaderMACKeys = make(map[string][]byte)
 		for sponsorID, base64Value := range config.ProxyProtocolHeaderMACKeys {
@@ -1019,11 +1027,39 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			if err != nil {
 				return nil, errors.Tracef("invalid ProxyProtocolHeaderMACKeys value: %v", err)
 			}
-			if len(value) != proxyheader.ProxyProtocolHeaderKeyIDSize+proxyheader.ProxyProtocolHeaderMACKeySize {
-				return nil, errors.TraceNew("unexpected ProxyProtocolHeaderMACKeys value size")
+			err = proxyheader.ValidateMACKey(value)
+			if err != nil {
+				return nil, errors.Tracef(
+					"invalid ProxyProtocolHeaderMACKeys value: %v", err)
 			}
 			config.proxyProtocolHeaderMACKeys[sponsorID] = value
 		}
+	}
+
+	if len(config.ProxyProtocolHeaderCustomTLVs) > 0 {
+		config.proxyProtocolHeaderCustomTLVs = make(map[string][]byte)
+	}
+
+	for sponsorID, base64Value := range config.ProxyProtocolHeaderCustomTLVs {
+		_, ok := config.proxyProtocolHeaderMACKeys[sponsorID]
+		if !ok {
+			return nil, errors.TraceNew(
+				"missing ProxyProtocolHeaderMACKeys entry")
+		}
+
+		customTLV, err := base64.StdEncoding.DecodeString(base64Value)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid ProxyProtocolHeaderCustomTLVs value: %v", err)
+		}
+
+		err = proxyheader.ValidateCustomTLV(customTLV)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid ProxyProtocolHeaderCustomTLVs value: %v", err)
+		}
+
+		config.proxyProtocolHeaderCustomTLVs[sponsorID] = customTLV
 	}
 
 	return &config, nil

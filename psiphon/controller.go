@@ -26,6 +26,7 @@ package psiphon
 import (
 	"context"
 	"encoding/json"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -112,7 +113,6 @@ type Controller struct {
 	inproxyHandleTacticsMutex               sync.Mutex
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
-	inproxyClientDialRateLimiter            *rate.Limiter
 
 	serverEntryIterationMetricsMutex                    sync.Mutex
 	serverEntryIterationUniqueCandidates                *hyperloglog.Sketch
@@ -121,7 +121,7 @@ type Controller struct {
 
 	currentNetworkMutex      sync.Mutex
 	currentNetworkCtx        context.Context
-	currentNetworkCancelFunc context.CancelFunc
+	currentNetworkCancelFunc context.CancelCauseFunc
 
 	signalLightProxyTestFetch chan struct{}
 }
@@ -214,7 +214,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// interface changes.
 
 	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
-		context.WithCancel(context.Background())
+		context.WithCancelCause(context.Background())
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
 	// remote server list and upgrade downloads.
@@ -263,6 +263,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 		controller.packetTunnelClient = packetTunnelClient
 		controller.packetTunnelTransport = packetTunnelTransport
 	}
+
+	// As a failsafe, clear any light proxy state stored by a previous
+	// Controller sharing this Config.
+	config.ClearLightProxy()
 
 	if config.EnableLightProxyFallback {
 
@@ -575,7 +579,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	}
 
 	// Cleanup current network context
-	controller.currentNetworkCancelFunc()
+	controller.currentNetworkCancelFunc(nil)
 
 	// All workers -- runTunnels, establishment workers, and auxilliary
 	// workers such as fetch remote server list and untunneled uprade
@@ -648,10 +652,10 @@ func (controller *Controller) NetworkChanged() {
 	controller.currentNetworkMutex.Lock()
 	defer controller.currentNetworkMutex.Unlock()
 
-	controller.currentNetworkCancelFunc()
+	controller.currentNetworkCancelFunc(std_errors.New("network changed"))
 
 	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
-		context.WithCancel(context.Background())
+		context.WithCancelCause(context.Background())
 }
 
 func (controller *Controller) getCurrentNetworkContext() context.Context {
@@ -1158,11 +1162,6 @@ func (controller *Controller) signalServerEntriesReporter(
 func (controller *Controller) connectedReporter() {
 	defer controller.runWaitGroup.Done()
 
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
-
 	select {
 	case <-controller.signalReportConnected:
 		// Make the initial connected request
@@ -1217,11 +1216,6 @@ loop:
 }
 
 func (controller *Controller) signalConnectedReporter() {
-
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
 
 	select {
 	case controller.signalReportConnected <- struct{}{}:
@@ -1351,9 +1345,9 @@ loop:
 				}
 
 				// In the case of multi-tunnels, only the first tunnel will send status requests,
-				// including transfer stats (domain bytes), persistent stats, and prune checks.
-				// While transfer stats and persistent stats use a "take out" scheme that would
-				// allow for multiple, concurrent requesters, the prune check does not.
+				// including persistent stats and prune checks. While persistent stats use a
+				// "take out" scheme that allows multiple concurrent requesters, the prune
+				// check does not.
 
 				isStatusReporter := isFirstTunnel
 
@@ -1422,10 +1416,7 @@ loop:
 
 				// If the handshake indicated that a new client version is available,
 				// trigger an upgrade download.
-				// Note: serverContext is nil when DisableApi is set
-				if connectedTunnel.serverContext != nil &&
-					connectedTunnel.serverContext.clientUpgradeVersion != "" {
-
+				if connectedTunnel.serverContext.clientUpgradeVersion != "" {
 					handshakeVersion := connectedTunnel.serverContext.clientUpgradeVersion
 					select {
 					case controller.signalDownloadUpgrade <- handshakeVersion:
@@ -2098,7 +2089,8 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return p.hasInitialProtocols() &&
+	return serverEntry.SupportsSSHAPIRequests() &&
+		p.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
 			p.config.TunnelDialsUseUpstreamProxy(),
@@ -2112,13 +2104,14 @@ func (p *protocolSelectionConstraints) isCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return len(serverEntry.GetSupportedProtocols(
-		conditionallyEnabledComponents{},
-		p.config.TunnelDialsUseUpstreamProxy(),
-		p.limitTunnelProtocols,
-		p.limitTunnelDialPortNumbers,
-		p.limitQUICVersions,
-		excludeIntensive)) > 0
+	return serverEntry.SupportsSSHAPIRequests() &&
+		len(serverEntry.GetSupportedProtocols(
+			conditionallyEnabledComponents{},
+			p.config.TunnelDialsUseUpstreamProxy(),
+			p.limitTunnelProtocols,
+			p.limitTunnelDialPortNumbers,
+			p.limitQUICVersions,
+			excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
@@ -2127,7 +2120,7 @@ func (p *protocolSelectionConstraints) canReplay(
 	serverEntry *protocol.ServerEntry,
 	replayProtocol string) bool {
 
-	if p.replayCandidateCount != -1 && connectTunnelCount > p.replayCandidateCount {
+	if p.replayCandidateCount != -1 && connectTunnelCount >= p.replayCandidateCount {
 		return false
 	}
 
@@ -2501,8 +2494,6 @@ func (controller *Controller) launchEstablishing() {
 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
 
 		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
-
-		inproxyClientDialRateLimiter: controller.inproxyClientDialRateLimiter,
 	}
 
 	// Adjust protocol limits for in-proxy personal proxy mode. In this mode,
@@ -2547,7 +2538,7 @@ func (controller *Controller) launchEstablishing() {
 	inproxyRateLimitQuantity := p.Int(parameters.InproxyClientDialRateLimitQuantity)
 	inproxyRateLimitInterval := p.Duration(parameters.InproxyClientDialRateLimitInterval)
 	if inproxyRateLimitQuantity > 0 {
-		controller.inproxyClientDialRateLimiter = rate.NewLimiter(
+		controller.protocolSelectionConstraints.inproxyClientDialRateLimiter = rate.NewLimiter(
 			rate.Limit(float64(inproxyRateLimitQuantity)/inproxyRateLimitInterval.Seconds()),
 			inproxyRateLimitQuantity)
 	}
@@ -2782,7 +2773,7 @@ func (controller *Controller) doConstraintsScan(ctx context.Context) {
 	// Make adjustments based on candidate counts.
 
 	if tunnelPoolSize > candidates && candidates > 0 {
-		tunnelPoolSize = candidates
+		controller.setTunnelPoolSize(candidates)
 	}
 
 	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
@@ -2839,7 +2830,6 @@ func (controller *Controller) stopEstablishing() {
 	controller.candidateServerEntries = nil
 	controller.serverAffinityDoneBroadcast = nil
 	controller.establishSignalForceTacticsFetch = nil
-	controller.inproxyClientDialRateLimiter = nil
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
@@ -3045,8 +3035,7 @@ loop:
 				break
 			}
 
-			if controller.config.TargetAPIProtocol == protocol.PSIPHON_API_PROTOCOL_SSH &&
-				!serverEntry.SupportsSSHAPIRequests() {
+			if !serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}
 
@@ -3402,7 +3391,40 @@ loop:
 			return controller.establishConnectTunnelCount
 		}
 
+		// The dial rate limit delay, determined by protocolSelectionConstraints.selectProtocol, is
+		// not applied within that function since this worker holds the concurrentEstablishTunnelsMutex
+		// lock when that's called. Instead, the required delay is passed out and applied below.
+		// It's safe for the selectProtocol callback to write to dialRateLimitDelay without
+		// synchronization since this worker goroutine invokes the callback.
+
+		var dialRateLimitDelay time.Duration
+
 		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+
+			if !controller.protocolSelectionConstraints.canReplay(
+				controller.establishConnectTunnelCount,
+				excludeIntensive,
+				serverEntry,
+				replayProtocol) {
+				return false
+			}
+
+			if protocol.TunnelProtocolUsesInproxy(replayProtocol) {
+				// Since replay skips selectProtocol, call it here to invoke the rate limiter.
+				// Since concurrentEstablishTunnelsMutex remains held, selectProtocol should
+				// return replayProtocol on success.
+				selectedProtocol, rateLimitDelay, ok := controller.protocolSelectionConstraints.selectProtocol(
+					controller.establishConnectTunnelCount,
+					excludeIntensive,
+					true,
+					replayProtocol,
+					serverEntry)
+				if !ok || selectedProtocol != replayProtocol {
+					return false
+				}
+
+				dialRateLimitDelay = rateLimitDelay
+			}
 
 			if inproxyForceSelection {
 				if !protocol.TunnelProtocolUsesInproxy(replayProtocol) {
@@ -3429,20 +3451,8 @@ loop:
 				}
 			}
 
-			return controller.protocolSelectionConstraints.canReplay(
-				controller.establishConnectTunnelCount,
-				excludeIntensive,
-				serverEntry,
-				replayProtocol)
+			return true
 		}
-
-		// The dial rate limit delay, determined by protocolSelectionConstraints.selectProtocol, is
-		// not applied within that function since this worker holds the concurrentEstablishTunnelsMutex
-		// lock when that's called. Instead, the required delay is passed out and applied below.
-		// It's safe for the selectProtocol callback to write to dialRateLimitDelay without
-		// synchronization since this worker goroutine invokes the callback.
-
-		var dialRateLimitDelay time.Duration
 
 		selectProtocol := func(
 			serverEntry *protocol.ServerEntry,

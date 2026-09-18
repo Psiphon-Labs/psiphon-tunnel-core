@@ -316,6 +316,68 @@ func TestRevokedCA(t *testing.T) {
 	}
 }
 
+func TestRevokedCertifiedKey(t *testing.T) {
+	_, caPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caSigner, err := ssh.NewSignerFromKey(caPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostKey, err := ssh.NewPublicKey(hostPriv.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signCert := func(serial uint64, principal string) *ssh.Certificate {
+		cert := &ssh.Certificate{
+			CertType:        ssh.HostCert,
+			Key:             hostKey,
+			Serial:          serial,
+			ValidBefore:     ssh.CertTimeInfinity,
+			ValidPrincipals: []string{principal},
+		}
+		if err := cert.SignCert(rand.Reader, caSigner); err != nil {
+			t.Fatal(err)
+		}
+		return cert
+	}
+	cert := signCert(1, "server.org")
+
+	// Revoking the host key revokes any certificate for it, even when
+	// the CA is trusted, matching OpenSSH's check_key_not_revoked.
+	db := testDB(t, "@revoked server.org "+serialize(hostKey)+"\n"+
+		"@cert-authority server.org "+serialize(caSigner.PublicKey())+"\n")
+	if !db.IsRevoked(cert) {
+		t.Error("IsRevoked returned false for certificate with revoked certified key")
+	}
+
+	// Conversely, a @revoked line containing a certificate revokes the
+	// plain key it certifies.
+	db = testDB(t, "@revoked server.org "+serialize(cert)+"\n")
+	if err := db.check("server.org:22", testAddr, hostKey); err == nil {
+		t.Error("no error for plain key revoked via certificate")
+	} else if _, ok := err.(*RevokedError); !ok {
+		t.Errorf("got %T (%v), want *RevokedError", err, err)
+	}
+
+	// Since only public portions are compared, revoking a certificate
+	// also revokes any sibling certificate certifying the same key,
+	// whatever its serial number and principals.
+	sibling := signCert(2, "other.org")
+	db = testDB(t, "@revoked * "+serialize(cert)+"\n"+
+		"@cert-authority * "+serialize(caSigner.PublicKey())+"\n")
+	if !db.IsRevoked(sibling) {
+		t.Error("IsRevoked returned false for sibling certificate of a revoked certificate")
+	}
+}
+
 const testHostname = "hostname"
 
 // generated with keygen -H -f

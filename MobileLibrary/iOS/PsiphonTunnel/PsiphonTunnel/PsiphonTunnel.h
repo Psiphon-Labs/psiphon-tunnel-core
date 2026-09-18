@@ -351,10 +351,14 @@ followed by a tunnel-core shutdown.
 - (void)onLightProxyAvailable;
 
 /*!
- Called when a persisted opaque access token is available to fetch with getAccessToken. The token
- may be used for push notifications; it is not an FCM or APNs device token.
+ Called asynchronously on the library's serial callback queue with a persisted opaque access
+ token at startup, if available, and whenever a changed token has been persisted.
+ Requires EnableDSLAccessTokenRegistration in the config.
+ The token may be used for push notifications; it is not an FCM or APNs device token.
+ Dispatch calls to PsiphonTunnel APIs onto a separate queue.
+ @param token The access token as unpadded Base64URL text.
  */
-- (void)onAccessTokenAvailable;
+- (void)onAccessToken:(NSString * _Nonnull)token;
 
 @end
 

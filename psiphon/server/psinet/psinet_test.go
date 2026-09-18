@@ -20,7 +20,6 @@
 package psinet
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -99,11 +98,7 @@ func TestDatabase(t *testing.T) {
                 },
                 "alert_action_urls" : {
                     "ALERT-REASON-1" : ["SPONSOR-ALERT-1-ACTION-URL?client_region=XX&device_region=XX&client_platform=XX&feature-x=XX"]
-                },
-                "https_request_regexes" : [{
-                    "regex" : "REGEX-VALUE",
-                    "replace" : "REPLACE-VALUE"
-                }]
+                }
             }
         },
 
@@ -268,35 +263,6 @@ func TestDatabase(t *testing.T) {
 			upgradeVersion := db.GetUpgradeClientVersion(testCase.currentClientVersion, testCase.clientPlatform)
 			if upgradeVersion != testCase.expectedUpgradeClientVersion {
 				t.Fatalf("unexpected upgrade version: %s", upgradeVersion)
-			}
-		})
-	}
-
-	httpsRegexTestCases := []struct {
-		sponsorID            string
-		expectedRegexValue   string
-		expectedReplaceValue string
-	}{
-		{"SPONSOR-ID", "REGEX-VALUE", "REPLACE-VALUE"},
-		{"UNCONFIGURED-SPONSOR-ID", "REGEX-VALUE", "REPLACE-VALUE"},
-	}
-
-	for _, testCase := range httpsRegexTestCases {
-		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
-			regexes, checksum := db.GetHttpsRequestRegexes(testCase.sponsorID)
-			if !bytes.Equal(checksum, db.GetDomainBytesChecksum(testCase.sponsorID)) {
-				t.Fatalf("unexpected checksum: %+v", checksum)
-			}
-			var regexValue, replaceValue string
-			ok := false
-			if len(regexes) == 1 && len(regexes[0]) == 2 {
-				regexValue, ok = regexes[0]["regex"]
-				if ok {
-					replaceValue, ok = regexes[0]["replace"]
-				}
-			}
-			if !ok || regexValue != testCase.expectedRegexValue || replaceValue != testCase.expectedReplaceValue {
-				t.Fatalf("unexpected regexes: %+v", regexes)
 			}
 		})
 	}

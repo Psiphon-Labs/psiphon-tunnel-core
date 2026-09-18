@@ -33,9 +33,8 @@ const (
 	destBytesHardMaxEntries = 1000000
 )
 
-// destBytesLogger accumulates ASN and domain destination bytes metrics,
-// aggregates into coarse-grained buckets, and periodically logs destination
-// byte events.
+// destBytesLogger accumulates ASN destination bytes metrics, aggregates into
+// coarse-grained buckets, and periodically logs destination byte events.
 type destBytesLogger struct {
 	support *SupportServices
 
@@ -47,12 +46,8 @@ type destBytesLogger struct {
 	asnBytesMutex sync.Mutex
 	asnBytes      map[destBytesBucket]destBytesCounters
 
-	domainBytesMutex sync.Mutex
-	domainBytes      map[destBytesBucket]destBytesCounters
-
-	signalLogASNBytes    chan struct{}
-	signalLogDomainBytes chan struct{}
-	loggedHardMax        atomic.Bool
+	signalLogASNBytes chan struct{}
+	loggedHardMax     atomic.Bool
 }
 
 type destBytesBucket struct {
@@ -72,11 +67,9 @@ type destBytesCounters struct {
 // newDestBytesLogger initializes a new destBytesLogger.
 func newDestBytesLogger(support *SupportServices) *destBytesLogger {
 	return &destBytesLogger{
-		support:              support,
-		asnBytes:             make(map[destBytesBucket]destBytesCounters),
-		domainBytes:          make(map[destBytesBucket]destBytesCounters),
-		signalLogASNBytes:    make(chan struct{}, 1),
-		signalLogDomainBytes: make(chan struct{}, 1),
+		support:           support,
+		asnBytes:          make(map[destBytesBucket]destBytesCounters),
+		signalLogASNBytes: make(chan struct{}, 1),
 	}
 }
 
@@ -136,29 +129,6 @@ func (d *destBytesLogger) AddASNBytes(
 	}
 
 	d.addBytes(
-		true,
-		destination,
-		clientGeoIPData,
-		apiParams,
-		bytesTCP,
-		bytesUDP)
-}
-
-// AddDomainBytes adds domain destination bytes to the aggregation.
-func (d *destBytesLogger) AddDomainBytes(
-	destination string,
-	clientGeoIPData GeoIPData,
-	apiParams common.APIParameters,
-	bytesTCP int64,
-	bytesUDP int64) {
-
-	if d == nil {
-		// !RunDestBytesLogger case.
-		return
-	}
-
-	d.addBytes(
-		false,
 		destination,
 		clientGeoIPData,
 		apiParams,
@@ -175,16 +145,12 @@ func (d *destBytesLogger) run() {
 		select {
 		case <-ticker.C:
 			d.logAccumulatedASNDestBytes()
-			d.logAccumulatedDomainDestBytes()
 		case <-d.signalLogASNBytes:
 			d.logAccumulatedASNDestBytes()
-		case <-d.signalLogDomainBytes:
-			d.logAccumulatedDomainDestBytes()
 		case <-d.stopBroadcast:
 			// Log on stop to record metrics accumulated since the last
 			// periodic logging.
 			d.logAccumulatedASNDestBytes()
-			d.logAccumulatedDomainDestBytes()
 			return
 		}
 	}
@@ -212,24 +178,6 @@ func (d *destBytesLogger) logAccumulatedASNDestBytes() {
 	}
 }
 
-func (d *destBytesLogger) logAccumulatedDomainDestBytes() {
-
-	// See snapshot comment in logAccumulatedDomainDestBytes.
-
-	d.domainBytesMutex.Lock()
-	domainBytes := d.domainBytes
-	d.domainBytes = make(map[destBytesBucket]destBytesCounters)
-	d.domainBytesMutex.Unlock()
-
-	for bucket, counters := range domainBytes {
-		logFields := make(LogFields)
-		logFields["event_name"] = "domain_dest_bytes"
-		logFields["domain"] = bucket.destination
-		d.addLogFields(logFields, bucket, counters)
-		log.LogRawFieldsWithTimestamp(logFields)
-	}
-}
-
 func (d *destBytesLogger) addLogFields(
 	logFields LogFields,
 	bucket destBytesBucket,
@@ -247,7 +195,6 @@ func (d *destBytesLogger) addLogFields(
 }
 
 func (d *destBytesLogger) addBytes(
-	isASN bool,
 	destination string,
 	clientGeoIPData GeoIPData,
 	apiParams common.APIParameters,
@@ -255,8 +202,6 @@ func (d *destBytesLogger) addBytes(
 	bytesUDP int64) {
 
 	if bytesTCP == 0 && bytesUDP == 0 {
-		// Some cases, such as client submitted domain bytes, may report all 0
-		// bytes. Skip this data.
 		return
 	}
 
@@ -276,25 +221,10 @@ func (d *destBytesLogger) addBytes(
 	// The map key is a comparable struct of strings. The non-pointer struct
 	// types used for the map keys and values avoids allocations.
 
-	var destBytes map[destBytesBucket]destBytesCounters
-	var logSignal chan struct{}
+	d.asnBytesMutex.Lock()
+	defer d.asnBytesMutex.Unlock()
 
-	if isASN {
-		d.asnBytesMutex.Lock()
-		defer d.asnBytesMutex.Unlock()
-
-		destBytes = d.asnBytes
-		logSignal = d.signalLogASNBytes
-
-	} else {
-		d.domainBytesMutex.Lock()
-		defer d.domainBytesMutex.Unlock()
-
-		destBytes = d.domainBytes
-		logSignal = d.signalLogDomainBytes
-	}
-
-	counters, ok := destBytes[bucket]
+	counters, ok := d.asnBytes[bucket]
 
 	if !ok {
 
@@ -305,11 +235,11 @@ func (d *destBytesLogger) addBytes(
 		// When the soft limit is reached, logging is signaled. If the hard
 		// limit is reached, the new data is dropped.
 
-		count := len(destBytes)
+		count := len(d.asnBytes)
 
 		if count >= destBytesSoftMaxEntries {
 			select {
-			case logSignal <- struct{}{}:
+			case d.signalLogASNBytes <- struct{}{}:
 			default:
 			}
 		}
@@ -325,5 +255,5 @@ func (d *destBytesLogger) addBytes(
 	counters.TCP += bytesTCP
 	counters.UDP += bytesUDP
 
-	destBytes[bucket] = counters
+	d.asnBytes[bucket] = counters
 }

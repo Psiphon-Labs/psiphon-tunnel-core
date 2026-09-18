@@ -136,6 +136,7 @@ func TestSSH(t *testing.T) {
 		&controllerRunConfig{
 			protocol:                 protocol.TUNNEL_PROTOCOL_SSH,
 			disableUntunneledUpgrade: true,
+			checkBytesTransferred:    true,
 		})
 }
 
@@ -220,17 +221,6 @@ func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 			protocol:              protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 			clientIsLatestVersion: true,
 			transformHostNames:    true,
-		})
-}
-
-func TestDisabledApi(t *testing.T) {
-	controllerRun(t,
-		&controllerRunConfig{
-			protocol:                 "",
-			clientIsLatestVersion:    true,
-			disableUntunneledUpgrade: true,
-			disableApi:               true,
-			tunnelPoolSize:           1,
 		})
 }
 
@@ -408,7 +398,6 @@ type controllerRunConfig struct {
 	clientIsLatestVersion    bool
 	disableUntunneledUpgrade bool
 	disableEstablishing      bool
-	disableApi               bool
 	tunnelPoolSize           int
 	useUpstreamProxy         bool
 	disruptNetwork           bool
@@ -418,6 +407,7 @@ type controllerRunConfig struct {
 	useInproxyDialRateLimit  bool
 	quicVersions             protocol.QUICVersions
 	doAppResumed             bool
+	checkBytesTransferred    bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -451,6 +441,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	modifyConfig["EnableUpgradeDownload"] = true
 	modifyConfig["EnableFeedbackUpload"] = false
+	if runConfig.checkBytesTransferred {
+		modifyConfig["EmitBytesTransferred"] = true
+	}
 
 	// Override client retry throttle values to speed up automated
 	// tests and ensure tests complete within fixed deadlines.
@@ -529,10 +522,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		config.DisableRemoteServerListFetcher = true
 	}
 
-	if runConfig.disableApi {
-		config.DisableApi = true
-	}
-
 	config.TunnelPoolSize = runConfig.tunnelPoolSize
 
 	if runConfig.useUpstreamProxy && runConfig.disruptNetwork {
@@ -583,6 +572,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	confirmedLatestVersion := make(chan struct{}, 1)
 	candidateServers := make(chan struct{}, 1)
 	availableEgressRegions := make(chan struct{}, 1)
+	bytesTransferred := make(chan [2]int64, 16)
 
 	var clientUpgradeDownloadedBytesCount int32
 	var remoteServerListDownloadedBytesCount int32
@@ -597,6 +587,18 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				return
 			}
 			switch noticeType {
+
+			case "BytesTransferred":
+
+				if runConfig.checkBytesTransferred {
+					select {
+					case bytesTransferred <- [2]int64{
+						int64(payload["sent"].(float64)),
+						int64(payload["received"].(float64)),
+					}:
+					default:
+					}
+				}
 
 			case "ListeningHttpProxyPort":
 
@@ -762,16 +764,30 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 			}
 		}
 
-		// Cannot establish port forwards in DisableApi mode
-		if !runConfig.disableApi {
+		// Test: fetch website through tunnel
 
-			// Test: fetch website through tunnel
+		// Allow for known race condition described in NewHttpProxy():
+		time.Sleep(1 * time.Second)
 
-			// Allow for known race condition described in NewHttpProxy():
-			time.Sleep(1 * time.Second)
+		if !runConfig.disruptNetwork {
+			fetchAndVerifyWebsite(t, httpProxyPort)
 
-			if !runConfig.disruptNetwork {
-				fetchAndVerifyWebsite(t, httpProxyPort)
+			if runConfig.checkBytesTransferred {
+				timeout := time.NewTimer(10 * time.Second)
+				var sent, received int64
+
+				for sent == 0 || received == 0 {
+					select {
+					case counts := <-bytesTransferred:
+						sent += counts[0]
+						received += counts[1]
+					case <-timeout.C:
+						t.Fatalf(
+							"missing tunneled byte counts: sent %d, received %d",
+							sent, received)
+					}
+				}
+				timeout.Stop()
 			}
 		}
 
@@ -793,7 +809,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	// Test: upgrade check/download must be downloaded within 240 seconds
 
-	expectUpgrade := !runConfig.disableApi && !runConfig.disableUntunneledUpgrade
+	expectUpgrade := !runConfig.disableUntunneledUpgrade
 
 	if expectUpgrade {
 		upgradeTimeout := time.NewTimer(240 * time.Second)

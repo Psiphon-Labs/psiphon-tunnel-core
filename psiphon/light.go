@@ -206,7 +206,18 @@ func dialLightProxy(
 	ctx context.Context,
 	config *Config,
 	lightClient *light.Client,
+	currentNetworkCtx context.Context,
+	inactivityTimeout time.Duration,
 	remoteAddr string) (net.Conn, error) {
+
+	// Interrupt the dial if the host's current active network changes.
+	// Merging the contexts also ensures ctx.Err() reflects a network change.
+	if currentNetworkCtx != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = common.MergeContextCancel(
+			ctx, currentNetworkCtx)
+		defer cancel()
+	}
 
 	dialParams := config.GetLightProxyDialParameters()
 
@@ -225,6 +236,7 @@ func dialLightProxy(
 	conn, err := lightClient.Dial(
 		ctx,
 		logFields,
+		inactivityTimeout,
 		GetNetworkType(config.GetNetworkID()),
 		dialParams.TLSProfile,
 		dialParams.RandomizedTLSProfileSeed,
@@ -233,8 +245,14 @@ func dialLightProxy(
 		dialParams.TLSPadding,
 		remoteAddr)
 	if err != nil {
-		if ctx.Err() == nil {
+		// Retain replay parameters when the dial was canceled, including by a
+		// network change. Clear on dial timeout or other failures.
+		if ctx.Err() != context.Canceled {
 			config.SetLightProxyDialParameters(&lightDialParameters{})
+		}
+		// Annotate the error with the interrupt cause such as "network changed".
+		if ctx.Err() != nil {
+			err = errors.TraceMsg(err, context.Cause(ctx).Error())
 		}
 		return nil, errors.Trace(err)
 	}
@@ -310,6 +328,10 @@ func dialLightProxyRace(
 
 	dialTimeout := controller.config.GetLightProxyDialTimeout()
 
+	// Associate the dial and established connection with the current network.
+	// On NetworkChanged, both dials and connections are interrupted.
+	currentNetworkCtx := controller.getCurrentNetworkContext()
+
 	lightDialCtx, cancel := context.WithTimeout(
 		controller.runCtx, dialTimeout)
 	defer cancel()
@@ -321,8 +343,14 @@ func dialLightProxyRace(
 	go func() {
 		defer lightDialWaitGroup.Done()
 
+		p := controller.config.GetParameters().Get()
+		inactivityTimeout := p.Duration(
+			parameters.LightProxyInactivityTimeout)
+		p.Close()
+
 		conn, err := dialLightProxy(
-			lightDialCtx, controller.config, lightClient, remoteAddr)
+			lightDialCtx, controller.config, lightClient,
+			currentNetworkCtx, inactivityTimeout, remoteAddr)
 		lightResult <- lightProxyDialResult{conn: conn, err: err}
 	}()
 	defer lightDialWaitGroup.Wait()
@@ -347,11 +375,20 @@ func dialLightProxyRace(
 
 			if result.err == nil {
 				// Close downstreamConn when the light conn is closed. See
-				// Controller.Dial and TunneledConn.
-				return &lightProxyConn{
-					Conn:           result.conn,
-					downstreamConn: downstreamConn,
-				}, nil, nil
+				// Controller.Dial and TunneledConn. A network change also
+				// closes the conn, including downstreamConn.
+				conn := newLightProxyConn(
+					result.conn, downstreamConn, currentNetworkCtx)
+
+				// Avoid returning a conn for a network that changed while
+				// dialing.
+				if currentNetworkCtx.Err() != nil {
+					_ = conn.Close()
+					return nil, nil, errors.Trace(
+						context.Cause(currentNetworkCtx))
+				}
+
+				return conn, nil, nil
 			}
 
 			return nil, nil, errors.Trace(result.err)
@@ -372,10 +409,45 @@ func dialLightProxyRace(
 
 type lightProxyConn struct {
 	net.Conn
-	downstreamConn net.Conn
+	downstreamConn   net.Conn
+	unassociateAfter func() bool
+}
+
+func newLightProxyConn(
+	conn net.Conn,
+	downstreamConn net.Conn,
+	currentNetworkCtx context.Context) *lightProxyConn {
+
+	lightConn := &lightProxyConn{
+		Conn:           conn,
+		downstreamConn: downstreamConn,
+	}
+
+	// Close the conns when the network changes. This callback closes the
+	// conns directly rather than calling lightProxyConn.Close, which avoids
+	// a race with unassociateAfter assignment.
+	if currentNetworkCtx != nil {
+		lightConn.unassociateAfter = context.AfterFunc(
+			currentNetworkCtx,
+			func() {
+				if downstreamConn != nil {
+					_ = downstreamConn.Close()
+				}
+				_ = conn.Close()
+			})
+	}
+
+	return lightConn
 }
 
 func (conn *lightProxyConn) Close() error {
+
+	// The AfterFunc callback may run concurrently with Close; the
+	// underlying conns support multiple and concurrent Close calls.
+	if conn.unassociateAfter != nil {
+		conn.unassociateAfter()
+	}
+
 	if conn.downstreamConn != nil {
 		_ = conn.downstreamConn.Close()
 	}
@@ -397,7 +469,21 @@ func makeLightProxyTunnelTCPDialer(
 			return nil, errors.TraceNew("missing light proxy client")
 		}
 
-		conn, err := dialLightProxy(ctx, config, lightProxyClient, addr)
+		// The overall tunnel dial and subsequent tunnel operation take
+		// ownership of idle timeouts; set no light client inactivity
+		// timeout, which would otherwise conflict with SSH keepalive
+		// periods.
+		//
+		// No currentNetworkCtx is passed in; network changes are handled by
+		// existing tunnel operations, including SSH keepalive failures and
+		// tunnel re-establishment triggered by NetworkChanged.
+		//
+		// Limitation: an in-flight tunnel-mode light proxy dial is not
+		// promptly interrupted on network change; it runs to failure or is
+		// bounded by the tunnel establishment context.
+		conn, err := dialLightProxy(
+			ctx, config, lightProxyClient,
+			nil, light.NoInactivityTimeout, addr)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

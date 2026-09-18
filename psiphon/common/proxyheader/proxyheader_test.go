@@ -45,6 +45,7 @@ func runTestProxyProtocolHeaderVerification() error {
 	keyID := make([]byte, ProxyProtocolHeaderKeyIDSize)
 	binary.BigEndian.PutUint32(keyID, 1)
 	key := prng.Bytes(ProxyProtocolHeaderMACKeySize)
+	customTLV := append([]byte{byte(proxyproto.PP2_TYPE_MAX_CUSTOM)}, prng.Bytes(16)...)
 
 	incorrectKeyID := make([]byte, ProxyProtocolHeaderKeyIDSize)
 	binary.BigEndian.PutUint32(incorrectKeyID, 2)
@@ -54,10 +55,47 @@ func runTestProxyProtocolHeaderVerification() error {
 	destinationIP := net.ParseIP("127.0.0.2")
 	destinationPort := 443
 
-	// Test: check offset of final TLV and MAC
+	// Test: custom TLV validation
+
+	err := ValidateCustomTLV(nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = ValidateCustomTLV(customTLV)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	invalidCustomTLVs := [][]byte{
+		{byte(proxyproto.PP2_TYPE_MIN_CUSTOM)},
+		{byte(proxyproto.PP2_TYPE_MIN_CUSTOM) - 1, 0x01},
+		{byte(proxyProtocolHeaderMACTLVType), 0x01},
+		{byte(proxyproto.PP2_TYPE_MAX_CUSTOM) + 1, 0x01},
+		append([]byte{byte(proxyproto.PP2_TYPE_MAX_CUSTOM)}, make([]byte, 65536)...),
+	}
+	for _, invalidCustomTLV := range invalidCustomTLVs {
+		err = ValidateCustomTLV(invalidCustomTLV)
+		if err == nil {
+			return errors.TraceNew("unexpected custom TLV validation success")
+		}
+	}
+
+	_, err = MakeProxyProtocolHeader(
+		keyID,
+		key,
+		invalidCustomTLVs[0],
+		sourceIP,
+		destinationIP,
+		destinationPort)
+	if err == nil {
+		return errors.TraceNew("unexpected custom TLV success")
+	}
+
+	// Test: check custom TLV and offset of final MAC TLV
 
 	wireHeader, err := MakeProxyProtocolHeader(
-		keyID, key, sourceIP, destinationIP, destinationPort)
+		keyID, key, customTLV, sourceIP, destinationIP, destinationPort)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -73,25 +111,54 @@ func runTestProxyProtocolHeaderVerification() error {
 		return errors.Trace(err)
 	}
 
-	if len(tlvs) != 1 {
+	if len(tlvs) != 2 {
 		return errors.TraceNew("unexpected TLV count")
 	}
 
-	if tlvs[0].Type != proxyProtocolHeaderMACTLVType ||
-		len(tlvs[0].Value) != proxyProtocolHeaderMACTLVSize {
+	if tlvs[0].Type != proxyproto.PP2Type(customTLV[0]) ||
+		!bytes.Equal(tlvs[0].Value, customTLV[1:]) {
+		return errors.TraceNew("unexpected custom TLV")
+	}
+
+	if tlvs[1].Type != proxyProtocolHeaderMACTLVType ||
+		len(tlvs[1].Value) != proxyProtocolHeaderMACTLVSize {
 		return errors.TraceNew("unexpected TLV")
 	}
 
 	if !bytes.Equal(
 		wireHeader[len(wireHeader)-proxyProtocolHeaderMACTLVSize:],
-		tlvs[0].Value) {
+		tlvs[1].Value) {
 		return errors.TraceNew("unexpected TLV offset")
+	}
+
+	// Test: custom TLV omission
+
+	wireHeader, err = MakeProxyProtocolHeader(
+		keyID, key, nil, sourceIP, destinationIP, destinationPort)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	header, err = proxyproto.Read(
+		bufio.NewReader(bytes.NewReader(wireHeader)))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	tlvs, err = header.TLVs()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(tlvs) != 1 ||
+		tlvs[0].Type != proxyProtocolHeaderMACTLVType {
+		return errors.TraceNew("unexpected custom TLV omission")
 	}
 
 	// Test: successful verification
 
 	wireHeader, err = MakeProxyProtocolHeader(
-		keyID, key, sourceIP, destinationIP, destinationPort)
+		keyID, key, customTLV, sourceIP, destinationIP, destinationPort)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -139,6 +206,25 @@ func runTestProxyProtocolHeaderVerification() error {
 		return errors.TraceNew("unexpected success")
 	}
 
+	// Test: custom TLV included in MAC
+
+	wireHeader, err = MakeProxyProtocolHeader(
+		keyID, key, customTLV, sourceIP, destinationIP, destinationPort)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	const tlvHeaderSize = 3
+	customTLVLastValueOffset :=
+		len(wireHeader) - tlvHeaderSize - proxyProtocolHeaderMACTLVSize - 1
+	wireHeader[customTLVLastValueOffset] ^= 0xff
+
+	_, _, _, _, err =
+		VerifyProxyProtocolHeader(keyID, key, wireHeader)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
 	// Note: AddOrReplaceProxyProtocolHeader is exercised in server_test.
 
 	return nil
@@ -173,6 +259,7 @@ func TestProxyProtocolHeaderMixedAddressFamilies(t *testing.T) {
 			wireHeader, err := MakeProxyProtocolHeader(
 				keyID,
 				key,
+				nil,
 				test.sourceIP,
 				test.destinationIP,
 				destinationPort)

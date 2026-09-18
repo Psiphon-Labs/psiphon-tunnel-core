@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -36,7 +37,11 @@ import (
 )
 
 const (
-	clientInactivityTimeout = 5 * time.Minute
+	// Matches default parameters.LightProxyInactivityTimeout
+	clientInactivityTimeout = 2 * time.Minute
+
+	// NoInactivityTimeout disables the client read inactivity timeout.
+	NoInactivityTimeout time.Duration = -1
 )
 
 // TCPDialer is a callback that dials a TCP connection. The dialer allows for
@@ -267,12 +272,16 @@ func (client *Client) GetMetrics(resetCounters bool) *ClientMetrics {
 // The light proxy protocol requires the client to write first, and the light
 // header is prepended to the client's first write.
 //
+// inactivityTimeout specifies the read inactivity timeout. When zero, the
+// default timeout is applied. NoInactivityTimeout disables the timeout.
+//
 // The specified tlsProfile must be a utls TLS 1.3 ClientHello parrot
 // fingerprint, or a randomized fingerprint that produces a TLS 1.3
 // ClientHello with the given randomizedTLSProfileSeed.
 func (client *Client) Dial(
 	ctx context.Context,
 	additionalLogFields common.LogFields,
+	inactivityTimeout time.Duration,
 	networkType string,
 	tlsProfile string,
 	randomizedTLSProfileSeed *prng.Seed,
@@ -281,15 +290,19 @@ func (client *Client) Dial(
 	tlsPadding int,
 	destinationAddress string) (retConn *ClientConn, retErr error) {
 
+	switch {
+	case inactivityTimeout == NoInactivityTimeout:
+		// ActivityMonitoredConn uses zero to disable its timeout.
+		inactivityTimeout = 0
+	case inactivityTimeout < 0:
+		return nil, errors.TraceNew("invalid inactivity timeout")
+	case inactivityTimeout == 0:
+		inactivityTimeout = clientInactivityTimeout
+	}
+
 	// Start at 1 to distinguish from the zero value the proxy will record if
 	// the header is not delivered.
 	connectionNum := client.connectionNumber.Add(1)
-
-	passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
-		true, client.obfuscationKey)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
 
 	logFields := common.LogFields{
 		"proxyID":           client.proxyID,
@@ -303,7 +316,10 @@ func (client *Client) Dial(
 	}
 	logFields.Add(additionalLogFields)
 
-	// Log once per connection. If the dial fails, log accumulated fields
+	client.config.Logger.WithTraceFields(
+		logFields).Info("light proxy connection start")
+
+	// Log the connection outcome. If the dial fails, log accumulated fields
 	// here. Otherwise, log on Close.
 	defer func() {
 		if retErr != nil {
@@ -321,9 +337,18 @@ func (client *Client) Dial(
 				logFields["error"] = retErr.Error()
 				client.config.Logger.WithTraceFields(
 					logFields).Warning("light proxy dial failed")
+			} else {
+				client.config.Logger.WithTraceFields(
+					logFields).Info("light proxy dial canceled")
 			}
 		}
 	}()
+
+	passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
+		true, client.obfuscationKey)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	start := time.Now()
 
@@ -390,9 +415,15 @@ func (client *Client) Dial(
 	logFields["isIPv6"] = isIPv6
 
 	// Wrapping here counts outer TLS handshake bytes.
+	//
+	// activeOnWrite is false: writes succeed locally, buffered by the OS,
+	// even when the peer is unreachable. A trickle of small writes on a dead
+	// connection could extend the deadline indefinitely.
 	bytesCounter := &bytesCounter{}
 	activityConn, err := common.NewActivityMonitoredConn(
-		tcpConn, clientInactivityTimeout, false, nil, bytesCounter)
+		tcpConn,
+		inactivityTimeout,
+		false, nil, bytesCounter)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -468,6 +499,27 @@ type ClientConn struct {
 	closeErr  error
 }
 
+func (conn *ClientConn) Read(b []byte) (int, error) {
+	n, err := conn.lightConn.Read(b)
+
+	// Preserve io.Reader EOF semantics. Other errors, including EOF wrapped
+	// after an incomplete frame, retain the client connection number.
+	if err != nil && err != io.EOF {
+		return n, errors.Tracef(
+			"connectionNum %d: %w", conn.connectionNum, err)
+	}
+	return n, err
+}
+
+func (conn *ClientConn) Write(b []byte) (int, error) {
+	n, err := conn.lightConn.Write(b)
+	if err != nil {
+		return n, errors.Tracef(
+			"connectionNum %d: %w", conn.connectionNum, err)
+	}
+	return n, nil
+}
+
 func (conn *ClientConn) Close() error {
 	conn.closeOnce.Do(func() {
 		conn.closeErr = errors.Trace(conn.lightConn.Close())
@@ -477,7 +529,7 @@ func (conn *ClientConn) Close() error {
 		conn.logFields["duration"] = conn.activityConn.GetActiveDuration().String()
 
 		conn.client.config.Logger.WithTraceFields(
-			conn.logFields).Info("light proxy connection")
+			conn.logFields).Info("light proxy connection end")
 	})
 	return conn.closeErr
 }

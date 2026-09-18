@@ -37,9 +37,6 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	"asn_dest_bytes": {
 		destParams: true,
 	},
-	"domain_dest_bytes": {
-		destParams: true,
-	},
 	"server_blocklist_hit": {
 		baseParams: true,
 	},
@@ -175,10 +172,6 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 		msg := &pb.AsnDestBytes{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_AsnDestBytes{AsnDestBytes: msg}
-	case "domain_dest_bytes":
-		msg := &pb.DomainDestBytes{}
-		protobufPopulateMessage(logFields, msg, eventName)
-		psiphondWrapped.Metric = &pb.Psiphond_DomainDestBytes{DomainDestBytes: msg}
 	case "server_load":
 		if region, hasRegion := logFields["region"]; hasRegion {
 			for _, proto := range append(protocol.SupportedTunnelProtocols, "ALL") {

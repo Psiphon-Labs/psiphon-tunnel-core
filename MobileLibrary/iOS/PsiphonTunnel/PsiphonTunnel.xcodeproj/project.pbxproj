@@ -43,6 +43,8 @@
 		CE676F2B25FA82DA00F7DB13 /* DefaultRouteMonitor.m in Sources */ = {isa = PBXBuildFile; fileRef = CE676F2925FA82DA00F7DB13 /* DefaultRouteMonitor.m */; };
 		CE676F2F25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h in Headers */ = {isa = PBXBuildFile; fileRef = CE676F2D25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h */; };
 		CE676F3025FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m in Sources */ = {isa = PBXBuildFile; fileRef = CE676F2E25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m */; };
+		881991CA3419D227B2677E17 /* IANATimeZoneCountry.h in Headers */ = {isa = PBXBuildFile; fileRef = 182A2AD8CF4E5C9CA375B87D /* IANATimeZoneCountry.h */; };
+		0BBEDA70DE26EB1963B2AF48 /* IANATimeZoneCountry.m in Sources */ = {isa = PBXBuildFile; fileRef = D038A120676BFE4FA43D6561 /* IANATimeZoneCountry.m */; };
 		CE9549F525C8AAEE00F9AF86 /* Redactor.h in Headers */ = {isa = PBXBuildFile; fileRef = CE9549F325C8AAEE00F9AF86 /* Redactor.h */; };
 		CE9549F625C8AAEE00F9AF86 /* Redactor.m in Sources */ = {isa = PBXBuildFile; fileRef = CE9549F425C8AAEE00F9AF86 /* Redactor.m */; };
 		CEC229FC24F047E700534D04 /* PsiphonProviderNoticeHandlerShim.h in Headers */ = {isa = PBXBuildFile; fileRef = CEC229FA24F047E700534D04 /* PsiphonProviderNoticeHandlerShim.h */; };
@@ -112,6 +114,8 @@
 		CE676F2925FA82DA00F7DB13 /* DefaultRouteMonitor.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DefaultRouteMonitor.m; sourceTree = "<group>"; };
 		CE676F2D25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Reachability+ReachabilityProtocol.h"; sourceTree = "<group>"; };
 		CE676F2E25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "Reachability+ReachabilityProtocol.m"; sourceTree = "<group>"; };
+		182A2AD8CF4E5C9CA375B87D /* IANATimeZoneCountry.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = IANATimeZoneCountry.h; sourceTree = "<group>"; };
+		D038A120676BFE4FA43D6561 /* IANATimeZoneCountry.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = IANATimeZoneCountry.m; sourceTree = "<group>"; };
 		CE9549F325C8AAEE00F9AF86 /* Redactor.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Redactor.h; sourceTree = "<group>"; };
 		CE9549F425C8AAEE00F9AF86 /* Redactor.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Redactor.m; sourceTree = "<group>"; };
 		CEC229FA24F047E700534D04 /* PsiphonProviderNoticeHandlerShim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonProviderNoticeHandlerShim.h; sourceTree = "<group>"; };
@@ -257,6 +261,8 @@
 			children = (
 				CE3D1DA323906003009A4AF6 /* Backups.h */,
 				CE3D1DA423906003009A4AF6 /* Backups.m */,
+				182A2AD8CF4E5C9CA375B87D /* IANATimeZoneCountry.h */,
+				D038A120676BFE4FA43D6561 /* IANATimeZoneCountry.m */,
 				52BE676725B8A615002DB553 /* PsiphonClientPlatform.h */,
 				52BE676B25B8A635002DB553 /* PsiphonClientPlatform.m */,
 				CE9549F325C8AAEE00F9AF86 /* Redactor.h */,
@@ -320,6 +326,7 @@
 				CECF01492538DD0B00CD3E5C /* PsiphonProviderNetwork.h in Headers */,
 				66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */,
 				66BDB0311DA6BFCC0079384C /* PsiphonTunnel.h in Headers */,
+				881991CA3419D227B2677E17 /* IANATimeZoneCountry.h in Headers */,
 				CE9549F525C8AAEE00F9AF86 /* Redactor.h in Headers */,
 				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
 				CECF01502538E14B00CD3E5C /* NetworkID.h in Headers */,
@@ -476,6 +483,7 @@
 				662659281DD270E900872F6C /* Reachability.m in Sources */,
 				66BDB0601DC26CCC0079384C /* SBJson4StreamParserState.m in Sources */,
 				CE3D1DA623906003009A4AF6 /* Backups.m in Sources */,
+				0BBEDA70DE26EB1963B2AF48 /* IANATimeZoneCountry.m in Sources */,
 				CE9549F625C8AAEE00F9AF86 /* Redactor.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

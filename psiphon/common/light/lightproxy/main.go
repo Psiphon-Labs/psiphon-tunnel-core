@@ -271,6 +271,7 @@ func main() {
 				[]string(allowedDestinations),
 				nil,
 				nil,
+				nil,
 				passthroughAddress)
 			if err != nil {
 				return errors.Trace(err)
@@ -506,7 +507,16 @@ func lightProxyTestFetch(
 		DisableKeepAlives: true,
 		DialContext: func(dialCtx context.Context, _, address string) (net.Conn, error) {
 			conn, err := lightClient.Dial(
-				dialCtx, nil, "UNKNOWN", protocol.TLS_PROFILE_CHROME_133, nil, "", false, 0, address)
+				dialCtx,
+				nil,
+				0,
+				"UNKNOWN",
+				protocol.TLS_PROFILE_CHROME_133,
+				nil,
+				"",
+				false,
+				0,
+				address)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}

@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,34 @@ func TestParseCert(t *testing.T) {
 	marshaled = marshaled[:len(marshaled)-1]
 	if !bytes.Equal(authKeyBytes, marshaled) {
 		t.Errorf("marshaled certificate does not match original: got %q, want %q", marshaled, authKeyBytes)
+	}
+}
+
+func TestParseCertNestedSignatureKey(t *testing.T) {
+	signer, err := NewSignerFromKey(testPrivateKeys["ed25519"])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cert := &Certificate{
+		Key:         signer.PublicKey(),
+		CertType:    UserCert,
+		ValidBefore: CertTimeInfinity,
+	}
+	if err := cert.SignCert(rand.Reader, signer); err != nil {
+		t.Fatal(err)
+	}
+
+	inner := *cert
+	cert.SignatureKey = &inner
+	blob := cert.Marshal()
+
+	_, err = ParsePublicKey(blob)
+	if err == nil {
+		t.Fatal("ParsePublicKey: expected error for certificate signed by a certificate, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid for certificates") {
+		t.Errorf("ParsePublicKey: got error %q, want it to mention the signature key is invalid for certificates", err)
 	}
 }
 
@@ -353,6 +382,82 @@ func TestHostKeyCert(t *testing.T) {
 		if (err == nil) != test.succeed {
 			t.Errorf("NewServerConn(%q): %v", test.addr, err)
 		}
+	}
+}
+
+type testConnMeta struct {
+	ConnMetadata
+	user string
+}
+
+func (c testConnMeta) User() string { return c.user }
+
+func TestCertCriticalOptions(t *testing.T) {
+	appended := make([]string, 2)
+	appended[0], appended[1] = "supported-option", "appended-option"
+	supported := appended[:1]
+
+	checker := &CertChecker{
+		SupportedCriticalOptions: supported,
+		IsHostAuthority: func(p PublicKey, addr string) bool {
+			return bytes.Equal(testPublicKeys["ecdsa"].Marshal(), p.Marshal())
+		},
+		IsUserAuthority: func(p PublicKey) bool {
+			return bytes.Equal(testPublicKeys["ecdsa"].Marshal(), p.Marshal())
+		},
+	}
+
+	for _, test := range []struct {
+		name string
+		opts map[string]string
+		// succeed is the expected outcome of CheckHostKey, for a host
+		// certificate, and of CheckCert, for a user certificate.
+		succeed bool
+		// authSucceed is the expected outcome of Authenticate.
+		authSucceed bool
+	}{
+		{name: "no critical options", opts: nil, succeed: true, authSucceed: true},
+		{name: "source-address", opts: map[string]string{sourceAddressCriticalOption: "192.168.1.0/24"}, authSucceed: true},
+		{name: "unknown option", opts: map[string]string{"unknown-option": ""}},
+		{name: "supported option", opts: map[string]string{"supported-option": ""}, succeed: true, authSucceed: true},
+	} {
+		hostCert := &Certificate{
+			ValidPrincipals: []string{"hostname"},
+			Key:             testPublicKeys["rsa"],
+			ValidBefore:     CertTimeInfinity,
+			CertType:        HostCert,
+			Permissions:     Permissions{CriticalOptions: test.opts},
+		}
+		if err := hostCert.SignCert(rand.Reader, testSigners["ecdsa"]); err != nil {
+			t.Fatalf("SignCert: %v", err)
+		}
+
+		if err := checker.CheckHostKey("hostname:22", nil, hostCert); (err == nil) != test.succeed {
+			t.Errorf("CheckHostKey(%s): got %v, want success=%v", test.name, err, test.succeed)
+		}
+
+		userCert := &Certificate{
+			ValidPrincipals: []string{"user"},
+			Key:             testPublicKeys["rsa"],
+			ValidBefore:     CertTimeInfinity,
+			CertType:        UserCert,
+			Permissions:     Permissions{CriticalOptions: test.opts},
+		}
+		if err := userCert.SignCert(rand.Reader, testSigners["ecdsa"]); err != nil {
+			t.Fatalf("SignCert: %v", err)
+		}
+
+		if err := checker.CheckCert("user", userCert); (err == nil) != test.succeed {
+			t.Errorf("CheckCert(%s): got %v, want success=%v", test.name, err, test.succeed)
+		}
+
+		if _, err := checker.Authenticate(testConnMeta{user: "user"}, userCert); (err == nil) != test.authSucceed {
+			t.Errorf("Authenticate(%s): got %v, want success=%v", test.name, err, test.authSucceed)
+		}
+	}
+
+	if appended[1] != "appended-option" {
+		t.Errorf("Authenticate overwrote the caller's slice: got %q, want %q", appended[1], "appended-option")
 	}
 }
 

@@ -373,24 +373,22 @@ func (conn *rewriteICYConn) Read(b []byte) (int, error) {
 		return conn.Conn.Read(b)
 	}
 
-	if len(b) < 3 {
-		// Don't attempt to rewrite the protocol when insufficient
-		// buffer space. This is not expected to happen in practise
-		// when Go's http reads the response, so for now we just
-		// skip the rewrite instead of tracking state accross Reads.
-		return conn.Conn.Read(b)
+	protocol := "HTTP/1.0"
+	if len(b) < len(protocol) {
+		// Rewriting "ICY" expands the protocol name. Fail for unrealistically
+		// short buffer sizes rather than track replacement bytes across Read calls.
+		return 0, io.ErrShortBuffer
 	}
 
 	// Expect to read either "ICY" or "HTT".
 
-	n, err := conn.Conn.Read(b[:3])
+	n, err := io.ReadFull(conn.Conn, b[:3])
 	if err != nil {
 		return n, err
 	}
 
 	if bytes.Equal(b[:3], []byte("ICY")) {
 		atomic.StoreInt32(conn.isICY, 1)
-		protocol := "HTTP/1.0"
 		copy(b, []byte(protocol))
 		return len(protocol), nil
 	}
