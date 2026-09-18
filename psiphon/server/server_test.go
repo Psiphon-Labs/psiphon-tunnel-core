@@ -4060,7 +4060,7 @@ func checkExpectedDiscoveredServer(
 	defer iterator.Close()
 
 	for {
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -5587,7 +5587,7 @@ func scanServerEntries(
 
 	for {
 
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			t.Fatalf("ServerIterator.Next failed: %s", err)
 		}

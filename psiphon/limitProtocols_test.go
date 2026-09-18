@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,7 +35,20 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 )
 
+const initialLimitTunnelProtocolsCandidateCount = 100
+
 func TestLimitTunnelProtocols(t *testing.T) {
+	// The second case exercises replay eligibility retained by deferred
+	// candidates: with ReplayCandidateCount equal to the initial limit, no
+	// candidate at or past the initial limit could otherwise replay.
+	for _, replayCandidateCount := range []int{-1, initialLimitTunnelProtocolsCandidateCount} {
+		t.Run(fmt.Sprintf("ReplayCandidateCount=%d", replayCandidateCount), func(t *testing.T) {
+			runLimitTunnelProtocols(t, replayCandidateCount)
+		})
+	}
+}
+
+func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-limit-tunnel-protocols-test")
 	if err != nil {
@@ -43,11 +57,15 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	defer os.RemoveAll(testDataDirName)
 
 	initialLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "UNFRONTED-MEEK-HTTPS-OSSH"}
-	initialLimitTunnelProtocolsCandidateCount := 100
 	limitTunnelProtocols := protocol.TunnelProtocols{"SSH", "UNFRONTED-MEEK-OSSH"}
 
 	initialConnectingCount := 0
 	connectingCount := 0
+	var iteratorResets atomic.Int32
+	replayedBeforeReset := make(map[string]int)
+	expectedReplayAfterInitialLimit := make(map[string]bool)
+	initialFallbackID := ""
+	initialFallbackSeen := false
 
 	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
@@ -57,6 +75,21 @@ func TestLimitTunnelProtocols(t *testing.T) {
 			}
 
 			if noticeType == "ConnectingServer" {
+
+				if iteratorResets.Load() == 1 {
+					id := payload["diagnosticID"].(string)
+					candidateNumber := int(payload["candidateNumber"].(float64))
+					if payload["isReplay"] == true {
+						// Record the first replay only.
+						if _, ok := replayedBeforeReset[id]; !ok {
+							replayedBeforeReset[id] = candidateNumber
+						}
+					} else if id == initialFallbackID &&
+						payload["protocol"] == "OSSH" &&
+						candidateNumber < initialLimitTunnelProtocolsCandidateCount {
+						initialFallbackSeen = true
+					}
+				}
 
 				connectingCount += 1
 
@@ -112,6 +145,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	}
 
 	clientConfig.DataRootDirectory = testDataDirName
+	clientConfig.NetworkIDGetter = new(testNetworkGetter)
 
 	err = clientConfig.Commit(false)
 	if err != nil {
@@ -127,6 +161,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	applyParameters[parameters.InitialLimitTunnelProtocols] = initialLimitTunnelProtocols
 	applyParameters[parameters.InitialLimitTunnelProtocolsCandidateCount] = initialLimitTunnelProtocolsCandidateCount
 	applyParameters[parameters.LimitTunnelProtocols] = limitTunnelProtocols
+	applyParameters[parameters.ReplayCandidateCount] = replayCandidateCount
 
 	err = clientConfig.SetParameters("", true, applyParameters)
 	if err != nil {
@@ -167,7 +202,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 		serverEntries[i] = serverEntryFields
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < initialLimitTunnelProtocolsCandidateCount*len(serverEntries); i++ {
 
 		serverEntryFields := serverEntries[i%len(protocol.SupportedTunnelProtocols)]
 
@@ -182,6 +217,62 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	controller, err := NewController(clientConfig)
 	if err != nil {
 		t.Fatalf("error creating client controller: %s", err)
+	}
+
+	clientConfig.SetServerEntryIterationMetricsUpdater(func(movedToFront int) {
+		controller.updateServerEntryIterationResetMetrics(movedToFront)
+		iteratorResets.Add(1)
+	})
+
+	// MakeDialParameters needs a resolver to seed replay before Controller.Run.
+	resolver := NewResolver(clientConfig, clientConfig.deviceBinder())
+	defer resolver.Stop()
+	clientConfig.SetResolver(resolver)
+
+	// Cover skipped replay, replay bypassed by an initial dial, and allowed replay.
+	for i, testCase := range []struct {
+		ports          map[string]int
+		replayProtocol string
+	}{
+		{map[string]int{"SSH": 4000}, "SSH"},
+		{map[string]int{"SSH": 4000, "OSSH": 4001}, "SSH"},
+		{map[string]int{"OSSH": 4000}, "OSSH"},
+	} {
+		_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
+			&server.GenerateConfigParams{
+				ServerIPAddress:     fmt.Sprintf("0.2.0.%d", i+1),
+				TunnelProtocolPorts: testCase.ports,
+			})
+		if err != nil {
+			t.Fatalf("error generating replay server: %s", err)
+		}
+		fields, err := protocol.DecodeServerEntryFields(
+			string(encodedServerEntry), common.GetCurrentTimestamp(),
+			protocol.SERVER_ENTRY_SOURCE_REMOTE)
+		if err != nil {
+			t.Fatalf("error decoding replay server: %s", err)
+		}
+		if err := StoreServerEntry(fields, true); err != nil {
+			t.Fatalf("error storing replay server: %s", err)
+		}
+		entry, err := fields.GetServerEntry()
+		if err != nil {
+			t.Fatalf("error getting replay server: %s", err)
+		}
+		// canReplay may be nil: these server entries are freshly stored with no
+		// dial parameters, so MakeDialParameters never reaches the replay check.
+		dialParams, err := MakeDialParameters(
+			clientConfig, controller.steeringIPCache, nil, nil, nil, nil, nil,
+			func(*protocol.ServerEntry, string) (string, bool) { return testCase.replayProtocol, true },
+			entry, nil, nil, false, 0)
+		if err != nil || dialParams == nil {
+			t.Fatalf("error creating replay parameters: %v", err)
+		}
+		dialParams.Succeeded()
+		expectedReplayAfterInitialLimit[entry.GetDiagnosticID()] = testCase.replayProtocol == "SSH"
+		if testCase.replayProtocol == "SSH" && testCase.ports["OSSH"] != 0 {
+			initialFallbackID = entry.GetDiagnosticID()
+		}
 	}
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
@@ -208,5 +299,15 @@ func TestLimitTunnelProtocols(t *testing.T) {
 
 	if connectingCount < 3*initialLimitTunnelProtocolsCandidateCount {
 		t.Fatalf("unexpected connecting count")
+	}
+	if !initialFallbackSeen {
+		t.Fatal("expected cached SSH candidate to make an initial OSSH attempt")
+	}
+	for id, afterInitialLimit := range expectedReplayAfterInitialLimit {
+		candidateNumber, ok := replayedBeforeReset[id]
+		if !ok || (candidateNumber >= initialLimitTunnelProtocolsCandidateCount) != afterInitialLimit {
+			t.Fatalf("expected %s to replay before reset with afterInitialLimit=%t; got %v",
+				id, afterInitialLimit, replayedBeforeReset)
+		}
 	}
 }

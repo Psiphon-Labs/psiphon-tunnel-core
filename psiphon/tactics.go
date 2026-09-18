@@ -111,7 +111,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 				return
 			}
 
-			serverEntry, err := iterator.Next(ctx)
+			serverEntry, _, err := iterator.Next(ctx)
 			if err != nil {
 				NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 				return

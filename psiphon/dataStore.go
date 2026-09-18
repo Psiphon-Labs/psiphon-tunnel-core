@@ -673,12 +673,18 @@ type ServerEntryIterator struct {
 	applyServerAffinity          bool
 	serverEntryIDs               [][]byte
 	serverEntryIndex             int
+	serverEntryFetchCount        int
 	isTacticsServerEntryIterator bool
 	isTargetServerEntryIterator  bool
 	isPruneServerEntryIterator   bool
 	hasNextTargetServerEntry     bool
 	targetServerEntry            *protocol.ServerEntry
 	updateMoveToFrontMetrics     bool
+
+	deferredServerEntryMutex sync.Mutex
+	epoch                    uint64
+	deferredServerEntryIDs   []string
+	useDeferred              bool
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator.
@@ -691,7 +697,8 @@ type ServerEntryIterator struct {
 //
 // NewServerEntryIterator and any returned ServerEntryIterator are not
 // designed for concurrent use as not all related datastore operations are
-// performed in a single transaction.
+// performed in a single transaction. Only GetEpoch, Defer, and UseDeferred
+// may be called concurrently with iteration.
 func NewServerEntryIterator(
 	ctx context.Context, config *Config) (bool, *ServerEntryIterator, error) {
 
@@ -832,15 +839,28 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 	return false, iterator, nil
 }
 
-// Reset a NewServerEntryIterator to the start of its cycle. The next
-// call to Next will return the first server entry.
+// Reset the ServerEntryIterator, which reshuffles server entries and,
+// depending on the round and configuration, moves potential replay and
+// prioritized candidates to the front of the shuffled order. Reset discards
+// any pending deferred candidates (see Defer) as a reset is a fresh start.
 func (iterator *ServerEntryIterator) Reset(ctx context.Context) error {
 	return iterator.reset(ctx, false)
 }
 
 func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound bool) error {
 
-	iterator.Close()
+	// Release the previous cycle's state before building the new one. The
+	// epoch is advanced under the mutex, before the deferred queue is cleared,
+	// so any concurrent Defer for the previous cycle is dropped as stale.
+	iterator.serverEntryIDs = nil
+	iterator.serverEntryIndex = 0
+	iterator.serverEntryFetchCount = 0
+
+	iterator.deferredServerEntryMutex.Lock()
+	iterator.epoch++
+	iterator.deferredServerEntryIDs = nil
+	iterator.useDeferred = false
+	iterator.deferredServerEntryMutex.Unlock()
 
 	if iterator.isTargetServerEntryIterator {
 		iterator.hasNextTargetServerEntry = true
@@ -1124,15 +1144,54 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 	return nil
 }
 
+// GetEpoch returns the current iterator epoch. Each reset starts a new epoch.
+// The epoch is used to ensure server entry candidate deferral doesn't cross
+// reset boundaries.
+func (iterator *ServerEntryIterator) GetEpoch() uint64 {
+	iterator.deferredServerEntryMutex.Lock()
+	defer iterator.deferredServerEntryMutex.Unlock()
+	return iterator.epoch
+}
+
+// Defer queues a candidate returned by Next so that it will be chosen again,
+// once UseDeferred is called. Call Defer only once for a candidate returned
+// by Next per epoch. Defer calls for a previous epoch are dropped. Next
+// reports when a returned server entry is a deferred candidate.
+func (iterator *ServerEntryIterator) Defer(serverEntryID string, epoch uint64) {
+	iterator.deferredServerEntryMutex.Lock()
+	defer iterator.deferredServerEntryMutex.Unlock()
+
+	if epoch != iterator.epoch {
+		return
+	}
+
+	iterator.deferredServerEntryIDs = append(iterator.deferredServerEntryIDs, serverEntryID)
+}
+
+// UseDeferred signals the ServerEntryIterator to start consuming the deferred
+// candidates now, before any other remaining candidates.
+func (iterator *ServerEntryIterator) UseDeferred() {
+	iterator.deferredServerEntryMutex.Lock()
+	defer iterator.deferredServerEntryMutex.Unlock()
+	iterator.useDeferred = true
+}
+
 // Close cleans up resources associated with a ServerEntryIterator.
 func (iterator *ServerEntryIterator) Close() {
 	iterator.serverEntryIDs = nil
 	iterator.serverEntryIndex = 0
+	iterator.serverEntryFetchCount = 0
+
+	iterator.deferredServerEntryMutex.Lock()
+	defer iterator.deferredServerEntryMutex.Unlock()
+	iterator.deferredServerEntryIDs = nil
+	iterator.useDeferred = false
 }
 
-// Next returns the next server entry, by rank, for a ServerEntryIterator.
-// Returns nil with no error when there is no next item.
-func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.ServerEntry, error) {
+// Next returns the next server entry for a ServerEntryIterator, and whether
+// it is a deferred candidate (see Defer). Returns nil with no error when
+// there is no next item.
+func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.ServerEntry, bool, error) {
 
 	var serverEntry *protocol.ServerEntry
 	var err error
@@ -1146,9 +1205,9 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 	if iterator.isTargetServerEntryIterator {
 		if iterator.hasNextTargetServerEntry {
 			iterator.hasNextTargetServerEntry = false
-			return MakeCompatibleServerEntry(iterator.targetServerEntry), nil
+			return MakeCompatibleServerEntry(iterator.targetServerEntry), false, nil
 		}
-		return nil, nil
+		return nil, false, nil
 	}
 
 	// Support stand-alone GetTactics operation. See TacticsStorer for more
@@ -1156,25 +1215,43 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 	if iterator.isTacticsServerEntryIterator {
 		err := OpenDataStoreWithoutRetry(iterator.config)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 		defer CloseDataStore()
 	}
+
+	isDeferred := false
 
 	// There are no region/protocol indexes for the server entries bucket.
 	// Loop until we have the next server entry that matches the iterator
 	// filter requirements.
 	for {
 		if ctx.Err() != nil {
-			return nil, errors.Trace(ctx.Err())
-		}
-		if iterator.serverEntryIndex >= len(iterator.serverEntryIDs) {
-			// There is no next item
-			return nil, nil
+			return nil, false, errors.Trace(ctx.Err())
 		}
 
-		serverEntryID := iterator.serverEntryIDs[iterator.serverEntryIndex]
-		iterator.serverEntryIndex += 1
+		var serverEntryID []byte
+
+		iterator.deferredServerEntryMutex.Lock()
+		if iterator.useDeferred && len(iterator.deferredServerEntryIDs) > 0 {
+
+			serverEntryID = []byte(iterator.deferredServerEntryIDs[0])
+			iterator.deferredServerEntryIDs[0] = ""
+			iterator.deferredServerEntryIDs = iterator.deferredServerEntryIDs[1:]
+			isDeferred = true
+
+		} else if iterator.serverEntryIndex < len(iterator.serverEntryIDs) {
+
+			serverEntryID = iterator.serverEntryIDs[iterator.serverEntryIndex]
+			iterator.serverEntryIndex++
+			isDeferred = false
+		}
+		iterator.deferredServerEntryMutex.Unlock()
+
+		if serverEntryID == nil {
+			return nil, false, nil
+		}
+		iterator.serverEntryFetchCount++
 
 		serverEntry = nil
 		doDeleteServerEntry := false
@@ -1242,7 +1319,7 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 			return nil
 		})
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		if doDeleteServerEntry {
@@ -1256,9 +1333,9 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 		}
 
 		if serverEntry == nil {
-			// In case of data corruption or a bug causing this condition,
-			// do not stop iterating.
-			NoticeWarning("ServerEntryIterator.Next: unexpected missing server entry")
+			// This outcome may arise from pruning. Otherwise this indicates
+			// data corruption or a bug. Do not stop iterating.
+			NoticeWarning("ServerEntryIterator.Next: missing server entry")
 			continue
 		}
 
@@ -1343,7 +1420,7 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 			}
 		}
 
-		if iterator.serverEntryIndex%datastoreServerEntryFetchGCThreshold == 0 {
+		if iterator.serverEntryFetchCount%datastoreServerEntryFetchGCThreshold == 0 {
 			DoGarbageCollection()
 		}
 
@@ -1369,7 +1446,7 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 		}
 	}
 
-	return MakeCompatibleServerEntry(serverEntry), nil
+	return MakeCompatibleServerEntry(serverEntry), isDeferred, nil
 }
 
 // MakeCompatibleServerEntry provides backwards compatibility with old server entries
@@ -2295,7 +2372,7 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 
 	for {
 
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			return nil, 0, errors.Trace(err)
 		}
