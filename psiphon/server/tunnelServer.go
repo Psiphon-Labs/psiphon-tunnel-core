@@ -911,10 +911,6 @@ func runListener(
 				log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
 				// Temporary error, keep running
 				continue
-			} else if std_errors.Is(err, errRestrictedProvider) {
-				log.WithTraceFields(LogFields{"error": err}).Error("accept rejected client")
-				// Restricted provider, keep running
-				continue
 			}
 
 			reportListenerError(listenerError, errors.Trace(err))
@@ -3281,13 +3277,18 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 		if err == nil {
 			err = request.Reply(true, responsePayload)
 		} else {
-			requestFailureCount++
-			if requestFailureCount < SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
-				log.WithTraceFields(LogFields{"error": err}).Warning(
-					"request failed")
-			} else if requestFailureCount == SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
-				log.WithTraceFields(LogFields{"error": err}).Warning(
-					"request failure log limit exceeded")
+			// Logging for errRestrictedProvider is already handled in setHandshakeState,
+			// where it's logged only at debug level as it's an expected event; so this
+			// is also not counted towards requestFailureCount.
+			if !std_errors.Is(err, errRestrictedProvider) {
+				requestFailureCount++
+				if requestFailureCount < SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+					log.WithTraceFields(LogFields{"error": err}).Warning(
+						"request failed")
+				} else if requestFailureCount == SSH_CLIENT_MAX_REQUEST_FAIL_LOG_COUNT {
+					log.WithTraceFields(LogFields{"error": err}).Warning(
+						"request failure log limit exceeded")
+				}
 			}
 			err = request.Reply(false, nil)
 		}
@@ -4288,6 +4289,10 @@ func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
 	authorizations []string) (*handshakeStateInfo, error) {
 
+	// TODO: defer setting completed to true until all checks pass. Otherwise
+	// rejected handshakes are logged as completed and may permit port
+	// forwards before asynchronous shutdown.
+
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
 	if !completed {
@@ -4351,6 +4356,8 @@ func (sshClient *sshClient) setHandshakeState(
 
 			if p.WeightedCoinFlip(
 				parameters.RestrictInproxyProviderIDsServerProbability) {
+				log.WithTraceFields(LogFields{"error": errRestrictedProvider}).Debug(
+					"handshake rejected client")
 				return nil, errRestrictedProvider
 			}
 		}
