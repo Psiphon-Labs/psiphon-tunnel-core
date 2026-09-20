@@ -20,9 +20,13 @@
 package server
 
 import (
+	std_errors "errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -198,4 +202,119 @@ func TestListener(t *testing.T) {
 			tacticsListener.Close()
 		})
 	}
+}
+
+func TestListenerRestrictedProvider(t *testing.T) {
+
+	tacticsConfig := `{
+      "DefaultTactics": {"TTL": "60s", "Probability": 1.0},
+      "FilteredTactics": [{
+        "Filter": {"Regions": ["R1"]},
+        "Tactics": {"Parameters": {
+          "RestrictDirectProviderRegions": {"P1": ["R2"]},
+          "RestrictDirectProviderIDsServerProbability": 1.0
+        }}
+      }]
+    }`
+	tacticsConfigFilename := filepath.Join(t.TempDir(), "tactics_config.json")
+	if err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tacticsServer, err := tactics.NewServer(nil, nil, nil, tacticsConfigFilename, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tunnelProtocol := range []string{
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+	} {
+		t.Run(tunnelProtocol, func(t *testing.T) {
+			support := &SupportServices{
+				Config:        &Config{providerID: "P1", region: "R2"},
+				TacticsServer: tacticsServer,
+			}
+			support.ServerTacticsParametersCache = NewServerTacticsParametersCache(support)
+			support.ReplayCache = NewReplayCache(support)
+
+			// Like MeekServer, net/http must keep serving after restricted
+			// connections, without needing its own special error handling.
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			connectionCount := 0
+			server.Listener = NewTacticsListener(support, server.Listener, tunnelProtocol, func(string) GeoIPData {
+				connectionCount++
+				if connectionCount <= 2 {
+					return GeoIPData{Country: "R1"}
+				}
+				return GeoIPData{Country: "R3"}
+			})
+			if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+				server.StartTLS()
+			} else {
+				server.Start()
+			}
+			defer server.Close()
+
+			// Reject consecutive connections before accepting an allowed one.
+			// A restriction is applied before reading any HTTP or TLS bytes.
+			for i := 0; i < 2; i++ {
+				conn, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer conn.Close()
+				if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+					t.Fatal(err)
+				}
+				var b [1]byte
+				if _, err := conn.Read(b[:]); err != io.EOF {
+					t.Fatalf("expected restricted connection to close, got %v", err)
+				}
+			}
+
+			client := server.Client()
+			client.Timeout = time.Second
+			response, err := client.Get(server.URL)
+			if err != nil {
+				t.Fatalf("listener failed after rejecting connections: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				t.Fatalf("unexpected response status: %d", response.StatusCode)
+			}
+		})
+	}
+}
+
+func TestListenerRestrictedProviderError(t *testing.T) {
+	for _, restrictedError := range []error{
+		errRestrictedProvider,
+		fmt.Errorf("wrapped: %w", errRestrictedProvider),
+	} {
+		t.Run(restrictedError.Error(), func(t *testing.T) {
+			for _, listenerError := range []error{net.ErrClosed, std_errors.New("accept failed")} {
+				listener := NewTacticsListener(nil, &tacticsErrorListener{
+					errors: []error{restrictedError, listenerError},
+				}, "", nil)
+				conn, err := listener.Accept()
+				if conn != nil || err != listenerError {
+					t.Fatalf("expected original listener error %v, got conn %v, error %v", listenerError, conn, err)
+				}
+			}
+		})
+	}
+}
+
+type tacticsErrorListener struct {
+	net.Listener
+	errors []error
+}
+
+func (listener *tacticsErrorListener) Accept() (net.Conn, error) {
+	err := listener.errors[0]
+	listener.errors = listener.errors[1:]
+	return nil, err
 }
