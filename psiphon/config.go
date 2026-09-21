@@ -82,6 +82,21 @@ type Config struct {
 	// be deleted, moved or overwritten.
 	DataRootDirectory string `json:",omitempty"`
 
+	// DisableDataStoreFileLock disables the datastore's process-level file lock.
+	//
+	// The library user MUST ensure that no other library instance, in this
+	// or any other process, accesses the same datastore until it is closed,
+	// including while this process is suspended. Otherwise, data corruption
+	// may occur. Internal transaction synchronization and disk syncing
+	// remain enabled.
+	//
+	// One use case for this flag is to avoid 0xdead10cc in an iOS extension
+	// which has its own exclusive datastore.
+	//
+	// Currently, this applies only to the Bolt datastore adapter and ignored
+	// by other adapters.
+	DisableDataStoreFileLock bool `json:",omitempty"`
+
 	// UseNoticeFiles configures notice files for writing. If set, homepages
 	// will be written to a file created at config.GetHomePageFilename()
 	// and notices will be written to a file created at

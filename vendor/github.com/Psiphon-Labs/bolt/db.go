@@ -159,6 +159,10 @@ type DB struct {
 	// Read only mode.
 	// When true, Update() and Begin(true) return ErrDatabaseReadOnly immediately.
 	readOnly bool
+
+	// [Psiphon]
+	// File locking mode is fixed when the database is opened.
+	disableFileLock bool
 }
 
 // Path returns the path to currently open database file.
@@ -203,6 +207,9 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	db.NoFreelistSync = options.NoFreelistSync
 	db.FreelistType = options.FreelistType
 
+	// [Psiphon]
+	db.disableFileLock = options.DisableFileLock
+
 	// Set default values for later DB operations.
 	db.MaxBatchSize = DefaultMaxBatchSize
 	db.MaxBatchDelay = DefaultMaxBatchDelay
@@ -234,9 +241,14 @@ func Open(path string, mode os.FileMode, options *Options) (*DB, error) {
 	// if !options.ReadOnly.
 	// The database file is locked using the shared lock (more than one process may
 	// hold a lock at the same time) otherwise (options.ReadOnly is set).
-	if err := flock(db, !db.readOnly, options.Timeout); err != nil {
-		_ = db.close()
-		return nil, err
+	//
+	// [Psiphon]
+	// Skip file locking when the user guarantees exclusive access.
+	if !db.disableFileLock {
+		if err := flock(db, !db.readOnly, options.Timeout); err != nil {
+			_ = db.close()
+			return nil, err
+		}
 	}
 
 	// Default values for test hooks
@@ -522,7 +534,10 @@ func (db *DB) close() error {
 	// Close file handles.
 	if db.file != nil {
 		// No need to unlock read-only file.
-		if !db.readOnly {
+		//
+		// [Psiphon]
+		// Also skip unlocking when file locking was disabled.
+		if !db.readOnly && !db.disableFileLock {
 			// Unlock the file.
 			if err := funlock(db); err != nil {
 				log.Printf("bolt.Close(): funlock error: %s", err)
@@ -1074,6 +1089,9 @@ type Options struct {
 
 	// Open database in read-only mode. Uses flock(..., LOCK_SH |LOCK_NB) to
 	// grab a shared lock (UNIX).
+	//
+	// [Psiphon]
+	// No shared lock is acquired when DisableFileLock is set.
 	ReadOnly bool
 
 	// Sets the DB.MmapFlags flag before memory mapping the file.
@@ -1100,6 +1118,17 @@ type Options struct {
 	// OpenFile is used to open files. It defaults to os.OpenFile. This option
 	// is useful for writing hermetic tests.
 	OpenFile func(string, int, os.FileMode) (*os.File, error)
+
+	// [Psiphon]
+	// DisableFileLock disables the advisory file lock, including for ReadOnly
+	// databases. The DB user MUST ensure that no other DB instance accesses the
+	// same file until this DB is closed, including while the process is suspended.
+	// Otherwise, data corruption may occur. Timeout is ignored when enabled.
+	// Internal transaction locks and disk synchronization are unaffected.
+	//
+	// One use case for this flag is to avoid 0xdead10cc in an iOS extension
+	// which has its own exclusive DB.
+	DisableFileLock bool
 }
 
 // DefaultOptions represent the options used if nil options are passed into Open().

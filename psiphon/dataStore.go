@@ -166,7 +166,7 @@ func openDataStore(config *Config, retryAndReset bool) error {
 	// datastoreReferenceCount is 0, so open the datastore.
 
 	newDB, err := datastoreOpenDB(
-		config.GetDataStoreDirectory(), retryAndReset)
+		config.GetDataStoreDirectory(), retryAndReset, config.DisableDataStoreFileLock)
 	if err != nil {
 		datastoreMutex.Unlock()
 		datastoreReferenceCountMutex.Unlock()

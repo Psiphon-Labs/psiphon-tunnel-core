@@ -69,7 +69,7 @@ type datastoreCursor struct {
 }
 
 func datastoreOpenDB(
-	rootDataDirectory string, retryAndReset bool) (*datastoreDB, error) {
+	rootDataDirectory string, retryAndReset, disableFileLock bool) (*datastoreDB, error) {
 
 	var db *datastoreDB
 	var err error
@@ -83,7 +83,7 @@ func datastoreOpenDB(
 
 	for attempt := 0; attempt < attempts; attempt++ {
 
-		db, err = tryDatastoreOpenDB(rootDataDirectory, reset)
+		db, err = tryDatastoreOpenDB(rootDataDirectory, reset, disableFileLock)
 		if err == nil {
 			break
 		}
@@ -106,7 +106,7 @@ func datastoreOpenDB(
 }
 
 func tryDatastoreOpenDB(
-	rootDataDirectory string, reset bool) (retDB *datastoreDB, retErr error) {
+	rootDataDirectory string, reset, disableFileLock bool) (retDB *datastoreDB, retErr error) {
 
 	var newDB *bolt.DB
 
@@ -197,8 +197,14 @@ func tryDatastoreOpenDB(
 	// Note that ErrInvalid/ErrChecksum surface as panics in View/Update,
 	// after Open.
 
-	newDB, err := bolt.Open(
-		filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if disableFileLock {
+		NoticeInfo("tryDatastoreOpenDB: disable file lock")
+	}
+
+	newDB, err := bolt.Open(filename, 0600, &bolt.Options{
+		Timeout:         1 * time.Second,
+		DisableFileLock: disableFileLock,
+	})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
