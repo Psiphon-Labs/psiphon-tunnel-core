@@ -95,10 +95,11 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 
 	p, err := listener.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
-		// Close the connection and log the failure, but don't return an error
-		// which can cause listeners to permanently shut down. A tactics
-		// misconfiguration can be transient or apply only to certain GeoIP
-		// combinations.
+		// Tactics are configured, but the tactics listener functionality
+		// cannot be correctly applied. Close the connection and log the
+		// failure; don't return an error which can cause listeners to
+		// permanently shut down. A tactics misconfiguration can be transient
+		// or apply only to certain GeoIP combinations.
 		conn.Close()
 		log.WithTraceFields(
 			LogFields{"error": err}).Warning("ServerTacticsParametersCache.Get failed")
