@@ -24,7 +24,6 @@ import (
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -70,6 +69,10 @@ func (listener *TacticsListener) Accept() (net.Conn, error) {
 		// accept may discard a successfully accepted conn. In that case, accept
 		// returns nil, nil; call accept until either the conn or err is not nil.
 		conn, err := listener.accept()
+		if std_errors.Is(err, errRestrictedProvider) {
+			log.WithTraceFields(LogFields{"error": err}).Debug("accept rejected client")
+			continue
+		}
 		if conn != nil || err != nil {
 			// Don't modify error from net.Listener
 			return conn, err
@@ -92,8 +95,15 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 
 	p, err := listener.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
+		// Tactics are configured, but the tactics listener functionality
+		// cannot be correctly applied. Close the connection and log the
+		// failure; don't return an error which can cause listeners to
+		// permanently shut down. A tactics misconfiguration can be transient
+		// or apply only to certain GeoIP combinations.
 		conn.Close()
-		return nil, errors.Trace(err)
+		log.WithTraceFields(
+			LogFields{"error": err}).Warning("ServerTacticsParametersCache.Get failed")
+		return nil, nil
 	}
 
 	if p.IsNil() {
