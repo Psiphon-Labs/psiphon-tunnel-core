@@ -185,7 +185,7 @@ func TestServerEntryExchange(t *testing.T) {
 				return true
 			}
 
-			selectProtocol := func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
+			selectProtocol := func(serverEntry *protocol.ServerEntry, _ bool, _ string) (string, bool) {
 				return tunnelProtocol, true
 			}
 

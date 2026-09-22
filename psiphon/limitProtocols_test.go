@@ -61,11 +61,19 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 
 	initialConnectingCount := 0
 	connectingCount := 0
+	connectingCountReached := make(chan struct{})
+	var connectingCountReachedOnce sync.Once
 	var iteratorResets atomic.Int32
 	replayedBeforeReset := make(map[string]int)
 	expectedReplayAfterInitialLimit := make(map[string]bool)
 	initialFallbackID := ""
 	initialFallbackSeen := false
+	type dslDial struct {
+		protocol          string
+		afterInitialLimit bool
+	}
+	dslDialsBeforeReset := make(map[string][]dslDial)
+	expectedDSLDial := make(map[string]dslDial)
 
 	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
@@ -79,6 +87,11 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 				if iteratorResets.Load() == 1 {
 					id := payload["diagnosticID"].(string)
 					candidateNumber := int(payload["candidateNumber"].(float64))
+					if payload["DSLPrioritized"] == true {
+						dslDialsBeforeReset[id] = append(dslDialsBeforeReset[id], dslDial{
+							payload["protocol"].(string),
+							candidateNumber >= initialLimitTunnelProtocolsCandidateCount})
+					}
 					if payload["isReplay"] == true {
 						// Record the first replay only.
 						if _, ok := replayedBeforeReset[id]; !ok {
@@ -102,6 +115,12 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 
 				if common.Contains(limitTunnelProtocols, protocol) {
 					connectingCount += 1
+				}
+
+				if connectingCount >= 3*initialLimitTunnelProtocolsCandidateCount {
+					connectingCountReachedOnce.Do(func() {
+						close(connectingCountReached)
+					})
 				}
 
 				// At the end of the InitialLimit phase, the order of
@@ -219,9 +238,13 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		t.Fatalf("error creating client controller: %s", err)
 	}
 
+	firstRoundDone := make(chan struct{})
+
 	clientConfig.SetServerEntryIterationMetricsUpdater(func(movedToFront int) {
 		controller.updateServerEntryIterationResetMetrics(movedToFront)
-		iteratorResets.Add(1)
+		if iteratorResets.Add(1) == 2 {
+			close(firstRoundDone)
+		}
 	})
 
 	// MakeDialParameters needs a resolver to seed replay before Controller.Run.
@@ -229,14 +252,21 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 	defer resolver.Stop()
 	clientConfig.SetResolver(resolver)
 
-	// Cover skipped replay, replay bypassed by an initial dial, and allowed replay.
+	// Cover skipped replay, replay bypassed by an initial dial, allowed replay,
+	// and DSL prioritized candidates: deferred with and without a prioritized
+	// tunnel protocol, and dialed with an initial limit protocol, not deferred.
 	for i, testCase := range []struct {
-		ports          map[string]int
-		replayProtocol string
+		ports                       map[string]int
+		replayProtocol              string
+		dslPrioritize               bool
+		dslPrioritizeTunnelProtocol string
 	}{
-		{map[string]int{"SSH": 4000}, "SSH"},
-		{map[string]int{"SSH": 4000, "OSSH": 4001}, "SSH"},
-		{map[string]int{"OSSH": 4000}, "OSSH"},
+		{map[string]int{"SSH": 4000}, "SSH", false, ""},
+		{map[string]int{"SSH": 4000, "OSSH": 4001}, "SSH", false, ""},
+		{map[string]int{"OSSH": 4000}, "OSSH", false, ""},
+		{map[string]int{"SSH": 4000}, "", true, "SSH"},
+		{map[string]int{"SSH": 4000}, "", true, ""},
+		{map[string]int{"SSH": 4000, "OSSH": 4001}, "", true, "SSH"},
 	} {
 		_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 			&server.GenerateConfigParams{
@@ -259,11 +289,27 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		if err != nil {
 			t.Fatalf("error getting replay server: %s", err)
 		}
+		if testCase.dslPrioritize {
+			err = datastoreUpdate(func(tx *datastoreTx) error {
+				return dslPrioritizeDialServerEntry(
+					tx, clientConfig.GetNetworkID(), []byte(entry.IpAddress),
+					"test", testCase.dslPrioritizeTunnelProtocol)
+			})
+			if err != nil {
+				t.Fatalf("error storing DSL prioritize dial: %s", err)
+			}
+			if testCase.ports["OSSH"] != 0 {
+				expectedDSLDial[entry.GetDiagnosticID()] = dslDial{"OSSH", false}
+			} else {
+				expectedDSLDial[entry.GetDiagnosticID()] = dslDial{"SSH", true}
+			}
+			continue
+		}
 		// canReplay may be nil: these server entries are freshly stored with no
 		// dial parameters, so MakeDialParameters never reaches the replay check.
 		dialParams, err := MakeDialParameters(
 			clientConfig, controller.steeringIPCache, nil, nil, nil, nil, nil,
-			func(*protocol.ServerEntry, string) (string, bool) { return testCase.replayProtocol, true },
+			func(*protocol.ServerEntry, bool, string) (string, bool) { return testCase.replayProtocol, true },
 			entry, nil, nil, false, 0)
 		if err != nil || dialParams == nil {
 			t.Fatalf("error creating replay parameters: %v", err)
@@ -278,6 +324,10 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	controllerWaitGroup := new(sync.WaitGroup)
+	defer func() {
+		cancelFunc()
+		controllerWaitGroup.Wait()
+	}()
 
 	controllerWaitGroup.Add(1)
 	go func() {
@@ -285,7 +335,17 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		controller.Run(ctx)
 	}()
 
-	time.Sleep(10 * time.Second)
+	// The first iteration need not reach the connection-count threshold.
+	// Allow later iterations to supply the remaining attempts.
+	timer := time.NewTimer(60 * time.Second)
+	defer timer.Stop()
+	for _, done := range []<-chan struct{}{firstRoundDone, connectingCountReached} {
+		select {
+		case <-done:
+		case <-timer.C:
+			t.Fatal("timeout waiting for first server entry iteration and connection count")
+		}
+	}
 
 	cancelFunc()
 
@@ -296,7 +356,6 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 	if initialConnectingCount != initialLimitTunnelProtocolsCandidateCount {
 		t.Fatalf("unexpected initial-connecting count")
 	}
-
 	if connectingCount < 3*initialLimitTunnelProtocolsCandidateCount {
 		t.Fatalf("unexpected connecting count")
 	}
@@ -308,6 +367,12 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		if !ok || (candidateNumber >= initialLimitTunnelProtocolsCandidateCount) != afterInitialLimit {
 			t.Fatalf("expected %s to replay before reset with afterInitialLimit=%t; got %v",
 				id, afterInitialLimit, replayedBeforeReset)
+		}
+	}
+	for id, expected := range expectedDSLDial {
+		dials := dslDialsBeforeReset[id]
+		if len(dials) != 1 || dials[0] != expected {
+			t.Fatalf("expected %s to dial once before reset as %+v; got %+v", id, expected, dials)
 		}
 	}
 }

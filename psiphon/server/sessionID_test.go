@@ -175,7 +175,7 @@ func TestDuplicateSessionID(t *testing.T) {
 			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
-			func(_ *protocol.ServerEntry, _ string) (string, bool) { return "OSSH", true },
+			func(_ *protocol.ServerEntry, _ bool, _ string) (string, bool) { return "OSSH", true },
 			serverEntry,
 			nil,
 			nil,

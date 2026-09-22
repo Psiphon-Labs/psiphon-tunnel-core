@@ -2115,13 +2115,19 @@ func (p *protocolSelectionConstraints) isCandidate(
 			excludeIntensive)) > 0
 }
 
+// canReplay indicates whether replayProtocol may be replayed now. When
+// checkCandidateCount is false, the ReplayCandidateCount limit is not
+// applied; this is used for deferred candidates, which retain the replay
+// eligibility they had when deferred.
 func (p *protocolSelectionConstraints) canReplay(
 	connectTunnelCount int,
 	excludeIntensive bool,
+	checkCandidateCount bool,
 	serverEntry *protocol.ServerEntry,
 	replayProtocol string) bool {
 
-	if p.replayCandidateCount != -1 && connectTunnelCount >= p.replayCandidateCount {
+	if checkCandidateCount &&
+		p.replayCandidateCount != -1 && connectTunnelCount >= p.replayCandidateCount {
 		return false
 	}
 
@@ -2129,6 +2135,36 @@ func (p *protocolSelectionConstraints) canReplay(
 		p.supportedProtocols(
 			connectTunnelCount, excludeIntensive, serverEntry),
 		replayProtocol)
+}
+
+// canDefer indicates whether a candidate that cannot select replayProtocol
+// now, or any protocol when replayProtocol is "", could do so once the
+// initial limit phase completes. See Controller.establishTunnelWorker.
+func (p *protocolSelectionConstraints) canDefer(
+	connectTunnelCount int,
+	serverEntry *protocol.ServerEntry,
+	replayProtocol string) bool {
+
+	initialLimit := p.initialLimitTunnelProtocolsCandidateCount
+
+	if !p.hasInitialProtocols() || connectTunnelCount >= initialLimit {
+		return false
+	}
+
+	if replayProtocol != "" &&
+		p.replayCandidateCount != -1 &&
+		connectTunnelCount >= p.replayCandidateCount {
+		return false
+	}
+
+	// Check as if the initial limit phase were complete. excludeIntensive is
+	// false since the intensive dials to contend with are in the future.
+	deferredProtocols := p.supportedProtocols(initialLimit, false, serverEntry)
+
+	if replayProtocol != "" {
+		return common.Contains(deferredProtocols, replayProtocol)
+	}
+	return len(deferredProtocols) > 0
 }
 
 func (p *protocolSelectionConstraints) getLimitTunnelProtocols(
@@ -3412,25 +3448,54 @@ loop:
 
 		var dialRateLimitDelay time.Duration
 
-		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+		deferCandidate := func(serverEntry *protocol.ServerEntry, replayProtocol string) {
+
+			// deferCandidate queues the candidate to be dialed again once the
+			// initial limit phase completes; see canReplay below for the replay
+			// case. A DSL prioritized candidate is handled in selectProtocol and
+			// is deferred only when the server supports no protocol under the
+			// limits now in effect, including the intensive worker cap.
+			//
+			// Limitations:
+			//
+			// - A prioritized server that can dial an initial limit protocol
+			//   is dialed now, and never twice, so a prioritized tunnel
+			//   protocol outside the initial limit isn't applied in this
+			//   establishment. This tradeoff avoids retaining the
+			//   DSLPendingPrioritizeDial placeholder across a failed initial
+			//   limit dial.
+			//
+			// - A prioritized server whose only initial limit protocols are
+			//   in-proxy is skipped, not deferred, when in-proxy
+			//   requirements fail, even if it supports a non-in-proxy
+			//   protocol under the post-initial limits. Distinguishing this
+			//   case would require a failure reason from selectProtocol.
 
 			if candidateServerEntry.isDeferred {
+				// Only defer once.
+				return
+			}
 
-				// A deferred candidate was within ReplayCandidateCount when
-				// deferred and retains that eligibility, so only the protocol
-				// and intensive constraints now in effect are checked. A
-				// deferred candidate is never deferred again.
+			if !controller.protocolSelectionConstraints.canDefer(
+				controller.establishConnectTunnelCount, serverEntry, replayProtocol) {
+				return
+			}
 
-				if !common.Contains(
-					controller.protocolSelectionConstraints.supportedProtocols(
-						controller.establishConnectTunnelCount, excludeIntensive, serverEntry),
-					replayProtocol) {
-					return false
-				}
+			controller.serverEntryIterator.Defer(
+				serverEntry.IpAddress, candidateServerEntry.iteratorEpoch)
+		}
 
-			} else if !controller.protocolSelectionConstraints.canReplay(
+		canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
+
+			// A deferred candidate was within ReplayCandidateCount when
+			// deferred and retains that eligibility, so only the protocol
+			// and intensive constraints now in effect are checked. A
+			// deferred candidate is never deferred again; see deferCandidate.
+
+			if !controller.protocolSelectionConstraints.canReplay(
 				controller.establishConnectTunnelCount,
 				excludeIntensive,
+				!candidateServerEntry.isDeferred,
 				serverEntry,
 				replayProtocol) {
 
@@ -3439,11 +3504,16 @@ loop:
 				// initial limit phase is complete, defer it instead of
 				// completely skipping it. Without this deferral, strong
 				// replay candidates that don't match the initial limit are
-				// never tried until the iterator resets. The intensive worker
-				// cap is another reason a candidate may not replay now; for
-				// the deferred check, excludeIntensive is set to false since
-				// the number of intensive dials to contend with is in the
-				// future.
+				// never tried until the iterator resets. The intensive
+				// worker cap is another reason a candidate may not replay
+				// now; for the deferred check, excludeIntensive is set to
+				// false since the number of intensive dials to contend with
+				// is in the future.
+				//
+				// Limitation: during the initial limit phase, a replay
+				// candidate blocked only by the intensive cap is also
+				// deferred; but intensive cap-blocked replays after the
+				// initial limit phase are still skipped.
 				//
 				// By design, the deferral isn't always total: for servers
 				// supporting multiple tunnel protocols, candidates that meet
@@ -3457,12 +3527,15 @@ loop:
 				// Only candidates within ReplayCandidateCount are deferred,
 				// and the deferred dial retains that eligibility even though
 				// its candidate number will be at or past
-				// ReplayCandidateCount. See the isDeferred case above.
+				// ReplayCandidateCount. See the checkCandidateCount argument
+				// above.
+				//
 				// Since fully skipped candidates don't advance the candidate
 				// number, several candidates may be deferred at the same
 				// number and total replays may exceed ReplayCandidateCount,
 				// bounded by the number of replay candidates encountered
-				// before the cutoff.
+				// before the cutoff; in the worst case, every server with
+				// stored dial parameters. This is intentional.
 				//
 				// There is an assumption here that MakeDialParameters is only
 				// invoking canReplay for candidates that have persisted
@@ -3472,22 +3545,7 @@ loop:
 				// iterator is exhausted and reset before the initial limit
 				// phase completes.
 
-				initialLimit := controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount
-				if controller.protocolSelectionConstraints.hasInitialProtocols() &&
-					controller.establishConnectTunnelCount < initialLimit &&
-					(controller.protocolSelectionConstraints.replayCandidateCount == -1 ||
-						controller.establishConnectTunnelCount <
-							controller.protocolSelectionConstraints.replayCandidateCount) &&
-					// Check as if the initial limit phase were complete.
-					common.Contains(
-						controller.protocolSelectionConstraints.supportedProtocols(
-							initialLimit, false, serverEntry),
-						replayProtocol) {
-
-					controller.serverEntryIterator.Defer(
-						serverEntry.IpAddress, candidateServerEntry.iteratorEpoch)
-				}
-
+				deferCandidate(serverEntry, replayProtocol)
 				return false
 			}
 
@@ -3538,6 +3596,7 @@ loop:
 
 		selectProtocol := func(
 			serverEntry *protocol.ServerEntry,
+			isPrioritized bool,
 			prioritizeTunnelProtocol string) (string, bool) {
 
 			preferInproxy := inproxyForceSelection || prng.FlipWeightedCoin(inproxyPreferProbability)
@@ -3548,6 +3607,14 @@ loop:
 				preferInproxy,
 				prioritizeTunnelProtocol,
 				serverEntry)
+
+			if !ok && isPrioritized &&
+				// Only defer when limits eliminate all protocols; this skips
+				// defer in cases such as missing in-proxy broker specs.
+				len(controller.protocolSelectionConstraints.supportedProtocols(
+					controller.establishConnectTunnelCount, excludeIntensive, serverEntry)) == 0 {
+				deferCandidate(serverEntry, "")
+			}
 
 			dialRateLimitDelay = rateLimitDelay
 

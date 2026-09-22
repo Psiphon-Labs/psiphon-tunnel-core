@@ -685,6 +685,7 @@ type ServerEntryIterator struct {
 	epoch                    uint64
 	deferredServerEntryIDs   []string
 	useDeferred              bool
+	closed                   bool
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator.
@@ -860,6 +861,7 @@ func (iterator *ServerEntryIterator) reset(ctx context.Context, isInitialRound b
 	iterator.epoch++
 	iterator.deferredServerEntryIDs = nil
 	iterator.useDeferred = false
+	iterator.closed = false
 	iterator.deferredServerEntryMutex.Unlock()
 
 	if iterator.isTargetServerEntryIterator {
@@ -1155,13 +1157,14 @@ func (iterator *ServerEntryIterator) GetEpoch() uint64 {
 
 // Defer queues a candidate returned by Next so that it will be chosen again,
 // once UseDeferred is called. Call Defer only once for a candidate returned
-// by Next per epoch. Defer calls for a previous epoch are dropped. Next
-// reports when a returned server entry is a deferred candidate.
+// by Next per epoch. Defer calls for a previous epoch, or made after Close and
+// before the next Reset, are dropped. Next reports when a returned server
+// entry is a deferred candidate.
 func (iterator *ServerEntryIterator) Defer(serverEntryID string, epoch uint64) {
 	iterator.deferredServerEntryMutex.Lock()
 	defer iterator.deferredServerEntryMutex.Unlock()
 
-	if epoch != iterator.epoch {
+	if iterator.closed || epoch != iterator.epoch {
 		return
 	}
 
@@ -1184,6 +1187,7 @@ func (iterator *ServerEntryIterator) Close() {
 
 	iterator.deferredServerEntryMutex.Lock()
 	defer iterator.deferredServerEntryMutex.Unlock()
+	iterator.closed = true
 	iterator.deferredServerEntryIDs = nil
 	iterator.useDeferred = false
 }
