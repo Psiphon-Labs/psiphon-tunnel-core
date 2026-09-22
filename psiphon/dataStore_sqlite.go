@@ -135,7 +135,7 @@ func init() {
 }
 
 func datastoreOpenDB(
-	rootDataDirectory string, retryAndReset bool) (*datastoreDB, error) {
+	rootDataDirectory string, retryAndReset bool, _ bool) (*datastoreDB, error) {
 
 	filename := filepath.Join(rootDataDirectory, sqliteDatastoreFilename)
 	attempts := 1
