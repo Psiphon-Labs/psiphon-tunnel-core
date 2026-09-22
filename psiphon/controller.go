@@ -890,7 +890,10 @@ func (controller *Controller) announcePersistedDSLAccessToken() {
 	announceDSLAccessToken(controller.config, token)
 }
 
-// Record client event attributed to the current tunnel or light proxy
+// RecordClientEvent records a client event attributed to the current tunnel
+// or light proxy. Attribution follows the type used by the most recent
+// successful application port forward dial. Call RecordClientEvent as soon
+// as practical after the event occurs.
 func (controller *Controller) RecordClientEvent(event string) {
 
 	// Emit notices after locks are released.

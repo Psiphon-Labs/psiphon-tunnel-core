@@ -435,7 +435,9 @@ func GetDSLAccessToken() string {
 }
 
 // RecordClientEvent records a client event attributed to the current tunnel
-// or light proxy.
+// or light proxy. Attribution follows the type used by the most recent
+// successful application port forward dial. Call RecordClientEvent as soon
+// as practical after the event occurs.
 func RecordClientEvent(event string) {
 
 	controllerAccessMutex.RLock()

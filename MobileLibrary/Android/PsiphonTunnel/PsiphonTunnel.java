@@ -346,7 +346,10 @@ public class PsiphonTunnel {
         return Psi.getDSLAccessToken();
     }
 
-    // Record client event attributed to the current tunnel or light proxy
+    // Record client event attributed to the current tunnel or light proxy.
+    // Attribution follows the type used by the most recent successful application
+    // port forward dial. Call recordClientEvent as soon as practical after the
+    // event occurs.
     //
     // Direct calls from a HostService callback is unsupported as this can deadlock.
     public void recordClientEvent(String event) {
