@@ -25,6 +25,7 @@ package psiphon
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	std_errors "errors"
 	"fmt"
@@ -38,6 +39,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -72,6 +74,7 @@ type Controller struct {
 	tunnelPoolSize                          int
 	tunnels                                 []*Tunnel
 	nextTunnel                              int
+	lastPortForwardDialWasLightProxy        atomic.Bool
 	isEstablishing                          bool
 	establishStartTime                      time.Time
 	protocolSelectionConstraints            *protocolSelectionConstraints
@@ -124,6 +127,9 @@ type Controller struct {
 	currentNetworkCancelFunc context.CancelCauseFunc
 
 	signalLightProxyTestFetch chan struct{}
+
+	clientEventMutex       sync.Mutex
+	lightProxyClientEvents []string
 }
 
 // NewController initializes a new controller.
@@ -372,6 +378,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
 
+	// Exported Controller methods may be called after NewController and
+	// before Run, so no exported method should depend on variables that are
+	// only initialized in Run. See MobileLibrary/psi.
+
 	if controller.config.LimitCPUThreads {
 		runtime.GOMAXPROCS(1)
 	}
@@ -382,6 +392,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	// client will always get an AvailableEgressRegions notice,
 	// an initial instance of any repetitive error notice, etc.
 	ResetRepetitiveNotices()
+
 	controller.announcePersistedDSLAccessToken()
 
 	runCtx, stopRunning := context.WithCancel(ctx)
@@ -840,6 +851,148 @@ func (controller *Controller) ImportPushPayload(payload []byte) bool {
 	}
 
 	return importOK
+}
+
+// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
+// Base64URL text. An empty string is returned when no token has been
+// registered, or when retrieval fails; retrieval failures are logged to
+// diagnostics. A DSLAccessTokenAvailable notice indicates that a token is
+// available. Config.OnAccessToken also delivers the token directly, if set.
+func (controller *Controller) GetDSLAccessToken() string {
+
+	if !isDSLAccessTokenRegistrationEnabled(controller.config) {
+		return ""
+	}
+
+	token, err := getPersistedDSLAccessToken()
+	if err != nil {
+		NoticeWarning("GetDSLAccessToken failed: %v", errors.Trace(err))
+		return ""
+	}
+
+	if len(token) == 0 {
+		return ""
+	}
+
+	return base64.RawURLEncoding.EncodeToString(token)
+}
+
+// announcePersistedDSLAccessToken announces a previously registered DSL access
+// token and delivers it to Config.OnAccessToken, if set.
+func (controller *Controller) announcePersistedDSLAccessToken() {
+
+	token := controller.GetDSLAccessToken()
+
+	if len(token) == 0 {
+		return
+	}
+
+	announceDSLAccessToken(controller.config, token)
+}
+
+// RecordClientEvent records a client event attributed to the current tunnel
+// or light proxy. Attribution follows the type used by the most recent
+// successful application port forward dial. Call RecordClientEvent as soon
+// as practical after the event occurs.
+func (controller *Controller) RecordClientEvent(event string) {
+
+	// Emit notices after locks are released.
+	var dropReason string
+	defer func() {
+		if dropReason != "" {
+			NoticeClientEventDropped(dropReason)
+		}
+	}()
+
+	if len(event) == 0 {
+		dropReason = "empty event"
+		return
+	}
+
+	p := controller.config.GetParameters().Get()
+	limit := p.Int(parameters.PsiphonAPIClientEventReportLimit)
+	lengthLimit := p.Int(parameters.PsiphonAPIClientEventLengthLimit)
+	p.Close()
+
+	// Truncate events that exceed the length limit.
+	if len(event) > lengthLimit {
+		if lengthLimit == 0 {
+			dropReason = "event length limit is zero"
+			return
+		}
+		end := lengthLimit - 1
+		for end > 0 && !utf8.RuneStart(event[end]) {
+			end--
+		}
+		event = event[:end] + "*"
+	}
+
+	// Apply a simple heuristic to attribute client events to the current
+	// tunnel or a fallback light proxy when fallback is enabled and the last
+	// successful port forward dial selected it.
+	//
+	// Note that split tunnel port forwards aren't distinguished from tunneled
+	// port forwards for tunnel attribution.
+	//
+	// For light proxy client events, the light proxy ID reported in the
+	// connected request may not be the light proxy in use at the time the
+	// event is recorded.
+	//
+	// As potential future enhancements, additional traffic monitoring could
+	// be added to determine which of the tunnel or light proxy fallback was
+	// most recently used for significant app traffic; and the current light
+	// proxy ID could be included with the reported events.
+
+	// Hold the tunnel lock as briefly as possible while keeping attribution and
+	// event enqueueing synchronized with shutdown.
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+
+	if controller.tunnelPoolSize > 1 {
+		// Attributed client events not supported in multi-tunnel mode.
+		dropReason = "multi-tunnel mode"
+		return
+	}
+
+	var tunnel *Tunnel
+	if len(controller.tunnels) > 0 {
+		tunnel = controller.tunnels[0]
+	}
+	isLightProxy := controller.config.EnableLightProxyFallback &&
+		controller.lastPortForwardDialWasLightProxy.Load()
+	if tunnel == nil && !isLightProxy {
+		dropReason = "no tunnel or light proxy attribution"
+		return
+	}
+
+	controller.clientEventMutex.Lock()
+	defer controller.clientEventMutex.Unlock()
+
+	if isLightProxy {
+		remaining := limit
+		if tunnel != nil {
+			remaining -= tunnel.lightProxyClientEventReportedCount
+		}
+		if len(controller.lightProxyClientEvents) >= remaining {
+			dropReason = "report limit reached"
+			return
+		}
+		controller.lightProxyClientEvents = append(controller.lightProxyClientEvents, event)
+	} else {
+		remaining := limit - tunnel.clientEventReportedCount
+		if len(tunnel.clientEvents) >= remaining {
+			dropReason = "report limit reached"
+			return
+		}
+		tunnel.clientEvents = append(tunnel.clientEvents, event)
+	}
+
+	if tunnel != nil {
+		select {
+		case tunnel.signalClientEvents <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
@@ -1467,10 +1620,9 @@ loop:
 	NoticeInfo("exiting run tunnels")
 }
 
-// SignalSeededNewSLOK implements the TunnelOwner interface. This function
-// is called by Tunnel.operateTunnel when the tunnel has received a new,
-// previously unknown SLOK from the server. The Controller triggers an OSL
-// fetch, as the new SLOK may be sufficient to access new OSLs.
+// SignalSeededNewSLOK is called by Tunnel.operateTunnel when the tunnel has
+// received a new, previously unknown SLOK from the server. The Controller
+// triggers an OSL fetch, as the new SLOK may be sufficient to access new OSLs.
 func (controller *Controller) SignalSeededNewSLOK() {
 	select {
 	case controller.signalFetchObfuscatedServerLists <- struct{}{}:
@@ -1492,10 +1644,9 @@ func (controller *Controller) SignalSeededNewSLOK() {
 	_ = DSLSetLastTunneledFetchTime(time.Time{})
 }
 
-// SignalTunnelFailure implements the TunnelOwner interface. This function
-// is called by Tunnel.operateTunnel when the tunnel has detected that it
-// has failed. The Controller will signal runTunnels to create a new
-// tunnel and/or remove the tunnel from the list of active tunnels.
+// SignalTunnelFailure is called by Tunnel.operateTunnel when the tunnel has
+// detected that it has failed. The Controller will signal runTunnels to create
+// a new tunnel and/or remove the tunnel from the list of active tunnels.
 func (controller *Controller) SignalTunnelFailure(tunnel *Tunnel) {
 	// Don't block. Assumes the receiver has a buffer large enough for
 	// the typical number of operated tunnels. In case there's no room,
@@ -1523,8 +1674,9 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 // empty slot and false if the pool is full (caller should discard the tunnel).
 func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.tunnelMutex.Lock()
-	defer controller.tunnelMutex.Unlock()
+	// No defer unlock: don't hold tunnel mutex across notices or PromoteServerEntry database write.
 	if len(controller.tunnels) >= controller.tunnelPoolSize {
+		controller.tunnelMutex.Unlock()
 		return false
 	}
 	// Perform a final check just in case we've established
@@ -1533,13 +1685,17 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 		if activeTunnel.dialParams.ServerEntry.IpAddress ==
 			tunnel.dialParams.ServerEntry.IpAddress {
 
+			controller.tunnelMutex.Unlock()
 			NoticeWarning("duplicate tunnel: %s", tunnel.dialParams.ServerEntry.GetDiagnosticID())
 			return false
 		}
 	}
 	controller.establishedOnce = true
 	controller.tunnels = append(controller.tunnels, tunnel)
-	NoticeTunnels(len(controller.tunnels))
+	tunnelCount := len(controller.tunnels)
+	controller.tunnelMutex.Unlock()
+
+	NoticeTunnels(tunnelCount)
 
 	// Promote this successful tunnel to first rank so it's one
 	// of the first candidates next time establish runs.
@@ -1611,7 +1767,9 @@ func (controller *Controller) numTunnels() (int, int) {
 // is adjusted as required.
 func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 	controller.tunnelMutex.Lock()
-	defer controller.tunnelMutex.Unlock()
+	// No defer unlock: don't hold the tunnel mutex across Close, which waits
+	// on the final status request, or across notices.
+	found := false
 	for index, activeTunnel := range controller.tunnels {
 		if tunnel == activeTunnel {
 			controller.tunnels = append(
@@ -1622,24 +1780,37 @@ func (controller *Controller) terminateTunnel(tunnel *Tunnel) {
 			if controller.nextTunnel >= len(controller.tunnels) {
 				controller.nextTunnel = 0
 			}
-			activeTunnel.Close(false)
-			NoticeTunnels(len(controller.tunnels))
+			found = true
 			break
 		}
 	}
+	tunnelCount := len(controller.tunnels)
+	controller.tunnelMutex.Unlock()
+
+	if !found {
+		return
+	}
+
+	tunnel.Close(false)
+	NoticeTunnels(tunnelCount)
 }
 
 // terminateAllTunnels empties the tunnel pool, closing all active tunnels.
 // This is used when shutting down the controller.
 func (controller *Controller) terminateAllTunnels() {
 	controller.tunnelMutex.Lock()
-	defer controller.tunnelMutex.Unlock()
+	// No defer unlock: see terminateTunnel.
+	tunnels := controller.tunnels
+	controller.tunnels = make([]*Tunnel, 0)
+	controller.nextTunnel = 0
+	controller.tunnelMutex.Unlock()
+
 	// Closing all tunnels in parallel. In an orderly shutdown, each tunnel
 	// may take a few seconds to send a final status request. We only want
 	// to wait as long as the single slowest tunnel.
 	closeWaitGroup := new(sync.WaitGroup)
-	closeWaitGroup.Add(len(controller.tunnels))
-	for _, activeTunnel := range controller.tunnels {
+	closeWaitGroup.Add(len(tunnels))
+	for _, activeTunnel := range tunnels {
 		tunnel := activeTunnel
 		go func() {
 			defer closeWaitGroup.Done()
@@ -1647,9 +1818,7 @@ func (controller *Controller) terminateAllTunnels() {
 		}()
 	}
 	closeWaitGroup.Wait()
-	controller.tunnels = make([]*Tunnel, 0)
-	controller.nextTunnel = 0
-	NoticeTunnels(len(controller.tunnels))
+	NoticeTunnels(0)
 }
 
 // signalProbeInactiveTunnels enqueues SSH keep alive probes for all tunnels
@@ -1772,7 +1941,7 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 
 	// Perform a test fetch through the light proxy. triggerLightProxyTestFetch
 	// is called when initially connecting or reconnecting, so there will often
-	// be no tunnel yet when controller.Dial is called.
+	// be no tunnel yet when controller.dial is called.
 	//
 	// The test target is assumed to be a TCP HTTPS server.
 	// LightProxyTestFetchAddress should include a port. Only the raw body is
@@ -1804,14 +1973,14 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 		DisableKeepAlives:      true,
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
-			// controller.runCtx.Done will interrupt controller.Dial; and
-			// controller.Dial's light proxy path uses the configured light proxy
+			// controller.runCtx.Done will interrupt controller.dial; and
+			// controller.dial's light proxy path uses the configured light proxy
 			// dial timeout.
-			conn, err := controller.Dial(address, nil)
+			conn, isLightProxy, err := controller.dial(address, nil)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			if _, ok := conn.(*lightProxyConn); ok {
+			if isLightProxy {
 				usedLightProxy.Store(true)
 			}
 			return conn, nil
@@ -1872,6 +2041,19 @@ func (controller *Controller) lightProxyTestFetch() (retErr error) {
 func (controller *Controller) Dial(
 	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
 
+	conn, isLightProxy, err := controller.dial(remoteAddr, downstreamConn)
+
+	if controller.config.EnableLightProxyFallback && err == nil {
+		// See comment in RecordClientEvent.
+		controller.lastPortForwardDialWasLightProxy.Store(isLightProxy)
+	}
+
+	return conn, err
+}
+
+func (controller *Controller) dial(
+	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, isLightProxy bool, err error) {
+
 	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
 
 	readInactiveThreshold := controller.config.GetLightProxyTunnelInactiveThreshold()
@@ -1915,7 +2097,7 @@ func (controller *Controller) Dial(
 					}
 
 					if lightConn != nil {
-						return lightConn, nil
+						return lightConn, true, nil
 					}
 					// Drop through with tunnel returned from dialLightProxyRace.
 				}
@@ -1929,7 +2111,7 @@ func (controller *Controller) Dial(
 		}
 
 		if tunnel == nil {
-			return nil, errors.TraceNew("no active tunnels")
+			return nil, false, errors.TraceNew("no active tunnels")
 		}
 	}
 
@@ -1938,15 +2120,15 @@ func (controller *Controller) Dial(
 		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
 			remoteAddr, false, downstreamConn)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		if splitTunnel {
-			return nil, errors.TraceNew(
+			return nil, false, errors.TraceNew(
 				"unexpected split tunnel classification")
 		}
 
-		return tunneledConn, nil
+		return tunneledConn, false, nil
 	}
 
 	// In split tunnel mode, TCP port forwards to destinations in the same
@@ -1993,7 +2175,7 @@ func (controller *Controller) Dial(
 		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
 			remoteAddr, false, downstreamConn)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		if !splitTunnel {
@@ -2002,7 +2184,7 @@ func (controller *Controller) Dial(
 			// destination, as the server is now classifying it as tunneled.
 			untunneledCache.Delete(remoteAddr)
 
-			return tunneledConn, nil
+			return tunneledConn, false, nil
 		}
 
 		// The server has indicated that the client should make a direct,
@@ -2015,10 +2197,10 @@ func (controller *Controller) Dial(
 
 	untunneledConn, err := controller.DirectDial(remoteAddr)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, false, errors.Trace(err)
 	}
 
-	return untunneledConn, nil
+	return untunneledConn, false, nil
 }
 
 // DirectDial dials an untunneled TCP connection within the controller run context.

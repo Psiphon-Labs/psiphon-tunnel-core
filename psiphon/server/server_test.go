@@ -910,6 +910,18 @@ var (
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
 	testHostID                           = "example-host-id"
 
+	testClientEvents = []struct {
+		event    string
+		expected string
+	}{
+		{"test-event-1", "test-event-1"},
+		{"test-event-2", "test-event-2"},
+		{"test-event-1", "test-event-1"},
+		{strings.Repeat("a", 64), strings.Repeat("a", 64)},
+		{strings.Repeat("a", 65), strings.Repeat("a", 63) + "*"},
+		{strings.Repeat("a", 62) + "éx", strings.Repeat("a", 62) + "*"},
+	}
+
 	// A steering IP must not be a bogon; this address is not dialed.
 	testSteeringIP = "1.1.1.1"
 )
@@ -2104,6 +2116,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error creating client controller: %s", err)
 	}
 
+	// Test: drop client events recorded before connection
+
+	controller.RecordClientEvent("before-connect")
+
 	connectedServer := make(chan struct{}, 1)
 	inproxyActivity := make(chan struct{}, 1)
 	tunnelsEstablished := make(chan struct{}, 1)
@@ -2327,6 +2343,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		lastConnectedUpdateCount += 1
 	}
 
+	// Test: record a client event before application traffic
+
+	controller.RecordClientEvent(testClientEvents[0].event)
+
 	if runConfig.doChangeDestBytesConfig {
 
 		if !runConfig.doASNDestBytes {
@@ -2485,6 +2505,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				t.Fatalf("tunneled NTP request failed: %s", err)
 			}
 		}
+	}
+
+	// Test: record client events after application traffic
+
+	for _, testCase := range testClientEvents[1:] {
+		controller.RecordClientEvent(testCase.event)
 	}
 
 	// Test: await SLOK payload or server alert notice
@@ -3177,6 +3203,7 @@ func checkExpectedServerTunnelLogFields(
 		"client_version",
 		"client_platform",
 		"client_features",
+		"client_events",
 		"relay_protocol",
 		"device_region",
 		"device_location",
@@ -3243,6 +3270,19 @@ func checkExpectedServerTunnelLogFields(
 		if clientFeatures[i].(string) != feature {
 			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
 		}
+	}
+
+	clientEvents := fields["client_events"].([]interface{})
+	if len(clientEvents) != len(testClientEvents) {
+		return fmt.Errorf("unexpected client_events '%s'", fields["client_events"])
+	}
+	for i, testCase := range testClientEvents {
+		if clientEvents[i].(string) != testCase.expected {
+			return fmt.Errorf("unexpected client_events '%s'", fields["client_events"])
+		}
+	}
+	if fields["light_proxy_client_events"] != nil {
+		return fmt.Errorf("unexpected field 'light_proxy_client_events'")
 	}
 
 	clientTunnelProtocol := runConfig.tunnelProtocol

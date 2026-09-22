@@ -118,6 +118,8 @@ type ServerTunnel struct {
 	LightProxyDialFailed                          *int64                 `protobuf:"varint,195,opt,name=light_proxy_dial_failed,json=lightProxyDialFailed,proto3,oneof" json:"light_proxy_dial_failed,omitempty"`
 	TotalDomainPortForwardCountTcp                *int64                 `protobuf:"varint,196,opt,name=total_domain_port_forward_count_tcp,json=totalDomainPortForwardCountTcp,proto3,oneof" json:"total_domain_port_forward_count_tcp,omitempty"`
 	LightProxyDialCanceled                        *int64                 `protobuf:"varint,197,opt,name=light_proxy_dial_canceled,json=lightProxyDialCanceled,proto3,oneof" json:"light_proxy_dial_canceled,omitempty"`
+	ClientEvents                                  []string               `protobuf:"bytes,198,rep,name=client_events,json=clientEvents,proto3" json:"client_events,omitempty"`
+	LightProxyClientEvents                        []string               `protobuf:"bytes,199,rep,name=light_proxy_client_events,json=lightProxyClientEvents,proto3" json:"light_proxy_client_events,omitempty"`
 	unknownFields                                 protoimpl.UnknownFields
 	sizeCache                                     protoimpl.SizeCache
 }
@@ -810,11 +812,25 @@ func (x *ServerTunnel) GetLightProxyDialCanceled() int64 {
 	return 0
 }
 
+func (x *ServerTunnel) GetClientEvents() []string {
+	if x != nil {
+		return x.ClientEvents
+	}
+	return nil
+}
+
+func (x *ServerTunnel) GetLightProxyClientEvents() []string {
+	if x != nil {
+		return x.LightProxyClientEvents
+	}
+	return nil
+}
+
 var File_ca_psiphon_psiphond_server_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82J\n" +
+	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe4J\n" +
 	"\fServerTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
@@ -915,7 +931,9 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x15light_proxy_dial_IPv6\x18\xc2\x01 \x01(\x03HZR\x12lightProxyDialIPv6\x88\x01\x01\x12;\n" +
 	"\x17light_proxy_dial_failed\x18\xc3\x01 \x01(\x03H[R\x14lightProxyDialFailed\x88\x01\x01\x12Q\n" +
 	"#total_domain_port_forward_count_tcp\x18\xc4\x01 \x01(\x03H\\R\x1etotalDomainPortForwardCountTcp\x88\x01\x01\x12?\n" +
-	"\x19light_proxy_dial_canceled\x18\xc5\x01 \x01(\x03H]R\x16lightProxyDialCanceled\x88\x01\x01B\x0e\n" +
+	"\x19light_proxy_dial_canceled\x18\xc5\x01 \x01(\x03H]R\x16lightProxyDialCanceled\x88\x01\x01\x12$\n" +
+	"\rclient_events\x18\xc6\x01 \x03(\tR\fclientEvents\x12:\n" +
+	"\x19light_proxy_client_events\x18\xc7\x01 \x03(\tR\x16lightProxyClientEventsB\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
 	"\x14_inproxy_dial_paramsB\x1f\n" +

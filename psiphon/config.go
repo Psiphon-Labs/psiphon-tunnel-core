@@ -1999,6 +1999,11 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 				"EnableLightProxyFallback is incompatible with DisableTunnels")
 		}
 
+		if config.PacketTunnelTunFileDescriptor > 0 {
+			return errors.TraceNew(
+				"EnableLightProxyFallback is incompatible with packet tunnel mode")
+		}
+
 		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
 			return errors.TraceNew(
 				"EnableLightProxyFallback is incompatible with disabled local proxies")
