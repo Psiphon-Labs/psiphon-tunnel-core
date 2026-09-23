@@ -233,6 +233,7 @@ func MakeDialParameters(
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(
 		serverEntry *protocol.ServerEntry,
+		isPrioritized bool,
 		prioritizeTunnelProtocol string) (string, bool),
 	serverEntry *protocol.ServerEntry,
 	inproxyClientBrokerClientManager *InproxyBrokerClientManager,
@@ -323,6 +324,7 @@ func MakeDialParameters(
 	dslPrioritizeTunnelProtocol := ""
 	dslPendingPrioritizeDial :=
 		dialParams != nil && !dialParams.DSLPendingPrioritizeDialTimestamp.IsZero()
+	dslPlaceholderExpired := false
 
 	if dslPendingPrioritizeDial {
 
@@ -346,6 +348,7 @@ func MakeDialParameters(
 			if err != nil {
 				NoticeWarning("DeleteDialParameters failed: %s", err)
 			}
+			dslPlaceholderExpired = true
 		}
 
 		dslPrioritizeDialReason = dialParams.DSLPrioritizedDialReason
@@ -607,7 +610,8 @@ func MakeDialParameters(
 		// is fully incapable of satisfying the current protocol selection
 		// constraints.
 
-		selectedProtocol, ok := selectProtocol(serverEntry, dslPrioritizeTunnelProtocol)
+		selectedProtocol, ok := selectProtocol(
+			serverEntry, dslPendingPrioritizeDial && !dslPlaceholderExpired, dslPrioritizeTunnelProtocol)
 		if !ok {
 			return nil, nil
 		}

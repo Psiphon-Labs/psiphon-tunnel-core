@@ -4100,7 +4100,7 @@ func checkExpectedDiscoveredServer(
 	defer iterator.Close()
 
 	for {
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -5477,7 +5477,7 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
-			func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
+			func(serverEntry *protocol.ServerEntry, _ bool, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
 			},
 			serverEntry,
@@ -5627,7 +5627,7 @@ func scanServerEntries(
 
 	for {
 
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			t.Fatalf("ServerIterator.Next failed: %s", err)
 		}
