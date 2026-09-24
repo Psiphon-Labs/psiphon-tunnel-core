@@ -54,6 +54,7 @@
         NSString *activeInterfaceAddress =
             [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                 andCurrentNetworkStatus:currentNetworkStatus
+                                                             preferIPv4:NO
                                                                   error:&err];
         if (err != nil) {
             NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
@@ -64,12 +65,38 @@
         }
         [networkID appendFormat:@"-%@", activeInterfaceAddress];
 #else
+        BOOL foundBSSID = NO;
         NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
         for (NSString *networkInterfaceName in networkInterfaceNames) {
             NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
             if (networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]) {
                 [networkID appendFormat:@"-%@", networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]];
+                foundBSSID = YES;
             }
+        }
+
+        if (!foundBSSID) {
+            // CNCopyCurrentNetworkInfo is deprecated and returns no BSSID unless the app meets Apple's
+            // requirements for accessing Wi-Fi information. Without a BSSID, fall back to the address of
+            // the active Wi-Fi interface, as the Android library does with WifiInfo.getIpAddress.
+            //
+            // IPv4 is preferred, because Wi-Fi interfaces also carry IPv6 privacy addresses that are
+            // periodically regenerated. On an IPv6-only network, the first non-link-local IPv6 address
+            // is used instead, as in psiphon/common/networkid.
+            NSError *err;
+            NSString *activeInterfaceAddress =
+                [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                    andCurrentNetworkStatus:currentNetworkStatus
+                                                                 preferIPv4:YES
+                                                                      error:&err];
+            if (err != nil) {
+                NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
+                *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                                      code:1
+                                                  userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+                return networkID;
+            }
+            [networkID appendFormat:@"-%@", activeInterfaceAddress];
         }
 #endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
@@ -84,6 +111,7 @@
             NSString *activeInterfaceAddress =
                 [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                     andCurrentNetworkStatus:currentNetworkStatus
+                                                                 preferIPv4:NO
                                                                       error:&err];
             if (err != nil) {
                 NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
@@ -112,6 +140,7 @@
         NSString *activeInterfaceAddress =
             [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                 andCurrentNetworkStatus:currentNetworkStatus
+                                                             preferIPv4:NO
                                                                   error:&err];
         if (err != nil) {
             NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];

@@ -26,9 +26,70 @@
 #import <Network/Network.h>
 #import "DefaultRouteMonitor.h"
 
+// See comment in header.
+const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifaddrs *_Nullable interfaces,
+                                                              const char *_Nullable interfaceName,
+                                                              BOOL preferIPv4) {
+    if (interfaceName == NULL) {
+        return NULL;
+    }
+
+    const struct ifaddrs *firstIPv6 = NULL;
+
+    for (const struct ifaddrs *interface = interfaces; interface != NULL; interface = interface->ifa_next) {
+
+        // Only IFF_UP interfaces. Loopback is ignored.
+        if (!(interface->ifa_flags & IFF_UP) || (interface->ifa_flags & IFF_LOOPBACK)) {
+            continue;
+        }
+
+        const struct sockaddr *addr = interface->ifa_addr;
+        if (addr == NULL || (addr->sa_family != AF_INET && addr->sa_family != AF_INET6)) {
+            continue;
+        }
+
+        // ifa_name could be NULL
+        // https://sourceware.org/bugzilla/show_bug.cgi?id=21812
+        if (interface->ifa_name == NULL || strcmp(interface->ifa_name, interfaceName) != 0) {
+            continue;
+        }
+
+        if (addr->sa_family == AF_INET6) {
+            // Ignore IPv6 link-local addresses https://developer.apple.com/forums/thread/128215?answerId=403310022#403310022
+            // TODO: consider excluding other IP ranges
+            const struct sockaddr_in6 *addr6 = (const struct sockaddr_in6 *)addr;
+            if (IN6_IS_ADDR_LINKLOCAL(&addr6->sin6_addr)) {
+                continue;
+            }
+        }
+
+        if (!preferIPv4) {
+            // Do not ignore link-local IPv4 addresses because it is possible the interface
+            // is assigned one manually, or if DHCP fails, etc.
+            return interface;
+        }
+
+        if (addr->sa_family == AF_INET) {
+            // A self-assigned link-local IPv4 address does not identify the network.
+            const struct sockaddr_in *addr4 = (const struct sockaddr_in *)addr;
+            if (IN_LINKLOCAL(ntohl(addr4->sin_addr.s_addr))) {
+                continue;
+            }
+            return interface;
+        }
+
+        if (firstIPv6 == NULL) {
+            firstIPv6 = interface;
+        }
+    }
+
+    return firstIPv6;
+}
+
 @implementation NetworkInterface
 
 + (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName
+                               preferIPv4:(BOOL)preferIPv4
                                     error:(NSError *_Nullable *_Nonnull)outError {
     *outError = nil;
 
@@ -41,66 +102,34 @@
         return nil;
     }
 
-    struct ifaddrs *interface;
-    for (interface=interfaces; interface; interface=interface->ifa_next) {
-
-        // Only IFF_UP interfaces. Loopback is ignored.
-        if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
-
-            if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
-
-                // ifa_name could be NULL
-                // https://sourceware.org/bugzilla/show_bug.cgi?id=21812
-                if (interface->ifa_name != NULL) {
-
-                    NSString *curInterfaceName = [NSString stringWithUTF8String:interface->ifa_name];
-                    if ([interfaceName isEqualToString:curInterfaceName]) {
-
-                        // Ignore IPv6 link-local addresses https://developer.apple.com/forums/thread/128215?answerId=403310022#403310022
-                        // Do not ignore link-local IPv4 addresses because it is possible the interface
-                        // is assigned one manually, or if DHCP fails, etc.
-                        if (interface->ifa_addr->sa_family == AF_INET6) {
-                            struct sockaddr_in6 *sa_in6 = (struct sockaddr_in6*)interface->ifa_addr;
-                            if (sa_in6 != NULL) {
-                                struct in6_addr i_a = sa_in6->sin6_addr;
-                                if (IN6_IS_ADDR_LINKLOCAL(&i_a)) {
-                                    // TODO: consider excluding other IP ranges
-                                    continue;
-                                }
-                            }
-                        }
-
-                        char addr[NI_MAXHOST];
-                        int ret = getnameinfo(interface->ifa_addr,
-                                              (socklen_t)interface->ifa_addr->sa_len,
-                                              addr,
-                                              (socklen_t)NI_MAXHOST,
-                                              NULL,
-                                              (socklen_t)0,
-                                              NI_NUMERICHOST);
-                        if (ret != 0) {
-                            NSString *localizedDescription = [NSString stringWithFormat:@"getnameinfo returned %d", ret];
-                            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
-                                                                   code:1
-                                                               userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
-                            freeifaddrs(interfaces);
-                            return nil;
-                        }
-
-                        freeifaddrs(interfaces);
-
-                        NSString *resolvedAddr = [NSString stringWithUTF8String:addr];
-
-                        return resolvedAddr;
-                    }
-                }
-            }
-        }
+    const struct ifaddrs *interface = NetworkInterfaceSelectAddress(interfaces,
+                                                                    [interfaceName UTF8String],
+                                                                    preferIPv4);
+    if (interface == NULL) {
+        freeifaddrs(interfaces);
+        return nil;
     }
+
+    char addr[NI_MAXHOST];
+    int ret = getnameinfo(interface->ifa_addr,
+                          (socklen_t)interface->ifa_addr->sa_len,
+                          addr,
+                          (socklen_t)NI_MAXHOST,
+                          NULL,
+                          (socklen_t)0,
+                          NI_NUMERICHOST);
 
     freeifaddrs(interfaces);
 
-    return nil;
+    if (ret != 0) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"getnameinfo returned %d", ret];
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                               code:1
+                                           userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return nil;
+    }
+
+    return [NSString stringWithUTF8String:addr];
 }
 
 + (NSSet<NSString*>*)activeInterfaces:(NSError *_Nullable *_Nonnull)outError {
@@ -227,6 +256,7 @@
 
 + (NSString*)getActiveInterfaceAddressWithReachability:(id<ReachabilityProtocol>)reachability
                                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                            preferIPv4:(BOOL)preferIPv4
                                                  error:(NSError *_Nullable *_Nonnull)outError {
 
     *outError = nil;
@@ -251,6 +281,7 @@
     }
 
     NSString *interfaceAddress = [NetworkInterface getInterfaceAddress:activeInterface
+                                                            preferIPv4:preferIPv4
                                                                  error:&err];
     if (err != nil) {
         NSString *localizedDescription =
