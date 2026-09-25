@@ -417,6 +417,15 @@ Returns the path where the rotated notices file will be created.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
 
+ @note On Wi-Fi, the network ID that tunnel-core uses to key per-network state, such as stored tactics and replay
+ parameters, includes the BSSID when available. On iOS 14 and Mac Catalyst 14 and later, the BSSID is obtained with
+ NEHotspotNetwork, which requires the `com.apple.developer.networking.wifi-info` entitlement in the process that
+ runs PsiphonTunnel, such as the Network Extension, and one of Apple's conditions, such as an active VPN
+ configuration or precise location authorization. Without them, NEHotspotNetwork returns nothing and the user is
+ not prompted; the network ID then falls back to CNCopyCurrentNetworkInfo, which returns nothing to apps built
+ with the iOS 19 SDK or later, and finally to the Wi-Fi interface address. Calling this method on the main thread
+ prevents tunnel-core's first network ID lookup from waiting for the BSSID.
+
  @warning Direct calls from a TunneledAppDelegate callback is unsupported as this can deadlock.
  */
 - (BOOL)start:(BOOL)ifNeeded;

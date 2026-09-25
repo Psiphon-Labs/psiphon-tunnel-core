@@ -45,11 +45,16 @@
 #import "ReachabilityProtocol.h"
 #import "Reachability+ReachabilityProtocol.h"
 #import "DefaultRouteMonitor.h"
+#import "WiFiNetworkInfo.h"
 
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
 
 const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
 const BOOL UseHasIPv6RouteGetter = FALSE;
+
+// Upper bound on how long a network ID lookup waits for an outstanding NEHotspotNetwork fetch. On device, fetches
+// took 14-65 ms.
+static const NSTimeInterval WiFiBSSIDLookupTimeout = 1.0;
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -125,6 +130,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
 
+    // Provides the Wi-Fi BSSID for the network ID. Nil when NEHotspotNetwork is unavailable.
+    WiFiNetworkInfo *_Nullable wifiNetworkInfo;
+
     BOOL tunnelWholeDevice;
 
     _Atomic BOOL usingNoticeFiles;
@@ -179,6 +187,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         self->reachability = [Reachability reachabilityForInternetConnection];
     }
     atomic_init(&self->currentNetworkStatus, NetworkReachabilityNotReachable);
+#if TARGET_OS_IPHONE
+    if (@available(iOS 14.0, macCatalyst 14.0, *)) {
+        __weak PsiphonTunnel *weakSelf = self;
+        self->wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithLogger:^(NSString * _Nonnull message) {
+            [weakSelf logMessage:message];
+        }];
+    }
+#endif
     self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
@@ -342,6 +358,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
+        // Start fetching the Wi-Fi BSSID now, so that it is usually available by the time tunnel-core first
+        // requests the network ID.
+        [self->wifiNetworkInfo start];
+
         [self startInternetReachabilityMonitoring];
 
         @try {
@@ -446,6 +466,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [self logMessage: @"Stopping Psiphon library"];
 
         [self stopInternetReachabilityMonitoring];
+        [self->wifiNetworkInfo stop];
 
         GoPsiStop();
         
@@ -1431,10 +1452,19 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)getNetworkID {
+    NetworkReachability networkStatus = atomic_load(&self->currentNetworkStatus);
+
+    // Only a Wi-Fi network ID uses the BSSID, so only then wait for an outstanding fetch.
+    NSString *wifiBSSID = nil;
+    if (networkStatus == NetworkReachabilityReachableViaWiFi) {
+        wifiBSSID = [self->wifiNetworkInfo bssidWaitingUpTo:WiFiBSSIDLookupTimeout];
+    }
+
     NSError *warn;
     NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
-                                          andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                          andCurrentNetworkStatus:networkStatus
                                                 tunnelWholeDevice:self->tunnelWholeDevice
+                                                        wifiBSSID:wifiBSSID
                                                           warning:&warn];
     if (warn != nil) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
@@ -1719,6 +1749,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         // is back on the initial network -- even though those DNS servers _may_
         // have changed.
         atomic_store(&self->useInitialDNS, FALSE);
+
+        // The network may have changed, so fetch the BSSID again before GoPsiNetworkChanged below causes
+        // tunnel-core to request a new network ID. That request waits for this fetch, rather than using the
+        // previous network's BSSID.
+        [self->wifiNetworkInfo invalidateAndRefetch];
 
         NetworkReachability networkStatus;
         NetworkReachability previousNetworkStatus;
