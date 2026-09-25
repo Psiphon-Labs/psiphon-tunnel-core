@@ -35,6 +35,8 @@ This code is a canonical guide for integrating the Library.
 
 6. In the "Build Phases" for the target, add a "Copy Files" phase. Set "Destination" to "Frameworks". Add `PsiphonTunnel.xcframework` to the list. Ensure "Code Sign on Copy" is checked.
 
+7. Optional: to let the Library tell Wi-Fi networks apart by BSSID, add the "Access Wi-Fi Information" capability (`com.apple.developer.networking.wifi-info`) to the target that runs the Library, such as the Network Extension. The BSSID is obtained with `NEHotspotNetwork`, which also requires the app to meet one of Apple's conditions, such as having an active VPN configuration installed. Otherwise the Library uses the Wi-Fi interface address, and the user is never prompted. See the `start:` comment in `PsiphonTunnel.h`.
+
 ## Compiling and testing
 
 The following architecture targets are compiled into the Library's framework binary: `arm64`, and `x86_64`. This means that the Library can run on phones or in a simulator (on a 64-bit host system).

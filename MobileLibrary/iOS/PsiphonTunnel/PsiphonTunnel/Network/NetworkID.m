@@ -29,6 +29,7 @@
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
                          tunnelWholeDevice:(BOOL)tunnelWholeDevice
+                                 wifiBSSID:(NSString *_Nullable)wifiBSSID
                                    warning:(NSError *_Nullable *_Nonnull)outWarn {
 
     *outWarn = nil;
@@ -65,39 +66,22 @@
         }
         [networkID appendFormat:@"-%@", activeInterfaceAddress];
 #else
-        BOOL foundBSSID = NO;
-        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
-        for (NSString *networkInterfaceName in networkInterfaceNames) {
-            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
-            if (networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]) {
-                [networkID appendFormat:@"-%@", networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]];
-                foundBSSID = YES;
-            }
+        return [NetworkID wifiNetworkIDWithBSSID:wifiBSSID
+                        currentNetworkInfoBSSIDs:^NSArray<NSString *> *{
+            return [NetworkID currentNetworkInfoBSSIDs];
         }
-
-        if (!foundBSSID) {
-            // CNCopyCurrentNetworkInfo is deprecated and returns no BSSID unless the app meets Apple's
-            // requirements for accessing Wi-Fi information. Without a BSSID, fall back to the address of
-            // the active Wi-Fi interface, as the Android library does with WifiInfo.getIpAddress.
+                                interfaceAddress:^NSString *(NSError *_Nullable *_Nonnull outError) {
+            // As the Android library does with WifiInfo.getIpAddress when it has no BSSID.
             //
             // IPv4 is preferred, because Wi-Fi interfaces also carry IPv6 privacy addresses that are
             // periodically regenerated. On an IPv6-only network, the first non-link-local IPv6 address
             // is used instead, as in psiphon/common/networkid.
-            NSError *err;
-            NSString *activeInterfaceAddress =
-                [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
-                                                    andCurrentNetworkStatus:currentNetworkStatus
-                                                                 preferIPv4:YES
-                                                                      error:&err];
-            if (err != nil) {
-                NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
-                *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
-                                                      code:1
-                                                  userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
-                return networkID;
-            }
-            [networkID appendFormat:@"-%@", activeInterfaceAddress];
+            return [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                       andCurrentNetworkStatus:currentNetworkStatus
+                                                                    preferIPv4:YES
+                                                                         error:outError];
         }
+                                         warning:outWarn];
 #endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
@@ -155,5 +139,50 @@
     }
     return networkID;
 }
+
+// See comment in header.
++ (NSString *)wifiNetworkIDWithBSSID:(NSString *_Nullable)wifiBSSID
+            currentNetworkInfoBSSIDs:(NetworkIDCurrentNetworkInfoBSSIDs)currentNetworkInfoBSSIDs
+                    interfaceAddress:(NetworkIDInterfaceAddress)interfaceAddress
+                             warning:(NSError *_Nullable *_Nonnull)outWarn {
+
+    *outWarn = nil;
+
+    if (wifiBSSID.length > 0) {
+        return [@"WIFI-" stringByAppendingString:wifiBSSID];
+    }
+
+    NSArray<NSString *> *bssids = currentNetworkInfoBSSIDs();
+    if (bssids.count > 0) {
+        return [@"WIFI-" stringByAppendingString:[bssids componentsJoinedByString:@"-"]];
+    }
+
+    NSError *err;
+    NSString *activeInterfaceAddress = interfaceAddress(&err);
+    if (err != nil || activeInterfaceAddress.length == 0) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@",
+                                          err != nil ? err.localizedDescription : @"empty address"];
+        *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                              code:1
+                                          userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"WIFI";
+    }
+    return [@"WIFI-" stringByAppendingString:activeInterfaceAddress];
+}
+
+#if TARGET_OS_IPHONE
++ (NSArray<NSString *> *)currentNetworkInfoBSSIDs {
+    NSMutableArray<NSString *> *bssids = [NSMutableArray array];
+    NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
+    for (NSString *networkInterfaceName in networkInterfaceNames) {
+        NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
+        id bssid = networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID];
+        if ([bssid isKindOfClass:[NSString class]] && [bssid length] > 0) {
+            [bssids addObject:bssid];
+        }
+    }
+    return bssids;
+}
+#endif
 
 @end
