@@ -49,29 +49,32 @@
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {
         [networkID setString:@"WIFI"];
-#if TARGET_OS_MAC && !TARGET_OS_IPHONE
-        NSError *err;
-        NSString *activeInterfaceAddress =
-            [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
-                                                andCurrentNetworkStatus:currentNetworkStatus
-                                                                  error:&err];
-        if (err != nil) {
-            NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
-            *outWarn = [[NSError alloc] initWithDomain:@"PsiphonTunnelError"
-                                                  code:1
-                                              userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
-            return networkID;
-        }
-        [networkID appendFormat:@"-%@", activeInterfaceAddress];
-#else
+        BOOL foundBSSID = NO;
+#if TARGET_OS_IPHONE
         NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
         for (NSString *networkInterfaceName in networkInterfaceNames) {
             NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
             if (networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]) {
                 [networkID appendFormat:@"-%@", networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]];
+                foundBSSID = YES;
             }
         }
 #endif
+        if (!foundBSSID) {
+            NSError *err;
+            NSString *activeInterfaceAddress =
+                [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                    andCurrentNetworkStatus:currentNetworkStatus
+                                                                      error:&err];
+            if (err != nil) {
+                NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
+                *outWarn = [[NSError alloc] initWithDomain:@"PsiphonTunnelError"
+                                                      code:1
+                                                  userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+                return networkID;
+            }
+            [networkID appendFormat:@"-%@", activeInterfaceAddress];
+        }
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
 
