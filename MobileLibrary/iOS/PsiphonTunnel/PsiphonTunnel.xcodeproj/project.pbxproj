@@ -57,6 +57,8 @@
 		CECF01512538E14B00CD3E5C /* NetworkID.m in Sources */ = {isa = PBXBuildFile; fileRef = CECF014F2538E14B00CD3E5C /* NetworkID.m */; };
 		CEDBA51225B7737C007685E2 /* NetworkInterface.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDBA51025B7737C007685E2 /* NetworkInterface.h */; };
 		CEDBA51325B7737C007685E2 /* NetworkInterface.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDBA51125B7737C007685E2 /* NetworkInterface.m */; };
+		037B32C2B67E482C2F282F9D /* WiFiNetworkInfo.h in Headers */ = {isa = PBXBuildFile; fileRef = A616FF929EFCFE2CE364C0CA /* WiFiNetworkInfo.h */; };
+		B197B00B89988978AEE9D5D6 /* WiFiNetworkInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 5287B3219B0C260802C2CF27 /* WiFiNetworkInfo.m */; };
 		CEDE547924EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDE547724EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h */; };
 		CEDE547A24EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDE547824EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m */; };
 		CEFC764225B1F358003A2A52 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CEFC764125B1F358003A2A52 /* Network.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
@@ -128,6 +130,8 @@
 		CECF014F2538E14B00CD3E5C /* NetworkID.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NetworkID.m; sourceTree = "<group>"; };
 		CEDBA51025B7737C007685E2 /* NetworkInterface.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NetworkInterface.h; sourceTree = "<group>"; };
 		CEDBA51125B7737C007685E2 /* NetworkInterface.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NetworkInterface.m; sourceTree = "<group>"; };
+		A616FF929EFCFE2CE364C0CA /* WiFiNetworkInfo.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WiFiNetworkInfo.h; sourceTree = "<group>"; };
+		5287B3219B0C260802C2CF27 /* WiFiNetworkInfo.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = WiFiNetworkInfo.m; sourceTree = "<group>"; };
 		CEDE547724EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = PsiphonProviderFeedbackHandlerShim.h; path = ../PsiphonProviderFeedbackHandlerShim.h; sourceTree = "<group>"; };
 		CEDE547824EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PsiphonProviderFeedbackHandlerShim.m; path = ../PsiphonProviderFeedbackHandlerShim.m; sourceTree = "<group>"; };
 		CEFC764125B1F358003A2A52 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk/System/Library/Frameworks/Network.framework; sourceTree = DEVELOPER_DIR; };
@@ -168,6 +172,8 @@
 				CECF014F2538E14B00CD3E5C /* NetworkID.m */,
 				CEDBA51025B7737C007685E2 /* NetworkInterface.h */,
 				CEDBA51125B7737C007685E2 /* NetworkInterface.m */,
+				A616FF929EFCFE2CE364C0CA /* WiFiNetworkInfo.h */,
+				5287B3219B0C260802C2CF27 /* WiFiNetworkInfo.m */,
 			);
 			path = Network;
 			sourceTree = "<group>";
@@ -332,6 +338,7 @@
 				CECF01502538E14B00CD3E5C /* NetworkID.h in Headers */,
 				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
 				CEDBA51225B7737C007685E2 /* NetworkInterface.h in Headers */,
+				037B32C2B67E482C2F282F9D /* WiFiNetworkInfo.h in Headers */,
 				CEDE547924EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h in Headers */,
 				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
 				66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */,
@@ -474,6 +481,7 @@
 				66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */,
 				CE676F2B25FA82DA00F7DB13 /* DefaultRouteMonitor.m in Sources */,
 				CEDBA51325B7737C007685E2 /* NetworkInterface.m in Sources */,
+				B197B00B89988978AEE9D5D6 /* WiFiNetworkInfo.m in Sources */,
 				CE676F3025FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m in Sources */,
 				66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */,
 				66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */,
