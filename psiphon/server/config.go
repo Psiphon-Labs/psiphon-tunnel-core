@@ -393,6 +393,16 @@ type Config struct {
 	// CPU profiling. For the default, 0, no CPU profile is taken.
 	ProcessCPUProfileDurationSeconds int `json:",omitempty"`
 
+	// ProfileProtobufFormat specifies that the profiles written on
+	// SIGUSR2 use the gzip-compressed protocol buffer format, with function
+	// names, files and lines embedded, so that pprof tooling reads them
+	// without the psiphond binary. For the default, false, they use the
+	// legacy text format a programmer reads without tools, whose symbols
+	// live in comments that tools discard. Only the SIGUSR2 profiles are
+	// affected; the profiles the server writes on its own keep the text
+	// format.
+	ProfileProtobufFormat bool `json:",omitempty"`
+
 	// TrafficRulesFilename is the path of a file containing a JSON-encoded
 	// TrafficRulesSet, the traffic rules to apply to Psiphon client tunnels.
 	TrafficRulesFilename string `json:",omitempty"`
