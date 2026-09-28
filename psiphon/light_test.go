@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -40,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
@@ -102,7 +104,7 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 		DisableLocalSocksProxy:        true,
 		TargetServerEntry:             targetServerEntry,
 		EstablishTunnelTimeoutSeconds: &establishTunnelTimeoutSeconds,
-		EnableLightProxy:              true,
+		EnableLightProxyFallback:      true,
 		LightProxyLimitDestinationAddresses: []string{
 			webServerAddress,
 		},
@@ -116,6 +118,14 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 	}
 
 	err = config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	expectedClientEvents := []string{"test-event-1", "test-event-2", "test-event-1"}
+	err = config.SetParameters("", false, map[string]interface{}{
+		parameters.PsiphonAPIClientEventReportLimit: len(expectedClientEvents),
+	})
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -228,6 +238,15 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 		return errors.Trace(ctx.Err())
 	}
 
+	// No events are attributed before the first light proxy dial.
+	controller.RecordClientEvent("before-light-proxy-dial")
+	controller.clientEventMutex.Lock()
+	queuedClientEventCount := len(controller.lightProxyClientEvents)
+	controller.clientEventMutex.Unlock()
+	if queuedClientEventCount != 0 {
+		return errors.TraceNew("unexpected client events before light proxy dial")
+	}
+
 	if importPushPayload {
 		storedLightProxy := LoadLightProxy()
 		if storedLightProxy == nil {
@@ -246,6 +265,21 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 	err = doHTTPSWebServerFetches(ctx, localProxyPort, webServerAddress)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	for _, event := range expectedClientEvents {
+		controller.RecordClientEvent(event)
+	}
+
+	// Events beyond the report limit are dropped.
+	controller.RecordClientEvent("test-event-3")
+	controller.RecordClientEvent("test-event-4")
+
+	controller.clientEventMutex.Lock()
+	clientEvents := slices.Clone(controller.lightProxyClientEvents)
+	controller.clientEventMutex.Unlock()
+	if !slices.Equal(clientEvents, expectedClientEvents) {
+		return errors.Tracef("unexpected light proxy client events: %v", clientEvents)
 	}
 
 	select {
@@ -625,7 +659,7 @@ func TestControllerImportPushPayloadLightProxy(t *testing.T) {
 		PropagationChannelId:          "0000000000000000",
 		SponsorId:                     "0000000000000000",
 		DisableLocalSocksProxy:        true,
-		EnableLightProxy:              true,
+		EnableLightProxyFallback:      true,
 		PushPayloadObfuscationKey:     obfuscationKey,
 		PushPayloadSignaturePublicKey: publicKey,
 	}
@@ -771,7 +805,7 @@ func TestControllerImportPushPayloadLightProxyStoreFailure(t *testing.T) {
 		PropagationChannelId:          "0000000000000000",
 		SponsorId:                     "0000000000000000",
 		DisableLocalSocksProxy:        true,
-		EnableLightProxy:              true,
+		EnableLightProxyFallback:      true,
 		PushPayloadObfuscationKey:     obfuscationKey,
 		PushPayloadSignaturePublicKey: publicKey,
 	}
@@ -853,7 +887,7 @@ func TestControllerImportPushPayloadInvalidLightProxyNotStored(t *testing.T) {
 		PropagationChannelId:          "0000000000000000",
 		SponsorId:                     "0000000000000000",
 		DisableLocalSocksProxy:        true,
-		EnableLightProxy:              true,
+		EnableLightProxyFallback:      true,
 		PushPayloadObfuscationKey:     obfuscationKey,
 		PushPayloadSignaturePublicKey: publicKey,
 	}

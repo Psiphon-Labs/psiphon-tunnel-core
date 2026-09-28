@@ -73,14 +73,6 @@ type Tunneler interface {
 	SignalComponentFailure()
 }
 
-// TunnelOwner specifies the interface required by Tunnel to notify its
-// owner when it has failed. The owner may, as in the case of the Controller,
-// remove the tunnel from its list of active tunnels.
-type TunnelOwner interface {
-	SignalSeededNewSLOK()
-	SignalTunnelFailure(tunnel *Tunnel)
-}
-
 // Tunnel is a connection to a Psiphon server. An established
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
@@ -116,6 +108,15 @@ type Tunnel struct {
 	recentBytesSent                atomic.Int64
 	recentBytesReceived            atomic.Int64
 	inFlightConnectedRequestSignal chan struct{}
+
+	signalClientEvents chan struct{}
+
+	// Synchronized using controller.clientEventMutex. Client events
+	// attributed to the tunnel and per-tunnel report limit counters are
+	// stored in Tunnel so they naturally share the Tunnel lifetime.
+	clientEvents                       []string
+	clientEventReportedCount           int
+	lightProxyClientEventReportedCount int
 }
 
 // getCustomParameters helpers wrap the verbose function call chain required
@@ -181,6 +182,7 @@ func ConnectTunnel(
 		signalSSHRequestFailure:    make(chan error, 1),
 		signalAppResumed:           make(chan struct{}, 1),
 		signalReadInactiveProbe:    make(chan struct{}, 1),
+		signalClientEvents:         make(chan struct{}, 1),
 		adjustedEstablishStartTime: adjustedEstablishStartTime,
 	}, nil
 }
@@ -207,7 +209,7 @@ func (tunnel *Tunnel) AppResumed() {
 // and handles periodic management.
 func (tunnel *Tunnel) Activate(
 	ctx context.Context,
-	tunnelOwner TunnelOwner,
+	controller *Controller,
 	isStatusReporter bool) (retErr error) {
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -315,7 +317,7 @@ func (tunnel *Tunnel) Activate(
 							// post-handshake SSH requests, such as OSL or
 							// alert requests, arrive to this handler instead
 							// of operateTunnel, so invoke HandleServerRequest here.
-							HandleServerRequest(tunnelOwner, tunnel, serverRequest)
+							HandleServerRequest(controller, tunnel, serverRequest)
 						}
 					}
 				case <-handshakeCtx.Done():
@@ -390,7 +392,7 @@ func (tunnel *Tunnel) Activate(
 	// Spawn the operateTunnel goroutine, which monitors the tunnel and handles periodic
 	// stats updates.
 	tunnel.operateWaitGroup.Add(1)
-	go tunnel.operateTunnel(tunnelOwner)
+	go tunnel.operateTunnel(controller)
 
 	tunnel.mutex.Unlock()
 
@@ -585,6 +587,11 @@ func (tunnel *Tunnel) SignalReadInactiveProbe() {
 // receives its response (or the SSH connection is terminated).
 func (tunnel *Tunnel) SendAPIRequest(
 	name string, requestPayload []byte) ([]byte, error) {
+
+	// The single in-flight request is an x/crypto/ssh implementation
+	// limitation and not inherent to the SSH protocol. mux.SendRequest
+	// holds a per-connection mutex while awaiting a reply to any global
+	// request with wantReply=true, regardless of request type.
 
 	ok, responsePayload, err := tunnel.sshClient.Conn.SendRequest(
 		name, true, requestPayload)
@@ -1815,7 +1822,7 @@ func performLivenessTest(
 //
 // TODO: change "recently active" to include having received any
 // SSH protocol messages from the server, not just user payload?
-func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
+func (tunnel *Tunnel) operateTunnel(controller *Controller) {
 	defer tunnel.operateWaitGroup.Done()
 
 	now := time.Now()
@@ -1839,6 +1846,16 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
+
+	var clientEventsTimer *time.Timer
+	var clientEventsTimerC <-chan time.Time
+	stopClientEventsTimer := func() {
+		if clientEventsTimer != nil {
+			clientEventsTimer.Stop()
+		}
+		clientEventsTimerC = nil
+	}
+	defer stopClientEventsTimer()
 
 	// Only one active tunnel should be designated as the status reporter for
 	// sending stats and prune checks. While the stats provide a "take out"
@@ -1886,18 +1903,22 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// other operations.
 	requestsWaitGroup := new(sync.WaitGroup)
 
+	// To ensure client event delivery, allow a pending request to be
+	// buffered. With the buffer, it's possible for statsTimer to enqueue a
+	// second status request when one is in flight, but that request will
+	// only be sent if makeStatusRequestPayload finds new pending data.
+	signalStatusRequest := make(chan struct{}, 1)
 	requestsWaitGroup.Add(1)
-	signalStatusRequest := make(chan struct{})
 	go func() {
 		defer requestsWaitGroup.Done()
 		for range signalStatusRequest {
-			sendStats(tunnel)
+			sendStats(controller, tunnel)
 		}
 	}()
 
-	requestsWaitGroup.Add(1)
 	signalPeriodicSshKeepAlive := make(chan time.Duration)
 	sshKeepAliveError := make(chan error, 1)
+	requestsWaitGroup.Add(1)
 	go func() {
 		defer requestsWaitGroup.Done()
 		isFirstPeriodicKeepAlive := true
@@ -1920,8 +1941,8 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// concurrently, to ensure a long period keep alive timeout doesn't delay
 	// failed tunnel detection.
 
-	requestsWaitGroup.Add(1)
 	signalProbeSshKeepAlive := make(chan time.Duration)
+	requestsWaitGroup.Add(1)
 	go func() {
 		defer requestsWaitGroup.Done()
 		for timeout := range signalProbeSshKeepAlive {
@@ -2061,8 +2082,35 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 				setDialParamsSucceeded = true
 			}
 
+		case <-tunnel.signalClientEvents:
+			if tunnel.isStatusReporter && clientEventsTimerC == nil {
+				// Instead of immediately initiating a status request, set a short timer
+				// in order to gather a potential batch. Jitter the timer to mitigate
+				// predictable scheduling that may be a traffic shape fingerprint.
+				p := tunnel.getCustomParameters()
+				delay := prng.Period(
+					p.Duration(parameters.PsiphonAPIClientEventReportDelayMin),
+					p.Duration(parameters.PsiphonAPIClientEventReportDelayMax))
+				if clientEventsTimer == nil {
+					clientEventsTimer = time.NewTimer(delay)
+				} else {
+					// Assumes Go 1.23+ timer semantics
+					clientEventsTimer.Reset(delay)
+				}
+				clientEventsTimerC = clientEventsTimer.C
+			}
+
+		case <-clientEventsTimerC:
+			stopClientEventsTimer()
+			select {
+			case signalStatusRequest <- struct{}{}:
+			default:
+			}
+
 		case <-statsTimer.C:
 			if tunnel.isStatusReporter {
+				// This request also reports any pending client events.
+				stopClientEventsTimer()
 				select {
 				case signalStatusRequest <- struct{}{}:
 				default:
@@ -2146,11 +2194,34 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		case serverRequest := <-tunnel.sshServerRequests:
 			if serverRequest != nil {
-				HandleServerRequest(tunnelOwner, tunnel, serverRequest)
+				HandleServerRequest(controller, tunnel, serverRequest)
 			}
 
 		case <-tunnel.operateCtx.Done():
 			shutdown = true
+		}
+	}
+
+	if err == nil {
+		// This commanded shutdown case is initiated by Tunnel.Close, which
+		// will wait up to parameters.TunnelOperateShutdownTimeout to allow
+		// the following requests to complete.
+		//
+		// Queue a single final status request to report outstanding
+		// persistent stats and client events. If a request is already
+		// pending in the buffered channel, that request reports the
+		// outstanding items instead. Client events that don't fit are
+		// dropped.
+		select {
+		case signalStatusRequest <- struct{}{}:
+		default:
+		}
+	} else {
+		// The tunnel has failed. Drain any pending status request signal
+		// rather than attempt a request on the failed tunnel.
+		select {
+		case <-signalStatusRequest:
+		default:
 		}
 	}
 
@@ -2173,23 +2244,14 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		NoticeInfo("shutdown operate tunnel")
 
-		// This commanded shutdown case is initiated by Tunnel.Close, which will
-		// wait up to parameters.TunnelOperateShutdownTimeout to allow the following
-		// requests to complete.
-
-		// Send a final status request in order to report any outstanding persistent
-		// stats as soon as possible.
-
-		sendStats(tunnel)
-
 		// The controller connectedReporter may have initiated a connected request
 		// concurrent to this commanded shutdown. SetInFlightConnectedRequest
 		// ensures that a connected request doesn't start after the commanded
 		// shutdown. AwaitInFlightConnectedRequest blocks until any in flight
 		// request completes or is aborted after TunnelOperateShutdownTimeout.
 		//
-		// As any connected request is performed by a concurrent goroutine,
-		// sendStats is called first and AwaitInFlightConnectedRequest second.
+		// The final status request completed before requestsWaitGroup.Wait
+		// returned above, so it precedes AwaitInFlightConnectedRequest.
 
 		tunnel.AwaitInFlightConnectedRequest()
 
@@ -2198,7 +2260,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		NoticeWarning("operate tunnel error for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
 
-		tunnelOwner.SignalTunnelFailure(tunnel)
+		controller.SignalTunnelFailure(tunnel)
 	}
 }
 
@@ -2403,14 +2465,14 @@ loop:
 }
 
 // sendStats is a helper for sending session stats to the server.
-func sendStats(tunnel *Tunnel) bool {
+func sendStats(controller *Controller, tunnel *Tunnel) bool {
 
 	// Skip when tunnel is discarded
 	if tunnel.IsDiscarded() {
 		return true
 	}
 
-	err := tunnel.serverContext.DoStatusRequest()
+	err := tunnel.serverContext.DoStatusRequest(controller)
 	if err != nil {
 		NoticeWarning("DoStatusRequest failed for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)

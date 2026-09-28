@@ -450,43 +450,6 @@ func isDSLAccessTokenRegistrationEnabled(config *Config) bool {
 	return enabled
 }
 
-// GetDSLAccessToken returns the persisted opaque DSL access token as unpadded
-// Base64URL text. An empty string is returned when no token has been
-// registered, or when retrieval fails; retrieval failures are logged to
-// diagnostics. A DSLAccessTokenAvailable notice indicates that a token is
-// available. Config.OnAccessToken also delivers the token directly, if set.
-func (controller *Controller) GetDSLAccessToken() string {
-
-	if !isDSLAccessTokenRegistrationEnabled(controller.config) {
-		return ""
-	}
-
-	token, err := getPersistedDSLAccessToken()
-	if err != nil {
-		NoticeWarning("GetDSLAccessToken failed: %v", errors.Trace(err))
-		return ""
-	}
-
-	if len(token) == 0 {
-		return ""
-	}
-
-	return base64.RawURLEncoding.EncodeToString(token)
-}
-
-// announcePersistedDSLAccessToken announces a previously registered DSL access
-// token and delivers it to Config.OnAccessToken, if set.
-func (controller *Controller) announcePersistedDSLAccessToken() {
-
-	token := controller.GetDSLAccessToken()
-
-	if len(token) == 0 {
-		return
-	}
-
-	announceDSLAccessToken(controller.config, token)
-}
-
 func announceDSLAccessToken(config *Config, token string) {
 	NoticeDSLAccessTokenAvailable()
 
