@@ -20,6 +20,7 @@
 package common
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -68,6 +69,65 @@ func TestWriteRuntimeProfiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(testDirName, profileManifestName+".tmp")); !os.IsNotExist(err) {
 		t.Fatalf("temporary manifest left behind: %v", err)
+	}
+}
+
+// The protocol buffer variant writes every profile gzip-compressed (the
+// runtime's protocol buffer encoding), listed in the manifest like the text
+// ones; the text variant leaves the non-CPU profiles as readable text.
+func TestWriteRuntimeProfilesProtobuf(t *testing.T) {
+
+	testDirName, err := ioutil.TempDir("", "psiphon-profiles-test")
+	if err != nil {
+		fmt.Printf("TempDir failed: %s\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(testDirName)
+
+	WriteRuntimeProfilesProtobuf(&testLogger{}, testDirName, "", 1, 1)
+
+	content, err := os.ReadFile(filepath.Join(testDirName, profileManifestName))
+	if err != nil {
+		t.Fatalf("read manifest: %s", err)
+	}
+	var manifest profileManifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("parse manifest: %s", err)
+	}
+	if len(manifest.Files) != 6 {
+		t.Fatalf("manifest lists %v, want the six profiles", manifest.Files)
+	}
+	for _, name := range manifest.Files {
+		head := make([]byte, 2)
+		file, err := os.Open(filepath.Join(testDirName, name))
+		if err != nil {
+			t.Fatalf("open %s: %s", name, err)
+		}
+		_, err = file.Read(head)
+		file.Close()
+		if err != nil {
+			t.Fatalf("read %s: %s", name, err)
+		}
+		if head[0] != 0x1f || head[1] != 0x8b {
+			t.Fatalf("%s is not gzip-compressed (starts %x)", name, head)
+		}
+	}
+
+	textDirName, err := ioutil.TempDir("", "psiphon-profiles-test")
+	if err != nil {
+		fmt.Printf("TempDir failed: %s\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(textDirName)
+
+	WriteRuntimeProfiles(&testLogger{}, textDirName, "", 0, 0)
+
+	text, err := os.ReadFile(filepath.Join(textDirName, "goroutine.profile"))
+	if err != nil {
+		t.Fatalf("read text goroutine profile: %s", err)
+	}
+	if !bytes.HasPrefix(text, []byte("goroutine profile: total ")) {
+		t.Fatalf("text goroutine profile starts %q, want the legacy text header", text[:min(len(text), 30)])
 	}
 }
 
