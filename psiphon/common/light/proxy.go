@@ -976,9 +976,9 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	//
 	// - Passthrough relays may run indefinitely, even beyond Proxy.Run. This
 	//   is the intended design; see psiphon-tls.Conn.serverHandshake. To
-	//   support this, the activityConn inactivity timeout is deactivated
-	//   when the TLS handshake fails. In addition, passthrough bytes
-	//   continue to be counted for the lifetime of the passtrhough relay.
+	//   support this, psiphon-tls clears the activityConn pre-header deadline
+	//   before starting the relay. In addition, passthrough bytes continue to
+	//   be counted for the lifetime of the passthrough relay.
 
 	handleCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -996,10 +996,6 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	tlsClientHelloFragmented = connectionMetrics.ClientHelloFragmented
 	tlsClientHelloPadding = connectionMetrics.ClientHelloPaddingLength
 	if err != nil {
-
-		// Clear the pre-header deadline to support the passthrough relay case.
-		_ = activityConn.SetInactivityTimeout(0)
-
 		return errors.Trace(err)
 	}
 
@@ -1031,14 +1027,16 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 
 	// Replace the pre-header deadline with the inactivity timeout for an
 	// authentic client.
-	if err := activityConn.SetInactivityTimeout(proxy.inactivityTimeout); err != nil {
+	err = activityConn.SetInactivityTimeout(proxy.inactivityTimeout)
+	if err != nil {
 		return errors.Trace(err)
 	}
 
 	// Apply limits after reading the header so that the ConnectionFailure
 	// will be accompanied by client characteristics such as sponsor ID. A
 	// later enforcement also means the client is authenticated as having the
-	// obfuscation key, and a prober behind shared NAT can't consume limits.
+	// obfuscation key, and a prober behind shared NAT can't consume or
+	// observe limits.
 
 	limitIP := common.GetRateLimitIP(clientIP)
 	err = proxy.applyRateLimit(limitIP)

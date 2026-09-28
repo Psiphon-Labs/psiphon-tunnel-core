@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !ios && !android
 
 /*
  * Copyright (c) 2026, Psiphon Inc.

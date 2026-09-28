@@ -1,3 +1,5 @@
+//go:build !ios && !android
+
 /*
  * Copyright (c) 2026, Psiphon Inc.
  * All rights reserved.

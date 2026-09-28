@@ -285,16 +285,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [self start];
 }
 
-// See comment in header
-- (void)appResumed {
-    GoPsiAppResumed();
-}
-
-// See comment in header
-- (void)dropPacketTunnelTraffic:(BOOL)drop {
-    GoPsiDropPacketTunnelTraffic(drop);
-}
-
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
  Assumes self.sessionID has been initialized -- i.e., assumes that
@@ -502,18 +492,34 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return GoPsiGetPacketTunnelMTU();
 }
 
+// See comment in header
+- (void)dropPacketTunnelTraffic:(BOOL)drop {
+    GoPsiDropPacketTunnelTraffic(drop);
+}
+
+// See comment in header
+- (void)appResumed {
+    GoPsiAppResumed();
+}
+
 // See comment in header.
 - (BOOL)importPushPayload:(NSData * _Nonnull)payload {
     return GoPsiImportPushPayload(payload);
 }
 
 // See comment in header.
-+ (NSString * _Nonnull)getBuildInfo {
-    return GoPsiGetBuildInfo();
-}
-
 - (NSString * _Nonnull)getAccessToken {
     return GoPsiGetDSLAccessToken();
+}
+
+// See comment in header
+- (void)recordClientEvent:(NSString *)event {
+    GoPsiRecordClientEvent(event);
+}
+
+// See comment in header.
++ (NSString * _Nonnull)getBuildInfo {
+    return GoPsiGetBuildInfo();
 }
 
 #pragma mark - Profiling utilities
@@ -1318,13 +1324,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
-    else if ([noticeType isEqualToString:@"DSLAccessTokenAvailable"]) {
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onAccessTokenAvailable)]) {
-            dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onAccessTokenAvailable];
-            });
-        }
-    }
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }
@@ -1441,6 +1440,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
     }
     return networkID;
+}
+
+- (void)onAccessToken:(NSString *)token {
+    id<TunneledAppDelegate> delegate = self.tunneledAppDelegate;
+    if ([delegate respondsToSelector:@selector(onAccessToken:)]) {
+        dispatch_async(self->callbackQueue, ^{
+            [delegate onAccessToken:token];
+        });
+    }
 }
 
 - (void)notice:(NSString *)noticeJSON {

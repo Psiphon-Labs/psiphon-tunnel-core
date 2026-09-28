@@ -92,7 +92,6 @@ const (
 	LimitIntensiveConnectionWorkers                    = "LimitIntensiveConnectionWorkers"
 	UpstreamProxyErrorMinWaitDuration                  = "UpstreamProxyErrorMinWaitDuration"
 	UpstreamProxyErrorMaxWaitDuration                  = "UpstreamProxyErrorMaxWaitDuration"
-	IgnoreHandshakeStatsRegexps                        = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocolsProbability               = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                          = "PrioritizeTunnelProtocols"
 	PrioritizeTunnelProtocolsCandidateCount            = "PrioritizeTunnelProtocolsCandidateCount"
@@ -174,6 +173,10 @@ const (
 	PsiphonAPIPersistentStatsMaxCount                  = "PsiphonAPIPersistentStatsMaxCount"
 	PsiphonAPIConnectedRequestPeriod                   = "PsiphonAPIConnectedRequestPeriod"
 	PsiphonAPIConnectedRequestRetryPeriod              = "PsiphonAPIConnectedRequestRetryPeriod"
+	PsiphonAPIClientEventReportDelayMin                = "PsiphonAPIClientEventReportDelayMin"
+	PsiphonAPIClientEventReportDelayMax                = "PsiphonAPIClientEventReportDelayMax"
+	PsiphonAPIClientEventReportLimit                   = "PsiphonAPIClientEventReportLimit"
+	PsiphonAPIClientEventLengthLimit                   = "PsiphonAPIClientEventLengthLimit"
 	FetchSplitTunnelRoutesTimeout                      = "FetchSplitTunnelRoutesTimeout"
 	SplitTunnelRoutesURLFormat                         = "SplitTunnelRoutesURLFormat"
 	SplitTunnelRoutesSignaturePublicKey                = "SplitTunnelRoutesSignaturePublicKey"
@@ -658,7 +661,6 @@ var defaultParameters = map[string]struct {
 	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
 	UpstreamProxyErrorMinWaitDuration:        {value: 10 * time.Second, minimum: time.Duration(0)},
 	UpstreamProxyErrorMaxWaitDuration:        {value: 30 * time.Second, minimum: time.Duration(0)},
-	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	PacketTunnelReadTimeout:                  {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
@@ -776,6 +778,14 @@ var defaultParameters = map[string]struct {
 	PsiphonAPIStatusRequestPaddingMaxBytes: {value: 256, minimum: 0},
 
 	PsiphonAPIConnectedRequestRetryPeriod: {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+
+	PsiphonAPIClientEventReportDelayMin: {value: 50 * time.Millisecond, minimum: time.Duration(0)},
+	PsiphonAPIClientEventReportDelayMax: {value: 250 * time.Millisecond, minimum: time.Duration(0)},
+
+	// Report limit must not exceed the server.CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL.
+	// Length limit must not exceed the server.CLIENT_EVENTS_MAX_LENGTH.
+	PsiphonAPIClientEventReportLimit: {value: 128, minimum: 0},
+	PsiphonAPIClientEventLengthLimit: {value: 64, minimum: 0},
 
 	// FetchSplitTunnelRoutesTimeout, SplitTunnelRoutesURLFormat,
 	// SplitTunnelRoutesSignaturePublicKey and SplitTunnelDNSServer are obsoleted

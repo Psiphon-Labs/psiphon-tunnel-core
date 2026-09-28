@@ -2107,6 +2107,9 @@ type sshClient struct {
 	persistentStatsDroppedLogCount       int
 	blocklistHitsLogCount                int
 	proxyProtocolMetrics                 proxyProtocolMetrics
+
+	clientEvents           []string
+	lightProxyClientEvents []string
 }
 
 type trafficState struct {
@@ -2234,8 +2237,6 @@ type handshakeState struct {
 	activeAuthorizationIDs    []string
 	authorizedAccessTypes     []string
 	authorizationsRevoked     bool
-	domainBytesChecksum       []byte
-	hasDomainBytesRegexes     bool
 	establishedTunnelsCount   int
 	splitTunnelLookup         *common.StringLookup
 	deviceRegion              string
@@ -2721,14 +2722,15 @@ func (sshClient *sshClient) run(
 		var err error
 
 		if protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
-			// With Encrypt-then-MAC hash algorithms, packet length is
-			// transmitted in plaintext, which aids in traffic analysis;
-			// clients may still send Encrypt-then-MAC algorithms in their
-			// KEX_INIT message, but do not select these algorithms.
+			// Ensure SSH algorithm selection conforms to the obfuscated SSH
+			// expectation that everything after the obfuscated KEX is fully
+			// random. Full compliance depends on clients with the latest
+			// ObfuscatedSSHMode logic; for legacy client compatibility, the
+			// server allows non-conforming selections.
 			//
 			// The exception is TUNNEL_PROTOCOL_SSH, which is intended to appear
 			// like SSH on the wire.
-			sshServerConfig.NoEncryptThenMACHash = true
+			sshServerConfig.ObfuscatedSSHMode = true
 
 		} else {
 			// For TUNNEL_PROTOCOL_SSH only, randomize KEX.
@@ -3787,6 +3789,8 @@ func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPor
 	return true
 }
 
+// light_proxy_client_events is intentionally omitted; sshClient accumulates
+// these events separately.
 var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
@@ -3979,6 +3983,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["proxy_protocol_header_added"] = sshClient.proxyProtocolMetrics.added.Load()
 		logFields["proxy_protocol_header_replaced"] = sshClient.proxyProtocolMetrics.replaced.Load()
 		logFields["proxy_protocol_header_failed"] = sshClient.proxyProtocolMetrics.failed.Load()
+	}
+
+	if len(sshClient.clientEvents) > 0 {
+		logFields["client_events"] = sshClient.clientEvents
+	}
+	if len(sshClient.lightProxyClientEvents) > 0 {
+		logFields["light_proxy_client_events"] = sshClient.lightProxyClientEvents
 	}
 
 	// Merge in additional metrics from the optional metrics source
@@ -4596,42 +4607,6 @@ func (sshClient *sshClient) updateAPIParameters(
 	for name, value := range apiParams {
 		sshClient.handshakeState.apiParams[name] = value
 	}
-}
-
-func (sshClient *sshClient) acceptDomainBytes() bool {
-	sshClient.Lock()
-	defer sshClient.Unlock()
-
-	// Drop domain bytes when no regexes were configured for the client at
-	// handshake.
-	if !sshClient.handshakeState.hasDomainBytesRegexes {
-		return false
-	}
-
-	// When the domain bytes checksum differs from the checksum sent to the
-	// client in the handshake response, the psinet regex configuration has
-	// changed. In this case, drop the stats so we don't continue to record
-	// stats as previously configured.
-	//
-	// Limitations:
-	// - The checksum comparison may result in dropping some stats for a
-	//   domain that remains in the new configuration.
-	// - We don't push new regexs to the clients, so clients that remain
-	//   connected will continue to send stats that will be dropped; and
-	//   those clients will not send stats as newly configured until after
-	//   reconnecting.
-	// - Due to the design of
-	//   transferstats.ReportRecentBytesTransferredForServer in the client,
-	//   the client may accumulate stats, reconnect before its next status
-	//   request, get a new regex configuration, and then send the previously
-	//   accumulated stats in its next status request. The checksum scheme
-	//   won't prevent the reporting of those stats.
-
-	sponsorID, _ := getStringRequestParam(sshClient.handshakeState.apiParams, "sponsor_id")
-
-	domainBytesChecksum := sshClient.sshServer.support.PsinetDatabase.GetDomainBytesChecksum(sponsorID)
-
-	return bytes.Equal(sshClient.handshakeState.domainBytesChecksum, domainBytesChecksum)
 }
 
 // setOSLConfig resets the client's OSL seed state based on the latest OSL config

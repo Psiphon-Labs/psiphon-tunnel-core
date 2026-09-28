@@ -1341,7 +1341,6 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // Flow tracking is used to implement:
 // - one-time permissions checks for a flow
 // - OSLs
-// - domain bytes transferred [TODO]
 // - DNS quality metrics
 //
 // The applicationData from the first packet in the flow is

@@ -82,6 +82,21 @@ type Config struct {
 	// be deleted, moved or overwritten.
 	DataRootDirectory string `json:",omitempty"`
 
+	// DisableDataStoreFileLock disables the datastore's process-level file lock.
+	//
+	// The library user MUST ensure that no other library instance, in this
+	// or any other process, accesses the same datastore until it is closed,
+	// including while this process is suspended. Otherwise, data corruption
+	// may occur. Internal transaction synchronization and disk syncing
+	// remain enabled.
+	//
+	// One use case for this flag is to avoid 0xdead10cc in an iOS extension
+	// which has its own exclusive datastore.
+	//
+	// Currently, this applies only to the Bolt datastore adapter and ignored
+	// by other adapters.
+	DisableDataStoreFileLock bool `json:",omitempty"`
+
 	// UseNoticeFiles configures notice files for writing. If set, homepages
 	// will be written to a file created at config.GetHomePageFilename()
 	// and notices will be written to a file created at
@@ -312,9 +327,6 @@ type Config struct {
 	// LimitRelayBufferSizes selects smaller buffers for port forward relaying.
 	LimitRelayBufferSizes bool `json:",omitempty"`
 
-	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
-	IgnoreHandshakeStatsRegexps bool `json:",omitempty"`
-
 	// UpstreamProxyURL is a URL specifying an upstream proxy to use for all
 	// outbound connections. The URL should include proxy type and
 	// authentication information, as required. See example URLs here:
@@ -369,10 +381,10 @@ type Config struct {
 	// network. See: NetworkIDGetter doc.
 	NetworkIDGetter NetworkIDGetter `json:",omitempty"`
 
-	// NetworkID, when not blank, is used as the identifier for the host's
-	// current active network.
-	// NetworkID is ignored when NetworkIDGetter is set, or when
-	// common/networkid is enabled.
+	// NetworkID, when set, specifies an identifier for the host's current
+	// network. For valid values, see the NetworkIDGetter type doc.
+	// NetworkID is ignored when NetworkIDGetter is set. When NetworkID is blank
+	// and no NetworkIDGetter is set, common/networkid is used when enabled.
 	NetworkID string `json:",omitempty"`
 
 	// DisableTactics disables tactics operations including requests, payload
@@ -389,22 +401,7 @@ type Config struct {
 	// the pool size is 1.
 	TargetServerEntry string `json:",omitempty"`
 
-	// DisableApi disables Psiphon server API calls including handshake,
-	// connected, status, etc. This is used for special case temporary tunnels
-	// (Windows VPN mode).
-	DisableApi bool `json:",omitempty"`
-
-	// TargetAPIProtocol specifies whether to force use of "ssh" or "web" API
-	// protocol. When blank, the default, the optimal API protocol is used.
-	// Note that this capability check is not applied before the
-	// "CandidateServers" count is emitted.
-	//
-	// This parameter is intended for testing and debugging only. Not all
-	// parameters are supported in the legacy "web" API protocol, including
-	// speed test samples.
-	TargetAPIProtocol string `json:",omitempty"`
-
-	// TargetAPIProtocol specifies whether to use "json" or "cbor" API
+	// TargetAPIEncoding specifies whether to use "json" or "cbor" API
 	// protocol parameter encodings. When blank, the default is to use "cbor"
 	// where supported.
 	TargetAPIEncoding string `json:",omitempty"`
@@ -711,6 +708,12 @@ type Config struct {
 	// more than two eligible interfaces; setting both fields explicitly is
 	// recommended.
 	//
+	// Limitation: Split-interface mode serves personal clients only:
+	// InproxyMaxCommonClients must be 0. The broker requires common client
+	// answer candidates to match the GeoIP of the proxy's broker connection,
+	// which the two interfaces cannot both satisfy; only personal pairing is
+	// exempt from that check.
+	//
 	// Cannot be used with DeviceBinder.
 	// On Windows, interface names must match the FriendlyName that Go
 	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
@@ -844,9 +847,17 @@ type Config struct {
 	// EnableDSLAccessTokenRegistration indicates whether DSL discovery requests ask
 	// the DSL backend to issue an opaque token. A DSLAccessTokenAvailable notice is
 	// emitted for a persisted token at startup and when a newly issued token
-	// differs from the previously stored token; the token itself is fetched with
-	// GetDSLAccessToken.
+	// differs from the previously stored token; the token itself is delivered to
+	// OnAccessToken, if set, and may also be fetched with GetDSLAccessToken.
 	EnableDSLAccessTokenRegistration bool `json:",omitempty"`
+
+	// OnAccessToken is an optional callback that receives the persisted opaque
+	// DSL access token as unpadded Base64URL text at startup, if available, and
+	// whenever a changed token has been persisted. Requires
+	// EnableDSLAccessTokenRegistration. The callback runs synchronously and
+	// should return promptly.
+	// The token is never included in notices.
+	OnAccessToken func(token string) `json:"-"`
 
 	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
 	// deobfuscate push payloads. This value is supplied by the Psiphon
@@ -1015,6 +1026,19 @@ type Config struct {
 	// Deprecated: Use EnableLightProxyFallback.
 	EnableLightProxy bool `json:",omitempty"`
 
+	// DisableApi disables Psiphon server API calls including handshake,
+	// connected, status, etc. This is used for special case temporary tunnels
+	// (Windows VPN mode).
+	//
+	// Deprecated and no longer supported: Psiphon API calls may no longer be
+	// disabled.
+	DisableApi bool `json:",omitempty"`
+
+	// TargetAPIProtocol must be blank or "ssh"; both select SSH.
+	//
+	// Deprecated: SSH is the only supported Psiphon API protocol.
+	TargetAPIProtocol string `json:",omitempty"`
+
 	//
 	// The following parameters are for testing purposes.
 	//
@@ -1051,13 +1075,10 @@ type Config struct {
 	MeekPayloadPaddingMaxSize           *int     `json:",omitempty"`
 	MeekPayloadPaddingOmitProbability   *float64 `json:",omitempty"`
 
-	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
-	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
-	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
-	// key algorithm.
-	ObfuscatedSSHAlgorithms []string `json:",omitempty"`
-	ObfuscatedSSHMinPadding *int     `json:",omitempty"`
-	ObfuscatedSSHMaxPadding *int     `json:",omitempty"`
+	// ObfuscatedSSHMinPadding and ObfuscatedSSHMaxPadding are for testing
+	// purposes.
+	ObfuscatedSSHMinPadding *int `json:",omitempty"`
+	ObfuscatedSSHMaxPadding *int `json:",omitempty"`
 
 	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
 	// testing purposes.
@@ -1726,6 +1747,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.Tracef("invalid client version: %s", err)
 	}
 
+	if config.DisableApi {
+		return errors.TraceNew("DisableApi is not supported")
+	}
+
 	if config.TargetAPIProtocol != "" &&
 		!protocol.PsiphonAPIProtocolIsValid(config.TargetAPIProtocol) {
 
@@ -1769,12 +1794,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.FeedbackEncryptionPublicKey == "" {
 			return errors.TraceNew("missing FeedbackEncryptionPublicKey")
 		}
-	}
-
-	if config.ObfuscatedSSHAlgorithms != nil &&
-		len(config.ObfuscatedSSHAlgorithms) != 4 {
-		// TODO: validate each algorithm?
-		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
 	splitInterfaceMode := config.InproxyProxySplitUpstreamInterfaceName != "" ||
@@ -1878,12 +1897,25 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			}
 		}
 
+		maxCommonClients := config.InproxyMaxCommonClients
 		maxPersonalClients := config.InproxyMaxPersonalClients
 		if config.InproxyProxyLimits != nil {
+			_, maxCommonClients, _, _, _ = config.InproxyProxyLimits.GetCommonLimits()
 			_, maxPersonalClients, _, _, _ = config.InproxyProxyLimits.GetPersonalLimits()
 		}
 		if len(config.InproxyProxyPersonalCompartmentID) > 0 && maxPersonalClients <= 0 {
 			return errors.TraceNew("invalid InproxyMaxPersonalClients when personal compartment IDs are provided")
+		}
+
+		// In split-interface mode, the broker connection egresses via the
+		// upstream interface while ICE candidates are gathered on the
+		// downstream interface. The broker requires common client answer
+		// candidates to match the GeoIP country and ASN of the proxy's broker
+		// connection, so, common connection cannot establish as is in split
+		// interface mode.
+		if splitInterfaceMode && maxCommonClients > 0 {
+			return errors.TraceNew(
+				"InproxyMaxCommonClients must be 0 in split interface mode")
 		}
 
 		if config.InproxyProxyLimits == nil &&
@@ -1965,6 +1997,11 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		if config.DisableTunnels {
 			return errors.TraceNew(
 				"EnableLightProxyFallback is incompatible with DisableTunnels")
+		}
+
+		if config.PacketTunnelTunFileDescriptor > 0 {
+			return errors.TraceNew(
+				"EnableLightProxyFallback is incompatible with packet tunnel mode")
 		}
 
 		if config.DisableLocalSocksProxy && config.DisableLocalHTTPProxy {
@@ -2120,17 +2157,22 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	networkIDGetter := config.NetworkIDGetter
 
 	if networkIDGetter == nil {
-		if networkid.Enabled() {
-			networkIDGetter = newCommonNetworkIDGetter()
+		if config.NetworkID != "" {
+			// Limitation: unlike NetworkIDGetter and common/networkid, this method
+			// of network identification is not dynamic and will not reflect network
+			// changes that occur while running.
+			networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
+		} else if networkid.Enabled() {
+			// Limitation: only this getter describes the split-interface
+			// downstream network. NetworkIDGetter takes no interface name, so a
+			// host application supplying one such as the Android and iOS libraries,
+			// describes the default route instead. Adding split-interface
+			// mode to a mobile host will require extending that interface and
+			// its native implementations.
+			networkIDGetter = newCommonNetworkIDGetter(
+				config.splitInterfaceDownstreamInterfaceName())
 		} else {
-			// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
-			// this method of network identification is not dynamic and will not reflect
-			// network changes that occur while running.
-			if config.NetworkID != "" {
-				networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
-			} else {
-				networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
-			}
+			networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
 		}
 	}
 
@@ -2652,8 +2694,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	applyParameters[parameters.MeekLimitBufferSizes] = config.LimitMeekBufferSizes
-
-	applyParameters[parameters.IgnoreHandshakeStatsRegexps] = config.IgnoreHandshakeStatsRegexps
 
 	if config.EstablishTunnelTimeoutSeconds != nil {
 		applyParameters[parameters.EstablishTunnelTimeout] = fmt.Sprintf("%ds", *config.EstablishTunnelTimeoutSeconds)
@@ -4804,15 +4844,22 @@ func (n *staticNetworkIDGetter) GetNetworkID() string {
 	return n.networkID
 }
 
+// commonNetworkIDGetter describes the network reached through interfaceName,
+// or, when that is empty, the default route. In split-interface mode it is the
+// downstream interface: the side that establishes in-proxy WebRTC connections,
+// whose network type is used in broker matching based on NAT assumptions. The
+// upstream network is deliberately not described, as nothing consumes it yet.
 type commonNetworkIDGetter struct {
+	interfaceName string
 }
 
-func newCommonNetworkIDGetter() *commonNetworkIDGetter {
-	return &commonNetworkIDGetter{}
+func newCommonNetworkIDGetter(interfaceName string) *commonNetworkIDGetter {
+	return &commonNetworkIDGetter{interfaceName: interfaceName}
 }
 
 func (n *commonNetworkIDGetter) GetNetworkID() string {
-	networkID, err := networkid.Get()
+
+	networkID, err := networkid.Get(n.interfaceName)
 	if err != nil {
 		NoticeError("networkid.Get failed: %v", errors.Trace(err))
 		return unknownNetworkID
@@ -4849,11 +4896,11 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 
 // cachingNetworkIDGetter caches the GetNetworkID result from the underlying
 // network ID getter. The current GetNetworkID implementations take in the
-// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows) to execute, on
-// modern devices. To minimize delaying dials and other operations that start
-// with fetching the current network ID, the return values are cached for a
-// short time. On platforms that invoke NetworkChanged, the cache is flushed
-// immediately upon a network change.
+// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows); ~0.25ms (macOS);
+// ~0.15ms (Linux) to execute, on modern devices. To minimize delaying dials
+// and other operations that start with fetching the current network ID, the
+// return values are cached for a short time. On platforms that invoke
+// NetworkChanged, the cache is flushed immediately upon a network change.
 type cachingNetworkIDGetter struct {
 	config *Config
 	n      NetworkIDGetter

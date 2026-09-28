@@ -19,12 +19,11 @@
 
 // Package psinet implements psinet database services. The psinet database is a
 // JSON-format file containing information about the Psiphon network, including
-// sponsors, home pages, stats regexes, available upgrades, and other servers for
+// sponsors, home pages, available upgrades, and other servers for
 // discovery.
 package psinet
 
 import (
-	"crypto/md5"
 	"encoding/json"
 	"math/rand"
 	"net/url"
@@ -77,13 +76,10 @@ func (s *DiscoveryServer) String() string {
 }
 
 type Sponsor struct {
-	ID                  string                `json:"id"`
-	HomePages           map[string][]HomePage `json:"home_pages"`
-	MobileHomePages     map[string][]HomePage `json:"mobile_home_pages"`
-	AlertActionURLs     map[string][]string   `json:"alert_action_urls"`
-	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
-
-	domainBytesChecksum []byte `json:"-"`
+	ID              string                `json:"id"`
+	HomePages       map[string][]HomePage `json:"home_pages"`
+	MobileHomePages map[string][]HomePage `json:"mobile_home_pages"`
+	AlertActionURLs map[string][]string   `json:"alert_action_urls"`
 }
 
 type ClientVersion struct {
@@ -93,11 +89,6 @@ type ClientVersion struct {
 type HomePage struct {
 	Region string `json:"region"`
 	URL    string `json:"url"`
-}
-
-type HttpsRequestRegex struct {
-	Regex   string `json:"regex"`
-	Replace string `json:"replace"`
 }
 
 // NewDatabase initializes a Database, calling Reload on the specified
@@ -124,19 +115,6 @@ func NewDatabase(filename string) (*Database, error) {
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
 			database.DiscoveryServers = newDatabase.DiscoveryServers
 			database.fileModTime = fileModTime
-
-			for _, sponsor := range database.Sponsors {
-
-				value, err := json.Marshal(sponsor.HttpsRequestRegexes)
-				if err != nil {
-					return errors.Trace(err)
-				}
-
-				// MD5 hash is used solely as a data checksum and not for any
-				// security purpose.
-				checksum := md5.Sum(value)
-				sponsor.domainBytesChecksum = checksum[:]
-			}
 
 			// Decode each encoded server entry for its IP address, which is used in
 			// the consistent.Member implementation in the discovery package.
@@ -388,53 +366,6 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 	}
 
 	return ""
-}
-
-// GetHttpsRequestRegexes returns bytes transferred stats regexes and the
-// associated checksum for the specified sponsor. The checksum may be nil.
-func (db *Database) GetHttpsRequestRegexes(sponsorID string) ([]map[string]string, []byte) {
-	db.ReloadableFile.RLock()
-	defer db.ReloadableFile.RUnlock()
-
-	regexes := make([]map[string]string, 0)
-
-	sponsor, ok := db.Sponsors[sponsorID]
-	if !ok {
-		sponsor = db.Sponsors[db.DefaultSponsorID]
-	}
-
-	if sponsor == nil {
-		return regexes, nil
-	}
-
-	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
-	// zero value of the map, an empty Sponsor struct.
-	for _, sponsorRegex := range sponsor.HttpsRequestRegexes {
-		regex := make(map[string]string)
-		regex["replace"] = sponsorRegex.Replace
-		regex["regex"] = sponsorRegex.Regex
-		regexes = append(regexes, regex)
-	}
-
-	return regexes, sponsor.domainBytesChecksum
-}
-
-// GetDomainBytesChecksum returns the bytes transferred stats regexes
-// checksum for the specified sponsor. The checksum may be nil.
-func (db *Database) GetDomainBytesChecksum(sponsorID string) []byte {
-	db.ReloadableFile.RLock()
-	defer db.ReloadableFile.RUnlock()
-
-	sponsor, ok := db.Sponsors[sponsorID]
-	if !ok {
-		sponsor = db.Sponsors[db.DefaultSponsorID]
-	}
-
-	if sponsor == nil {
-		return nil
-	}
-
-	return sponsor.domainBytesChecksum
 }
 
 // IsValidServerEntryTag checks if the specified server entry tag is valid.

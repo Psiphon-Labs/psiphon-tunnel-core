@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && !ios && cgo
 
 /*
  * Copyright (c) 2026, Psiphon Inc.

@@ -28,6 +28,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -424,6 +425,7 @@ type testConfig struct {
 	requireOSLKeys     bool
 	interruptDownloads bool
 	enableRetries      bool
+	testDiscoverRetry  bool
 	repeatBeforeTTL    bool
 	isTunneled         bool
 	expectFailure      bool
@@ -455,6 +457,12 @@ func TestDSLs(t *testing.T) {
 
 			interruptDownloads: true,
 			enableRetries:      true,
+		},
+		{
+			name: "discovery interruption with retry",
+
+			enableRetries:     true,
+			testDiscoverRetry: true,
 		},
 		{
 			name: "require OSL keys with interruptions",
@@ -681,10 +689,17 @@ func testDSLs(testConfig *testConfig) error {
 	}
 
 	dslClient := newDSLClient(clientSLOKs)
+	var discoverCounts []int32
 
 	clientRelayRoundTripper := func(
 		ctx context.Context,
 		requestPayload []byte) ([]byte, error) {
+
+		var relayedRequest RelayedRequest
+		err := cbor.Unmarshal(requestPayload, &relayedRequest)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
 		// Normally, the Fetcher.RoundTripper would add a circumvention,
 		// blocking resistant first hop. For this test, it's just a stub that
@@ -701,8 +716,30 @@ func testDSLs(testConfig *testConfig) error {
 			return GetRelayGenericErrorResponse(), errors.Trace(err)
 		}
 
-		// Simulate interruption of large response.
-		if interruptLimit > 0 && len(responsePayload) > interruptLimit {
+		// Simulate interruption of discovery response. This is handled
+		// deterministically since discovery retries result in fewer
+		// discovered servers.
+		if testConfig.testDiscoverRetry &&
+			relayedRequest.RequestType == requestTypeDiscoverServerEntries {
+
+			var request DiscoverServerEntriesRequest
+			err := cbor.Unmarshal(relayedRequest.Request, &request)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			discoverCounts = append(discoverCounts, request.DiscoverCount)
+
+			// Interrupt only on the first request and try.
+			if len(discoverCounts) == 1 {
+				return nil, errors.TraceNew("interrupted")
+			}
+		}
+
+		// Simulate interruption of large download response.
+		if interruptLimit > 0 &&
+			relayedRequest.RequestType != requestTypeDiscoverServerEntries &&
+			len(responsePayload) > interruptLimit {
+
 			return nil, errors.TraceNew("interrupted")
 		}
 
@@ -817,6 +854,31 @@ func testDSLs(testConfig *testConfig) error {
 	}
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	if testConfig.testDiscoverRetry {
+
+		// With interruption, the discovery request for 128 should have failed
+		// and then retried with 64. Check this and then refetch the full 128 to
+		// satisfy later checks.
+
+		expectedDiscoverCounts := []int32{128, 64}
+		if !slices.Equal(discoverCounts, expectedDiscoverCounts) {
+			return errors.Tracef(
+				"unexpected discover counts: %v", discoverCounts)
+		}
+		if dslClient.serverEntryStoreCount != 64 {
+			return errors.Tracef(
+				"unexpected server entry store count: %d",
+				dslClient.serverEntryStoreCount)
+		}
+
+		dslClient.lastFetchTime = time.Time{}
+
+		err = fetcher.Run(ctx)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	if testConfig.repeatBeforeTTL {

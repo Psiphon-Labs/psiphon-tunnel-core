@@ -20,12 +20,18 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/fxamacker/cbor/v2"
 )
 
 func TestDSLAccessTokenRegistrationScheduling(t *testing.T) {
@@ -120,6 +126,20 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 
 	token := []byte{0xff, 0x00, 0x80, 's', 'e', 'c', 'r', 'e', 't'}
 
+	controller := &Controller{config: config}
+	var callbacks int
+	config.OnAccessToken = func(got string) {
+		if got != base64.RawURLEncoding.EncodeToString(token) {
+			t.Fatal("callback did not deliver the expected token")
+		}
+		if controller.GetDSLAccessToken() != got {
+			t.Fatal("callback invoked before token persistence")
+		}
+		callbacks++
+		// A direct callback must run outside the notice logger lock.
+		NoticeLightProxyAvailable()
+	}
+
 	var notices int
 	err := SetNoticeWriter(NewNoticeReceiver(func(notice []byte) {
 		// Neither the raw token nor the encoding a host application would
@@ -151,24 +171,42 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	}
 	defer ResetNoticeWriter()
 
-	controller := &Controller{config: config}
-	if err := handleDSLAccessTokenRegistrationResponse(token); err != nil {
+	controller.announcePersistedDSLAccessToken()
+	if notices != 0 || callbacks != 0 {
+		t.Fatal("missing startup token was announced")
+	}
+	if err := handleDSLAccessTokenRegistrationResponse(config, nil); err == nil {
+		t.Fatal("empty token registration succeeded")
+	}
+	if notices != 0 || callbacks != 0 {
+		t.Fatal("failed registration was announced")
+	}
+
+	if err := handleDSLAccessTokenRegistrationResponse(config, token); err != nil {
 		t.Fatal(err)
 	}
-	if notices != 1 {
+	if notices != 1 || callbacks != 1 {
 		t.Fatal("new token was not announced exactly once")
 	}
 
-	if err := handleDSLAccessTokenRegistrationResponse(token); err != nil {
+	if err := handleDSLAccessTokenRegistrationResponse(config, token); err != nil {
 		t.Fatal(err)
 	}
-	if notices != 1 {
+	if notices != 1 || callbacks != 1 {
 		t.Fatal("unchanged token was announced again")
 	}
 
-	notices = 0
+	token = []byte{0xfb, 0xff, 0x00, 0x80, 0x01}
+	if err := handleDSLAccessTokenRegistrationResponse(config, token); err != nil {
+		t.Fatal(err)
+	}
+	if notices != 2 || callbacks != 2 {
+		t.Fatal("changed token was not announced exactly once")
+	}
+
+	notices, callbacks = 0, 0
 	controller.announcePersistedDSLAccessToken()
-	if notices != 1 {
+	if notices != 1 || callbacks != 1 {
 		t.Fatal("persisted startup token was not announced")
 	}
 
@@ -177,9 +215,9 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 	if got != "" {
 		t.Fatal("config-disabled access token was returned")
 	}
-	notices = 0
+	notices, callbacks = 0, 0
 	controller.announcePersistedDSLAccessToken()
-	if notices != 0 {
+	if notices != 0 || callbacks != 0 {
 		t.Fatal("config-disabled access token was announced")
 	}
 
@@ -195,8 +233,218 @@ func TestDSLAccessTokenPolicyAndNotice(t *testing.T) {
 		t.Fatal("tactics-disabled access token was returned")
 	}
 	controller.announcePersistedDSLAccessToken()
-	if notices != 0 {
+	if notices != 0 || callbacks != 0 {
 		t.Fatal("tactics-disabled access token was announced")
+	}
+
+	if err := config.SetParameters("", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	config.OnAccessToken = nil
+	token = []byte("token-without-callback")
+	if err := handleDSLAccessTokenRegistrationResponse(config, token); err != nil {
+		t.Fatal(err)
+	}
+	controller.announcePersistedDSLAccessToken()
+	if notices != 2 || callbacks != 0 {
+		t.Fatal("availability notices require a callback")
+	}
+}
+
+func TestDSLAccessTokenRegistrationDisabledDuringFetch(t *testing.T) {
+	config := newDSLAccessTokenTestConfig(t)
+	if err := OpenDataStore(config); err != nil {
+		t.Fatal(err)
+	}
+	defer CloseDataStore()
+
+	if err := config.SetParameters("", false, map[string]interface{}{
+		parameters.EnableDSLFetcher: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Skip OSL discovery so the round trip below handles only registration.
+	if err := DSLSetLastActiveOSLsTime(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	var receivedTokens []string
+	config.OnAccessToken = func(token string) {
+		receivedTokens = append(receivedTokens, token)
+	}
+	token := []byte{0xfb, 0xff, 0x00, 0x80, 0x01}
+	var notices int
+	if err := SetNoticeWriter(NewNoticeReceiver(func(notice []byte) {
+		if bytes.Contains(notice, token) ||
+			bytes.Contains(notice, []byte(base64.RawURLEncoding.EncodeToString(token))) {
+
+			t.Fatal("token leaked into notice")
+		}
+		noticeType, data, err := GetNotice(notice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if noticeType == "DSLAccessTokenAvailable" {
+			if len(data) != 0 {
+				t.Fatal("DSLAccessTokenAvailable notice contains data")
+			}
+			notices++
+		}
+	})); err != nil {
+		t.Fatal(err)
+	}
+	defer ResetNoticeWriter()
+
+	registrationRequested := false
+	roundTripper := func(_ context.Context, payload []byte) ([]byte, error) {
+		var relayedRequest dsl.RelayedRequest
+		if err := cbor.Unmarshal(payload, &relayedRequest); err != nil {
+			return nil, err
+		}
+		var request dsl.DiscoverServerEntriesRequest
+		if err := cbor.Unmarshal(relayedRequest.Request, &request); err != nil {
+			return nil, err
+		}
+		registrationRequested = request.DSLAccessTokenRegistration
+
+		// Apply new tactics after the request has been sent but before its
+		// response is handled, without relying on concurrent goroutine timing.
+		if err := config.SetParameters("", false, map[string]interface{}{
+			parameters.EnableDSLFetcher:                  true,
+			parameters.DSLAccessTokenDisableRegistration: true,
+		}); err != nil {
+			return nil, err
+		}
+
+		response, err := protocol.CBOREncoding.Marshal(&dsl.DiscoverServerEntriesResponse{
+			DSLAccessToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return protocol.CBOREncoding.Marshal(&dsl.RelayedResponse{Response: response})
+	}
+	if err := doDSLFetch(t.Context(), config, config.GetNetworkID(), true, roundTripper); err != nil {
+		t.Fatal(err)
+	}
+	if !registrationRequested {
+		t.Fatal("access token registration was not requested")
+	}
+	if len(receivedTokens) != 0 {
+		t.Fatal("access token was delivered after tactics disabled registration")
+	}
+	if notices != 1 {
+		t.Fatal("successful registration was not logged")
+	}
+	controller := &Controller{config: config}
+	if controller.GetDSLAccessToken() != "" {
+		t.Fatal("tactics-disabled access token was returned")
+	}
+
+	// The successful registration is still persisted and may be delivered
+	// at startup once registration is enabled again.
+	record, err := loadDSLAccessTokenRegistrationRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(record.DSLAccessToken, token) ||
+		record.LastSuccessfulDSLAccessTokenRegistrationTime.IsZero() {
+
+		t.Fatal("successful registration was not persisted")
+	}
+	if err := config.SetParameters("", false, map[string]interface{}{
+		parameters.EnableDSLFetcher: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controller.announcePersistedDSLAccessToken()
+	if len(receivedTokens) != 1 || receivedTokens[0] != base64.RawURLEncoding.EncodeToString(token) {
+		t.Fatal("persisted token was not delivered after re-enabling registration")
+	}
+}
+
+func TestDSLAccessTokenCallbackDiagnostics(t *testing.T) {
+	emitDiagnostics := GetEmitDiagnosticNotices()
+	emitNetworkParameters := GetEmitNetworkParameters()
+	defer SetEmitDiagnosticNotices(emitDiagnostics, emitNetworkParameters)
+
+	for _, testCase := range []struct {
+		name            string
+		emitDiagnostics bool
+		useNoticeFiles  bool
+	}{
+		{name: "writer"},
+		{name: "writer-diagnostics", emitDiagnostics: true},
+		{name: "files", useNoticeFiles: true},
+		{name: "files-diagnostics", emitDiagnostics: true, useNoticeFiles: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			config := newDSLAccessTokenTestConfig(t)
+			if err := OpenDataStore(config); err != nil {
+				t.Fatal(err)
+			}
+			defer CloseDataStore()
+			SetEmitDiagnosticNotices(testCase.emitDiagnostics, false)
+
+			var receivedToken string
+			config.OnAccessToken = func(token string) { receivedToken = token }
+			configJSON, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(configJSON, []byte("OnAccessToken")) {
+				t.Fatal("callback included in serialized config")
+			}
+
+			var notices bytes.Buffer
+			if err := SetNoticeWriter(&notices); err != nil {
+				t.Fatal(err)
+			}
+			defer ResetNoticeWriter()
+
+			var noticesFilename string
+			if testCase.useNoticeFiles {
+				noticesFilename = filepath.Join(t.TempDir(), "notices")
+				if err := setNoticeFiles("", noticesFilename, 1<<20, 1); err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					singletonNoticeLogger.mutex.Lock()
+					defer singletonNoticeLogger.mutex.Unlock()
+					singletonNoticeLogger.rotatingFile.Close()
+					singletonNoticeLogger.rotatingFile = nil
+				}()
+			}
+
+			token := []byte{0xfb, 0xff, 0x00, 0x80, 0x01}
+			if err := handleDSLAccessTokenRegistrationResponse(config, token); err != nil {
+				t.Fatal(err)
+			}
+			if receivedToken != base64.RawURLEncoding.EncodeToString(token) {
+				t.Fatal("token was not delivered to the callback")
+			}
+			checkNotice := func(notice []byte) {
+				t.Helper()
+				noticeType, data, err := GetNotice(notice)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if noticeType != "DSLAccessTokenAvailable" || len(data) != 0 {
+					t.Fatal("expected a token-free availability notice")
+				}
+				if bytes.Contains(notice, token) || bytes.Contains(notice, []byte(receivedToken)) {
+					t.Fatal("access token leaked into diagnostics")
+				}
+			}
+			checkNotice(notices.Bytes())
+			if testCase.useNoticeFiles {
+				diagnostics, err := os.ReadFile(noticesFilename)
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkNotice(diagnostics)
+			}
+		})
 	}
 }
 
@@ -289,7 +537,7 @@ func TestDSLAccessTokenRegistrationCorruptRecordSelfHeal(t *testing.T) {
 	// A registration over a corrupt record succeeds, healing the
 	// storeDSLAccessTokenRegistration path.
 	setCorruptRecord(corruptRecords[0])
-	if err := handleDSLAccessTokenRegistrationResponse([]byte("token")); err != nil {
+	if err := handleDSLAccessTokenRegistrationResponse(config, []byte("token")); err != nil {
 		t.Fatal(err)
 	}
 	token = (&Controller{config: config}).GetDSLAccessToken()

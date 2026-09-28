@@ -84,7 +84,7 @@ type datastoreCursor struct {
 }
 
 func datastoreOpenDB(
-	rootDataDirectory string, _ bool) (*datastoreDB, error) {
+	rootDataDirectory string, _ bool, _ bool) (*datastoreDB, error) {
 
 	dataDirectory := filepath.Join(rootDataDirectory, "psiphon.filesdb")
 	err := os.MkdirAll(dataDirectory, 0700)

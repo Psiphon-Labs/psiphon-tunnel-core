@@ -20,17 +20,11 @@
 package psiphon
 
 import (
-	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -45,21 +39,13 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/fxamacker/cbor/v2"
 )
 
-// ServerContext is a utility struct which holds all of the data associated
-// with a Psiphon server connection. In addition to the established tunnel, this
-// includes data and transport mechanisms for Psiphon API requests. Legacy servers
-// offer the Psiphon API through a web service; newer servers offer the Psiphon
-// API through SSH requests made directly through the tunnel's SSH client.
+// ServerContext holds data associated with Psiphon server API requests.
 type ServerContext struct {
 	tunnel                   *Tunnel
-	psiphonHttpsClient       *http.Client
-	statsRegexps             *transferstats.Regexps
 	clientUpgradeVersion     string
 	serverHandshakeTimestamp string
 	paddingPRNG              *prng.PRNG
@@ -84,29 +70,16 @@ func MakeSessionId() (string, error) {
 // requests (e.g., periodic connected and status requests).
 func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 
-	// For legacy servers, set up psiphonHttpsClient for
-	// accessing the Psiphon API via the web service.
-	var psiphonHttpsClient *http.Client
-	if !tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() ||
-		tunnel.config.TargetAPIProtocol == protocol.PSIPHON_API_PROTOCOL_WEB {
-
-		var err error
-		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+	if !tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() {
+		return nil, errors.TraceNew("server does not support SSH API requests")
 	}
 
 	serverContext := &ServerContext{
-		tunnel:             tunnel,
-		psiphonHttpsClient: psiphonHttpsClient,
-		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
+		tunnel:      tunnel,
+		paddingPRNG: prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
 	}
 
-	ignoreRegexps := tunnel.config.GetParameters().Get().Bool(
-		parameters.IgnoreHandshakeStatsRegexps)
-
-	err := serverContext.doHandshakeRequest(ignoreRegexps)
+	err := serverContext.doHandshakeRequest()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -116,8 +89,8 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 
 // doHandshakeRequest performs the "handshake" API request. The handshake
 // returns upgrade info, newly discovered server entries -- which are
-// stored -- and sponsor info (home pages, stat regexes).
-func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) error {
+// stored -- and sponsor info such as home pages.
+func (serverContext *ServerContext) doHandshakeRequest() error {
 
 	params := serverContext.getBaseAPIParameters(baseParametersAll)
 
@@ -233,51 +206,25 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	// When requesting compressed tactics, the response will use CBOR binary
 	// encoding.
 
-	var responseUnmarshaler func([]byte, any) error
-	responseUnmarshaler = json.Unmarshal
+	var responseUnmarshaler = json.Unmarshal
 
-	if compressTactics && serverContext.psiphonHttpsClient == nil {
+	if compressTactics {
 		protocol.SetCompressTactics(params)
 		responseUnmarshaler = cbor.Unmarshal
 	}
 
-	var response []byte
-	if serverContext.psiphonHttpsClient == nil {
+	params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] =
+		serverContext.tunnel.config.GetAuthorizations()
 
-		params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] =
-			serverContext.tunnel.config.GetAuthorizations()
+	request, err := serverContext.makeSSHAPIRequestPayload(params)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-		request, err := serverContext.makeSSHAPIRequestPayload(params)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		response, err = serverContext.tunnel.SendAPIRequest(
-			protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME, request)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-	} else {
-
-		// Legacy web service API request
-
-		responseBody, err := serverContext.doGetRequest(
-			makeRequestUrl(serverContext.tunnel, "", "handshake", params))
-		if err != nil {
-			return errors.Trace(err)
-		}
-		// Skip legacy format lines and just parse the JSON config line
-		configLinePrefix := []byte("Config: ")
-		for _, line := range bytes.Split(responseBody, []byte("\n")) {
-			if bytes.HasPrefix(line, configLinePrefix) {
-				response = line[len(configLinePrefix):]
-				break
-			}
-		}
-		if len(response) == 0 {
-			return errors.TraceNew("no config line found")
-		}
+	response, err := serverContext.tunnel.SendAPIRequest(
+		protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME, request)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	// Legacy fields:
@@ -286,7 +233,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 
 	var handshakeResponse protocol.HandshakeResponse
 
-	err := responseUnmarshaler(response, &handshakeResponse)
+	err = responseUnmarshaler(response, &handshakeResponse)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -372,24 +319,6 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		NoticeClientUpgradeAvailable(handshakeResponse.UpgradeClientVersion)
 	} else {
 		NoticeClientIsLatestVersion("")
-	}
-
-	if !ignoreStatsRegexps {
-
-		// The handshake returns page_view_regexes and https_request_regexes.
-		// page_view_regexes is obsolete and not used. https_request_regexes, which
-		// are actually host/domain name regexes, are used for host/domain name
-		// bytes transferred metrics: tunneled traffic TLS SNI server names and HTTP
-		// Host header host names are matched against these regexes to select flows
-		// for bytes transferred counting.
-
-		var regexpsNotices []string
-		serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
-			handshakeResponse.HttpsRequestRegexes)
-
-		for _, notice := range regexpsNotices {
-			NoticeWarning(notice)
-		}
 	}
 
 	diagnosticID := serverContext.tunnel.dialParams.ServerEntry.GetDiagnosticID()
@@ -522,6 +451,21 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 
 	params["last_connected"] = lastConnected
 
+	// Report accumulated pre-tunnel light proxy client events in the
+	// connected request. This avoids an extra round trip traffic shape if we
+	// instead immediately triggered a status request.
+	//
+	// Light proxy events reported by this connected request are dropped on
+	// failure and not carried forward to a later tunnel. The intention is
+	// for server_tunnel.light_proxy_client_events to reflect light proxy
+	// fallback events that occur before a tunnel connects or during that
+	// tunnel.
+	_, lightProxyClientEvents, _ := takeClientEvents(controller, serverContext.tunnel, false)
+
+	if len(lightProxyClientEvents) > 0 {
+		params["light_proxy_client_events"] = lightProxyClientEvents
+	}
+
 	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
@@ -549,29 +493,15 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 		params["light_proxy_dial_canceled"] = strconv.Itoa(metrics.DialCanceledCount)
 	}
 
-	var response []byte
-	if serverContext.psiphonHttpsClient == nil {
+	request, err := serverContext.makeSSHAPIRequestPayload(params)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-		request, err := serverContext.makeSSHAPIRequestPayload(params)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		response, err = serverContext.tunnel.SendAPIRequest(
-			protocol.PSIPHON_API_CONNECTED_REQUEST_NAME, request)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-	} else {
-
-		// Legacy web service API request
-
-		response, err = serverContext.doGetRequest(
-			makeRequestUrl(serverContext.tunnel, "", "connected", params))
-		if err != nil {
-			return errors.Trace(err)
-		}
+	response, err := serverContext.tunnel.SendAPIRequest(
+		protocol.PSIPHON_API_CONNECTED_REQUEST_NAME, request)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	var connectedResponse protocol.ConnectedResponse
@@ -600,23 +530,17 @@ func getLastConnected() (string, error) {
 	return lastConnected, nil
 }
 
-// StatsRegexps gets the Regexps used for the statistics for this tunnel.
-func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
-	return serverContext.statsRegexps
-}
-
-// DoStatusRequest makes a "status" API request to the server, sending session stats.
-func (serverContext *ServerContext) DoStatusRequest() error {
+// DoStatusRequest makes a "status" API request to the server.
+func (serverContext *ServerContext) DoStatusRequest(controller *Controller) error {
 
 	params := serverContext.getBaseAPIParameters(
 		baseParametersNoDialParameters)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
-	// payload for future attempt, in all failure cases.
+	// persistent stats for a future attempt, in all failure cases.
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
-		serverContext.tunnel.config,
-		serverContext.tunnel.dialParams.ServerEntry.IpAddress)
+		controller, serverContext.tunnel)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -627,33 +551,19 @@ func (serverContext *ServerContext) DoStatusRequest() error {
 		return nil
 	}
 
+	rawMessage := json.RawMessage(statusPayload)
+	params["statusData"] = &rawMessage
+
+	request, err := serverContext.makeSSHAPIRequestPayload(params)
 	var response []byte
-
-	if serverContext.psiphonHttpsClient == nil {
-
-		rawMessage := json.RawMessage(statusPayload)
-		params["statusData"] = &rawMessage
-
-		var request []byte
-		request, err = serverContext.makeSSHAPIRequestPayload(params)
-
-		if err == nil {
-			response, err = serverContext.tunnel.SendAPIRequest(
-				protocol.PSIPHON_API_STATUS_REQUEST_NAME, request)
-		}
-
-	} else {
-
-		// Legacy web service API request
-		response, err = serverContext.doPostRequest(
-			makeRequestUrl(serverContext.tunnel, "", "status", params),
-			"application/json",
-			bytes.NewReader(statusPayload))
+	if err == nil {
+		response, err = serverContext.tunnel.SendAPIRequest(
+			protocol.PSIPHON_API_STATUS_REQUEST_NAME, request)
 	}
 
 	if err != nil {
 
-		// Resend the transfer stats and tunnel stats later
+		// Resend persistent stats later.
 		// Note: potential duplicate reports if the server received and processed
 		// the request but the client failed to receive the response.
 		putBackStatusRequestPayload(statusPayloadInfo)
@@ -662,8 +572,8 @@ func (serverContext *ServerContext) DoStatusRequest() error {
 	}
 
 	// Confirm the payload now that the server response is received. For
-	// persistentStats and transferStats, this clears the reported data as it
-	// is now delivered and doesn't need to be resent.
+	// persistentStats, this clears the reported data as it is now delivered
+	// and doesn't need to be resent.
 
 	confirmStatusRequestPayload(statusPayloadInfo)
 
@@ -717,15 +627,15 @@ func (serverContext *ServerContext) DoStatusRequest() error {
 // either "clear" or "put back" status request payload data depending
 // on whether or not the request succeeded.
 type statusRequestPayloadInfo struct {
-	serverId                 string
-	transferStats            *transferstats.AccumulatedStats
 	persistentStats          map[string][][]byte
 	checkServerEntryTagCount int
 }
 
 func makeStatusRequestPayload(
-	config *Config,
-	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
+	controller *Controller,
+	tunnel *Tunnel) ([]byte, *statusRequestPayloadInfo, error) {
+
+	config := controller.config
 
 	// The status request payload is always JSON encoded. As it is sent after
 	// the initial handshake and is multiplexed with other tunnel traffic,
@@ -733,53 +643,57 @@ func makeStatusRequestPayload(
 	//
 	// TODO: pack and CBOR encode the status request payload.
 
+	// Events sent in a status request are not resent on failure.
+	//
+	// As a potential future enhancement, retain light proxy events from
+	// failed batches and send them through the next tunnel. This could
+	// report events twice if the original server processed the request but
+	// its response was lost.
+
+	clientEvents, lightProxyClientEvents, eventsSize := takeClientEvents(controller, tunnel, true)
+
 	// GetCheckServerEntryTags returns a randomly selected set of server entry
 	// tags to be checked for pruning, or an empty list if a check is not yet
 	// due.
 	//
-	// Both persistentStats and prune check data have a max payload size
-	// allowance, and the allowance for persistentStats is reduced by the
-	// size of the prune check data, if any.
+	// The prune check allowance is reduced by the size of client events, and
+	// the persistent stats allowance is reduced by both.
 
-	checkServerEntryTags, tagsSize, err := GetCheckServerEntryTags(config)
+	checkServerEntryTags, tagsSize, err := GetCheckServerEntryTags(config, eventsSize)
 	if err != nil {
 		NoticeWarning(
 			"GetCheckServerEntryTags failed: %s", errors.Trace(err))
 		checkServerEntryTags = nil
-		// Proceed with persistentStats/transferStats only
+		// Proceed without the prune check.
 	}
 
-	transferStats := transferstats.TakeOutStatsForServer(serverId)
-	hostBytes := transferStats.GetStatsForStatusRequest()
-
-	persistentStats, statsSize, err := TakeOutUnreportedPersistentStats(config, tagsSize)
+	persistentStats, statsSize, err := TakeOutUnreportedPersistentStats(config, eventsSize+tagsSize)
 	if err != nil {
 		NoticeWarning(
 			"TakeOutUnreportedPersistentStats failed: %s", errors.Trace(err))
 		persistentStats = nil
-		// Proceed with transferStats only
+		// Proceed without persistent stats.
 	}
 
-	if len(checkServerEntryTags) == 0 && len(hostBytes) == 0 && len(persistentStats) == 0 {
+	if len(clientEvents) == 0 && len(lightProxyClientEvents) == 0 &&
+		len(checkServerEntryTags) == 0 && len(persistentStats) == 0 {
 		// There is no payload to send.
 		return nil, nil, nil
 	}
 
 	payloadInfo := &statusRequestPayloadInfo{
-		serverId,
-		transferStats,
 		persistentStats,
 		len(checkServerEntryTags),
 	}
 
 	payload := make(map[string]interface{})
 
-	payload["host_bytes"] = hostBytes
-
-	// We're not recording these fields, but legacy servers require them.
-	payload["bytes_transferred"] = 0
-	payload["page_views"] = make([]string, 0)
-	payload["https_requests"] = make([]string, 0)
+	if len(clientEvents) > 0 {
+		payload["client_events"] = clientEvents
+	}
+	if len(lightProxyClientEvents) > 0 {
+		payload["light_proxy_client_events"] = lightProxyClientEvents
+	}
 
 	persistentStatPayloadNames := make(map[string]string)
 	persistentStatPayloadNames[datastorePersistentStatTypeRemoteServerList] = "remote_server_list_stats"
@@ -800,22 +714,97 @@ func makeStatusRequestPayload(
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 
-		// Send the transfer stats and tunnel stats later
+		// Send persistent stats later.
 		putBackStatusRequestPayload(payloadInfo)
 
 		return nil, nil, errors.Trace(err)
 	}
 
 	NoticeInfo(
-		"StatusRequestPayload: %d total bytes, %d stats bytes, %d tag bytes",
-		len(jsonPayload), statsSize, tagsSize)
+		"StatusRequestPayload: %d total bytes, %d client event bytes, %d tag bytes, %d stats bytes",
+		len(jsonPayload), eventsSize, tagsSize, statsSize)
 
 	return jsonPayload, payloadInfo, nil
 }
 
+// takeClientEvents dequeues client events for a connected or status request.
+func takeClientEvents(
+	controller *Controller,
+	tunnel *Tunnel,
+	includeTunnelEvents bool) ([]string, []string, int) {
+
+	p := controller.config.GetParameters().Get()
+	limit := p.Int(parameters.PsiphonAPIClientEventReportLimit)
+	maxSendBytes := p.Int(parameters.PersistentStatsMaxSendBytes)
+	p.Close()
+
+	// Emit notices after locks are released.
+	var dropReason string
+	defer func() {
+		if dropReason != "" {
+			NoticeClientEventDropped(dropReason)
+		}
+	}()
+
+	controller.clientEventMutex.Lock()
+	defer controller.clientEventMutex.Unlock()
+
+	eventsSize := 0
+	takeEvents := func(events *[]string, reportedCount *int) []string {
+		remaining := max(0, limit-*reportedCount)
+		if len(*events) > remaining {
+			dropReason = "report limit reached"
+			clear((*events)[remaining:])
+			*events = (*events)[:remaining]
+		}
+
+		count := 0
+		for _, event := range *events {
+			if eventsSize >= maxSendBytes {
+				break
+			}
+			// Estimate JSON encoding: two bytes per input byte for common
+			// escapes, plus quotes and a comma.
+			eventsSize += 2*len(event) + 3
+			count++
+		}
+
+		batch := (*events)[:count:count]
+		*events = (*events)[count:]
+		if len(*events) == 0 {
+			*events = nil
+		}
+		*reportedCount += count
+		return batch
+	}
+
+	var clientEvents []string
+	if includeTunnelEvents {
+		clientEvents = takeEvents(
+			&tunnel.clientEvents, &tunnel.clientEventReportedCount)
+	}
+
+	// Connected requests may report only the first light proxy events for
+	// a tunnel. This allows the server to prepend that batch if a later
+	// status request reaches it first.
+	var lightProxyClientEvents []string
+	if includeTunnelEvents || tunnel.lightProxyClientEventReportedCount == 0 {
+		lightProxyClientEvents = takeEvents(
+			&controller.lightProxyClientEvents, &tunnel.lightProxyClientEventReportedCount)
+	}
+
+	if len(controller.lightProxyClientEvents) > 0 ||
+		(includeTunnelEvents && len(tunnel.clientEvents) > 0) {
+		select {
+		case tunnel.signalClientEvents <- struct{}{}:
+		default:
+		}
+	}
+
+	return clientEvents, lightProxyClientEvents, eventsSize
+}
+
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
-	transferstats.PutBackStatsForServer(
-		payloadInfo.serverId, payloadInfo.transferStats)
 	err := PutBackUnreportedPersistentStats(payloadInfo.persistentStats)
 	if err != nil {
 		// These persistent stats records won't be resent until after a
@@ -960,7 +949,6 @@ func RecordFailedTunnelStat(
 	includeSessionID := true
 	params := getBaseAPIParameters(baseParametersAll, nil, includeSessionID, config, dialParams)
 
-	delete(params, "server_secret")
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
 	params["last_connected"] = lastConnected
 	params["client_failed_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
@@ -997,63 +985,6 @@ func RecordFailedTunnelStat(
 		config, datastorePersistentStatTypeFailedTunnel, failedTunnelStatJson)
 }
 
-// doGetRequest makes a tunneled HTTPS request and returns the response body.
-func (serverContext *ServerContext) doGetRequest(
-	requestUrl string) (responseBody []byte, err error) {
-
-	request, err := http.NewRequest("GET", requestUrl, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
-
-	response, err := serverContext.psiphonHttpsClient.Do(request)
-	if err == nil && response.StatusCode != http.StatusOK {
-		response.Body.Close()
-		err = fmt.Errorf("HTTP GET request failed with response code: %d", response.StatusCode)
-	}
-	if err != nil {
-		// Trim this error since it may include long URLs
-		return nil, errors.Trace(TrimError(err))
-	}
-	defer response.Body.Close()
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return body, nil
-}
-
-// doPostRequest makes a tunneled HTTPS POST request.
-func (serverContext *ServerContext) doPostRequest(
-	requestUrl string, bodyType string, body io.Reader) (responseBody []byte, err error) {
-
-	request, err := http.NewRequest("POST", requestUrl, body)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	request.Header.Set("User-Agent", MakePsiphonUserAgent(serverContext.tunnel.config))
-	request.Header.Set("Content-Type", bodyType)
-
-	response, err := serverContext.psiphonHttpsClient.Do(request)
-	if err == nil && response.StatusCode != http.StatusOK {
-		response.Body.Close()
-		err = fmt.Errorf("HTTP POST request failed with response code: %d", response.StatusCode)
-	}
-	if err != nil {
-		// Trim this error since it may include long URLs
-		return nil, errors.Trace(TrimError(err))
-	}
-	defer response.Body.Close()
-	responseBody, err = ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return responseBody, nil
-}
-
 // makeSSHAPIRequestPayload makes an encoded payload for an SSH API request.
 func (serverContext *ServerContext) makeSSHAPIRequestPayload(
 	params common.APIParameters) ([]byte, error) {
@@ -1062,8 +993,8 @@ func (serverContext *ServerContext) makeSSHAPIRequestPayload(
 	// more space for variable padding to mitigate potential fingerprinting
 	// based on API message sizes.
 
-	if !serverContext.tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() ||
-		serverContext.tunnel.config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
+	if serverContext.tunnel.config.TargetAPIEncoding ==
+		protocol.PSIPHON_API_ENCODING_JSON {
 
 		jsonPayload, err := json.Marshal(params)
 		if err != nil {
@@ -1165,21 +1096,6 @@ func getBaseAPIParameters(
 	// TODO: snapshot tactics tag used when dialParams initialized.
 	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
 		config.GetParameters().Get().Tag()
-
-	// The server secret is deprecated and included only in legacy JSON
-	// encoded API messages for backwards compatibility. SSH login proves
-	// client possession of the server entry; the server secret was for the
-	// legacy web API with no SSH login. Note that we can't check
-	// dialParams.ServerEntry in the baseParametersNoDialParameters case, but
-	// that case is used by in-proxy dials, which implies support.
-
-	if dialParams != nil {
-		if !dialParams.ServerEntry.SupportsSSHAPIRequests() ||
-			config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
-
-			params["server_secret"] = dialParams.ServerEntry.WebServerSecret
-		}
-	}
 
 	// Blank parameters must be omitted.
 
@@ -1508,108 +1424,16 @@ func getBaseAPIParameters(
 	return params
 }
 
-// makeRequestUrl makes a URL for a web service API request.
-func makeRequestUrl(tunnel *Tunnel, port, path string, params common.APIParameters) string {
-	var requestUrl bytes.Buffer
-
-	if port == "" {
-		port = tunnel.dialParams.ServerEntry.WebServerPort
-	}
-
-	requestUrl.WriteString("https://")
-	requestUrl.WriteString(tunnel.dialParams.ServerEntry.IpAddress)
-	requestUrl.WriteString(":")
-	requestUrl.WriteString(port)
-	requestUrl.WriteString("/")
-	requestUrl.WriteString(path)
-
-	if len(params) > 0 {
-
-		queryParams := url.Values{}
-
-		for name, value := range params {
-
-			// Note: this logic skips the tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME
-			// parameter, which has a different type. This parameter is not recognized
-			// by legacy servers.
-
-			switch v := value.(type) {
-			case string:
-				queryParams.Set(name, v)
-			case []string:
-				// String array param encoded as JSON
-				jsonValue, err := json.Marshal(v)
-				if err != nil {
-					break
-				}
-				queryParams.Set(name, string(jsonValue))
-			}
-		}
-
-		requestUrl.WriteString("?")
-		requestUrl.WriteString(queryParams.Encode())
-	}
-
-	return requestUrl.String()
-}
-
-// makePsiphonHttpsClient creates a Psiphon HTTPS client that tunnels web service API
-// requests and which validates the web server using the Psiphon server entry web server
-// certificate.
-func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error) {
-
-	certificate, err := DecodeCertificate(
-		tunnel.dialParams.ServerEntry.WebServerCertificate)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	tunneledDialer := func(_ context.Context, _, addr string) (net.Conn, error) {
-		// This case bypasses tunnel.Dial, to avoid its check that the tunnel is
-		// already active (it won't be pre-handshake). This bypass won't handle the
-		// server rejecting the port forward due to split tunnel classification, but
-		// we know that the server won't classify the web API destination as
-		// untunneled.
-		return tunnel.sshClient.Dial("tcp", addr)
-	}
-
-	// Note: as with SSH API requests, there no dial context here. SSH port forward dials
-	// cannot be interrupted directly. Closing the tunnel will interrupt both the dial and
-	// the request. While it's possible to add a timeout here, we leave it with no explicit
-	// timeout which is the same as SSH API requests: if the tunnel has stalled then SSH keep
-	// alives will cause the tunnel to close.
-
-	dialer := tlsdialer.NewDialer(
-		&tlsdialer.Config{
-			Parameters:              tunnel.config.GetParameters(),
-			Dial:                    tunneledDialer,
-			VerifyLegacyCertificate: certificate,
-		})
-
-	transport := &http.Transport{
-		DialTLS: func(network, addr string) (net.Conn, error) {
-			return dialer(context.Background(), network, addr)
-		},
-		Dial: func(network, addr string) (net.Conn, error) {
-			return nil, errors.TraceNew("HTTP not supported")
-		},
-	}
-
-	return &http.Client{
-		Transport: transport,
-	}, nil
-}
-
 func HandleServerRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) {
 
 	var err error
 
 	switch request.Type {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
-		err = HandleOSLRequest(tunnelOwner, tunnel, request)
+		err = HandleOSLRequest(controller, tunnel, request)
 	case protocol.PSIPHON_API_ALERT_REQUEST_NAME:
-		err = HandleAlertRequest(tunnelOwner, tunnel, request)
+		err = HandleAlertRequest(controller, tunnel, request)
 	default:
 		err = errors.Tracef("invalid request name")
 	}
@@ -1621,7 +1445,7 @@ func HandleServerRequest(
 }
 
 func HandleOSLRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) (retErr error) {
 
 	defer func() {
 		if retErr != nil {
@@ -1660,7 +1484,7 @@ func HandleOSLRequest(
 	}
 
 	if seededNewSLOK {
-		tunnelOwner.SignalSeededNewSLOK()
+		controller.SignalSeededNewSLOK()
 	}
 
 	err = request.Reply(true, nil)
@@ -1672,7 +1496,7 @@ func HandleOSLRequest(
 }
 
 func HandleAlertRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+	controller *Controller, tunnel *Tunnel, request *ssh.Request) (retErr error) {
 
 	defer func() {
 		if retErr != nil {

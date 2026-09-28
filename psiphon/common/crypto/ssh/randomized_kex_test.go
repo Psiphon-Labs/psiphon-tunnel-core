@@ -75,11 +75,10 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 		name                     string
 		doPeerKEXPRNGSeed        bool
 		doServerKEXRandomization bool
-		noEncryptThenMACHash     bool
+		obfuscatedSSHMode        bool
 		expectFailure            bool
 	}{
 		{"randomized server with prediction", true, true, false, false},
-		{"randomized server with prediction, no Encrypt-then-MAC", true, true, true, false},
 		{"randomized server without prediction", false, true, false, true},
 		{"OSSH non-randomized server", false, false, true, false},
 		{"non-randomized server, Encrypt-then-MAC allowed", false, false, false, false},
@@ -129,7 +128,7 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 
 				clientConfig.KEXPRNGSeed = clientSeed
 
-				clientConfig.NoEncryptThenMACHash = testCase.noEncryptThenMACHash
+				clientConfig.ObfuscatedSSHMode = testCase.obfuscatedSSHMode
 
 				if testCase.doPeerKEXPRNGSeed {
 					clientConfig.PeerKEXPRNGSeed = serverSeed
@@ -180,7 +179,7 @@ func runTestRandomizedSSHKEXes(legacyClient bool) error {
 				serverConfig := &ServerConfig{
 					PasswordCallback: insecurePasswordCallback,
 				}
-				serverConfig.NoEncryptThenMACHash = testCase.noEncryptThenMACHash
+				serverConfig.ObfuscatedSSHMode = testCase.obfuscatedSSHMode
 				serverConfig.AddHostKey(signer)
 
 				if testCase.doServerKEXRandomization {

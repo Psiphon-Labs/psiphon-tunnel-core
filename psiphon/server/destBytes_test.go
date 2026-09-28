@@ -42,12 +42,11 @@ func runTestDestBytes() error {
 
 	var logsMutex sync.Mutex
 	var asnDestBytesLogs []map[string]interface{}
-	var domainDestBytesLogs []map[string]interface{}
 
 	// Discard logs, skipping InitLogging. Force disable useProtobufLogging,
 	// which would otherwise require the udsipc.Reader/handler scheme in
-	// server_test. Both asn_dest_bytes and domain_dest_bytes contents are
-	// checked in server_test in PSIPHON_RUN_PROTOBUF_LOGGING_TEST mode.
+	// server_test. asn_dest_bytes contents are checked there in
+	// PSIPHON_RUN_PROTOBUF_LOGGING_TEST mode.
 
 	logWriter := log.Logger.Out
 	protobufLogging := useProtobufLogging
@@ -68,11 +67,8 @@ func runTestDestBytes() error {
 		logsMutex.Lock()
 		defer logsMutex.Unlock()
 
-		switch logFields["event_name"].(string) {
-		case "asn_dest_bytes":
+		if logFields["event_name"].(string) == "asn_dest_bytes" {
 			asnDestBytesLogs = append(asnDestBytesLogs, logFields)
-		case "domain_dest_bytes":
-			domainDestBytesLogs = append(domainDestBytesLogs, logFields)
 		}
 	}
 
@@ -94,7 +90,6 @@ func runTestDestBytes() error {
 	defer destBytesLogger.Stop()
 
 	destASNs := []string{"00001", "00002"}
-	destDomains := []string{"example.com", "example.org"}
 	clientRegions := []string{"R1", "R2"}
 	clientASNs := []string{"00003", "00004"}
 	clientPlatformPrefixes := []string{"iOS", "Android"}
@@ -125,11 +120,6 @@ func runTestDestBytes() error {
 						for _, destASN := range destASNs {
 							destBytesLogger.AddASNBytes(destASN, geoIPData, apiParams, bytesTCP, bytesUDP)
 						}
-
-						for _, destDomain := range destDomains {
-							destBytesLogger.AddDomainBytes(destDomain, geoIPData, apiParams, bytesTCP, bytesUDP)
-						}
-
 					}
 				}
 			}
@@ -141,107 +131,86 @@ func runTestDestBytes() error {
 		logsMutex.Lock()
 		defer logsMutex.Unlock()
 
-		for i, logs := range [][]map[string]interface{}{asnDestBytesLogs, domainDestBytesLogs} {
+		expectedBucketCount := len(destASNs) *
+			len(clientRegions) *
+			len(clientASNs) *
+			len(clientPlatformPrefixes) *
+			len(sponsorIDs)
 
-			destCount := len(destASNs)
-			if i != 0 {
-				destCount = len(destDomains)
+		if len(asnDestBytesLogs) < expectedBucketCount {
+
+			// Not a precise comparison: len(asnDestBytesLogs) can exceed this
+			// total if the destBytesLogger ticker happens to fire in the
+			// middle of an addBytes loop.
+
+			return errors.Tracef("unexpected log count: %d", len(asnDestBytesLogs))
+		}
+
+		loggedDestASNs := make(map[string]struct{})
+		loggedClientRegions := make(map[string]struct{})
+		loggedClientASNs := make(map[string]struct{})
+		loggedClientPlatforms := make(map[string]struct{})
+		loggedSponsorIDs := make(map[string]struct{})
+
+		sumBytesTCP := int64(0)
+		sumBytesUDP := int64(0)
+		sumBytes := int64(0)
+
+		for _, logFields := range asnDestBytesLogs {
+			loggedDestASNs[logFields["asn"].(string)] = struct{}{}
+			loggedClientRegions[logFields["client_region"].(string)] = struct{}{}
+			loggedClientASNs[logFields["client_asn"].(string)] = struct{}{}
+			loggedClientPlatforms[logFields["client_platform"].(string)] = struct{}{}
+			loggedSponsorIDs[logFields["sponsor_id"].(string)] = struct{}{}
+			sumBytesTCP += int64(logFields["bytes_tcp"].(float64))
+			sumBytesUDP += int64(logFields["bytes_udp"].(float64))
+			sumBytes += int64(logFields["bytes"].(float64))
+		}
+
+		checkFields := func(logged map[string]struct{}, expected []string) error {
+			if len(logged) != len(expected) {
+				return errors.Tracef("unexpected length: %d", len(logged))
 			}
-
-			expectedBucketCount := destCount *
-				len(clientRegions) *
-				len(clientASNs) *
-				len(clientPlatformPrefixes) *
-				len(sponsorIDs)
-
-			if len(logs) < expectedBucketCount {
-
-				// Not a precise comparison: len(logs) can exceed this total
-				// if the destBytesLogger ticker happens to fire in the
-				// middle of an addBytes loop.
-
-				return errors.Tracef("unexpected log count: %d", len(logs))
-			}
-
-			loggedDestASNs := make(map[string]struct{})
-			loggedDestDomains := make(map[string]struct{})
-			loggedClientRegions := make(map[string]struct{})
-			loggedClientASNs := make(map[string]struct{})
-			loggedClientPlatforms := make(map[string]struct{})
-			loggedSponsorIDs := make(map[string]struct{})
-
-			sumBytesTCP := int64(0)
-			sumBytesUDP := int64(0)
-			sumBytes := int64(0)
-
-			for _, logFields := range logs {
-				if i == 0 {
-					loggedDestASNs[logFields["asn"].(string)] = struct{}{}
-				} else {
-					loggedDestDomains[logFields["domain"].(string)] = struct{}{}
-				}
-				loggedClientRegions[logFields["client_region"].(string)] = struct{}{}
-				loggedClientASNs[logFields["client_asn"].(string)] = struct{}{}
-				loggedClientPlatforms[logFields["client_platform"].(string)] = struct{}{}
-				loggedSponsorIDs[logFields["sponsor_id"].(string)] = struct{}{}
-				sumBytesTCP += int64(logFields["bytes_tcp"].(float64))
-				sumBytesUDP += int64(logFields["bytes_udp"].(float64))
-				sumBytes += int64(logFields["bytes"].(float64))
-			}
-
-			checkFields := func(logged map[string]struct{}, expected []string) error {
-				if len(logged) != len(expected) {
-					return errors.Tracef("unexpected length: %d", len(logged))
-				}
-				for _, key := range expected {
-					if _, ok := logged[key]; !ok {
-						return errors.Tracef("missing %v", key)
-					}
-				}
-				return nil
-			}
-
-			if i == 0 {
-				err := checkFields(loggedDestASNs, destASNs)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			} else {
-				err = checkFields(loggedDestDomains, destDomains)
-				if err != nil {
-					return errors.Trace(err)
+			for _, key := range expected {
+				if _, ok := logged[key]; !ok {
+					return errors.Tracef("missing %v", key)
 				}
 			}
-			err := checkFields(loggedClientRegions, clientRegions)
-			if err != nil {
-				return errors.Trace(err)
-			}
-			err = checkFields(loggedClientASNs, clientASNs)
-			if err != nil {
-				return errors.Trace(err)
-			}
-			err = checkFields(loggedClientPlatforms, clientPlatformPrefixes)
-			if err != nil {
-				return errors.Trace(err)
-			}
-			err = checkFields(loggedSponsorIDs, sponsorIDs)
-			if err != nil {
-				return errors.Trace(err)
-			}
+			return nil
+		}
 
-			if sumBytesTCP != int64(expectedBucketCount*eventCount)*bytesTCP {
-				return errors.Tracef("unexpected TCP bytes: %d", sumBytesTCP)
-			}
-			if sumBytesUDP != int64(expectedBucketCount*eventCount)*bytesUDP {
-				return errors.Tracef("unexpected UDP bytes: %d", sumBytesUDP)
-			}
-			if sumBytes != int64(expectedBucketCount*eventCount)*(bytesTCP+bytesUDP) {
-				return errors.Tracef("unexpected bytes: %d", sumBytes)
-			}
+		err := checkFields(loggedDestASNs, destASNs)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = checkFields(loggedClientRegions, clientRegions)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = checkFields(loggedClientASNs, clientASNs)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = checkFields(loggedClientPlatforms, clientPlatformPrefixes)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = checkFields(loggedSponsorIDs, sponsorIDs)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if sumBytesTCP != int64(expectedBucketCount*eventCount)*bytesTCP {
+			return errors.Tracef("unexpected TCP bytes: %d", sumBytesTCP)
+		}
+		if sumBytesUDP != int64(expectedBucketCount*eventCount)*bytesUDP {
+			return errors.Tracef("unexpected UDP bytes: %d", sumBytesUDP)
+		}
+		if sumBytes != int64(expectedBucketCount*eventCount)*(bytesTCP+bytesUDP) {
+			return errors.Tracef("unexpected bytes: %d", sumBytes)
 		}
 
 		asnDestBytesLogs = nil
-		domainDestBytesLogs = nil
 
 		return nil
 	}

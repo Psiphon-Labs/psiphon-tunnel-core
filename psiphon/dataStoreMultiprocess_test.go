@@ -54,7 +54,7 @@ func TestSQLiteMultiProcess(t *testing.T) {
 	idle := startSQLiteTestProcess(t, "idle", directory)
 	idle.waitReady(t)
 
-	db, err := datastoreOpenDB(directory, false)
+	db, err := datastoreOpenDB(directory, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestSQLiteMultiProcess(t *testing.T) {
 	idle.release(t)
 	idle.wait(t)
 
-	db, err = datastoreOpenDB(directory, false)
+	db, err = datastoreOpenDB(directory, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestSQLiteMultiProcess(t *testing.T) {
 }
 
 func runSQLiteTestProcess(t *testing.T, role, directory string) {
-	db, err := datastoreOpenDB(directory, false)
+	db, err := datastoreOpenDB(directory, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

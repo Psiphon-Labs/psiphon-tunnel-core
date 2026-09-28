@@ -875,8 +875,9 @@ func init() {
 		// Specs: server.connectedRequestParams
 
 		{185, "light_proxy_dial_canceled", intConverter},
+		{186, "light_proxy_client_events", nil},
 
-		// Next key value = 186
+		// Next key value = 187
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

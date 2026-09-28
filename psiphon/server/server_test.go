@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	std_errors "errors"
@@ -192,6 +193,7 @@ func TestOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -206,6 +208,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			forceFragmenting:     true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -221,6 +224,7 @@ func TestPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -237,6 +241,7 @@ func TestFragmentedPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			lengthStructureCheck: true,
 			doLogProtobuf:        useProtobufLogging,
 		})
 }
@@ -736,18 +741,18 @@ func TestBurstMonitorAndASNDestBytes(t *testing.T) {
 		})
 }
 
-func TestChangeBytesConfig(t *testing.T) {
+func TestChangeDestBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doASNDestBytes:       true,
-			doChangeBytesConfig:  true,
-			doLogHostProvider:    true,
-			doLogProtobuf:        useProtobufLogging,
+			tunnelProtocol:          "OSSH",
+			requireAuthorization:    true,
+			doTunneledWebRequest:    true,
+			doTunneledNTPRequest:    true,
+			doDanglingTCPConn:       true,
+			doASNDestBytes:          true,
+			doChangeDestBytesConfig: true,
+			doLogHostProvider:       true,
+			doLogProtobuf:           useProtobufLogging,
 		})
 }
 
@@ -872,9 +877,10 @@ type runServerConfig struct {
 	doSplitTunnel                bool
 	limitQUICVersions            bool
 	doASNDestBytes               bool
-	doChangeBytesConfig          bool
+	doChangeDestBytesConfig      bool
 	doLogHostProvider            bool
 	inspectFlows                 bool
+	lengthStructureCheck         bool
 	doSteeringIP                 bool
 	doTargetBrokerSpecs          bool
 	useLegacyAPIEncoding         bool
@@ -903,6 +909,18 @@ var (
 	testDeviceLocation                   = "gzzzz"
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
 	testHostID                           = "example-host-id"
+
+	testClientEvents = []struct {
+		event    string
+		expected string
+	}{
+		{"test-event-1", "test-event-1"},
+		{"test-event-2", "test-event-2"},
+		{"test-event-1", "test-event-1"},
+		{strings.Repeat("a", 64), strings.Repeat("a", 64)},
+		{strings.Repeat("a", 65), strings.Repeat("a", 63) + "*"},
+		{strings.Repeat("a", 62) + "éx", strings.Repeat("a", 62) + "*"},
+	}
 
 	// A steering IP must not be a bogon; this address is not dialed.
 	testSteeringIP = "1.1.1.1"
@@ -1150,7 +1168,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Pave psinet with random values to test handshake homepages.
 	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
-		t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags, discoveryServers)
+		t, psinetFilename, "", runConfig.doDefaultSponsorID, psinetValidServerEntryTags, discoveryServers)
 
 	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
@@ -1367,7 +1385,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverTunnelLog := make(chan map[string]interface{}, 1)
 	uniqueUserLog := make(chan map[string]interface{}, 1)
 	asnDestBytesLog := make(chan map[string]interface{}, 1)
-	domainDestBytesLog := make(chan map[string]interface{}, 1)
 
 	// Max 3 discovery logs:
 	// 1. server startup
@@ -1410,11 +1427,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case "asn_dest_bytes":
 			select {
 			case asnDestBytesLog <- logFields:
-			default:
-			}
-		case "domain_dest_bytes":
-			select {
-			case domainDestBytesLog <- logFields:
 			default:
 			}
 		case "server_tunnel":
@@ -1540,7 +1552,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// run flow inspector if requested
 	var flowInspectorProxy *flowInspectorProxy
-	if runConfig.inspectFlows {
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
 		flowInspectorProxy, err = newFlowInspectorProxy()
 		if err != nil {
 			t.Fatalf("error starting flow inspector: %s", err)
@@ -1619,7 +1631,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Pave new config files with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
-			t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags, discoveryServers)
+			t, psinetFilename, "", runConfig.doDefaultSponsorID, psinetValidServerEntryTags, discoveryServers)
 
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
@@ -1778,6 +1790,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
 	clientConfig.EnableDSLAccessTokenRegistration = runConfig.testDSLAccessToken
+	dslAccessTokenReceived := make(chan struct{}, 1)
+	clientConfig.OnAccessToken = func(token string) {
+		if !runConfig.testDSLAccessToken {
+			t.Errorf("unexpected DSL access token callback")
+		} else if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {
+			t.Errorf("DSL access token callback did not deliver the expected token")
+		} else {
+			sendNotificationReceived(dslAccessTokenReceived)
+		}
+	}
 
 	// In the classic test path, TargetServerEntry is used to specify the
 	// server enrty. In the DSL test case, the server entry is fetched from
@@ -1799,7 +1821,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
 	clientConfig.NetworkConnectivityChecker = &networkConnectivityChecker{}
 
-	if runConfig.inspectFlows {
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
 		trueVal := true
 		clientConfig.UpstreamProxyURL = fmt.Sprintf("socks5://%s", flowInspectorProxy.listener.Addr())
 		clientConfig.UpstreamProxyAllowAllServerEntrySources = &trueVal
@@ -2094,6 +2116,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error creating client controller: %s", err)
 	}
 
+	// Test: drop client events recorded before connection
+
+	controller.RecordClientEvent("before-connect")
+
 	connectedServer := make(chan struct{}, 1)
 	inproxyActivity := make(chan struct{}, 1)
 	tunnelsEstablished := make(chan struct{}, 1)
@@ -2275,6 +2301,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		if runConfig.testDSLAccessToken {
 			waitOnNotification(t, dslAccessTokenAvailable, timeoutSignal, "DSL access token timeout exceeded")
+			waitOnNotification(t, dslAccessTokenReceived, timeoutSignal, "DSL access token callback timeout exceeded")
 
 			token := controller.GetDSLAccessToken()
 			if token != base64.RawURLEncoding.EncodeToString(testDSLAccessToken) {
@@ -2316,21 +2343,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		lastConnectedUpdateCount += 1
 	}
 
-	if runConfig.doChangeBytesConfig {
+	// Test: record a client event before application traffic
+
+	controller.RecordClientEvent(testClientEvents[0].event)
+
+	if runConfig.doChangeDestBytesConfig {
 
 		if !runConfig.doASNDestBytes {
 			t.Fatalf("invalid test configuration")
 		}
 
-		// Test: now that the client is connected, change the domain bytes and
-		// destination bytes configurations. No stats should be logged, even
-		// with an already connected client.
-
-		// Pave psinet without domain bytes; retain the same sponsor ID. The
-		// random homepage URLs will change, but this has no effect on the
-		// already connected client.
-		_, _ = pavePsinetDatabaseFile(
-			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags, discoveryServers)
+		// Test: now that the client is connected, change the destination bytes
+		// configuration. No stats should be logged, even with an already
+		// connected client.
 
 		// Pave tactics without destination bytes.
 		paveTacticsConfigFile(
@@ -2482,6 +2507,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	// Test: record client events after application traffic
+
+	for _, testCase := range testClientEvents[1:] {
+		controller.RecordClientEvent(testCase.event)
+	}
+
 	// Test: await SLOK payload or server alert notice
 
 	time.Sleep(1 * time.Second)
@@ -2586,7 +2617,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.limitQUICVersions {
 		expectQUICVersion = limitQUICVersions[0]
 	}
-	expectASNDestBytes := runConfig.doASNDestBytes && !runConfig.doChangeBytesConfig
+	expectASNDestBytes := runConfig.doASNDestBytes && !runConfig.doChangeDestBytesConfig
 	expectMeekHTTPVersion := ""
 	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
 		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
@@ -2609,14 +2640,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectMeekPayloadPadding := doMeekPayloadPadding
 	expectAddedProxyProtocolHeader := runConfig.doProxyProtocolHeader && !runConfig.doReplaceProxyProtocolHeader
 	expectReplacedProxyProtocolHeader := runConfig.doProxyProtocolHeader && runConfig.doReplaceProxyProtocolHeader
-
-	// The client still reports domain_bytes up when no port forwards are
-	// allowed (expectTrafficFailure).
-	//
-	// In the in-proxy self-proxy scheme, the final status request races with
-	// proxy shutdown and domain bytes may or may not arrive.
-	allowDomainDestBytes := !runConfig.doChangeBytesConfig
-	requireDomainDestBytes := allowDomainDestBytes && !doInproxy
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -2694,37 +2717,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		select {
 		case <-asnDestBytesLog:
 			t.Fatalf("unexpected ASN dest bytes log")
-		default:
-		}
-	}
-
-	if requireDomainDestBytes {
-		select {
-		case logFields := <-domainDestBytesLog:
-			err := checkExpectedDomainDestBytesLogFields(
-				runConfig,
-				logFields)
-			if err != nil {
-				t.Fatalf("invalid domain dest bytes log fields: %s", err)
-			}
-		default:
-			t.Fatalf("missing domain bytes log")
-		}
-	} else if allowDomainDestBytes {
-		select {
-		case logFields := <-domainDestBytesLog:
-			err := checkExpectedDomainDestBytesLogFields(
-				runConfig,
-				logFields)
-			if err != nil {
-				t.Fatalf("invalid domain dest bytes log fields: %s", err)
-			}
-		default:
-		}
-	} else {
-		select {
-		case <-domainDestBytesLog:
-			t.Fatalf("unexpected domain dest bytes log")
 		default:
 		}
 	}
@@ -2831,12 +2823,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 
+	var inspectedFlows []*flows
+	if runConfig.inspectFlows || runConfig.lengthStructureCheck {
+		inspectedFlows = <-flowInspectorProxy.ch
+	}
+
 	// Inspect OSSH prefix flows, if applicable.
 	if runConfig.inspectFlows && runConfig.applyPrefix && protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
 
-		flows := <-flowInspectorProxy.ch
-		serverFlows := flows[0]
-		clientFlows := flows[1]
+		serverFlows := inspectedFlows[0]
+		clientFlows := inspectedFlows[1]
 
 		expectedClientPrefix := bytes.Repeat([]byte{0x00}, 200)
 		expectedServerPrefix := bytes.Repeat([]byte{0x01}, 200)
@@ -2883,6 +2879,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				t.Fatalf("server write delay after prefix too high: %f ms",
 					serverFlows.flows[1].timeDelta.Seconds()*1e3)
 			}
+		}
+	}
+
+	if runConfig.lengthStructureCheck {
+
+		serverStream := inspectedFlows[0].streamDump.Bytes()
+		clientStream := inspectedFlows[1].streamDump.Bytes()
+
+		// Check that this is the main established tunnel connection rather
+		// than other potential shorter, non-tunnel connections through the
+		// UpstreamProxyURL, such as tactics fetches.
+		minimumInspectedTunnelBytes := len(mockWebServerExpectedResponse)
+		if len(serverStream) < minimumInspectedTunnelBytes {
+			t.Fatalf(
+				"inspected server flow is too short to be the tunnel: got %d bytes, want at least %d",
+				len(serverStream),
+				minimumInspectedTunnelBytes)
+		}
+
+		serverFound := findLengthPrefixedStructure(t, serverStream, 4)
+		clientFound := findLengthPrefixedStructure(t, clientStream, 4)
+		if serverFound || clientFound {
+			t.Fatalf(
+				"unexpected length-prefixed structure: server=%v client=%v", serverFound, clientFound)
 		}
 	}
 
@@ -3183,6 +3203,7 @@ func checkExpectedServerTunnelLogFields(
 		"client_version",
 		"client_platform",
 		"client_features",
+		"client_events",
 		"relay_protocol",
 		"device_region",
 		"device_location",
@@ -3249,6 +3270,19 @@ func checkExpectedServerTunnelLogFields(
 		if clientFeatures[i].(string) != feature {
 			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
 		}
+	}
+
+	clientEvents := fields["client_events"].([]interface{})
+	if len(clientEvents) != len(testClientEvents) {
+		return fmt.Errorf("unexpected client_events '%s'", fields["client_events"])
+	}
+	for i, testCase := range testClientEvents {
+		if clientEvents[i].(string) != testCase.expected {
+			return fmt.Errorf("unexpected client_events '%s'", fields["client_events"])
+		}
+	}
+	if fields["light_proxy_client_events"] != nil {
+		return fmt.Errorf("unexpected field 'light_proxy_client_events'")
 	}
 
 	clientTunnelProtocol := runConfig.tunnelProtocol
@@ -3988,35 +4022,6 @@ func checkExpectedUniqueUserLogFields(
 	return nil
 }
 
-func checkExpectedDomainDestBytesLogFields(
-	runConfig *runServerConfig,
-	fields map[string]interface{}) error {
-
-	for _, name := range []string{
-		"client_asn",
-		"client_platform",
-		"client_region",
-		"device_region",
-		"sponsor_id",
-		"domain",
-		"bytes",
-		"bytes_tcp",
-		"bytes_udp",
-	} {
-		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
-			return fmt.Errorf("missing expected field '%s'", name)
-		}
-
-		if name == "domain" {
-			if fields[name].(string) != "ALL" && fields[name].(string) != "(OTHER)" {
-				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
-			}
-		}
-	}
-
-	return nil
-}
-
 func checkExpectedASNDestBytesLogFields(
 	runConfig *runServerConfig,
 	fields map[string]interface{}) error {
@@ -4095,7 +4100,7 @@ func checkExpectedDiscoveredServer(
 	defer iterator.Close()
 
 	for {
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -4443,7 +4448,6 @@ func pavePsinetDatabaseFile(
 	psinetFilename string,
 	sponsorID string,
 	useDefaultSponsorID bool,
-	doDomainBytes bool,
 	validServerEntryTags []string,
 	discoveryServers []*psinet.DiscoveryServer) (string, string) {
 
@@ -4470,7 +4474,6 @@ func pavePsinetDatabaseFile(
         "default_sponsor_id" : "%s",
         "sponsors" : {
             "%s" : {
-                %s
                 "home_pages" : {
                     "None" : [
                         {
@@ -4489,19 +4492,7 @@ func pavePsinetDatabaseFile(
         },
         "discovery_servers" : %s
     }
-	`
-
-	domainBytes := ""
-	if doDomainBytes {
-		domainBytes = `
-                "https_request_regexes" : [
-                    {
-                        "regex" : ".*",
-                        "replace" : "ALL"
-                    }
-                ],
-	`
-	}
+    `
 
 	actionURLsJSON, _ := json.Marshal(testDisallowedTrafficAlertActionURLs)
 
@@ -4517,7 +4508,6 @@ func pavePsinetDatabaseFile(
 		psinetJSONFormat,
 		defaultSponsorID,
 		sponsorID,
-		domainBytes,
 		expectedHomepageURL,
 		protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
 		actionURLsJSON,
@@ -5487,7 +5477,7 @@ func storePruneServerEntriesTest(
 			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
-			func(serverEntry *protocol.ServerEntry, _ string) (string, bool) {
+			func(serverEntry *protocol.ServerEntry, _ bool, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
 			},
 			serverEntry,
@@ -5637,7 +5627,7 @@ func scanServerEntries(
 
 	for {
 
-		serverEntry, err := iterator.Next(ctx)
+		serverEntry, _, err := iterator.Next(ctx)
 		if err != nil {
 			t.Fatalf("ServerIterator.Next failed: %s", err)
 		}
@@ -5683,6 +5673,56 @@ func testSampleInUniformRange[V Number](sample, a, b, stddev V) bool {
 	lower := math.Abs(float64(sample-a) / float64(stddev))
 	higher := math.Abs(float64(sample-b) / float64(stddev))
 	return lower <= 2.0 || higher <= 2.0
+}
+
+func findLengthPrefixedStructure(t *testing.T, stream []byte, minimumRecords int) bool {
+	t.Helper()
+
+	const (
+		maximumRecordLength = 256 * 1024
+		recordAlignment     = 8
+	)
+
+	// This test covers cipher/hash constructs with plaintext 4-byte length
+	// headers, block sizes that are a multiple of 8, and a selection of
+	// trailing values, typically authentication tags.
+	//
+	// As a potential future enhancement, consider a general entropy test.
+
+	trailerLengths := []int{0, 8, 12, 16, 20, 32, 64}
+
+	for start := 0; start+4 <= len(stream); start++ {
+		for _, trailerLength := range trailerLengths {
+			offset := start
+			var lengths []uint32
+			for offset+4 <= len(stream) {
+				recordLength := binary.BigEndian.Uint32(stream[offset : offset+4])
+				if recordLength < recordAlignment ||
+					recordLength > maximumRecordLength ||
+					recordLength%recordAlignment != 0 {
+					break
+				}
+
+				nextOffset := offset + 4 + int(recordLength) + trailerLength
+				if nextOffset > len(stream) {
+					break
+				}
+
+				lengths = append(lengths, recordLength)
+				if len(lengths) >= minimumRecords {
+					t.Logf(
+						"found length-prefixed structure: offset=%d trailerLength=%d lengths=%v",
+						start,
+						trailerLength,
+						lengths)
+					return true
+				}
+				offset = nextOffset
+			}
+		}
+	}
+
+	return false
 }
 
 type flowInspectorProxy struct {
