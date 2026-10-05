@@ -47,6 +47,12 @@ type profileManifest struct {
 // does not exist. The profiles include "heap", "goroutine", and other
 // selected profiles from: https://golang.org/pkg/runtime/pprof/#Profile.
 //
+// The profiles are written in pprof's legacy text format, with comments
+// translating addresses to function names, so that a programmer can read
+// them without tools; the CPU profile, which has no text form, is always
+// the gzip-compressed protocol buffer. See WriteRuntimeProfilesProtobuf for
+// the form tools read.
+//
 // The SampleDurationSeconds inputs determine how long to wait and sample
 // profiles that require active sampling. When set to 0, these profiles are
 // skipped.
@@ -56,6 +62,39 @@ func WriteRuntimeProfiles(
 	filenameSuffix string,
 	blockSampleDurationSeconds int,
 	cpuSampleDurationSeconds int) {
+
+	writeRuntimeProfiles(
+		logger, outputDirectory, filenameSuffix,
+		blockSampleDurationSeconds, cpuSampleDurationSeconds, 1)
+}
+
+// WriteRuntimeProfilesProtobuf is WriteRuntimeProfiles with every profile
+// written in the gzip-compressed protocol buffer format, the function
+// names, files and lines embedded, so that pprof tooling can read the
+// profiles without the binary that produced them. The legacy text format
+// keeps its symbols in comments, which tools discard.
+func WriteRuntimeProfilesProtobuf(
+	logger Logger,
+	outputDirectory string,
+	filenameSuffix string,
+	blockSampleDurationSeconds int,
+	cpuSampleDurationSeconds int) {
+
+	writeRuntimeProfiles(
+		logger, outputDirectory, filenameSuffix,
+		blockSampleDurationSeconds, cpuSampleDurationSeconds, 0)
+}
+
+// writeRuntimeProfiles is the shared implementation; debug is the
+// runtime/pprof Profile.WriteTo debug level: 0 for the protocol buffer, 1
+// for the legacy text format.
+func writeRuntimeProfiles(
+	logger Logger,
+	outputDirectory string,
+	filenameSuffix string,
+	blockSampleDurationSeconds int,
+	cpuSampleDurationSeconds int,
+	debug int) {
 
 	if err := os.MkdirAll(outputDirectory, 0755); err != nil {
 		logger.WithTraceFields(
@@ -92,7 +131,7 @@ func WriteRuntimeProfiles(
 		if file == nil {
 			return
 		}
-		err := pprof.Lookup(profileName).WriteTo(file, 1)
+		err := pprof.Lookup(profileName).WriteTo(file, debug)
 		file.Close()
 		if err != nil {
 			logger.WithTraceFields(

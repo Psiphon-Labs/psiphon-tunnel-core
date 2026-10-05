@@ -356,7 +356,8 @@ func RunServices(configJSON []byte) (retErr error) {
 		for {
 			select {
 			case <-signalProcessProfiles:
-				outputProcessProfiles(support.Config, "")
+				outputProcessProfiles(
+					support.Config, "", support.Config.ProfileProtobufFormat)
 			case <-shutdownBroadcast:
 				return
 			}
@@ -406,7 +407,7 @@ loop:
 				// Run the profile dump in a goroutine and don't block this loop. Shutdown
 				// doesn't wait for any running outputProcessProfiles to complete.
 				go func() {
-					outputProcessProfiles(support.Config, "stop_establish_tunnels")
+					outputProcessProfiles(support.Config, "stop_establish_tunnels", false)
 				}()
 			}
 
@@ -456,7 +457,7 @@ loop:
 			filenameSuffix := fmt.Sprintf(
 				"delayed_shutdown_%ds",
 				time.Since(shutdownStartTime)/time.Second)
-			outputProcessProfiles(support.Config, filenameSuffix)
+			outputProcessProfiles(support.Config, filenameSuffix, false)
 
 		}
 	}()
@@ -495,12 +496,20 @@ func getRuntimeMetrics() LogFields {
 	}
 }
 
-func outputProcessProfiles(config *Config, filenameSuffix string) {
+// outputProcessProfiles logs the runtime metrics and, when a profile output
+// directory is configured, writes the runtime profiles there: in the
+// protocol buffer format when protobufFormat is set, else the legacy text
+// format.
+func outputProcessProfiles(config *Config, filenameSuffix string, protobufFormat bool) {
 
 	log.WithTraceFields(getRuntimeMetrics()).Info("runtime_metrics")
 
 	if config.ProcessProfileOutputDirectory != "" {
-		common.WriteRuntimeProfiles(
+		write := common.WriteRuntimeProfiles
+		if protobufFormat {
+			write = common.WriteRuntimeProfilesProtobuf
+		}
+		write(
 			CommonLogger(log),
 			config.ProcessProfileOutputDirectory,
 			filenameSuffix,
