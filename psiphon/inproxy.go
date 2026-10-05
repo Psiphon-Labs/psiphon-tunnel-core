@@ -216,6 +216,9 @@ func (b *InproxyBrokerClientManager) resetBrokerClientOnNoMatch(
 		return nil
 	}
 
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
 	if b.brokerClientInstance != brokerClientInstance {
 		// See comment for same logic in resetBrokerClientOnRoundTripperFailed.
 		return nil
