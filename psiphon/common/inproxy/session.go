@@ -320,6 +320,9 @@ func (s *InitiatorSessions) RoundTrip(
 	for {
 		out, isRequestPacket, err := rt.Next(ctx, in)
 		if err != nil {
+			// This round trip will not continue. Fail any owned, unfinished
+			// session and wake initiators waiting to share it.
+			rt.TransportFailed()
 			return nil, errors.Trace(err)
 		}
 		if out == nil {
@@ -751,6 +754,10 @@ func (r *InitiatorRoundTrip) Next(
 				r.lastSentPacket.Bytes(),
 				sessionPacket.ResetSessionToken) {
 
+			// Wake any initiators waiting to share this session before replacing
+			// it. A reset may arrive before the session is ready to share.
+			r.session.transportFailed()
+
 			// removeIfSession won't clobber any other, concurrently
 			// established session for the same responder.
 			r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
@@ -823,7 +830,7 @@ func (r *InitiatorRoundTrip) TransportFailed() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	if !r.sharingSession && !r.session.isReadyToShare(nil) {
+	if r.session != nil && !r.sharingSession && !r.session.isReadyToShare(nil) {
 		r.session.transportFailed()
 		r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
 	}
