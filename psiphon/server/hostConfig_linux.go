@@ -95,15 +95,20 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 	//
 	// For the [2]int value in IptablesAcceptRateLimitTunnelProtocolRateLimits:
 	// - In the "recent" rule case, value[0] specifies --seconds N and value[1] specifies --hitcount N.
-	// - In the other case, value[0] specifies --limit N/sec and value[1] is ignored.
+	// - In the "limit" rule case, value[0] specifies --limit N/sec and value[1] specifies
+	//   --limit-burst N (the --limit-burst argument is omitted when value[1] is zero).
 
 	inproxyAcceptRateLimitRules := func(networkProtocol string, portNumber int, rateLimit [2]int) ([]string, error) {
 		if rateLimit[0] == 0 {
 			rateLimit[0] = 1000
 		}
+		limit := fmt.Sprintf("--limit %d/sec", rateLimit[0])
+		if rateLimit[1] > 0 {
+			limit += fmt.Sprintf(" --limit-burst %d", rateLimit[1])
+		}
 		return []string{
-			fmt.Sprintf("-A %s -p %s -m state --state NEW -m %s --dport %d -m limit --limit %d/sec -j ACCEPT",
-				chainName, networkProtocol, networkProtocol, portNumber, rateLimit[0]),
+			fmt.Sprintf("-A %s -p %s -m state --state NEW -m %s --dport %d -m limit %s -j ACCEPT",
+				chainName, networkProtocol, networkProtocol, portNumber, limit),
 		}, nil
 	}
 
@@ -111,9 +116,13 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 		if rateLimit[0] == 0 {
 			rateLimit[0] = 1000
 		}
+		limit := fmt.Sprintf("--limit %d/sec", rateLimit[0])
+		if rateLimit[1] > 0 {
+			limit += fmt.Sprintf(" --limit-burst %d", rateLimit[1])
+		}
 		return []string{
-			fmt.Sprintf("-A %s -p tcp -m state --state NEW -m tcp --dport %d -m limit --limit %d/sec -j ACCEPT",
-				chainName, portNumber, rateLimit[0]),
+			fmt.Sprintf("-A %s -p tcp -m state --state NEW -m tcp --dport %d -m limit %s -j ACCEPT",
+				chainName, portNumber, limit),
 		}, nil
 	}
 
@@ -144,6 +153,21 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 		for tunnelProtocol, portNumber := range config.TunnelProtocolPorts {
 
 			rateLimit := config.IptablesAcceptRateLimitTunnelProtocolRateLimits[tunnelProtocol]
+
+			// Apply the in-proxy broker rate and burst defaults to all meek
+			// listeners, including shared INPROXY-WEBRTC meek listeners handled
+			// by the in-proxy branch below, before dispatching to the rule
+			// generators. Explicit custom rates still take precedence.
+			if config.MeekServerRunInproxyBroker &&
+				protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+				if rateLimit[0] == 0 {
+					rateLimit[0] = 10000
+				}
+				if rateLimit[1] == 0 {
+					rateLimit[1] = 10000
+				}
+			}
+
 			var protocolRules []string
 			var err error
 
