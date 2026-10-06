@@ -28,8 +28,7 @@
 
 // See comment in header.
 const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifaddrs *_Nullable interfaces,
-                                                              const char *_Nullable interfaceName,
-                                                              BOOL preferIPv4) {
+                                                              const char *_Nullable interfaceName) {
     if (interfaceName == NULL) {
         return NULL;
     }
@@ -63,12 +62,6 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
             }
         }
 
-        if (!preferIPv4) {
-            // Do not ignore link-local IPv4 addresses because it is possible the interface
-            // is assigned one manually, or if DHCP fails, etc.
-            return interface;
-        }
-
         if (addr->sa_family == AF_INET) {
             // A self-assigned link-local IPv4 address does not identify the network.
             const struct sockaddr_in *addr4 = (const struct sockaddr_in *)addr;
@@ -89,7 +82,6 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
 @implementation NetworkInterface
 
 + (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName
-                               preferIPv4:(BOOL)preferIPv4
                                     error:(NSError *_Nullable *_Nonnull)outError {
     *outError = nil;
 
@@ -103,8 +95,7 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
     }
 
     const struct ifaddrs *interface = NetworkInterfaceSelectAddress(interfaces,
-                                                                    [interfaceName UTF8String],
-                                                                    preferIPv4);
+                                                                    [interfaceName UTF8String]);
     if (interface == NULL) {
         freeifaddrs(interfaces);
         return nil;
@@ -256,7 +247,6 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
 
 + (NSString*)getActiveInterfaceAddressWithReachability:(id<ReachabilityProtocol>)reachability
                                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                                            preferIPv4:(BOOL)preferIPv4
                                                  error:(NSError *_Nullable *_Nonnull)outError {
 
     *outError = nil;
@@ -281,7 +271,6 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
     }
 
     NSString *interfaceAddress = [NetworkInterface getInterfaceAddress:activeInterface
-                                                            preferIPv4:preferIPv4
                                                                  error:&err];
     if (err != nil) {
         NSString *localizedDescription =

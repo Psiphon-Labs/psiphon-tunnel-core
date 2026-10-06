@@ -55,7 +55,6 @@
         NSString *activeInterfaceAddress =
             [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                 andCurrentNetworkStatus:currentNetworkStatus
-                                                             preferIPv4:NO
                                                                   error:&err];
         if (err != nil) {
             NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
@@ -72,13 +71,8 @@
         }
                                 interfaceAddress:^NSString *(NSError *_Nullable *_Nonnull outError) {
             // As the Android library does with WifiInfo.getIpAddress when it has no BSSID.
-            //
-            // IPv4 is preferred, because Wi-Fi interfaces also carry IPv6 privacy addresses that are
-            // periodically regenerated. On an IPv6-only network, the first non-link-local IPv6 address
-            // is used instead, as in psiphon/common/networkid.
             return [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                        andCurrentNetworkStatus:currentNetworkStatus
-                                                                    preferIPv4:YES
                                                                          error:outError];
         }
                                          warning:outWarn];
@@ -88,14 +82,12 @@
 
 #if TARGET_OS_IOS
         if (@available(iOS 16.0, *)) {
-            // Testing showed that the IP address of the active interface uniquely identified the
-            // corresponding network and did not change over long periods of time, which makes it a
-            // useful addition to the network ID value.
+            // Use the active interface address as a best-effort network identifier now that
+            // CTCarrier no longer provides useful carrier codes.
             NSError *err;
             NSString *activeInterfaceAddress =
                 [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                     andCurrentNetworkStatus:currentNetworkStatus
-                                                                 preferIPv4:NO
                                                                       error:&err];
             if (err != nil) {
                 NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
@@ -124,7 +116,6 @@
         NSString *activeInterfaceAddress =
             [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
                                                 andCurrentNetworkStatus:currentNetworkStatus
-                                                             preferIPv4:NO
                                                                   error:&err];
         if (err != nil) {
             NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];

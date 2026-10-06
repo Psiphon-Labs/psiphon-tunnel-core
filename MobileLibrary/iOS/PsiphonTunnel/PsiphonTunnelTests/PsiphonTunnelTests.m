@@ -244,8 +244,8 @@
 @end
 
 /// Returns the address NetworkInterfaceSelectAddress selects for en0, or nil if none is selected.
-static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces, BOOL preferIPv4) {
-    const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces.list, "en0", preferIPv4);
+static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
+    const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces.list, "en0");
     if (selected == NULL) {
         return nil;
     }
@@ -265,73 +265,54 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces, B
 
 @implementation NetworkInterfaceTests
 
-- (void)testPreferIPv4SelectsIPv4RegardlessOfOrder {
+- (void)testSelectsIPv4RegardlessOfOrder {
     FakeInterfaceAddresses *ipv6First = [[FakeInterfaceAddresses alloc] init];
     [ipv6First addLinkLayerInterface:"en0"];
     [ipv6First addInterface:"en0" address:"fe80::1"];
     [ipv6First addInterface:"en0" address:"2001:db8::1"];
     [ipv6First addInterface:"en0" address:"2001:db8::2"];
     [ipv6First addInterface:"en0" address:"192.0.2.1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv6First, YES), @"192.0.2.1");
+    XCTAssertEqualObjects(SelectedAddress(ipv6First), @"192.0.2.1");
 
     FakeInterfaceAddresses *ipv4First = [[FakeInterfaceAddresses alloc] init];
     [ipv4First addInterface:"en0" address:"192.0.2.1"];
     [ipv4First addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv4First, YES), @"192.0.2.1");
+    XCTAssertEqualObjects(SelectedAddress(ipv4First), @"192.0.2.1");
 
     FakeInterfaceAddresses *twoIPv4 = [[FakeInterfaceAddresses alloc] init];
     [twoIPv4 addInterface:"en0" address:"2001:db8::1"];
     [twoIPv4 addInterface:"en0" address:"192.0.2.1"];
     [twoIPv4 addInterface:"en0" address:"192.0.2.2"];
-    XCTAssertEqualObjects(SelectedAddress(twoIPv4, YES), @"192.0.2.1");
+    XCTAssertEqualObjects(SelectedAddress(twoIPv4), @"192.0.2.1");
 }
 
-- (void)testPreferIPv4SkipsLinkLocal {
+- (void)testSkipsLinkLocal {
     FakeInterfaceAddresses *withIPv4 = [[FakeInterfaceAddresses alloc] init];
     [withIPv4 addInterface:"en0" address:"fe80::1"];
     [withIPv4 addInterface:"en0" address:"169.254.1.1"];
     [withIPv4 addInterface:"en0" address:"192.0.2.1"];
-    XCTAssertEqualObjects(SelectedAddress(withIPv4, YES), @"192.0.2.1");
+    XCTAssertEqualObjects(SelectedAddress(withIPv4), @"192.0.2.1");
 
     // A self-assigned IPv4 address alongside a global IPv6 address, as on an IPv6-only network.
     FakeInterfaceAddresses *ipv6Only = [[FakeInterfaceAddresses alloc] init];
     [ipv6Only addInterface:"en0" address:"169.254.1.1"];
     [ipv6Only addInterface:"en0" address:"fe80::1"];
     [ipv6Only addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv6Only, YES), @"2001:db8::1");
+    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::1");
 
     FakeInterfaceAddresses *linkLocalOnly = [[FakeInterfaceAddresses alloc] init];
     [linkLocalOnly addInterface:"en0" address:"169.254.1.1"];
     [linkLocalOnly addInterface:"en0" address:"fe80::1"];
-    XCTAssertNil(SelectedAddress(linkLocalOnly, YES));
+    XCTAssertNil(SelectedAddress(linkLocalOnly));
 }
 
-- (void)testPreferIPv4SelectsFirstIPv6WithoutIPv4 {
+- (void)testSelectsFirstIPv6WithoutIPv4 {
     FakeInterfaceAddresses *interfaces = [[FakeInterfaceAddresses alloc] init];
     [interfaces addLinkLayerInterface:"en0"];
     [interfaces addInterface:"en0" address:"fe80::1"];
     [interfaces addInterface:"en0" address:"2001:db8::1"];
     [interfaces addInterface:"en0" address:"2001:db8::2"];
-    XCTAssertEqualObjects(SelectedAddress(interfaces, YES), @"2001:db8::1");
-}
-
-// Without preferIPv4, the selection is unchanged for the cellular, wired and macOS network IDs.
-- (void)testWithoutPreferIPv4SelectsFirstAddress {
-    FakeInterfaceAddresses *ipv6First = [[FakeInterfaceAddresses alloc] init];
-    [ipv6First addLinkLayerInterface:"en0"];
-    [ipv6First addInterface:"en0" address:"fe80::1"];
-    [ipv6First addInterface:"en0" address:"2001:db8::1"];
-    [ipv6First addInterface:"en0" address:"192.0.2.1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv6First, NO), @"2001:db8::1");
-
-    FakeInterfaceAddresses *linkLocalIPv4First = [[FakeInterfaceAddresses alloc] init];
-    [linkLocalIPv4First addInterface:"en0" address:"169.254.1.1"];
-    [linkLocalIPv4First addInterface:"en0" address:"192.0.2.1"];
-    XCTAssertEqualObjects(SelectedAddress(linkLocalIPv4First, NO), @"169.254.1.1");
-
-    FakeInterfaceAddresses *linkLocalIPv6Only = [[FakeInterfaceAddresses alloc] init];
-    [linkLocalIPv6Only addInterface:"en0" address:"fe80::1"];
-    XCTAssertNil(SelectedAddress(linkLocalIPv6Only, NO));
+    XCTAssertEqualObjects(SelectedAddress(interfaces), @"2001:db8::1");
 }
 
 - (void)testSelectsOnlyUpNonLoopbackEntriesOfNamedInterface {
@@ -344,12 +325,10 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces, B
     [interfaces addLinkLayerInterface:"en0"];
     [interfaces addInterface:"en00" address:"192.0.2.5"];
     [interfaces addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(interfaces, YES), @"2001:db8::1");
-    XCTAssertEqualObjects(SelectedAddress(interfaces, NO), @"2001:db8::1");
+    XCTAssertEqualObjects(SelectedAddress(interfaces), @"2001:db8::1");
 
-    XCTAssertTrue(NetworkInterfaceSelectAddress(interfaces.list, NULL, YES) == NULL);
-    XCTAssertTrue(NetworkInterfaceSelectAddress(NULL, "en0", YES) == NULL);
-    XCTAssertTrue(NetworkInterfaceSelectAddress(NULL, "en0", NO) == NULL);
+    XCTAssertTrue(NetworkInterfaceSelectAddress(interfaces.list, NULL) == NULL);
+    XCTAssertTrue(NetworkInterfaceSelectAddress(NULL, "en0") == NULL);
 }
 
 // getInterfaceAddress formats the address selected from the live interface list.
@@ -359,33 +338,28 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces, B
     XCTAssertNil(err);
 
     for (NSString *interfaceName in activeInterfaces) {
-        for (NSNumber *preferIPv4 in @[@YES, @NO]) {
-            struct ifaddrs *interfaces;
-            if (getifaddrs(&interfaces) != 0) {
-                XCTFail(@"getifaddrs error with errno %d", errno);
-                return;
-            }
-            const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces,
-                                                                           interfaceName.UTF8String,
-                                                                           preferIPv4.boolValue);
-            NSString *expected = nil;
-            if (selected != NULL) {
-                char buffer[NI_MAXHOST];
-                XCTAssertEqual(getnameinfo(selected->ifa_addr, selected->ifa_addr->sa_len,
-                                           buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST), 0);
-                expected = @(buffer);
-            }
-            freeifaddrs(interfaces);
-
-            NSString *address = [NetworkInterface getInterfaceAddress:interfaceName
-                                                           preferIPv4:preferIPv4.boolValue
-                                                                error:&err];
-            XCTAssertNil(err);
-            XCTAssertEqualObjects(address, expected, @"%@ preferIPv4 %@", interfaceName, preferIPv4);
+        struct ifaddrs *interfaces;
+        if (getifaddrs(&interfaces) != 0) {
+            XCTFail(@"getifaddrs error with errno %d", errno);
+            return;
         }
+        const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces,
+                                                                       interfaceName.UTF8String);
+        NSString *expected = nil;
+        if (selected != NULL) {
+            char buffer[NI_MAXHOST];
+            XCTAssertEqual(getnameinfo(selected->ifa_addr, selected->ifa_addr->sa_len,
+                                       buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST), 0);
+            expected = @(buffer);
+        }
+        freeifaddrs(interfaces);
+
+        NSString *address = [NetworkInterface getInterfaceAddress:interfaceName error:&err];
+        XCTAssertNil(err);
+        XCTAssertEqualObjects(address, expected, @"%@", interfaceName);
     }
 
-    XCTAssertNil([NetworkInterface getInterfaceAddress:@"lo0" preferIPv4:YES error:&err]);
+    XCTAssertNil([NetworkInterface getInterfaceAddress:@"lo0" error:&err]);
     XCTAssertNil(err);
 }
 
@@ -478,7 +452,8 @@ static NetworkIDInterfaceAddress InterfaceAddress(NSString *_Nullable address, B
     XCTAssertTrue([warn.localizedDescription containsString:@"no address"], @"%@", warn.localizedDescription);
 }
 
-// getNetworkIDWithReachability uses the NEHotspotNetwork BSSID for Wi-Fi only.
+#if TARGET_OS_IPHONE
+// On iOS and Mac Catalyst, getNetworkIDWithReachability uses the NEHotspotNetwork BSSID for Wi-Fi only.
 - (void)testGetNetworkIDUsesBSSIDOnlyForWiFi {
     if (@available(iOS 12.0, macOS 10.14, *)) {
         DefaultRouteMonitor *reachability = [[DefaultRouteMonitor alloc] init];
@@ -501,6 +476,7 @@ static NetworkIDInterfaceAddress InterfaceAddress(NSString *_Nullable address, B
         XCTAssertFalse([networkID containsString:@"e4:38"], @"%@", networkID);
     }
 }
+#endif
 
 @end
 
