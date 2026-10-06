@@ -25,10 +25,12 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /// Selects the address of the named interface from a getifaddrs(3) list. Only up, non-loopback interfaces with
-/// an IPv4 or IPv6 address are considered, and link-local addresses of both families are skipped.
+/// an IPv4 or IPv6 address are considered, and link-local addresses of both families are skipped. IPv4
+/// addresses in 192.0.0.0/29 (RFC 7335) are also skipped: 464XLAT assigns the same address, typically
+/// 192.0.0.2, on every IPv6-only network that provides IPv4 by translation, so it does not identify the network.
 ///
-/// The first remaining IPv4 address is selected if there is one, otherwise the first remaining IPv6 address,
-/// matching getInterfaceIP in psiphon/common/networkid/networkid_posix.go. Preferring IPv4 avoids selecting
+/// The first remaining IPv4 address is selected if there is one, otherwise the first remaining IPv6 address, the
+/// same order as getInterfaceIP in psiphon/common/networkid/networkid_posix.go. Preferring IPv4 avoids selecting
 /// periodically regenerated IPv6 privacy addresses when IPv4 is available. This does not guarantee a stable
 /// or unique network ID, and the IPv6 fallback does not distinguish temporary addresses from stable ones.
 ///

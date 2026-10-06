@@ -306,6 +306,36 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     XCTAssertNil(SelectedAddress(linkLocalOnly));
 }
 
+- (void)testSkips464XLAT {
+    // The 464XLAT address alongside a global IPv6 address, as on an IPv6-only cellular or IPv6-mostly
+    // Wi-Fi network.
+    FakeInterfaceAddresses *ipv6Only = [[FakeInterfaceAddresses alloc] init];
+    [ipv6Only addInterface:"en0" address:"192.0.0.2"];
+    [ipv6Only addInterface:"en0" address:"fe80::1"];
+    [ipv6Only addInterface:"en0" address:"2001:db8::1"];
+    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::1");
+
+    FakeInterfaceAddresses *withIPv4 = [[FakeInterfaceAddresses alloc] init];
+    [withIPv4 addInterface:"en0" address:"192.0.0.2"];
+    [withIPv4 addInterface:"en0" address:"192.0.2.1"];
+    XCTAssertEqualObjects(SelectedAddress(withIPv4), @"192.0.2.1");
+
+    FakeInterfaceAddresses *xlatOnly = [[FakeInterfaceAddresses alloc] init];
+    [xlatOnly addInterface:"en0" address:"192.0.0.0"];
+    [xlatOnly addInterface:"en0" address:"192.0.0.2"];
+    [xlatOnly addInterface:"en0" address:"192.0.0.7"];
+    XCTAssertNil(SelectedAddress(xlatOnly));
+
+    // Addresses just outside 192.0.0.0/29 are selected.
+    FakeInterfaceAddresses *outsideAbove = [[FakeInterfaceAddresses alloc] init];
+    [outsideAbove addInterface:"en0" address:"192.0.0.8"];
+    XCTAssertEqualObjects(SelectedAddress(outsideAbove), @"192.0.0.8");
+
+    FakeInterfaceAddresses *outsideBelow = [[FakeInterfaceAddresses alloc] init];
+    [outsideBelow addInterface:"en0" address:"191.255.255.255"];
+    XCTAssertEqualObjects(SelectedAddress(outsideBelow), @"191.255.255.255");
+}
+
 - (void)testSelectsFirstIPv6WithoutIPv4 {
     FakeInterfaceAddresses *interfaces = [[FakeInterfaceAddresses alloc] init];
     [interfaces addLinkLayerInterface:"en0"];

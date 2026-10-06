@@ -39,8 +39,9 @@ typedef NSString *_Nullable (^NetworkIDInterfaceAddress)(NSError *_Nullable *_No
 /// On iOS and Mac Catalyst, a Wi-Fi network ID includes the BSSID, if available, or else the address of the active
 /// interface. See wifiNetworkIDWithBSSID:currentNetworkInfoBSSIDs:interfaceAddress:warning:.
 ///
-/// All interface-address-based network IDs prefer non-link-local IPv4, falling back to the first non-link-local
-/// IPv6 address. If no address qualifies, the network ID contains only the network type.
+/// All interface-address-based network IDs prefer IPv4, falling back to the first IPv6 address. Link-local and
+/// 464XLAT (192.0.0.0/29) addresses are skipped; see NetworkInterfaceSelectAddress. If no address qualifies, the
+/// network ID contains only the network type.
 ///
 /// @param reachability ReachabilityProtocol implementer used to determine active interface on iOS >=12 when
 /// the network ID includes the active interface address.

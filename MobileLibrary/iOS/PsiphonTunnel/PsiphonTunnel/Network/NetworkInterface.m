@@ -63,9 +63,12 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
         }
 
         if (addr->sa_family == AF_INET) {
-            // A self-assigned link-local IPv4 address does not identify the network.
-            const struct sockaddr_in *addr4 = (const struct sockaddr_in *)addr;
-            if (IN_LINKLOCAL(ntohl(addr4->sin_addr.s_addr))) {
+            // Skip IPv4 addresses that do not identify the network:
+            // - self-assigned link-local, 169.254.0.0/16
+            // - 464XLAT, 192.0.0.0/29 (RFC 7335); the same address, typically 192.0.0.2,
+            //   is used on every IPv6-only network that provides IPv4 by translation
+            in_addr_t addr4 = ntohl(((const struct sockaddr_in *)addr)->sin_addr.s_addr);
+            if (IN_LINKLOCAL(addr4) || (addr4 & 0xfffffff8) == 0xc0000000) {
                 continue;
             }
             return interface;
