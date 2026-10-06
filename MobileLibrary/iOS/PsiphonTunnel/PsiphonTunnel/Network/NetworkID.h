@@ -56,6 +56,21 @@ typedef NSString *_Nullable (^NetworkIDInterfaceAddress)(NSError *_Nullable *_No
                                  wifiBSSID:(NSString *_Nullable)wifiBSSID
                                    warning:(NSError *_Nullable *_Nonnull)outWarn;
 
+/// Returns "VPN" if the library is used in non-VPN mode and an active VPN is found on the system, or else nil. This
+/// is the first check made by getNetworkIDWithReachability:andCurrentNetworkStatus:tunnelWholeDevice:wifiBSSID:warning:.
+///
+/// The check relies on CFNetworkCopySystemProxySettings, and may not find the tun interfaces of some VPNs on macOS.
+/// @param tunnelWholeDevice False if library is used in non-VPN mode, true otherwise.
++ (NSString *_Nullable)vpnNetworkIDWithTunnelWholeDevice:(BOOL)tunnelWholeDevice;
+
+/// Returns the network ID for currentNetworkStatus, as
+/// getNetworkIDWithReachability:andCurrentNetworkStatus:tunnelWholeDevice:wifiBSSID:warning: does when no VPN is
+/// found.
++ (NSString *)networkIDWithReachability:(id<ReachabilityProtocol>)reachability
+                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                              wifiBSSID:(NSString *_Nullable)wifiBSSID
+                                warning:(NSError *_Nullable *_Nonnull)outWarn;
+
 /// Returns the Wi-Fi network ID built from the first available source:
 ///
 /// 1. wifiBSSID, from NEHotspotNetwork: "WIFI-<BSSID>".

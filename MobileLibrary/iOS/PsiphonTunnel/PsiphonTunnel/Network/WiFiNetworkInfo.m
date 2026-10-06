@@ -18,33 +18,34 @@
  */
 
 #import "WiFiNetworkInfo.h"
-#import <Network/Network.h>
 #if TARGET_OS_IPHONE
 #import <NetworkExtension/NetworkExtension.h>
 #endif
 
 @implementation WiFiNetworkInfo {
     WiFiNetworkInfoFetcher fetcher;
-    BOOL monitorsPath;
+    NSTimeInterval timeout;
     void (^logger)(NSString *_Nonnull);
 
     // Log messages are delivered on their own queue, never while a lock is held or on a thread waiting for a
     // BSSID: delivering a message can block, for example on the provider lock that tunnel-core holds while it
     // requests the network ID.
     dispatch_queue_t logQueue;
-    dispatch_queue_t pathMonitorQueue;
 
-    // Guards the state below, and signals when a result is stored or invalidated.
+    // Guards the state below, and signals when the BSSID is decided, the network changes, or tracking stops.
     NSCondition *condition;
     BOOL started;
-    // Incremented whenever the cached BSSID is discarded, so that late results of earlier fetches are ignored.
+    // Incremented whenever a network begins or tracking stops, so that results for earlier networks are ignored.
     uint64_t generation;
-    // Whether bssid holds the result for the current generation.
-    BOOL resolved;
+    // Whether the current network uses Wi-Fi.
+    BOOL usesWiFi;
+    // Whether bssid holds the decision for the current network.
+    BOOL decided;
     NSString *_Nullable bssid;
-    // Whether a lookup gave up waiting for the result of the current generation.
-    BOOL waitTimedOut;
-    nw_path_monitor_t _Nullable pathMonitor;
+    // System uptime at which the current network began and its BSSID fetch started.
+    NSTimeInterval networkStart;
+    // The network ID kept for the current network, or nil if none is kept yet.
+    NSString *_Nullable networkID;
 }
 
 + (WiFiNetworkInfoFetcher)defaultFetcher {
@@ -79,23 +80,20 @@
     return bssid;
 }
 
-- (instancetype)initWithLogger:(void (^_Nullable)(NSString *_Nonnull))logger {
-    return [self initWithFetcher:[WiFiNetworkInfo defaultFetcher] monitorsPath:YES logger:logger];
+- (instancetype)initWithTimeout:(NSTimeInterval)timeout logger:(void (^_Nullable)(NSString *_Nonnull))logger {
+    return [self initWithFetcher:[WiFiNetworkInfo defaultFetcher] timeout:timeout logger:logger];
 }
 
 - (instancetype)initWithFetcher:(WiFiNetworkInfoFetcher)fetcher
-                   monitorsPath:(BOOL)monitorsPath
+                        timeout:(NSTimeInterval)timeout
                          logger:(void (^_Nullable)(NSString *_Nonnull))logger {
     self = [super init];
     if (self) {
         self->fetcher = [fetcher copy];
-        self->monitorsPath = monitorsPath;
+        self->timeout = timeout;
         self->logger = [logger copy];
         self->logQueue = dispatch_queue_create("com.psiphon3.library.WiFiNetworkInfoLogQueue", DISPATCH_QUEUE_SERIAL);
-        self->pathMonitorQueue = dispatch_queue_create("com.psiphon3.library.WiFiNetworkInfoPathMonitorQueue", DISPATCH_QUEUE_SERIAL);
         self->condition = [[NSCondition alloc] init];
-        // Until started, lookups return nil without waiting.
-        self->resolved = YES;
     }
     return self;
 }
@@ -110,88 +108,14 @@
     });
 }
 
-- (void)start {
+- (void)startUsingWiFi:(BOOL)usesWiFi {
     [self->condition lock];
     if (self->started) {
         [self->condition unlock];
         return;
     }
     self->started = YES;
-    [self invalidateLocked];
-    [self->condition unlock];
-
-    if (!self->monitorsPath) {
-        return;
-    }
-
-    if (@available(iOS 12.0, macOS 10.14, *)) {
-        nw_path_monitor_t monitor = nw_path_monitor_create();
-        nw_path_monitor_set_queue(monitor, self->pathMonitorQueue);
-        __weak WiFiNetworkInfo *weakSelf = self;
-        nw_path_monitor_set_update_handler(monitor, ^(nw_path_t _Nonnull path) {
-            nw_path_status_t status = nw_path_get_status(path);
-            BOOL usable = status == nw_path_status_satisfied || status == nw_path_status_satisfiable;
-            [weakSelf pathUpdatedUsingWiFi:usable && nw_path_uses_interface_type(path, nw_interface_type_wifi)];
-        });
-
-        [self->condition lock];
-        if (!self->started) {
-            // Stopped concurrently.
-            [self->condition unlock];
-            return;
-        }
-        self->pathMonitor = monitor;
-        [self->condition unlock];
-
-        // The first update is delivered promptly with the current path.
-        nw_path_monitor_start(monitor);
-    } else {
-        // Without path updates the BSSID would stay pending, so record that there is none.
-        [self->condition lock];
-        [self storeResultLocked:nil];
-        [self->condition unlock];
-    }
-}
-
-- (void)stop {
-    [self->condition lock];
-    self->started = NO;
-    self->generation++;
-    self->waitTimedOut = NO;
-    [self storeResultLocked:nil];
-    nw_path_monitor_t monitor = self->pathMonitor;
-    self->pathMonitor = nil;
-    [self->condition unlock];
-
-    if (monitor != nil) {
-        if (@available(iOS 12.0, macOS 10.14, *)) {
-            nw_path_monitor_cancel(monitor);
-        }
-    }
-}
-
-- (void)invalidateAndRefetch {
-    [self->condition lock];
-    if (!self->started) {
-        [self->condition unlock];
-        return;
-    }
-    uint64_t fetchGeneration = [self invalidateLocked];
-    [self->condition unlock];
-
-    [self fetchForGeneration:fetchGeneration];
-}
-
-- (void)pathUpdatedUsingWiFi:(BOOL)usesWiFi {
-    [self->condition lock];
-    if (!self->started) {
-        [self->condition unlock];
-        return;
-    }
-    uint64_t fetchGeneration = [self invalidateLocked];
-    if (!usesWiFi) {
-        [self storeResultLocked:nil];
-    }
+    uint64_t fetchGeneration = [self beginNetworkUsingWiFiLocked:usesWiFi];
     [self->condition unlock];
 
     if (usesWiFi) {
@@ -199,46 +123,150 @@
     }
 }
 
-- (NSString *_Nullable)bssidWaitingUpTo:(NSTimeInterval)timeout {
-    // The NEHotspotNetwork completion handler runs on the main queue, so waiting on the main thread would only
-    // delay the result it is waiting for.
-    BOOL mayWait = ![NSThread isMainThread];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
-    BOOL timedOut = NO;
+- (void)stop {
+    [self->condition lock];
+    self->started = NO;
+    self->generation++;
+    self->usesWiFi = NO;
+    self->decided = YES;
+    self->bssid = nil;
+    self->networkID = nil;
+    [self->condition broadcast];
+    [self->condition unlock];
+}
+
+- (void)networkChangedUsingWiFi:(BOOL)usesWiFi {
+    [self->condition lock];
+    if (!self->started) {
+        [self->condition unlock];
+        return;
+    }
+    uint64_t fetchGeneration = [self beginNetworkUsingWiFiLocked:usesWiFi];
+    [self->condition unlock];
+
+    if (usesWiFi) {
+        [self fetchForGeneration:fetchGeneration];
+    }
+}
+
+- (BOOL)isBSSIDPending {
+    [self->condition lock];
+    BOOL pending = self->started && self->usesWiFi && !self->decided;
+    [self->condition unlock];
+    return pending;
+}
+
+- (void)waitForBSSID {
+    if ([NSThread isMainThread]) {
+        return;
+    }
 
     [self->condition lock];
-    while (mayWait && !self->resolved && !self->waitTimedOut) {
-        if (![self->condition waitUntilDate:deadline] && !self->resolved) {
-            self->waitTimedOut = YES;
-            timedOut = YES;
-        }
-    }
-    NSString *result = self->resolved ? self->bssid : nil;
+    BOOL timedOut = [self waitForBSSIDLocked];
     [self->condition unlock];
 
     if (timedOut) {
-        [self log:[NSString stringWithFormat:@"timed out after %.0f ms waiting for the BSSID", timeout * 1000]];
+        [self logTimeout];
     }
-    return result;
+}
+
+- (NSString *_Nullable)networkIDWithBuilder:(NS_NOESCAPE WiFiNetworkIDBuilder)builder {
+    BOOL timedOut = NO;
+    BOOL decidedOnMainThread = NO;
+
+    [self->condition lock];
+    if (self->started && self->usesWiFi && self->networkID == nil && !self->decided) {
+        if ([NSThread isMainThread]) {
+            // The NEHotspotNetwork completion handler runs on the main queue, so the BSSID cannot arrive while
+            // this thread waits for it.
+            [self decideBSSIDLocked:nil];
+            decidedOnMainThread = YES;
+        } else {
+            timedOut = [self waitForBSSIDLocked];
+        }
+    }
+    // The network may have changed, or tracking stopped, while waiting.
+    BOOL available = self->started && self->usesWiFi;
+    NSString *keptNetworkID = self->networkID;
+    uint64_t buildGeneration = self->generation;
+    NSString *buildBSSID = self->bssid;
+    [self->condition unlock];
+
+    if (timedOut) {
+        [self logTimeout];
+    }
+    if (decidedOnMainThread) {
+        [self log:@"network ID requested on the main thread before the BSSID was fetched; using the fallback "
+                  @"network ID for this network"];
+    }
+
+    if (!available) {
+        return nil;
+    }
+    if (keptNetworkID != nil) {
+        return keptNetworkID;
+    }
+
+    // Built without the lock held, as building queries the system.
+    BOOL stable = YES;
+    NSString *builtNetworkID = builder(buildBSSID, &stable);
+
+    [self->condition lock];
+    if (self->started && self->generation == buildGeneration) {
+        if (self->networkID != nil) {
+            // A concurrent lookup kept its network ID first.
+            builtNetworkID = self->networkID;
+        } else if (stable) {
+            self->networkID = builtNetworkID;
+        }
+    }
+    [self->condition unlock];
+
+    return builtNetworkID;
 }
 
 #pragma mark - Private
 
-/// Discards the cached BSSID and returns the new generation. Must be called with the lock held.
-- (uint64_t)invalidateLocked {
+/// Discards the state of the previous network and returns the generation of the new one. Must be called with the
+/// lock held.
+- (uint64_t)beginNetworkUsingWiFiLocked:(BOOL)usesWiFi {
     self->generation++;
-    self->resolved = NO;
+    self->usesWiFi = usesWiFi;
+    // Without Wi-Fi, there is no BSSID to wait for.
+    self->decided = !usesWiFi;
     self->bssid = nil;
-    self->waitTimedOut = NO;
+    self->networkStart = [NSProcessInfo processInfo].systemUptime;
+    self->networkID = nil;
     [self->condition broadcast];
     return self->generation;
 }
 
-/// Stores the result for the current generation. Must be called with the lock held.
-- (void)storeResultLocked:(NSString *_Nullable)result {
-    self->bssid = result;
-    self->resolved = YES;
+/// Records the BSSID decision for the current network. Must be called with the lock held.
+- (void)decideBSSIDLocked:(NSString *_Nullable)decidedBSSID {
+    self->bssid = decidedBSSID;
+    self->decided = YES;
     [self->condition broadcast];
+}
+
+/// Waits until the BSSID of the current network is decided, deciding that there is none once the timeout passes,
+/// and returns YES in that case. Must be called with the lock held, and not on the main thread.
+- (BOOL)waitForBSSIDLocked {
+    while (self->started && self->usesWiFi && !self->decided) {
+        // The deadline is shared by all lookups for the network, and does not restart for each one.
+        NSTimeInterval remaining = self->networkStart + self->timeout - [NSProcessInfo processInfo].systemUptime;
+        if (remaining <= 0) {
+            [self decideBSSIDLocked:nil];
+            return YES;
+        }
+        [self->condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:remaining]];
+    }
+    return NO;
+}
+
+- (void)logTimeout {
+    [self log:[NSString stringWithFormat:@"BSSID not fetched within %.0f ms; using the fallback network ID for this "
+                                         @"network",
+                                         self->timeout * 1000]];
 }
 
 - (void)fetchForGeneration:(uint64_t)fetchGeneration {
@@ -256,17 +284,22 @@
     NSString *accepted = [WiFiNetworkInfo acceptedBSSID:fetchedBSSID];
 
     [self->condition lock];
-    BOOL current = self->started && fetchGeneration == self->generation && !self->resolved;
-    if (current) {
-        [self storeResultLocked:accepted];
+    BOOL current = self->started && fetchGeneration == self->generation;
+    BOOL used = current && !self->decided;
+    if (used) {
+        [self decideBSSIDLocked:accepted];
     }
     [self->condition unlock];
 
-    if (current) {
-        NSTimeInterval elapsed = [NSProcessInfo processInfo].systemUptime - fetchStart;
+    NSTimeInterval elapsed = [NSProcessInfo processInfo].systemUptime - fetchStart;
+    if (used) {
         [self log:[NSString stringWithFormat:@"%@ after %.0f ms",
                    accepted != nil ? @"fetched BSSID" : @"no BSSID available",
                    elapsed * 1000]];
+    } else if (current && accepted != nil) {
+        [self log:[NSString stringWithFormat:@"fetched BSSID after %.0f ms, after the network ID was chosen without "
+                                             @"it; ignoring it until the network changes",
+                                             elapsed * 1000]];
     }
 }
 

@@ -34,6 +34,19 @@
 
     *outWarn = nil;
 
+    NSString *vpnNetworkID = [NetworkID vpnNetworkIDWithTunnelWholeDevice:tunnelWholeDevice];
+    if (vpnNetworkID != nil) {
+        return vpnNetworkID;
+    }
+
+    return [NetworkID networkIDWithReachability:reachability
+                        andCurrentNetworkStatus:currentNetworkStatus
+                                      wifiBSSID:wifiBSSID
+                                        warning:outWarn];
+}
+
+// See comment in header.
++ (NSString *_Nullable)vpnNetworkIDWithTunnelWholeDevice:(BOOL)tunnelWholeDevice {
     // NetworkID is "VPN" if the library is used in non-VPN mode,
     // and an active VPN is found on the system.
     // This method is not exact and relies on CFNetworkCopySystemProxySettings,
@@ -46,6 +59,16 @@
             }
         }
     }
+    return nil;
+}
+
+// See comment in header.
++ (NSString *)networkIDWithReachability:(id<ReachabilityProtocol>)reachability
+                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                              wifiBSSID:(NSString *_Nullable)wifiBSSID
+                                warning:(NSError *_Nullable *_Nonnull)outWarn {
+
+    *outWarn = nil;
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {

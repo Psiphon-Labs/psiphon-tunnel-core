@@ -52,9 +52,9 @@ NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.Psiph
 const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
 const BOOL UseHasIPv6RouteGetter = FALSE;
 
-// Upper bound on how long a network ID lookup waits for an outstanding NEHotspotNetwork fetch. On device, fetches
-// took 14-65 ms.
-static const NSTimeInterval WiFiBSSIDLookupTimeout = 1.0;
+// Time from the start of a network's NEHotspotNetwork fetch after which its Wi-Fi network ID is chosen without the
+// BSSID. On device, fetches took 14-65 ms.
+static const NSTimeInterval WiFiBSSIDTimeout = 1.0;
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -130,8 +130,12 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
 
-    // Provides the Wi-Fi BSSID for the network ID. Nil when NEHotspotNetwork is unavailable.
+    // Chooses and keeps the Wi-Fi network ID for each network. Nil when NEHotspotNetwork is unavailable.
     WiFiNetworkInfo *_Nullable wifiNetworkInfo;
+
+    // Incremented by stop, so that a library start deferred by start can tell that it was stopped or superseded.
+    // Guarded by @synchronized (PsiphonTunnel.self).
+    uint64_t lifecycleGeneration;
 
     BOOL tunnelWholeDevice;
 
@@ -190,7 +194,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 #if TARGET_OS_IPHONE
     if (@available(iOS 14.0, macCatalyst 14.0, *)) {
         __weak PsiphonTunnel *weakSelf = self;
-        self->wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithLogger:^(NSString * _Nonnull message) {
+        self->wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithTimeout:WiFiBSSIDTimeout
+                                                                  logger:^(NSString * _Nonnull message) {
             [weakSelf logMessage:message];
         }];
     }
@@ -358,53 +363,99 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
-        // Start fetching the Wi-Fi BSSID now, so that it is usually available by the time tunnel-core first
-        // requests the network ID.
-        [self->wifiNetworkInfo start];
-
         [self startInternetReachabilityMonitoring];
 
-        @try {
-            NSError *e = nil;
+        // Fetch the Wi-Fi BSSID of the current network, and decide whether to use it before GoPsiStart, in which
+        // tunnel-core first requests the network ID to load stored tactics. The network ID is then kept for the
+        // network, so tunnel-core sees the same network ID throughout. See WiFiNetworkInfo.
+        BOOL usesWiFi = atomic_load(&self->currentNetworkStatus) == NetworkReachabilityReachableViaWiFi;
+        [self->wifiNetworkInfo startUsingWiFi:usesWiFi];
 
-            GoPsiStart(
-                configStr,
-                embeddedServerEntries,
-                embeddedServerEntriesPath,
-                self,
-                FALSE, // useDeviceBinder
-                UseIPv6Synthesizer,
-                UseHasIPv6RouteGetter,
-                &e);
-            
-            if (e != nil) {
-                [self logMessage:[NSString stringWithFormat: @"Psiphon library start failed: %@", e.localizedDescription]];
-                [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
-                return FALSE;
-            }
+        NSString *startEmbeddedServerEntries = embeddedServerEntries;
+        NSString *startEmbeddedServerEntriesPath = embeddedServerEntriesPath;
 
-            // self->usingNoticeFiles determines whether to invoke the
-            // onDiagnosticMessage callback for tunnel-core notices and
-            // whether to send logMessage messages to the notice files. Only
-            // enable once GoPsiStart had succeeded, at which point the notice
-            // files are initialized.
-            //
-            // Note that any tunnel-core notices received during GoPsiStart
-            // will invoke the onDiagnosticMessage callback.
-            if (usingNoticeFiles) {
-                atomic_store(&self->usingNoticeFiles, TRUE);
-            }
+        if ([NSThread isMainThread] && [self->wifiNetworkInfo isBSSIDPending]) {
+            // The NEHotspotNetwork completion handler runs on the main queue, so the BSSID cannot arrive while
+            // this thread waits for it. Instead, start the library on another queue once the BSSID is decided,
+            // which takes at most WiFiBSSIDTimeout. A failure to start is then reported only by the change to
+            // PsiphonConnectionStateDisconnected.
+            [self logMessage:@"Deferring Psiphon library start until the Wi-Fi BSSID is fetched or times out"];
+            uint64_t startGeneration = self->lifecycleGeneration;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                // Wait without holding the lock, so that stop is not delayed and network changes are handled.
+                [self->wifiNetworkInfo waitForBSSID];
+
+                @synchronized (PsiphonTunnel.self) {
+                    if (self->lifecycleGeneration != startGeneration) {
+                        // Stopped or restarted while waiting.
+                        return;
+                    }
+                    [self startPsiphonLibraryWithConfig:configStr
+                                  embeddedServerEntries:startEmbeddedServerEntries
+                              embeddedServerEntriesPath:startEmbeddedServerEntriesPath
+                                       usingNoticeFiles:usingNoticeFiles];
+                }
+            });
+            return TRUE;
         }
-        @catch(NSException *exception) {
-            [self logMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
+
+        [self->wifiNetworkInfo waitForBSSID];
+
+        return [self startPsiphonLibraryWithConfig:configStr
+                             embeddedServerEntries:startEmbeddedServerEntries
+                         embeddedServerEntriesPath:startEmbeddedServerEntriesPath
+                                  usingNoticeFiles:usingNoticeFiles];
+    }
+}
+
+/*!
+ Starts tunnel-core with GoPsiStart. Must be called with @synchronized (PsiphonTunnel.self) held, after the setup
+ done by start.
+ */
+- (BOOL)startPsiphonLibraryWithConfig:(NSString *)configStr
+                embeddedServerEntries:(NSString *)embeddedServerEntries
+            embeddedServerEntriesPath:(NSString *)embeddedServerEntriesPath
+                     usingNoticeFiles:(BOOL)usingNoticeFiles {
+    @try {
+        NSError *e = nil;
+
+        GoPsiStart(
+            configStr,
+            embeddedServerEntries,
+            embeddedServerEntriesPath,
+            self,
+            FALSE, // useDeviceBinder
+            UseIPv6Synthesizer,
+            UseHasIPv6RouteGetter,
+            &e);
+
+        if (e != nil) {
+            [self logMessage:[NSString stringWithFormat: @"Psiphon library start failed: %@", e.localizedDescription]];
             [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
             return FALSE;
         }
 
-        [self logMessage:@"Psiphon library started"];
-        
-        return TRUE;
+        // self->usingNoticeFiles determines whether to invoke the
+        // onDiagnosticMessage callback for tunnel-core notices and
+        // whether to send logMessage messages to the notice files. Only
+        // enable once GoPsiStart had succeeded, at which point the notice
+        // files are initialized.
+        //
+        // Note that any tunnel-core notices received during GoPsiStart
+        // will invoke the onDiagnosticMessage callback.
+        if (usingNoticeFiles) {
+            atomic_store(&self->usingNoticeFiles, TRUE);
+        }
     }
+    @catch(NSException *exception) {
+        [self logMessage:[NSString stringWithFormat: @"Failed to start Psiphon library: %@", exception.reason]];
+        [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
+        return FALSE;
+    }
+
+    [self logMessage:@"Psiphon library started"];
+
+    return TRUE;
 }
 
 /*!
@@ -464,6 +515,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 - (void)stop {
     @synchronized (PsiphonTunnel.self) {
         [self logMessage: @"Stopping Psiphon library"];
+
+        // Cancels any library start deferred by start.
+        self->lifecycleGeneration++;
 
         [self stopInternetReachabilityMonitoring];
         [self->wifiNetworkInfo stop];
@@ -1452,22 +1506,47 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)getNetworkID {
-    NetworkReachability networkStatus = atomic_load(&self->currentNetworkStatus);
-
-    // Only a Wi-Fi network ID uses the BSSID, so only then wait for an outstanding fetch.
-    NSString *wifiBSSID = nil;
-    if (networkStatus == NetworkReachabilityReachableViaWiFi) {
-        wifiBSSID = [self->wifiNetworkInfo bssidWaitingUpTo:WiFiBSSIDLookupTimeout];
+    // Checked first, as in NetworkID getNetworkIDWithReachability, including before a kept Wi-Fi network ID.
+    NSString *vpnNetworkID = [NetworkID vpnNetworkIDWithTunnelWholeDevice:self->tunnelWholeDevice];
+    if (vpnNetworkID != nil) {
+        return vpnNetworkID;
     }
 
+    NetworkReachability networkStatus = atomic_load(&self->currentNetworkStatus);
+
+    // The Wi-Fi network ID is chosen once per network and kept, so that it does not change on the same network,
+    // for example when the BSSID arrives after the fallback network ID was chosen. See WiFiNetworkInfo.
+    if (networkStatus == NetworkReachabilityReachableViaWiFi) {
+        NSString *networkID = [self->wifiNetworkInfo networkIDWithBuilder:^NSString *(NSString *bssid, BOOL *outStable) {
+            BOOL warned;
+            NSString *wifiNetworkID = [self networkIDWithStatus:networkStatus wifiBSSID:bssid warned:&warned];
+            // Without the BSSID or an interface address, the network ID is bare "WIFI", which does not identify
+            // the network. Do not keep it, so that an interface address is used once available.
+            *outStable = !warned;
+            return wifiNetworkID;
+        }];
+        if (networkID != nil) {
+            return networkID;
+        }
+    }
+
+    return [self networkIDWithStatus:networkStatus wifiBSSID:nil warned:NULL];
+}
+
+/// Returns the network ID for networkStatus, logging any warning, without the VPN check.
+- (NSString *)networkIDWithStatus:(NetworkReachability)networkStatus
+                        wifiBSSID:(NSString *_Nullable)wifiBSSID
+                           warned:(BOOL *_Nullable)outWarned {
     NSError *warn;
-    NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
-                                          andCurrentNetworkStatus:networkStatus
-                                                tunnelWholeDevice:self->tunnelWholeDevice
-                                                        wifiBSSID:wifiBSSID
-                                                          warning:&warn];
+    NSString *networkID = [NetworkID networkIDWithReachability:self->reachability
+                                       andCurrentNetworkStatus:networkStatus
+                                                     wifiBSSID:wifiBSSID
+                                                       warning:&warn];
     if (warn != nil) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
+    }
+    if (outWarned != NULL) {
+        *outWarned = warn != nil;
     }
     return networkID;
 }
@@ -1750,11 +1829,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         // have changed.
         atomic_store(&self->useInitialDNS, FALSE);
 
-        // The network may have changed, so fetch the BSSID again before GoPsiNetworkChanged below causes
-        // tunnel-core to request a new network ID. That request waits for this fetch, rather than using the
-        // previous network's BSSID.
-        [self->wifiNetworkInfo invalidateAndRefetch];
-
         NetworkReachability networkStatus;
         NetworkReachability previousNetworkStatus;
         BOOL interfaceChanged = FALSE;
@@ -1784,7 +1858,17 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
 
-        previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
+        // currentNetworkStatus is only written with @synchronized (PsiphonTunnel.self) held.
+        previousNetworkStatus = atomic_load(&self->currentNetworkStatus);
+        BOOL networkChanged = networkStatus != previousNetworkStatus || interfaceChanged;
+
+        // A new network gets a new Wi-Fi network ID, decided before GoPsiNetworkChanged below causes tunnel-core
+        // to request it. Other notifications keep the network ID, which must not change on the same network.
+        if (networkChanged) {
+            [self->wifiNetworkInfo networkChangedUsingWiFi:networkStatus == NetworkReachabilityReachableViaWiFi];
+        }
+
+        atomic_store(&self->currentNetworkStatus, networkStatus);
 
         // Signal when the network status or interface has changed, unless the
         // previous status was NetworkReachabilityNotReachable, because the
@@ -1792,7 +1876,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         //
         // GoPsiNetworkChanged initiates a reset of all open network
         // connections, including a tunnel reconnect.
-        if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
+        if (networkChanged && previousNetworkStatus != NetworkReachabilityNotReachable) {
             GoPsiNetworkChanged();
         }
     }

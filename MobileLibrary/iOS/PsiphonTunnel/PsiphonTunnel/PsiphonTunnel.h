@@ -415,7 +415,7 @@ Returns the path where the rotated notices file will be created.
 /*!
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected` and `onConnectionStateChanged`) are used to indicate progress and state.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
- @return TRUE if the connection start was successful, FALSE otherwise.
+ @return TRUE if the connection start was successful, or was deferred as described below; FALSE otherwise.
 
  @note On Wi-Fi, the network ID that tunnel-core uses to key per-network state, such as stored tactics and replay
  parameters, includes the BSSID when available. On iOS 14 and Mac Catalyst 14 and later, the BSSID is obtained with
@@ -423,8 +423,15 @@ Returns the path where the rotated notices file will be created.
  runs PsiphonTunnel, such as the Network Extension, and one of Apple's conditions, such as an active VPN
  configuration or precise location authorization. Without them, NEHotspotNetwork returns nothing and the user is
  not prompted; the network ID then falls back to CNCopyCurrentNetworkInfo, which returns nothing to apps built
- with the iOS 19 SDK or later, and finally to the Wi-Fi interface address. Calling this method on the main thread
- prevents tunnel-core's first network ID lookup from waiting for the BSSID.
+ with the iOS 19 SDK or later, and finally to the Wi-Fi interface address.
+
+ @note The Wi-Fi network ID is chosen once per network, and kept until the network changes, as tunnel-core requires.
+ It is chosen before the library starts: if the BSSID is not fetched within 1 second, then the fallback network ID
+ is used for that network, and the BSSID is ignored when it arrives. NEHotspotNetwork reports the BSSID on the main
+ queue, so if this method is called on the main thread while the BSSID is being fetched, then it returns TRUE before
+ starting the library, which then starts on another queue once the BSSID is fetched or 1 second has passed. In that
+ case, a failure to start is reported only by the change to `PsiphonConnectionStateDisconnected`, and a subsequent
+ `stop` or start cancels the deferred start.
 
  @warning Direct calls from a TunneledAppDelegate callback is unsupported as this can deadlock.
  */
