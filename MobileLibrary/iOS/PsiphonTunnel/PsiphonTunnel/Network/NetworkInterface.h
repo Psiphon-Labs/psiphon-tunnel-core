@@ -19,15 +19,32 @@
 
 #import <Foundation/Foundation.h>
 #import <Network/Network.h>
+#import <ifaddrs.h>
 #import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Selects the address of the named interface from a getifaddrs(3) list. Only up, non-loopback interfaces with
+/// an IPv4 or IPv6 address are considered, and link-local addresses of both families are skipped. IPv4
+/// addresses in 192.0.0.0/29 (RFC 7335) are also skipped: 464XLAT assigns the same address, typically
+/// 192.0.0.2, on every IPv6-only network that provides IPv4 by translation, so it does not identify the network.
+///
+/// The first remaining IPv4 address is selected if there is one, otherwise the first remaining IPv6 address, the
+/// same order as getInterfaceIP in psiphon/common/networkid/networkid_posix.go. Preferring IPv4 avoids selecting
+/// periodically regenerated IPv6 privacy addresses when IPv4 is available. This does not guarantee a stable
+/// or unique network ID, and the IPv6 fallback does not distinguish temporary addresses from stable ones.
+///
+/// @param interfaces getifaddrs(3) list. May be NULL.
+/// @param interfaceName Interface name. E.g. "en0".
+/// @return The selected list entry, or NULL if no address qualifies.
+const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifaddrs *_Nullable interfaces,
+                                                              const char *_Nullable interfaceName);
+
 /// NetworkInterface provides a set of functions for discovering active network interfaces on the device.
 @interface NetworkInterface : NSObject
 
-/// Returns address assigned to the given interface. If the interface has no assigned addresses, or only has a link-local IPv6 address,
-/// then nil is returned.
+/// Returns the address assigned to the given interface, chosen with NetworkInterfaceSelectAddress. If no address
+/// qualifies, then nil is returned.
 /// @param interfaceName Interface name. E.g. "en0".
 /// @param outError If non-nil, then an error occurred while trying determine the interface address.
 + (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName
