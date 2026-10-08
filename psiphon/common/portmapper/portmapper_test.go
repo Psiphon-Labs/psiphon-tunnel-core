@@ -131,7 +131,7 @@ func TestCloneSetLocalPortPreservesProbeResults(t *testing.T) {
 		Desc: testRootDesc,
 		Control: map[string]map[string]any{
 			"/ctl/IPConn": {
-				"AddPortMapping":      testAddPortMappingResponse,
+				"AddPortMapping":       testAddPortMappingResponse,
 				"GetExternalIPAddress": testGetExternalIPAddressResponse,
 				"GetStatusInfo":        testGetStatusInfoResponse,
 				"DeletePortMapping":    "",

@@ -854,11 +854,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 	if haveRecentPMP {
 		m.external = netip.AddrPortFrom(c.pmpPubIP, m.external.Port())
 	}
-	// Clone callers can reuse recently discovered UPnP services after the
-	// short probe fast-path has expired. This is especially important for
-	// callers that probe once and create mappings on demand.
-	if !haveRecentPMP && !haveRecentPCP &&
-		(c.lastProbe.After(now.Add(-5*time.Second)) || c.sawUPnPRecentlyLocked()) {
+	if c.lastProbe.After(now.Add(-5*time.Second)) && !haveRecentPMP && !haveRecentPCP {
 		c.mu.Unlock()
 		// fallback to UPnP portmapping
 		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort); ok {

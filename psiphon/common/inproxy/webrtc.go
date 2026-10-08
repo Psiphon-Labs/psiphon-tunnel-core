@@ -963,17 +963,22 @@ func newWebRTCConn(
 			return nil, nil, nil, errors.Trace(ctx.Err())
 		}
 
-		// When a port mapping is expected to be available, await it for a
-		// short period. Pion ICE gathering may complete first with only local
-		// host candidates, including when STUN was attempted but did not
-		// produce a viable server-reflexive candidate.
+		// When STUN is skipped and a port mapping is expected to be
+		// available, await a port mapping for a short period. In this
+		// scenario, pion ICE gathering may complete first, since it's only
+		// gathering local host candidates.
 		//
 		// It remains possible that these local candidates are sufficient, if
 		// they are public IPs or private IPs on the same LAN as the peer in
 		// the case of personal pairing. For that reason, the await timeout
 		// should be no more than a couple of seconds.
 		//
-		if iceCompleted && portMappingExternalAddr == "" && doPortMapping {
+		// TODO: also await port mappings when doSTUN, in case there are no
+		// STUN candidates; see hasServerReflexive check below; as it stands,
+		// in this case, it's more likely that port mapping won the previous
+		// select race.
+
+		if iceCompleted && portMappingExternalAddr == "" && !doSTUN && doPortMapping {
 
 			timer := time.NewTimer(
 				common.ValueOrDefault(
