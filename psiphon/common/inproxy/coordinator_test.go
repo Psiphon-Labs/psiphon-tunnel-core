@@ -222,6 +222,7 @@ type testWebRTCDialCoordinator struct {
 	stunServerAddressFailed         func(RFC5780 bool, address string)
 	discoverNAT                     bool
 	disableSTUN                     bool
+	disableSTUNCandidateGathering   bool
 	disablePortMapping              bool
 	disableInboundForMobileNetworks bool
 	disableIPv6ICECandidates        bool
@@ -311,6 +312,12 @@ func (t *testWebRTCDialCoordinator) DisableSTUN() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.disableSTUN
+}
+
+func (t *testWebRTCDialCoordinator) DisableSTUNCandidateGathering() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.disableSTUNCandidateGathering
 }
 
 func (t *testWebRTCDialCoordinator) DisablePortMapping() bool {

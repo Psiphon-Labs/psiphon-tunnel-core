@@ -32,18 +32,22 @@ import (
 )
 
 func TestNATDiscovery(t *testing.T) {
-	// Since this test can fail due to external network conditions, retry.
-	var err error
-	for try := 0; try < 2; try++ {
-		err = runTestNATDiscovery()
-		if err == nil {
-			return
-		}
+	for _, disableSTUNCandidateGathering := range []bool{false, true} {
+		t.Run(fmt.Sprintf("DisableSTUNCandidateGathering=%t", disableSTUNCandidateGathering), func(t *testing.T) {
+			// Since this test can fail due to external network conditions, retry.
+			var err error
+			for try := 0; try < 2; try++ {
+				err = runTestNATDiscovery(disableSTUNCandidateGathering)
+				if err == nil {
+					return
+				}
+			}
+			t.Error(err.Error())
+		})
 	}
-	t.Error(err.Error())
 }
 
-func runTestNATDiscovery() error {
+func runTestNATDiscovery(disableSTUNCandidateGathering bool) error {
 
 	// TODO: run local STUN and port mapping servers to test against, along
 	// with iptables rules to simulate NAT conditions
@@ -56,8 +60,9 @@ func runTestNATDiscovery() error {
 		stunServerAddressFailedCallCount int32
 
 	coordinator := &testWebRTCDialCoordinator{
-		stunServerAddress:        stunServerAddress,
-		stunServerAddressRFC5780: stunServerAddress,
+		disableSTUNCandidateGathering: disableSTUNCandidateGathering,
+		stunServerAddress:             stunServerAddress,
+		stunServerAddressRFC5780:      stunServerAddress,
 
 		setNATType: func(NATType) {
 			atomic.AddInt32(&setNATTypeCallCount, 1)
@@ -130,6 +135,9 @@ func runTestNATDiscovery() error {
 
 	// Should do port mapping only
 
+	// Clear the cached NAT type to exercise DisableSTUN suppressing discovery.
+	natType := coordinator.NATType()
+	coordinator.natType = NATTypeUnknown
 	coordinator.disableSTUN = true
 	coordinator.disablePortMapping = false
 
@@ -142,6 +150,7 @@ func runTestNATDiscovery() error {
 
 	// Should skip both and use values cached in WebRTCDialCoordinator
 
+	coordinator.natType = natType
 	coordinator.disableSTUN = false
 	coordinator.disablePortMapping = false
 

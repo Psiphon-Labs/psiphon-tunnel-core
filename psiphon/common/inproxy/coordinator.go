@@ -309,8 +309,13 @@ type WebRTCDialCoordinator interface {
 	// delay a client dial.
 	DiscoverNAT() bool
 
-	// DisableSTUN indicates whether to skip STUN operations.
+	// DisableSTUN skips STUN-server NAT discovery and candidate gathering,
+	// but leaves peer-to-peer ICE connectivity checks enabled.
 	DisableSTUN() bool
+
+	// DisableSTUNCandidateGathering skips only STUN-server candidate gathering;
+	// NAT discovery and peer-to-peer ICE connectivity checks are unaffected.
+	DisableSTUNCandidateGathering() bool
 
 	// DisablePortMapping indicates whether to skip port mapping operations.
 	DisablePortMapping() bool

@@ -225,13 +225,14 @@ var (
 
 // setLogCallback sets a callback that is invoked with each JSON log message.
 // This facility is intended for use in testing only.
+// The callback must support concurrent calls.
 func setLogCallback(callback func([]byte)) {
 	if callback == nil {
 		atomic.StoreInt32(&useLogCallback, 0)
 		return
 	}
-	atomic.StoreInt32(&useLogCallback, 1)
 	logCallback.Store(callback)
+	atomic.StoreInt32(&useLogCallback, 1)
 }
 
 const customJSONFormatterLogRawFieldsWithTimestamp = "CustomJSONFormatter.LogRawFieldsWithTimestamp"
@@ -368,13 +369,18 @@ func InitLogging(config *Config) (retErr error) {
 			logWriter = os.Stderr
 		}
 
-		log = &TraceLogger{
+		logger := &TraceLogger{
 			&logrus.Logger{
 				Out:       logWriter,
 				Formatter: &CustomJSONFormatter{},
 				Level:     level,
 			},
 		}
+
+		// Disable logrus locking so that JSON marshaling isn't serialized.
+		// Writers including rotate-safe-writer serialize writes.
+		logger.SetNoLock()
+		log = logger
 
 		if shouldLogProtobuf {
 

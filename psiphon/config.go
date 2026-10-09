@@ -1333,14 +1333,17 @@ type Config struct {
 	InproxyClientSTUNServerAddressesRFC5780                 []string                                         `json:",omitempty"`
 	InproxyClientDiscoverNATProbability                     *float64                                         `json:",omitempty"`
 	InproxyDisableSTUN                                      *bool                                            `json:",omitempty"`
+	InproxyDisableSTUNCandidateGathering                    *bool                                            `json:",omitempty"`
 	InproxyDisablePortMapping                               *bool                                            `json:",omitempty"`
 	InproxyDisableInboundForMobileNetworks                  *bool                                            `json:",omitempty"`
 	InproxyDisableIPv6ICECandidates                         *bool                                            `json:",omitempty"`
 	InproxyProxyDisableSTUN                                 *bool                                            `json:",omitempty"`
+	InproxyProxyDisableSTUNCandidateGathering               *bool                                            `json:",omitempty"`
 	InproxyProxyDisablePortMapping                          *bool                                            `json:",omitempty"`
 	InproxyProxyDisableInboundForMobileNetworks             *bool                                            `json:",omitempty"`
 	InproxyProxyDisableIPv6ICECandidates                    *bool                                            `json:",omitempty"`
 	InproxyClientDisableSTUN                                *bool                                            `json:",omitempty"`
+	InproxyClientDisableSTUNCandidateGathering              *bool                                            `json:",omitempty"`
 	InproxyClientDisablePortMapping                         *bool                                            `json:",omitempty"`
 	InproxyClientDisableInboundForMobileNetworks            *bool                                            `json:",omitempty"`
 	InproxyClientDisableIPv6ICECandidates                   *bool                                            `json:",omitempty"`
@@ -3531,6 +3534,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyDisableSTUN] = *config.InproxyDisableSTUN
 	}
 
+	if config.InproxyDisableSTUNCandidateGathering != nil {
+		applyParameters[parameters.InproxyDisableSTUNCandidateGathering] = *config.InproxyDisableSTUNCandidateGathering
+	}
+
 	if config.InproxyDisablePortMapping != nil {
 		applyParameters[parameters.InproxyDisablePortMapping] = *config.InproxyDisablePortMapping
 	}
@@ -3547,6 +3554,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyProxyDisableSTUN] = *config.InproxyProxyDisableSTUN
 	}
 
+	if config.InproxyProxyDisableSTUNCandidateGathering != nil {
+		applyParameters[parameters.InproxyProxyDisableSTUNCandidateGathering] = *config.InproxyProxyDisableSTUNCandidateGathering
+	}
+
 	if config.InproxyProxyDisablePortMapping != nil {
 		applyParameters[parameters.InproxyProxyDisablePortMapping] = *config.InproxyProxyDisablePortMapping
 	}
@@ -3561,6 +3572,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyClientDisableSTUN != nil {
 		applyParameters[parameters.InproxyClientDisableSTUN] = *config.InproxyClientDisableSTUN
+	}
+
+	if config.InproxyClientDisableSTUNCandidateGathering != nil {
+		applyParameters[parameters.InproxyClientDisableSTUNCandidateGathering] = *config.InproxyClientDisableSTUNCandidateGathering
 	}
 
 	if config.InproxyClientDisablePortMapping != nil {
@@ -4621,6 +4636,10 @@ func (config *Config) setDialParametersHash() error {
 		hash.Write([]byte("InproxyDisableSTUN"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableSTUN)
 	}
+	if config.InproxyDisableSTUNCandidateGathering != nil {
+		hash.Write([]byte("InproxyDisableSTUNCandidateGathering"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableSTUNCandidateGathering)
+	}
 	if config.InproxyDisablePortMapping != nil {
 		hash.Write([]byte("InproxyDisablePortMapping"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyDisablePortMapping)
@@ -4637,6 +4656,10 @@ func (config *Config) setDialParametersHash() error {
 		hash.Write([]byte("InproxyProxyDisableSTUN"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableSTUN)
 	}
+	if config.InproxyProxyDisableSTUNCandidateGathering != nil {
+		hash.Write([]byte("InproxyProxyDisableSTUNCandidateGathering"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableSTUNCandidateGathering)
+	}
 	if config.InproxyProxyDisablePortMapping != nil {
 		hash.Write([]byte("InproxyProxyDisablePortMapping"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisablePortMapping)
@@ -4652,6 +4675,10 @@ func (config *Config) setDialParametersHash() error {
 	if config.InproxyClientDisableSTUN != nil {
 		hash.Write([]byte("InproxyClientDisableSTUN"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableSTUN)
+	}
+	if config.InproxyClientDisableSTUNCandidateGathering != nil {
+		hash.Write([]byte("InproxyClientDisableSTUNCandidateGathering"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableSTUNCandidateGathering)
 	}
 	if config.InproxyClientDisablePortMapping != nil {
 		hash.Write([]byte("InproxyClientDisablePortMapping"))

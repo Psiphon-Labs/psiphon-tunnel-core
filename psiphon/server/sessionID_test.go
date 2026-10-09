@@ -20,6 +20,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -62,7 +63,10 @@ func TestDuplicateSessionID(t *testing.T) {
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 
-	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
+	logFilename := filepath.Join(testDataDirName, "psiphond.log")
+	rotatedLogFilename := logFilename + ".1"
+	logRotated := false
+	serverConfig["LogFilename"] = logFilename
 	serverConfig["LogLevel"] = "debug"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
@@ -92,8 +96,12 @@ func TestDuplicateSessionID(t *testing.T) {
 		}
 
 	})
+	defer setLogCallback(nil)
 
 	// Run server
+
+	// Ensure this test uses its own log file after any earlier server tests.
+	initLogging = sync.Once{}
 
 	serverWaitGroup := new(sync.WaitGroup)
 	serverWaitGroup.Add(1)
@@ -109,6 +117,27 @@ func TestDuplicateSessionID(t *testing.T) {
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(os.Interrupt)
 		serverWaitGroup.Wait()
+
+		if !logRotated {
+			return
+		}
+		for _, filename := range []string{rotatedLogFilename, logFilename} {
+			data, err := os.ReadFile(filename)
+			if err != nil {
+				t.Errorf("read log failed: %s", err)
+				continue
+			}
+			if len(data) == 0 || data[len(data)-1] != '\n' {
+				t.Errorf("incomplete log file: %s", filename)
+				continue
+			}
+			for _, line := range bytes.Split(data[:len(data)-1], []byte{'\n'}) {
+				if !json.Valid(line) {
+					t.Errorf("invalid JSON record in %s", filename)
+					break
+				}
+			}
+		}
 	}()
 
 	// TODO: monitor logs for more robust wait-until-loaded.
@@ -260,6 +289,9 @@ func TestDuplicateSessionID(t *testing.T) {
 	//
 	// This should be enough concurrent clients to trigger both the "stopping"
 	// and "aborting" duplicate session ID cases.
+	//
+	// Also exercise concurrent JSON formatting and callbacks during log rotation,
+	// checking for complete JSON records after shutdown.
 
 	tunnels := make([]*psiphon.Tunnel, numConcurrentClients)
 
@@ -271,7 +303,13 @@ func TestDuplicateSessionID(t *testing.T) {
 			tunnels[i] = dialTunnel(ctx)
 		}(i)
 	}
+
+	rotationErr := os.Rename(logFilename, rotatedLogFilename)
 	waitGroup.Wait()
+	if rotationErr != nil {
+		t.Fatalf("rotate log failed: %s", rotationErr)
+	}
+	logRotated = true
 
 	for _, t := range tunnels {
 		if t == nil {

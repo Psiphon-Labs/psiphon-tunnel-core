@@ -1268,6 +1268,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["LogFilename"] = filepath.Join(testDataDirName, "psiphond.log")
 	serverConfig["LogLevel"] = "debug"
 
+	// Only SIGUSR2 should collect/reset load metrics in this test.
+	serverConfig["LoadMonitorPeriodSeconds"] = 0
+
 	serverConfig["AccessControlVerificationKeyRing"] = accessControlVerificationKeyRing
 
 	// Set this parameter so at least the semaphore functions are called.
@@ -2727,6 +2730,28 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			fmt.Sprintf("%s", logFields["server_entry_tag"]) == "" {
 			t.Fatalf("missing server_entry_tag")
 		}
+		if doInproxy {
+			for _, name := range []string{
+				"inproxy_matcher_pass_count",
+				"inproxy_matcher_no_match_pass_count",
+				"inproxy_matcher_pass_duration_sum_us",
+				"inproxy_matcher_pass_duration_max_us",
+				"inproxy_matcher_offers_visited",
+				"inproxy_matcher_offers_without_eligible_queue",
+				"inproxy_matcher_announcements_examined",
+			} {
+				value, ok := logFields[name].(float64)
+				if !ok || value < 0 {
+					t.Fatalf("invalid server_load.%s: %v", name, logFields[name])
+				}
+			}
+			if logFields["inproxy_matcher_no_match_pass_count"].(float64) >=
+				logFields["inproxy_matcher_pass_count"].(float64) ||
+				logFields["inproxy_matcher_offers_visited"].(float64) == 0 ||
+				logFields["inproxy_matcher_announcements_examined"].(float64) == 0 {
+				t.Fatalf("missing successful matcher work in server_load")
+			}
+		}
 		if expectDomainPortForward {
 			dnsCount := int(logFields["dns_count"].(map[string]any)["ALL"].(float64))
 			if dnsCount != 1 {
@@ -2788,6 +2813,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if doInproxy && expectLog {
 			select {
 			case logFields := <-logChannel:
+
+				if logChannel == inproxyProxyAnswerLog && logFields["error"] == nil {
+					if _, ok := logFields["no_awaiting_client"].(bool); !ok {
+						t.Errorf("missing inproxy_broker.no_awaiting_client")
+					}
+				}
 
 				// Check that broker receives the correct fronting provider ID.
 				//
