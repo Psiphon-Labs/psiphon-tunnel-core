@@ -62,7 +62,7 @@ func runTestSessions() error {
 	}
 
 	responderSessions, err := NewResponderSessions(
-		responderPrivateKey, responderRootObfuscationSecret)
+		responderPrivateKey, responderRootObfuscationSecret, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -237,7 +237,7 @@ func runTestSessions() error {
 	responderSessions, err = NewResponderSessionsForKnownInitiators(
 		responderPrivateKey,
 		responderRootObfuscationSecret,
-		[]SessionPublicKey{initiatorPublicKey})
+		[]SessionPublicKey{initiatorPublicKey}, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -276,7 +276,7 @@ func runTestSessions() error {
 	responderSessions, err = NewResponderSessionsForKnownInitiators(
 		responderPrivateKey,
 		responderRootObfuscationSecret,
-		[]SessionPublicKey{})
+		[]SessionPublicKey{}, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -364,7 +364,7 @@ func runTestSessions() error {
 	// Test: many concurrent sessions
 
 	responderSessions, err = NewResponderSessions(
-		responderPrivateKey, responderRootObfuscationSecret)
+		responderPrivateKey, responderRootObfuscationSecret, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}

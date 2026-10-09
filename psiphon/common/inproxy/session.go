@@ -886,7 +886,8 @@ type ResponderSessions struct {
 // initiators to establish a session. A TTL is applied to cached sessions.
 func NewResponderSessions(
 	responderPrivateKey SessionPrivateKey,
-	responderRootObfuscationSecret ObfuscationSecret) (*ResponderSessions, error) {
+	responderRootObfuscationSecret ObfuscationSecret,
+	antiReplayHistorySize int) (*ResponderSessions, error) {
 
 	sendObfuscationSecret, receiveObfuscationSecret, err :=
 		deriveSessionPacketObfuscationSecrets(responderRootObfuscationSecret, true)
@@ -899,7 +900,7 @@ func NewResponderSessions(
 		sendObfuscationSecret:    sendObfuscationSecret,
 		receiveObfuscationSecret: receiveObfuscationSecret,
 		applyTTL:                 true,
-		obfuscationReplayHistory: newObfuscationReplayHistory(),
+		obfuscationReplayHistory: newObfuscationReplayHistory(antiReplayHistorySize),
 		sessions:                 lrucache.NewWithLRU(sessionsTTL, 1*time.Minute, sessionsMaxSize),
 		concurrentNewSessions:    semaphore.New(maxResponderConcurrentNewSessions),
 	}, nil
@@ -918,9 +919,11 @@ func NewResponderSessions(
 func NewResponderSessionsForKnownInitiators(
 	responderPrivateKey SessionPrivateKey,
 	responderRootObfuscationKey ObfuscationSecret,
-	initiatorPublicKeys []SessionPublicKey) (*ResponderSessions, error) {
+	initiatorPublicKeys []SessionPublicKey,
+	antiReplayHistorySize int) (*ResponderSessions, error) {
 
-	s, err := NewResponderSessions(responderPrivateKey, responderRootObfuscationKey)
+	s, err := NewResponderSessions(
+		responderPrivateKey, responderRootObfuscationKey, antiReplayHistorySize)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

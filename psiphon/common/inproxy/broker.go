@@ -227,6 +227,12 @@ type BrokerConfig struct {
 	// ObfuscationRootSecret broker's secure session long term obfuscation key.
 	ObfuscationRootSecret ObfuscationSecret
 
+	// ObfuscationAntiReplayHistorySize specifies the size of a brokers
+	// replay history. See common/inproxy.newObfuscationReplayHistory for
+	// more details. If not specified, a default value is used. Specify a
+	// negative value to disable history.
+	ObfuscationAntiReplayHistorySize int
+
 	// ServerEntrySignaturePublicKey is the key used to verify Psiphon server
 	// entry signatures.
 	ServerEntrySignaturePublicKey string
@@ -293,7 +299,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 	// configured to establish sessions only with specified broker public keys.
 
 	responderSessions, err := NewResponderSessions(
-		config.PrivateKey, config.ObfuscationRootSecret)
+		config.PrivateKey, config.ObfuscationRootSecret,
+		config.ObfuscationAntiReplayHistorySize)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
