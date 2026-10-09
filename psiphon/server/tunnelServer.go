@@ -368,6 +368,26 @@ func (server *TunnelServer) GetLoadStats() (
 	return server.sshServer.getLoadStats()
 }
 
+// GetInproxyBrokerMetrics returns a snapshot of metrics from completed matching
+// passes across brokers and resets the accumulated metrics.
+func (server *TunnelServer) GetInproxyBrokerMetrics() LogFields {
+	server.sshServer.meekServersMutex.Lock()
+	defer server.sshServer.meekServersMutex.Unlock()
+
+	var metrics inproxy.MatcherMetrics
+	hasBroker := false
+	for _, meekServer := range server.sshServer.meekServers {
+		if meekServer.inproxyBroker != nil {
+			metrics.Add(meekServer.inproxyBroker.GetMatcherMetrics())
+			hasBroker = true
+		}
+	}
+	if !hasBroker {
+		return nil
+	}
+	return LogFields(metrics.GetLogFields())
+}
+
 // GetEstablishedClientCount returns the number of currently established
 // clients.
 func (server *TunnelServer) GetEstablishedClientCount() int {

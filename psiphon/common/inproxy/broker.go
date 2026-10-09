@@ -404,6 +404,12 @@ func (b *Broker) SetCommonCompartmentIDs(
 		sponsorCommonCompartmentIDs))
 }
 
+// GetMatcherMetrics returns a snapshot of metrics from completed matching
+// passes and resets the accumulated metrics.
+func (b *Broker) GetMatcherMetrics() MatcherMetrics {
+	return b.matcher.GetMetrics()
+}
+
 // SetTimeouts sets new timeout values, replacing the previous configuration.
 // New timeout values do not apply to currently active announcement or offer
 // requests.
@@ -928,7 +934,10 @@ func (b *Broker) handleProxyAnnounce(
 		var limitError *MatcherLimitError
 		limited := std_errors.As(err, &limitError)
 
-		timeout := announceCtx.Err() == context.DeadlineExceeded
+		// Treat deadline expiry detected before context cancellation as no-match
+		// to avoid unnecessary broker resets.
+		timeout := announceCtx.Err() == context.DeadlineExceeded ||
+			std_errors.Is(err, context.DeadlineExceeded)
 
 		if !limited && !timeout {
 			return nil, errors.Trace(err)
@@ -1250,7 +1259,10 @@ func (b *Broker) handleClientOffer(
 		var limitError *MatcherLimitError
 		limited := std_errors.As(err, &limitError)
 
+		// Treat deadline expiry detected before context cancellation as no-match
+		// to avoid unnecessary broker resets.
 		timeout := offerCtx.Err() == context.DeadlineExceeded ||
+			std_errors.Is(err, context.DeadlineExceeded) ||
 			std_errors.Is(err, errOfferDropped)
 
 		// A no-match response is sent in the case of a timeout awaiting a
@@ -1423,6 +1435,7 @@ func (b *Broker) handleProxyAnswer(
 	var proxyAnswer *MatchAnswer
 	var sdpMetrics *webRTCSDPMetrics
 	var answerError string
+	var noAwaitingClient bool
 
 	// The proxy ID is an implicit parameter: it's the proxy's session public
 	// key.
@@ -1434,6 +1447,9 @@ func (b *Broker) handleProxyAnswer(
 			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-answer"
+		if retErr == nil {
+			logFields["no_awaiting_client"] = noAwaitingClient
+		}
 		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
@@ -1478,6 +1494,7 @@ func (b *Broker) handleProxyAnswer(
 		if std_errors.Is(err, errNoPendingAnswer) {
 			// Return a response. This avoids returning a
 			// broker-client-resetting 404 in this case.
+			noAwaitingClient = true
 			responsePayload, err := MarshalProxyAnswerResponse(
 				&ProxyAnswerResponse{NoAwaitingClient: true})
 			if err != nil {
@@ -1534,6 +1551,7 @@ func (b *Broker) handleProxyAnswer(
 			if std_errors.Is(err, errNoPendingAnswer) {
 				// Return a response. This avoids returning a
 				// broker-client-resetting 404 in this case.
+				noAwaitingClient = true
 				responsePayload, err := MarshalProxyAnswerResponse(
 					&ProxyAnswerResponse{NoAwaitingClient: true})
 				if err != nil {

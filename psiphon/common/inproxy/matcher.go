@@ -115,6 +115,9 @@ type Matcher struct {
 	matchSignal chan struct{}
 
 	pendingAnswers *lrucache.Cache
+
+	metricsMutex sync.Mutex
+	metrics      MatcherMetrics
 }
 
 // MatcherConfig specifies the configuration for a matcher.
@@ -234,6 +237,41 @@ type MatchAnswer struct {
 	ICEASN               string
 }
 
+// MatcherMetrics aggregates work metrics across complete matching passes.
+type MatcherMetrics struct {
+	PassCount                  int64
+	NoMatchPassCount           int64
+	PassDuration               time.Duration
+	MaxPassDuration            time.Duration
+	OffersVisited              int64
+	OffersWithoutEligibleQueue int64
+	AnnouncementsExamined      int64
+}
+
+// Add accumulates pass metrics, keeping the longest pass duration.
+func (metrics *MatcherMetrics) Add(other MatcherMetrics) {
+	metrics.PassCount += other.PassCount
+	metrics.NoMatchPassCount += other.NoMatchPassCount
+	metrics.PassDuration += other.PassDuration
+	metrics.MaxPassDuration = max(metrics.MaxPassDuration, other.MaxPassDuration)
+	metrics.OffersVisited += other.OffersVisited
+	metrics.OffersWithoutEligibleQueue += other.OffersWithoutEligibleQueue
+	metrics.AnnouncementsExamined += other.AnnouncementsExamined
+}
+
+// GetLogFields reports durations in microseconds.
+func (metrics MatcherMetrics) GetLogFields() common.LogFields {
+	return common.LogFields{
+		"inproxy_matcher_pass_count":                    metrics.PassCount,
+		"inproxy_matcher_no_match_pass_count":           metrics.NoMatchPassCount,
+		"inproxy_matcher_pass_duration_sum_us":          int64(metrics.PassDuration / time.Microsecond),
+		"inproxy_matcher_pass_duration_max_us":          int64(metrics.MaxPassDuration / time.Microsecond),
+		"inproxy_matcher_offers_visited":                metrics.OffersVisited,
+		"inproxy_matcher_offers_without_eligible_queue": metrics.OffersWithoutEligibleQueue,
+		"inproxy_matcher_announcements_examined":        metrics.AnnouncementsExamined,
+	}
+}
+
 // MatchMetrics records statistics about the match queue state at the time a
 // match is made.
 type MatchMetrics struct {
@@ -295,9 +333,14 @@ type offerEntry struct {
 	answerChan   chan *answerInfo
 	matchMetrics atomic.Value
 
+	answerMutex      sync.Mutex
+	answerDone       bool
+	pendingAnswerKey string
+
 	// queueReference is initialized by addOfferEntry, and used to efficiently
 	// dequeue the entry.
 	queueReference *list.Element
+	dequeued       atomic.Bool
 }
 
 func (offerEntry *offerEntry) getMatchMetrics() *MatchMetrics {
@@ -320,7 +363,7 @@ type answerInfo struct {
 // proxy.
 type pendingAnswer struct {
 	announcement *MatchAnnouncement
-	answerChan   chan *answerInfo
+	offerEntry   *offerEntry
 }
 
 // NewMatcher creates a new Matcher.
@@ -592,15 +635,16 @@ func (m *Matcher) Offer(
 
 	select {
 	case <-ctx.Done():
-		m.removeOfferEntry(true, offerEntry)
-
-		// TODO: also remove any pendingAnswers entry? The entry TTL is set to
-		// the Offer ctx, the client request, timeout, so it will eventually
-		// get removed. But a client may abort its request earlier than the
-		// timeout.
-
-		return nil, nil,
-			offerEntry.getMatchMetrics(), errors.Trace(ctx.Err())
+		// Handle abandoned pending answers before waiting for the offer-queue lock.
+		m.completeOffer(offerEntry, nil)
+		select {
+		case proxyAnswerInfo = <-offerEntry.answerChan:
+			// Preserve useful answers committed just before cancellation.
+		default:
+			m.removeOfferEntry(true, offerEntry)
+			return nil, nil,
+				offerEntry.getMatchMetrics(), errors.Trace(ctx.Err())
+		}
 
 	case proxyAnswerInfo = <-offerEntry.answerChan:
 	}
@@ -632,6 +676,32 @@ func (m *Matcher) Offer(
 		nil
 }
 
+func (m *Matcher) completeOffer(offerEntry *offerEntry, info *answerInfo) bool {
+	// Synchronize answer and error delivery with cancellation so at most one
+	// result is sent to the waiting offer.
+	offerEntry.answerMutex.Lock()
+	defer offerEntry.answerMutex.Unlock()
+
+	if offerEntry.answerDone {
+		return false
+	}
+	offerEntry.answerDone = true
+
+	if offerEntry.pendingAnswerKey != "" {
+		m.pendingAnswers.Delete(offerEntry.pendingAnswerKey)
+		offerEntry.pendingAnswerKey = ""
+	}
+
+	// Reject answers after offer cancellation or expiry. The broker responds with
+	// NoAwaitingClient, telling the proxy to abandon the connection attempt.
+	if matcherContextError(offerEntry.ctx) != nil {
+		return false
+	}
+
+	offerEntry.answerChan <- info
+	return true
+}
+
 var errNoPendingAnswer = std_errors.New("no pending answer")
 
 // AnnouncementHasPersonalCompartmentIDs looks for a pending answer for an
@@ -652,9 +722,19 @@ func (m *Matcher) AnnouncementHasPersonalCompartmentIDs(
 	}
 
 	pendingAnswer := pendingAnswerValue.(*pendingAnswer)
+	offerEntry := pendingAnswer.offerEntry
+	offerEntry.answerMutex.Lock()
+
+	// Reject answers for abandoned offers.
+	if offerEntry.answerDone || matcherContextError(offerEntry.ctx) != nil {
+		offerEntry.answerMutex.Unlock()
+		m.completeOffer(offerEntry, nil)
+		return false, errors.Trace(errNoPendingAnswer)
+	}
 
 	hasPersonalCompartmentIDs := len(
 		pendingAnswer.announcement.Properties.PersonalCompartmentIDs) > 0
+	offerEntry.answerMutex.Unlock()
 
 	return hasPersonalCompartmentIDs, nil
 }
@@ -677,13 +757,12 @@ func (m *Matcher) Answer(
 		return errors.Trace(errNoPendingAnswer)
 	}
 
-	m.pendingAnswers.Delete(key)
-
 	pendingAnswer := pendingAnswerValue.(*pendingAnswer)
-
-	pendingAnswer.answerChan <- &answerInfo{
+	if !m.completeOffer(pendingAnswer.offerEntry, &answerInfo{
 		announcement: pendingAnswer.announcement,
 		answer:       proxyAnswer,
+	}) {
+		return errors.Trace(errNoPendingAnswer)
 	}
 
 	return nil
@@ -704,10 +783,7 @@ func (m *Matcher) AnswerError(proxyID ID, connectionID ID) {
 		return
 	}
 
-	m.pendingAnswers.Delete(key)
-
-	// Closing the channel delivers nil, a failed indicator, to any receiver.
-	close(pendingAnswerValue.(*pendingAnswer).answerChan)
+	m.completeOffer(pendingAnswerValue.(*pendingAnswer).offerEntry, nil)
 }
 
 // matchWorker is the matching worker goroutine. It idles until signaled that
@@ -723,11 +799,35 @@ func (m *Matcher) matchWorker(ctx context.Context) {
 	}
 }
 
+// GetMetrics returns a snapshot of metrics from completed matching
+// passes and resets the accumulated metrics.
+func (m *Matcher) GetMetrics() MatcherMetrics {
+	m.metricsMutex.Lock()
+	defer m.metricsMutex.Unlock()
+
+	metrics := m.metrics
+	m.metrics = MatcherMetrics{}
+	return metrics
+}
+
 // matchAllOffers iterates over the queues, making all possible matches.
 func (m *Matcher) matchAllOffers() {
 
+	// TODO: Reduce matcher CPU and queue-lock hold time spent rescanning offers
+	// whose compartments have no announcement supply. Index offers by eligible
+	// compartments and only process offers with available supply.
+
 	// Include lock acquisition time in MatchDuration metric.
 	startTime := time.Now()
+	passMetrics := MatcherMetrics{PassCount: 1, NoMatchPassCount: 1}
+
+	defer func() {
+		passMetrics.PassDuration = time.Since(startTime)
+		passMetrics.MaxPassDuration = passMetrics.PassDuration
+		m.metricsMutex.Lock()
+		m.metrics.Add(passMetrics)
+		m.metricsMutex.Unlock()
+	}()
 
 	m.offerQueueMutex.Lock()
 	defer m.offerQueueMutex.Unlock()
@@ -745,6 +845,7 @@ func (m *Matcher) matchAllOffers() {
 	for nextOffer != nil && m.announcementQueue.getLen() > 0 {
 
 		offerIndex += 1
+		passMetrics.OffersVisited++
 
 		// Periodicially yield the announcement queue lock to allow proxy
 		// announces a chance to enqueue.
@@ -769,23 +870,52 @@ func (m *Matcher) matchAllOffers() {
 			continue
 		}
 
-		offerDeadline, _ := offerEntry.ctx.Deadline()
-		untilOfferDeadline := time.Until(offerDeadline)
+		offerDeadline, hasOfferDeadline := offerEntry.ctx.Deadline()
+		untilOfferDeadline := matcherPendingAnswersTTL
+		if hasOfferDeadline {
+			untilOfferDeadline = time.Until(offerDeadline)
+		}
 
 		// Drop this offer if it no longer has a sufficient remaining deadline
-		// for the proxy answer phase. This case signals Offer's answerChan
-		// so it can return immediately.
+		// for the proxy answer phase.
 
-		if m.offerMinimumDeadline > 0 &&
-			untilOfferDeadline < m.offerMinimumDeadline {
+		if untilOfferDeadline <= 0 ||
+			(m.offerMinimumDeadline > 0 && untilOfferDeadline < m.offerMinimumDeadline) {
 
 			m.removeOfferEntry(false, offerEntry)
-			offerEntry.answerChan <- &answerInfo{offerDropped: true}
+			m.completeOffer(offerEntry, &answerInfo{offerDropped: true})
 			continue
 		}
 
-		announcementEntry, announcementMatchIndex := m.matchOffer(offerEntry)
+		announcementEntry, announcementMatchIndex := m.matchOffer(offerEntry, &passMetrics)
 		if announcementEntry == nil {
+			continue
+		}
+		// Skip and discard abandoned announcements.
+		if matcherContextError(announcementEntry.ctx) != nil {
+			m.removeAnnouncementEntry(false, announcementEntry)
+			nextOffer = offer
+			offerIndex--
+			continue
+		}
+
+		// Recheck that this offer has not been abandoned and still has a sufficient
+		// remaining deadline for the proxy answer phase.
+		offerEntry.answerMutex.Lock()
+		if offerEntry.answerDone || offerEntry.ctx.Err() != nil {
+			offerEntry.answerMutex.Unlock()
+			m.removeOfferEntry(false, offerEntry)
+			continue
+		}
+		if hasOfferDeadline {
+			untilOfferDeadline = time.Until(offerDeadline)
+		}
+		if untilOfferDeadline <= 0 ||
+			(m.offerMinimumDeadline > 0 && untilOfferDeadline < m.offerMinimumDeadline) {
+
+			offerEntry.answerMutex.Unlock()
+			m.removeOfferEntry(false, offerEntry)
+			m.completeOffer(offerEntry, &answerInfo{offerDropped: true})
 			continue
 		}
 
@@ -823,25 +953,22 @@ func (m *Matcher) matchAllOffers() {
 
 		m.removeAnnouncementEntry(false, announcementEntry)
 
-		expiry := lrucache.DefaultExpiration
-		deadline, ok := offerEntry.ctx.Deadline()
-		if ok {
-			expiry = time.Until(deadline)
-		}
-
 		key := m.pendingAnswerKey(
 			announcementEntry.announcement.ProxyID,
 			announcementEntry.announcement.ConnectionID)
 
+		offerEntry.pendingAnswerKey = key
 		m.pendingAnswers.Set(
 			key,
 			&pendingAnswer{
 				announcement: announcementEntry.announcement,
-				answerChan:   offerEntry.answerChan,
+				offerEntry:   offerEntry,
 			},
-			expiry)
+			untilOfferDeadline)
 
 		announcementEntry.offerChan <- offerEntry.offer
+		offerEntry.answerMutex.Unlock()
+		passMetrics.NoMatchPassCount = 0
 
 		// Remove the matched offer from the queue and match the next offer,
 		// now first in the queue.
@@ -850,7 +977,8 @@ func (m *Matcher) matchAllOffers() {
 	}
 }
 
-func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
+func (m *Matcher) matchOffer(
+	offerEntry *offerEntry, metrics *MatcherMetrics) (*announcementEntry, int) {
 
 	// Assumes the caller has the queue mutexes locked.
 
@@ -884,6 +1012,9 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 
 	matchIterator := m.announcementQueue.startMatching(
 		isCommonCompartments, compartmentIDs)
+	if len(matchIterator.compartmentQueues) == 0 {
+		metrics.OffersWithoutEligibleQueue++
+	}
 
 	// Use the NAT traversal type counters to check if there's any preferred
 	// NAT match for this offer in the announcement queue. When there is, we
@@ -924,6 +1055,7 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 		if announcementEntry == nil {
 			break
 		}
+		metrics.AnnouncementsExamined++
 
 		if !isPriority && bestMatchIsPriority {
 
@@ -941,7 +1073,7 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 		// passed. There is no signal to the awaiting Announce function, as
 		// it will exit based on the same ctx.
 
-		if announcementEntry.ctx.Err() != nil {
+		if matcherContextError(announcementEntry.ctx) != nil {
 			m.removeAnnouncementEntry(false, announcementEntry)
 			continue
 		}
@@ -1207,8 +1339,19 @@ func (m *Matcher) applyIPLimits(
 
 func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) error {
 
+	err := matcherContextError(announcementEntry.ctx)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	m.announcementQueueMutex.Lock()
 	defer m.announcementQueueMutex.Unlock()
+
+	// The announcement may have been abandoned while waiting for the queue lock.
+	err = matcherContextError(announcementEntry.ctx)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// Ensure the queue doesn't grow larger than the max size.
 	if m.announcementQueue.getLen() >= matcherAnnouncementQueueMaxSize {
@@ -1231,7 +1374,7 @@ func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) err
 	// Ensure no single peer IP can enqueue a large number of entries or
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := true
-	err := m.applyIPLimits(
+	err = m.applyIPLimits(
 		isAnnouncement,
 		isExempt,
 		announcementEntry.limitIP)
@@ -1291,22 +1434,30 @@ func (m *Matcher) removeAnnouncementEntry(aborting bool, announcementEntry *anno
 		// a failure signal to the waiting Offer, so the client doesn't wait
 		// longer than necessary.
 
-		key := m.pendingAnswerKey(
+		m.AnswerError(
 			announcementEntry.announcement.ProxyID,
 			announcementEntry.announcement.ConnectionID)
-
-		pendingAnswerValue, ok := m.pendingAnswers.Get(key)
-		if ok {
-			close(pendingAnswerValue.(*pendingAnswer).answerChan)
-			m.pendingAnswers.Delete(key)
-		}
 	}
 }
 
 func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 
+	// TODO: Keep enqueue handlers from blocking on a full matcher pass.
+	// Consider appending to intake lists under a distinct lock.
+
+	err := matcherContextError(offerEntry.ctx)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	m.offerQueueMutex.Lock()
 	defer m.offerQueueMutex.Unlock()
+
+	// The offer may have been abandoned while waiting for the queue lock.
+	err = matcherContextError(offerEntry.ctx)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// Ensure the queue doesn't grow larger than the max size.
 	if m.offerQueue.Len() >= matcherOfferQueueMaxSize {
@@ -1316,7 +1467,7 @@ func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 	// Ensure no single peer IP can enqueue a large number of entries or
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := false
-	err := m.applyIPLimits(
+	err = m.applyIPLimits(
 		isAnnouncement, false, offerEntry.limitIP)
 	if err != nil {
 		return errors.Trace(err)
@@ -1344,9 +1495,16 @@ func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 
 func (m *Matcher) removeOfferEntry(aborting bool, offerEntry *offerEntry) {
 
+	// TODO: To reduce queue lock contention, let cancelled offer/announce handlers
+	// return without acquiring the queue lock. Clean up abandoned entries
+	// independently of matching.
+
 	// In the aborting case, the queue isn't already locked. Otherise, assume
 	// it is locked.
 	if aborting {
+		if offerEntry.dequeued.Load() {
+			return
+		}
 		m.offerQueueMutex.Lock()
 		defer m.offerQueueMutex.Unlock()
 	}
@@ -1366,6 +1524,21 @@ func (m *Matcher) removeOfferEntry(aborting bool, offerEntry *offerEntry) {
 	if m.offerQueueEntryCountByIP[offerEntry.limitIP] == 0 {
 		delete(m.offerQueueEntryCountByIP, offerEntry.limitIP)
 	}
+
+	// Record the dequeue, which allows the offer handler to avoid a queue lock
+	// in some scenarios.
+	offerEntry.dequeued.Store(true)
+}
+
+func matcherContextError(ctx context.Context) error {
+	err := ctx.Err()
+	if err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 0 {
+		return context.DeadlineExceeded
+	}
+	return nil
 }
 
 func (m *Matcher) pendingAnswerKey(proxyID ID, connectionID ID) string {
