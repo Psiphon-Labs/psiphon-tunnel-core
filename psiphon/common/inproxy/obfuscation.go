@@ -253,17 +253,18 @@ func (e *DeobfuscationAnomoly) Error() string {
 // obfuscateSessionPacket and the same deobfuscateSessionPacket.
 //
 // Responders must supply an obfuscationReplayHistory, which checks for
-// replayed session packets (within the time factor). Responders should drop
-// into anti-probing response behavior when deobfuscateSessionPacket returns
-// an error: the obfuscated packet may have been created by a prober without
-// the correct secret; or replayed by a prober.
+// replayed session packets (within the time factor) unless disabled.
+// Responders should drop into anti-probing response behavior when
+// deobfuscateSessionPacket returns an error: the obfuscated packet may have
+// been created by a prober without the correct secret; or replayed by a prober.
 func deobfuscateSessionPacket(
 	obfuscationSecret ObfuscationSecret,
 	isInitiator bool,
 	replayHistory *obfuscationReplayHistory,
 	obfuscatedPacket []byte) ([]byte, error) {
 
-	// A responder must provide a relay history, or it's misconfigured.
+	// A responder must provide a replay history, even when replay checks are
+	// disabled, as responders must still parse and validate timestamps.
 	if isInitiator == (replayHistory != nil) {
 		return nil, errors.TraceNew("unexpected replay history")
 	}
@@ -389,7 +390,14 @@ type obfuscationReplayHistory struct {
 	switchTime    time.Time
 }
 
-func newObfuscationReplayHistory() *obfuscationReplayHistory {
+func newObfuscationReplayHistory(historySize int) *obfuscationReplayHistory {
+
+	if historySize < 0 {
+		return &obfuscationReplayHistory{}
+	}
+	if historySize == 0 {
+		historySize = obfuscationAntiReplayHistorySize
+	}
 
 	// Replay history is implemented using bloom filters, which use fixed
 	// space overhead, and less space overhead than storing nonces explictly
@@ -398,12 +406,13 @@ func newObfuscationReplayHistory() *obfuscationReplayHistory {
 	// chance that a non-replayed nonce will be flagged as in the history,
 	// but no chance that a replayed nonce will pass as not in the history.
 	//
-	// With obfuscationAntiReplayHistorySize set to 10M and a false positive
+	// With the default history size of 10M and a false positive
 	// rate of 0.001, the session_test test case with 10k clients making 100
 	// requests each all within one time period consistently produces no
 	// false positives.
 	//
-	// Memory overhead is approximately 18MB per bloom filter, so 18MB x 2.
+	// At the default size, memory overhead is approximately 18MB per bloom
+	// filter, so 18MB x 2. Memory use scales linearly with historySize.
 	// From:
 	//
 	// m, _ := bloom.EstimateParameters(10_000_000, 0.001) --> 143775876
@@ -415,8 +424,8 @@ func newObfuscationReplayHistory() *obfuscationReplayHistory {
 
 	return &obfuscationReplayHistory{
 		filters: [2]*bloom.BloomFilter{
-			bloom.NewWithEstimates(obfuscationAntiReplayHistorySize, 0.001),
-			bloom.NewWithEstimates(obfuscationAntiReplayHistorySize, 0.001),
+			bloom.NewWithEstimates(uint(historySize), 0.001),
+			bloom.NewWithEstimates(uint(historySize), 0.001),
 		},
 		currentFilter: 0,
 		switchTime:    time.Now(),
@@ -424,6 +433,10 @@ func newObfuscationReplayHistory() *obfuscationReplayHistory {
 }
 
 func (h *obfuscationReplayHistory) Insert(value []byte) {
+	if h.filters[0] == nil {
+		return
+	}
+
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -433,6 +446,10 @@ func (h *obfuscationReplayHistory) Insert(value []byte) {
 }
 
 func (h *obfuscationReplayHistory) Lookup(value []byte) bool {
+	if h.filters[0] == nil {
+		return false
+	}
+
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 

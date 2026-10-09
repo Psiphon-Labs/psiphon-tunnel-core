@@ -21,12 +21,143 @@ package inproxy
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
 	"testing"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/bits-and-blooms/bloom/v3"
 )
+
+func TestConfiguredObfuscationAntiReplayHistory(t *testing.T) {
+	privateKey, err := GenerateSessionPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSecret, err := GenerateRootObfuscationSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testCase := range []struct {
+		name     string
+		size     int
+		isServer bool
+	}{
+		{"broker_default", 0, false},
+		{"broker_custom", 1000, false},
+		{"broker_disabled", -1, false},
+		{"broker_other_negative", -100, false},
+		{"tunnel_server_disabled", -1, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var history *obfuscationReplayHistory
+			if testCase.isServer {
+				server, err := NewServerBrokerSessions(&ServerBrokerSessionsConfig{
+					ServerPrivateKey:            privateKey,
+					ServerRootObfuscationSecret: rootSecret,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				history = server.sessions.obfuscationReplayHistory
+			} else {
+				broker, err := NewBroker(&BrokerConfig{
+					PrivateKey:                       privateKey,
+					ObfuscationRootSecret:            rootSecret,
+					ObfuscationAntiReplayHistorySize: testCase.size,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				history = broker.responderSessions.obfuscationReplayHistory
+			}
+
+			if testCase.size < 0 {
+				if history.filters[0] != nil || history.filters[1] != nil {
+					t.Fatal("disabled history allocated filters")
+				}
+			} else {
+				expectedSize := testCase.size
+				if expectedSize == 0 {
+					expectedSize = obfuscationAntiReplayHistorySize
+				}
+				expectedBits, _ := bloom.EstimateParameters(uint(expectedSize), 0.001)
+				for _, filter := range history.filters {
+					if filter == nil || filter.Cap() != expectedBits {
+						t.Fatal("unexpected filter capacity")
+					}
+				}
+			}
+
+			payload := []byte("session packet")
+			packet, err := obfuscateSessionPacket(rootSecret, true, payload, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := deobfuscateSessionPacket(rootSecret, false, history, packet)
+			if err != nil || !bytes.Equal(decoded, payload) {
+				t.Fatalf("first packet failed: %v", err)
+			}
+			decoded, err = deobfuscateSessionPacket(rootSecret, false, history, packet)
+			if testCase.size < 0 {
+				if err != nil || !bytes.Equal(decoded, payload) {
+					t.Fatalf("disabled history rejected repeated packet: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("enabled history accepted repeated packet")
+			}
+		})
+	}
+}
+
+func TestDisabledObfuscationAntiReplayValidation(t *testing.T) {
+	secret, err := GenerateRootObfuscationSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(secret[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := newObfuscationReplayHistory(-1)
+
+	// Construct authenticated packets with invalid timestamps to verify that
+	// disabling the Bloom filters preserves timestamp parsing and validation.
+	for _, timestamp := range []int64{
+		0,
+		time.Now().Add(-obfuscationAntiReplayTimePeriod).Unix(),
+		time.Now().Add(obfuscationAntiReplayTimePeriod).Unix(),
+	} {
+		plaintext := binary.AppendVarint(nil, timestamp)
+		plaintext = binary.AppendUvarint(plaintext, 0)
+		plaintext = append(plaintext, []byte("payload")...)
+		nonce := prng.Bytes(obfuscationSessionPacketNonceSize)
+		packet := gcm.Seal(nonce, nonce, plaintext, nil)
+		if _, err := deobfuscateSessionPacket(secret, false, history, packet); err == nil {
+			t.Fatalf("accepted invalid timestamp %d", timestamp)
+		}
+	}
+
+	packet, err := obfuscateSessionPacket(secret, true, []byte("payload"), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet[len(packet)-1] ^= 1
+	if _, err := deobfuscateSessionPacket(secret, false, history, packet); err == nil {
+		t.Fatal("accepted modified ciphertext")
+	}
+	if _, err := deobfuscateSessionPacket(secret, false, history, nil); err == nil {
+		t.Fatal("accepted missing nonce")
+	}
+}
 
 func FuzzSessionPacketDeobfuscation(f *testing.F) {
 
@@ -64,7 +195,7 @@ func FuzzSessionPacketDeobfuscation(f *testing.F) {
 		_, err := deobfuscateSessionPacket(
 			rootSecret,
 			false,
-			newObfuscationReplayHistory(),
+			newObfuscationReplayHistory(0),
 			obfuscatedPacket)
 
 		// Only the original, valid messages should successfully deobfuscate.
@@ -117,7 +248,7 @@ func runTestSessionPacketObfuscation() error {
 		return errors.Trace(err)
 	}
 
-	replayHistory := newObfuscationReplayHistory()
+	replayHistory := newObfuscationReplayHistory(0)
 
 	// Test: obfuscate/deobfuscate initiator -> responder
 
@@ -217,7 +348,7 @@ func runTestSessionPacketObfuscation() error {
 	}
 
 	_, err = deobfuscateSessionPacket(
-		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket2)
+		responderReceiveSecret, false, newObfuscationReplayHistory(0), obfuscatedPacket2)
 	if err == nil {
 		return errors.TraceNew("unexpected responder -> responder success")
 	}
@@ -306,7 +437,7 @@ func runTestSessionPacketObfuscation() error {
 	}
 
 	_, err = deobfuscateSessionPacket(
-		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(0), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected wrong secret success")
 	}
@@ -322,7 +453,7 @@ func runTestSessionPacketObfuscation() error {
 	obfuscatedPacket1 = obfuscatedPacket1[:len(obfuscatedPacket1)-1]
 
 	_, err = deobfuscateSessionPacket(
-		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(0), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected truncated packet success")
 	}
@@ -338,7 +469,7 @@ func runTestSessionPacketObfuscation() error {
 	obfuscatedPacket1[len(obfuscatedPacket1)-1] ^= 1
 
 	_, err = deobfuscateSessionPacket(
-		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(0), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected modified packet success")
 	}
@@ -355,7 +486,7 @@ func TestObfuscationReplayHistory(t *testing.T) {
 
 func runTestObfuscationReplayHistory() error {
 
-	replayHistory := newObfuscationReplayHistory()
+	replayHistory := newObfuscationReplayHistory(0)
 
 	size := obfuscationSessionPacketNonceSize
 

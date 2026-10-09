@@ -350,22 +350,23 @@ func NewMeekServer(
 
 		inproxyBroker, err := inproxy.NewBroker(
 			&inproxy.BrokerConfig{
-				Logger:                         CommonLogger(log),
-				AllowProxy:                     meekServer.inproxyBrokerAllowProxy,
-				PrioritizeProxy:                meekServer.inproxyBrokerPrioritizeProxy,
-				AllowClient:                    meekServer.inproxyBrokerAllowClient,
-				AllowDomainFrontedDestinations: meekServer.inproxyBrokerAllowDomainFrontedDestinations,
-				AllowMatch:                     meekServer.inproxyBrokerAllowMatch,
-				LookupGeoIP:                    lookupGeoIPData,
-				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(),
-				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
-				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
-				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
-				IsLoadLimiting:                 meekServer.support.TunnelServer.CheckLoadLimiting,
-				RelayDSLRequest:                meekServer.inproxyBrokerRelayDSLRequest,
-				PrivateKey:                     sessionPrivateKey,
-				ObfuscationRootSecret:          obfuscationRootSecret,
-				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
+				Logger:                           CommonLogger(log),
+				AllowProxy:                       meekServer.inproxyBrokerAllowProxy,
+				PrioritizeProxy:                  meekServer.inproxyBrokerPrioritizeProxy,
+				AllowClient:                      meekServer.inproxyBrokerAllowClient,
+				AllowDomainFrontedDestinations:   meekServer.inproxyBrokerAllowDomainFrontedDestinations,
+				AllowMatch:                       meekServer.inproxyBrokerAllowMatch,
+				LookupGeoIP:                      lookupGeoIPData,
+				APIParameterValidator:            getInproxyBrokerAPIParameterValidator(),
+				APIParameterLogFieldFormatter:    getInproxyBrokerAPIParameterLogFieldFormatter(),
+				IsValidServerEntryTag:            support.PsinetDatabase.IsValidServerEntryTag,
+				GetTacticsPayload:                meekServer.inproxyBrokerGetTacticsPayload,
+				IsLoadLimiting:                   meekServer.support.TunnelServer.CheckLoadLimiting,
+				RelayDSLRequest:                  meekServer.inproxyBrokerRelayDSLRequest,
+				PrivateKey:                       sessionPrivateKey,
+				ObfuscationRootSecret:            obfuscationRootSecret,
+				ObfuscationAntiReplayHistorySize: support.Config.InproxyObfuscationAntiReplayHistorySize,
+				ServerEntrySignaturePublicKey:    support.Config.InproxyBrokerServerEntrySignaturePublicKey,
 			})
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -467,6 +468,21 @@ func (server *MeekServer) Run() error {
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			return context.WithValue(ctx, meekNetConnContextKey, conn)
 		},
+	}
+
+	// Adjust HTTP/2 MaxConcurrentStreams. The default adjustment increases
+	// Go's standard value. Each broker request stream should be small and
+	// idle while it long polls. Allowing more streams per network connection
+	// should reduce broker network connection overhead.
+
+	if server.inproxyBroker != nil {
+		maxConcurrentStreams := server.support.Config.InproxyBrokerHTTP2MaxConcurrentStreams
+		if maxConcurrentStreams == 0 {
+			maxConcurrentStreams = 1500
+		}
+		httpServer.HTTP2 = &http.HTTP2Config{
+			MaxConcurrentStreams: maxConcurrentStreams,
+		}
 	}
 
 	// Note: Serve() will be interrupted by server.listener.Close() call
