@@ -213,6 +213,10 @@ func (tunnel *Tunnel) Activate(
 	controller *Controller,
 	isStatusReporter bool) (retErr error) {
 
+	// The broker client is used only for the broker/server relay during the
+	// handshake below. Release the broker client when activation ends.
+	defer tunnel.dialParams.releaseInproxyBrokerClient()
+
 	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// activate.
@@ -419,7 +423,7 @@ func (tunnel *Tunnel) relayInproxyPacketRoundTrip(
 		return errors.Trace(err)
 	}
 
-	inproxyConn := tunnel.dialParams.inproxyConn.Load().(*inproxy.ClientConn)
+	inproxyConn := tunnel.dialParams.getInproxyConn()
 	if inproxyConn == nil {
 		return errors.TraceNew("missing inproxyConn")
 	}
@@ -892,7 +896,7 @@ func dialTunnel(
 	var failedTunnelErr error
 	var extraFailureAction func()
 	defer func() {
-		if !dialSucceeded && baseCtx.Err() != context.Canceled {
+		if !dialSucceeded && isServerEntryFailure(baseCtx, retErr) {
 			dialParams.Failed(config, retErr)
 			if extraFailureAction != nil {
 				extraFailureAction()
@@ -960,11 +964,6 @@ func dialTunnel(
 
 		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
 
-			packetConn, err = dialInproxy(ctx, config, dialParams)
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-
 			// Use the actual 2nd hop destination address as the remote
 			// address for correct behavior in
 			// common/quic.getMaxPreDiscoveryPacketSize, which differs for
@@ -976,6 +975,11 @@ func dialTunnel(
 			// resolves the domain, so just assume IPv6, which has lower max
 			// padding(see quic.getMaxPreDiscoveryPacketSize), and use a stub
 			// address.
+			//
+			// Parse before the in-proxy dial so that no broker client
+			// lease or connection is acquired for an address that will not
+			// be used. The address is constructed by MakeDialParameters
+			// and is not expected to fail to parse.
 
 			host, portStr, err := net.SplitHostPort(dialParams.DirectDialAddress)
 			if err != nil {
@@ -990,6 +994,11 @@ func dialTunnel(
 				IP = net.ParseIP("fd00::")
 			}
 			remoteAddr = &net.UDPAddr{IP: IP, Port: port}
+
+			packetConn, err = dialInproxy(ctx, config, dialParams)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 
 		} else {
 
@@ -1559,7 +1568,7 @@ func makeInproxyTCPDialer(
 
 	return func(ctx context.Context, _, _ string) (net.Conn, error) {
 
-		if dialParams.inproxyConn.Load() != nil {
+		if dialParams.getInproxyConn() != nil {
 			return nil, errors.TraceNew("redial not supported")
 		}
 
@@ -1596,12 +1605,52 @@ func makeInproxyTCPDialer(
 	}
 }
 
+// inproxyDialFailedError wraps every error returned by dialInproxy so
+// callers can identify in-proxy dial failures within nested errors.
 type inproxyDialFailedError struct {
 	err error
 }
 
 func (e inproxyDialFailedError) Error() string {
 	return e.err.Error()
+}
+
+func (e inproxyDialFailedError) Unwrap() error {
+	return e.err
+}
+
+// inproxyBrokerAcquireFailedError wraps a GetBrokerClient error from
+// dialInproxy. The dial failed before any request reached a broker or the
+// destination server, for example because the caller's deadline expired
+// while waiting for a broker client, so the failure does not reflect on
+// the server entry: dialTunnel records no failed tunnel and does not clear
+// the server entry's replay. dialInproxy wraps it in inproxyDialFailedError
+// like any other error; errors.As finds it through the chain.
+type inproxyBrokerAcquireFailedError struct {
+	err error
+}
+
+func (e inproxyBrokerAcquireFailedError) Error() string {
+	return e.err.Error()
+}
+
+func (e inproxyBrokerAcquireFailedError) Unwrap() error {
+	return e.err
+}
+
+// isServerEntryFailure reports whether a dialTunnel failure reflects on the
+// server entry, so that its replay is cleared and a failed tunnel recorded:
+// not when the base context was cancelled, not when an in-proxy dial never
+// acquired a broker client, and not when its broker client was closed under
+// the request by another caller's NoMatch failover, a reset or shutdown.
+func isServerEntryFailure(baseCtx context.Context, dialErr error) bool {
+	if baseCtx.Err() == context.Canceled {
+		return false
+	}
+	var acquireErr *inproxyBrokerAcquireFailedError
+	var closedErr *inproxyBrokerClientClosedError
+	return !std_errors.As(dialErr, &acquireErr) &&
+		!std_errors.As(dialErr, &closedErr)
 }
 
 // dialInproxy performs the in-proxy dial and returns the resulting conn for
@@ -1611,7 +1660,7 @@ func (e inproxyDialFailedError) Error() string {
 func dialInproxy(
 	ctx context.Context,
 	config *Config,
-	dialParams *DialParameters) (retConn *inproxy.ClientConn, retErr error) {
+	dialParams *DialParameters) (retConn *inproxyBrokerOwnedConn, retErr error) {
 
 	defer func() {
 		// Wrap all returned errors with inproxyDialFailedError so callers can
@@ -1677,11 +1726,30 @@ func dialInproxy(
 	// and formatting when debug logging is off.
 	debugLogging := config.InproxyEnableWebRTCDebugLogging
 
+	brokerClient, brokerDialParams, release, err := dialParams.inproxyBrokerClientManager.GetBrokerClient(ctx, dialParams.NetworkID)
+	if err != nil {
+		return nil, &inproxyBrokerAcquireFailedError{err: errors.Trace(err)}
+	}
+	// On success, release the broker client when activation ends or the
+	// returned connection closes. On failure, release it here.
+	defer func() {
+		if retConn == nil {
+			NoticeInfo(
+				"inproxy: broker client %s tunnel dial %s failed: %v",
+				brokerDialParams.brokerClientID,
+				dialParams.ServerEntry.GetDiagnosticID(), retErr)
+			release()
+		}
+	}()
+
+	// Record the dial params used by this attempt for tunnel metrics.
+	dialParams.inproxyBrokerDialParameters = brokerDialParams
+
 	clientConfig := &inproxy.ClientConfig{
 		Logger:                       NoticeCommonLogger(debugLogging),
 		EnableWebRTCDebugLogging:     debugLogging,
 		BaseAPIParameters:            params,
-		BrokerClient:                 dialParams.inproxyBrokerClient,
+		BrokerClient:                 brokerClient,
 		WebRTCDialCoordinator:        webRTCDialInstance,
 		ReliableTransport:            reliableTransport,
 		DialNetworkProtocol:          networkProtocol,
@@ -1696,11 +1764,44 @@ func dialInproxy(
 		return nil, errors.Trace(err)
 	}
 
-	// The inproxy.ClientConn is stored in dialParams.inproxyConn in order to
-	// later fetch its connection ID and to facilitate broker/client replay.
-	dialParams.inproxyConn.Store(conn)
+	// Store the connection and broker client release function together for the
+	// broker/server relay, connection metrics and cleanup. Activation and
+	// connection Close may both call release; only the first call has an
+	// effect.
+	ownedConn := &inproxyBrokerOwnedConn{ClientConn: conn, release: release}
+	dialParams.inproxyConn.Store(ownedConn)
 
-	return conn, nil
+	return ownedConn, nil
+}
+
+// getInproxyConn returns the in-proxy connection stored by dialInproxy, or
+// nil when there is none.
+func (dialParams *DialParameters) getInproxyConn() *inproxyBrokerOwnedConn {
+	conn, _ := dialParams.inproxyConn.Load().(*inproxyBrokerOwnedConn)
+	return conn
+}
+
+// releaseInproxyBrokerClient releases the broker client lease held by the
+// in-proxy connection, if any.
+func (dialParams *DialParameters) releaseInproxyBrokerClient() {
+	if conn := dialParams.getInproxyConn(); conn != nil {
+		conn.release()
+	}
+}
+
+// inproxyBrokerOwnedConn pairs an in-proxy connection with the broker client
+// lease acquired for it, so the lease is released when the connection closes
+// or activation ends, whichever comes first. release is idempotent.
+type inproxyBrokerOwnedConn struct {
+	*inproxy.ClientConn
+	release func()
+}
+
+// Close closes the connection and releases the broker client lease.
+func (conn *inproxyBrokerOwnedConn) Close() error {
+	err := conn.ClientConn.Close()
+	conn.release()
+	return err
 }
 
 // Fields are exported for JSON encoding in NoticeLivenessTest.
