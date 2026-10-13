@@ -97,6 +97,14 @@ type Config struct {
 	// by other adapters.
 	DisableDataStoreFileLock bool `json:",omitempty"`
 
+	// DisableForcedGarbageCollection disables DoGarbageCollection and its
+	// debug.SetGCPercent and debug.FreeOSMemory calls.
+	//
+	// This setting applies to the whole process; the last successful Commit
+	// determines its value. It does not undo a GC percentage set by an earlier
+	// DoGarbageCollection call.
+	DisableForcedGarbageCollection bool `json:",omitempty"`
+
 	// UseNoticeFiles configures notice files for writing. If set, homepages
 	// will be written to a file created at config.GetHomePageFilename()
 	// and notices will be written to a file created at
@@ -2255,6 +2263,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 			f.Close()
 		}
 	}
+
+	disableForcedGarbageCollection.Store(config.DisableForcedGarbageCollection)
 
 	config.committed = true
 
