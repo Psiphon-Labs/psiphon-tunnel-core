@@ -238,6 +238,7 @@ type MatchAnswer struct {
 }
 
 // MatcherMetrics aggregates work metrics across complete matching passes.
+// OffersVisited includes retries after stale announcements.
 type MatcherMetrics struct {
 	PassCount                  int64
 	NoMatchPassCount           int64

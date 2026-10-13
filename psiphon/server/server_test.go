@@ -2814,9 +2814,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			select {
 			case logFields := <-logChannel:
 
-				if logChannel == inproxyProxyAnswerLog && logFields["error"] == nil {
-					if _, ok := logFields["no_awaiting_client"].(bool); !ok {
-						t.Errorf("missing inproxy_broker.no_awaiting_client")
+				if logChannel == inproxyProxyAnswerLog {
+					// Successful handlers log no_awaiting_client even for proxy-reported
+					// answer errors. A handler error overrides the proxy answer error.
+					answerError, _ := logFields["answer_error"].(string)
+					handlerOK := logFields["error"] == nil ||
+						(answerError != "" &&
+							logFields["error"] == fmt.Sprintf("proxy answer error: %s", answerError))
+					if handlerOK {
+						if _, ok := logFields["no_awaiting_client"].(bool); !ok {
+							t.Errorf("missing inproxy_broker.no_awaiting_client")
+						}
 					}
 				}
 

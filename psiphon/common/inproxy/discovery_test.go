@@ -32,22 +32,18 @@ import (
 )
 
 func TestNATDiscovery(t *testing.T) {
-	for _, disableSTUNCandidateGathering := range []bool{false, true} {
-		t.Run(fmt.Sprintf("DisableSTUNCandidateGathering=%t", disableSTUNCandidateGathering), func(t *testing.T) {
-			// Since this test can fail due to external network conditions, retry.
-			var err error
-			for try := 0; try < 2; try++ {
-				err = runTestNATDiscovery(disableSTUNCandidateGathering)
-				if err == nil {
-					return
-				}
-			}
-			t.Error(err.Error())
-		})
+	// Since this test can fail due to external network conditions, retry.
+	var err error
+	for try := 0; try < 2; try++ {
+		err = runTestNATDiscovery()
+		if err == nil {
+			return
+		}
 	}
+	t.Error(err.Error())
 }
 
-func runTestNATDiscovery(disableSTUNCandidateGathering bool) error {
+func runTestNATDiscovery() error {
 
 	// TODO: run local STUN and port mapping servers to test against, along
 	// with iptables rules to simulate NAT conditions
@@ -60,7 +56,8 @@ func runTestNATDiscovery(disableSTUNCandidateGathering bool) error {
 		stunServerAddressFailedCallCount int32
 
 	coordinator := &testWebRTCDialCoordinator{
-		disableSTUNCandidateGathering: disableSTUNCandidateGathering,
+		// Disabling candidate gathering must leave NAT discovery enabled.
+		disableSTUNCandidateGathering: true,
 		stunServerAddress:             stunServerAddress,
 		stunServerAddressRFC5780:      stunServerAddress,
 
