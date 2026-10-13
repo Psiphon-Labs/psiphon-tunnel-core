@@ -132,14 +132,21 @@ type BrokerDialCoordinator interface {
 	// session. In certain conditions, waitToShareSession might be faster, if
 	// a request waits briefly for another in-flight session establishment.
 	//
-	// Due to the isReadyToShare limitation, it is expected to be more optimal
-	// to disable waitToShareSession for in-proxy clients, so that multiple
-	// concurrent INPROXY tunnel protocol dials don't serialize, with all but
-	// the first dial awaiting the completion of the first dial's ClientOffer
-	// round trip, including the ProxyAnswer. For proxies, it remains
-	// preferable to use waitToShareSession, meaning that an initial
-	// ProxyAnnounce must complete before others will launch.
+	// Due to the isReadyToShare limitation, it is expected to be more
+	// optimal to disable waitToShareSession for in-proxy clients, so that
+	// concurrent ClientOffer requests on a shared BrokerClient do not
+	// serialize behind one offer's full round trip, which includes
+	// awaiting the ProxyAnswer. For proxies, it remains preferable to use
+	// waitToShareSession: when the broker has evicted the shared session
+	// from its cache, due to its TTL, cache size, or a broker restart, it
+	// replies with a ResetSessionToken and the proxy must perform a new
+	// Noise handshake. One ProxyAnnounce performs that handshake and
+	// concurrent announcements wait for it, rather than each performing
+	// its own.
 	DisableWaitToShareSession() bool
+
+	// BrokerClientID is a unique identifier for diagnostics.
+	BrokerClientID() string
 
 	// BrokerClientPrivateKey is the client or proxy's private key to be used
 	// in the secure session established with a broker. Clients should
@@ -182,21 +189,43 @@ type BrokerDialCoordinator interface {
 	// trip; the provider can choose to set replay only once.
 	BrokerClientRoundTripperSucceeded(roundTripper RoundTripper)
 
-	// BrokerClientRoundTripperSucceeded is called after a failed round trip
-	// using the specified RoundTripper. This signal is used to clear replay
+	// BrokerClientRoundTripperFailed is called after a failed round trip
+	// using the specified RoundTripper when the error is a
+	// RoundTripperFailedError. This signal may be used to clear replay
 	// for the round tripper's unsuccessful dial parameters. The provider
-	// will arrange for a new RoundTripper to be returned from the next
-	// BrokerClientRoundTripper call, discarding the current RoundTripper
-	// after closing its network resources.
+	// may instead retain the RoundTripper and its replay parameters for
+	// retry; for example, shortly after a successful round trip, when
+	// the failure is likely transient.
+	//
+	// In-flight requests on the same BrokerClient may still be using the
+	// RoundTripper, and BrokerClientRoundTripper must keep returning it.
+	// The provider must not close the RoundTripper or substitute another
+	// one while callers hold this BrokerClient. To move to a different
+	// broker or dial parameters, the provider stops sharing this
+	// BrokerClient, so that new callers obtain a different BrokerClient
+	// with its own RoundTripper while existing callers continue to use this
+	// one.
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
 
-	// BrokerClientNoMatch is called after a Client Offer fails due to no
-	// match. This signal may be used to rotate to a new broker in order to
-	// find a match. In personal pairing mode, clients should rotate on no
-	// match, as the corresponding proxy may be announcing only on another
-	// broker. In common pairing mode, clients may rotate, in case common
-	// proxies are not well balanced across brokers.
-	BrokerClientNoMatch(roundTripper RoundTripper)
+	// BrokerClientResponseReceived is called after a broker response is
+	// successfully decoded, indicating that the broker client works; a
+	// malformed or wrong-type response does not signal. This signal may
+	// be used to share the broker client with other requests.
+	//
+	// retryableNoMatch is true only for a client offer with no match,
+	// as derived from the response flags in BrokerClient.ClientOffer.
+	// Proxy announcements with no match are a normal outcome and do not
+	// set it. In personal pairing mode, clients should then rotate
+	// brokers, as the corresponding proxy may be announcing only on
+	// another broker; in common pairing mode, clients may rotate, in
+	// case common proxies are not well balanced across brokers. Decide
+	// whether to rotate before sharing the broker client.
+	//
+	// BrokerClient.ProxyAnswer does not signal. A proxy may answer on a
+	// broker client that is no longer shared, and the answer must not
+	// change sharing.
+	BrokerClientResponseReceived(
+		roundTripper RoundTripper, retryableNoMatch bool)
 
 	// MetricsForBrokerRequests returns the metrics, associated with the
 	// broker client instance, which are to be added to the base API
@@ -207,9 +236,6 @@ type BrokerDialCoordinator interface {
 
 	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration
-	AnnounceDelay() time.Duration
-	AnnounceMaxBackoffDelay() time.Duration
-	AnnounceDelayJitter() float64
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration
 	OfferRequestPersonalTimeout() time.Duration
