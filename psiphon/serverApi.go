@@ -34,7 +34,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -195,10 +194,10 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 	// original client IP and the relaying proxy ID to the Psiphon server.
 	// inproxy_relay_packet is a required field for in-proxy tunnel protocols.
 	if protocol.TunnelProtocolUsesInproxy(serverContext.tunnel.dialParams.TunnelProtocol) {
-		inproxyConn := serverContext.tunnel.dialParams.inproxyConn.Load()
+		inproxyConn := serverContext.tunnel.dialParams.getInproxyConn()
 		if inproxyConn != nil {
 			packet := base64.RawStdEncoding.EncodeToString(
-				inproxyConn.(*inproxy.ClientConn).InitialRelayPacket())
+				inproxyConn.InitialRelayPacket())
 			params["inproxy_relay_packet"] = packet
 		}
 	}
@@ -1113,10 +1112,10 @@ func getBaseAPIParameters(
 	if filter == baseParametersAll {
 
 		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
-			inproxyConn := dialParams.inproxyConn.Load()
+			inproxyConn := dialParams.getInproxyConn()
 			if inproxyConn != nil {
 				params["inproxy_connection_id"] =
-					inproxyConn.(*inproxy.ClientConn).GetConnectionID()
+					inproxyConn.GetConnectionID()
 			}
 		}
 

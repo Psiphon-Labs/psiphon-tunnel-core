@@ -1329,7 +1329,9 @@ var inproxyBrokerRequestParams = append(
 	append(
 		[]requestParamSpec{
 			{"session_id", isHexDigits, 0},
-			{"fronting_provider_id", isAnyString, requestParamOptional}},
+			{"fronting_provider_id", isAnyString, requestParamOptional},
+			{"inproxy_broker_is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+			{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 		tacticsParams...),
 	baseParams...)
 
@@ -1634,6 +1636,9 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_connection_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_is_reuse", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_is_shared", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_broker_acquire_wait_ms", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_use_media_streams", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 

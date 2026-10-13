@@ -212,10 +212,10 @@ func DialClient(
 		// Repeatedly try to establish in-proxy/WebRTC connection until the
 		// dial context is canceled or times out.
 		//
-		// If a broker request fails, the WebRTCDialCoordinator
-		// BrokerClientRoundTripperFailed callback will be invoked, so the
-		// Psiphon client will have an opportunity to select new broker
-		// connection parameters before a retry. Similarly, when STUN servers
+		// A broker transport failure invokes the BrokerDialCoordinator
+		// BrokerClientRoundTripperFailed callback. The Psiphon client can
+		// select another broker client on a subsequent dial; retries within
+		// this loop retain config.BrokerClient. Similarly, when STUN servers
 		// fail, WebRTCDialCoordinator STUNServerAddressFailed will be
 		// invoked, giving the Psiphon client an opportunity to select new
 		// STUN server parameter -- although, in this failure case, the
