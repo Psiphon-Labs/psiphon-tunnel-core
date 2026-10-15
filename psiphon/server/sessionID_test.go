@@ -118,6 +118,11 @@ func TestDuplicateSessionID(t *testing.T) {
 		p.Signal(os.Interrupt)
 		serverWaitGroup.Wait()
 
+		// Send logs to stderr before this test's log directory is deleted.
+		// Let later tests set up their own logging.
+		log.SetOutput(os.Stderr)
+		initLogging = sync.Once{}
+
 		if !logRotated {
 			return
 		}
