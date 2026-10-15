@@ -973,12 +973,38 @@ func newWebRTCConn(
 		// the case of personal pairing. For that reason, the await timeout
 		// should be no more than a couple of seconds.
 		//
-		// TODO: also await port mappings when doSTUN, in case there are no
-		// STUN candidates; see hasServerReflexive check below; as it stands,
-		// in this case, it's more likely that port mapping won the previous
-		// select race.
+		// Also await a potential port mapping when STUN completes without any
+		// server-reflexive candidates that survive SDP filtering. Host
+		// candidates are ignored in this check since they could be private
+		// IPs in personal pairing mode, or public IPv6 which may not be
+		// dialable by the peer.
 
-		if iceCompleted && portMappingExternalAddr == "" && !doSTUN && doPortMapping {
+		awaitPortMapping := !doSTUN
+		if iceCompleted && portMappingExternalAddr == "" && doPortMapping && doSTUN {
+
+			// Check for no STUN candidates. This prepareSDPAddresses call is
+			// potentially, but not always, a duplicate with the one below,
+			// but should only take on the order of microseconds.
+
+			_, metrics, err := prepareSDPAddresses(
+				[]byte(conn.peerConnection.LocalDescription().SDP),
+				false,
+				"",
+				config.WebRTCDialCoordinator.DisableIPv6ICECandidates(),
+				hasPersonalCompartmentIDs)
+			if err != nil {
+				return nil, nil, nil, errors.Trace(err)
+			}
+			awaitPortMapping = true
+			for _, candidateType := range metrics.iceCandidateTypes {
+				if candidateType == ICECandidateServerReflexive {
+					awaitPortMapping = false
+					break
+				}
+			}
+		}
+
+		if iceCompleted && portMappingExternalAddr == "" && doPortMapping && awaitPortMapping {
 
 			timer := time.NewTimer(
 				common.ValueOrDefault(
