@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -532,6 +533,17 @@ type Config struct {
 	// parameters are required.
 	MeekServerInproxyBrokerOnly bool `json:",omitempty"`
 
+	// InproxyBrokerHTTP2MaxConcurrentStreams specifies the maximum number of
+	// concurrent streams per HTTP/2 connection to a meek server hosting an
+	// in-proxy broker. If not specified, the default is 1500.
+	InproxyBrokerHTTP2MaxConcurrentStreams int `json:",omitempty"`
+
+	// InproxyObfuscationAntiReplayHistorySize specifies the size of a brokers
+	// replay history. See common/inproxy.newObfuscationReplayHistory for
+	// more details. If not specified, a default value is used. Specify a
+	// negative value to disable history.
+	InproxyObfuscationAntiReplayHistorySize int `json:",omitempty"`
+
 	// InproxyBrokerSessionPrivateKey specifies the broker's in-proxy session
 	// private key and derived public key used by in-proxy clients and
 	// proxies. This value is required when running an in-proxy broker.
@@ -776,6 +788,17 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 	if config.ServerIPAddress == "" {
 		return nil, errors.TraceNew("ServerIPAddress is required")
+	}
+
+	if config.InproxyBrokerHTTP2MaxConcurrentStreams < 0 ||
+		uint64(config.InproxyBrokerHTTP2MaxConcurrentStreams) > math.MaxUint32 {
+		return nil, errors.TraceNew("invalid InproxyBrokerHTTP2MaxConcurrentStreams")
+	}
+
+	if config.InproxyObfuscationAntiReplayHistorySize > 0 &&
+		(config.InproxyObfuscationAntiReplayHistorySize < 1_000_000 ||
+			config.InproxyObfuscationAntiReplayHistorySize > 1_000_000_000) {
+		return nil, errors.TraceNew("invalid InproxyObfuscationAntiReplayHistorySize")
 	}
 
 	if config.MeekServerRunInproxyBroker {

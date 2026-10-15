@@ -23,12 +23,15 @@ import (
 	"bytes"
 	"context"
 	crypto_rand "crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -38,12 +41,14 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/net/http2"
 )
 
 var KB = 1024
@@ -526,6 +531,122 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (
 
 func TestMeekServer(t *testing.T) {
 	runTestMeekAccessControl(t, false, false, false)
+}
+
+func TestMeekBrokerHTTP2MaxConcurrentStreams(t *testing.T) {
+	// Use net/http's default setting for comparison, and reuse its test TLS
+	// certificate for the MeekServer listeners.
+	defaultServer := httptest.NewUnstartedServer(nil)
+	defaultServer.EnableHTTP2 = true
+	defaultServer.StartTLS()
+	defer defaultServer.Close()
+	defaultMaxStreams := readHTTP2MaxConcurrentStreams(t, defaultServer.Listener.Addr().String())
+
+	for _, testCase := range []struct {
+		name       string
+		broker     bool
+		configured int
+		expected   uint32
+	}{
+		{"broker_default", true, 0, 1500},
+		{"broker_override", true, 2400, 2400},
+		{"broker_minimum", true, 1, 1},
+		{"non_broker_default", false, 0, defaultMaxStreams},
+		{"non_broker_override_ignored", false, 2400, defaultMaxStreams},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			stopBroadcast := make(chan struct{})
+			server := &MeekServer{
+				support: &SupportServices{Config: &Config{
+					InproxyBrokerHTTP2MaxConcurrentStreams: testCase.configured,
+				}},
+				listener:            listener,
+				stdTLSConfig:        defaultServer.TLS.Clone(),
+				maxSessionStaleness: MEEK_DEFAULT_MAX_SESSION_STALENESS,
+				openConns:           common.NewConns[net.Conn](),
+				stopBroadcast:       stopBroadcast,
+			}
+			if testCase.broker {
+				privateKey, err := inproxy.GenerateSessionPrivateKey()
+				if err != nil {
+					t.Fatal(err)
+				}
+				server.inproxyBroker, err = inproxy.NewBroker(&inproxy.BrokerConfig{
+					Logger:                           CommonLogger(log),
+					PrivateKey:                       privateKey,
+					CommonCompartmentIDs:             []inproxy.ID{{1}},
+					ObfuscationAntiReplayHistorySize: -1,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			runDone := make(chan error, 1)
+			go func() { runDone <- server.Run() }()
+			defer func() {
+				close(stopBroadcast)
+				listener.Close()
+				select {
+				case err := <-runDone:
+					if err != nil {
+						t.Errorf("MeekServer.Run failed: %v", err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Error("MeekServer.Run did not stop")
+				}
+			}()
+
+			if actual := readHTTP2MaxConcurrentStreams(t, listener.Addr().String()); actual != testCase.expected {
+				t.Fatalf("advertised max concurrent streams = %d; want %d", actual, testCase.expected)
+			}
+		})
+	}
+}
+
+// Read the actual HTTP/2 SETTINGS frame to check the net/http configuration
+// used by MeekServer on a listener with standard TLS and HTTP/2 enabled.
+func readHTTP2MaxConcurrentStreams(t *testing.T, address string) uint32 {
+	t.Helper()
+
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 5 * time.Second}, "tcp", address,
+		&tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if conn.ConnectionState().NegotiatedProtocol != "h2" {
+		t.Fatal("HTTP/2 was not negotiated")
+	}
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, http2.ClientPreface); err != nil {
+		t.Fatal(err)
+	}
+	framer := http2.NewFramer(conn, conn)
+	if err := framer.WriteSettings(); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := framer.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, ok := frame.(*http2.SettingsFrame)
+	if !ok {
+		t.Fatalf("expected SETTINGS frame, got %T", frame)
+	}
+	maxStreams, ok := settings.Value(http2.SettingMaxConcurrentStreams)
+	if !ok {
+		t.Fatal("missing SETTINGS_MAX_CONCURRENT_STREAMS")
+	}
+	return maxStreams
 }
 
 func TestMeekRateLimiter(t *testing.T) {
