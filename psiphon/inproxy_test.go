@@ -411,6 +411,59 @@ func runInproxySTUNDialParametersTest() error {
 		return errors.TraceNew("unexpected valid global replay STUN server address when client list is set")
 	}
 
+	checkSTUNFlags := func(wantProxy, wantClient bool) error {
+		for _, isProxy := range []bool{false, true} {
+			instance, err := NewInproxyWebRTCDialInstance(
+				config, networkID, isProxy, nil, dialParams, &InproxyWebRTCDialParameters{})
+			if err != nil {
+				return errors.Trace(err)
+			}
+			want := wantClient
+			if isProxy {
+				want = wantProxy
+			}
+			if instance.DisableSTUNCandidateGathering() != want || instance.DisableSTUN() {
+				return errors.Tracef("unexpected STUN flags for proxy=%t", isProxy)
+			}
+		}
+		return nil
+	}
+
+	for _, test := range []struct {
+		global, proxy, client, wantProxy, wantClient bool
+	}{
+		{false, false, false, false, false},
+		{false, true, false, true, false},
+		{false, false, true, false, true},
+		{false, true, true, true, true},
+		{true, false, false, true, true},
+	} {
+		config.InproxyDisableSTUNCandidateGathering = &test.global
+		config.InproxyProxyDisableSTUNCandidateGathering = &test.proxy
+		config.InproxyClientDisableSTUNCandidateGathering = &test.client
+		err = config.SetParameters("", false, nil)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = checkSTUNFlags(test.wantProxy, test.wantClient)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	err = config.SetParameters("", false, map[string]interface{}{
+		parameters.InproxyDisableSTUNCandidateGathering:       false,
+		parameters.InproxyProxyDisableSTUNCandidateGathering:  true,
+		parameters.InproxyClientDisableSTUNCandidateGathering: false,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	err = checkSTUNFlags(true, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 

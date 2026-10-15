@@ -73,6 +73,7 @@ type InproxyBroker struct {
 	AllowedGeoipMismatches        *int64                 `protobuf:"varint,146,opt,name=allowed_geoip_mismatches,json=allowedGeoipMismatches,proto3,oneof" json:"allowed_geoip_mismatches,omitempty"`
 	IceRegion                     *string                `protobuf:"bytes,147,opt,name=ice_region,json=iceRegion,proto3,oneof" json:"ice_region,omitempty"`
 	IceAsn                        *string                `protobuf:"bytes,148,opt,name=ice_asn,json=iceAsn,proto3,oneof" json:"ice_asn,omitempty"`
+	NoAwaitingClient              *bool                  `protobuf:"varint,149,opt,name=no_awaiting_client,json=noAwaitingClient,proto3,oneof" json:"no_awaiting_client,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -457,11 +458,18 @@ func (x *InproxyBroker) GetIceAsn() string {
 	return ""
 }
 
+func (x *InproxyBroker) GetNoAwaitingClient() bool {
+	if x != nil && x.NoAwaitingClient != nil {
+		return *x.NoAwaitingClient
+	}
+	return false
+}
+
 var File_ca_psiphon_psiphond_inproxy_broker_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
-	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xd2\x1b\n" +
+	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\x9d\x1c\n" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
@@ -517,7 +525,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x18allowed_geoip_mismatches\x18\x92\x01 \x01(\x03H+R\x16allowedGeoipMismatches\x88\x01\x01\x12#\n" +
 	"\n" +
 	"ice_region\x18\x93\x01 \x01(\tH,R\ticeRegion\x88\x01\x01\x12\x1d\n" +
-	"\aice_asn\x18\x94\x01 \x01(\tH-R\x06iceAsn\x88\x01\x01B\x0e\n" +
+	"\aice_asn\x18\x94\x01 \x01(\tH-R\x06iceAsn\x88\x01\x01\x122\n" +
+	"\x12no_awaiting_client\x18\x95\x01 \x01(\bH.R\x10noAwaitingClient\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x1b\n" +
 	"\x19_announcement_match_indexB\x1a\n" +
 	"\x18_announcement_queue_sizeB\x0f\n" +
@@ -567,7 +576,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x19_allowed_geoip_mismatchesB\r\n" +
 	"\v_ice_regionB\n" +
 	"\n" +
-	"\b_ice_asnBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\b_ice_asnB\x15\n" +
+	"\x13_no_awaiting_clientBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_broker_proto_rawDescOnce sync.Once

@@ -105,6 +105,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 	stunServerAddressSucceeded := func(bool, string) { atomic.AddInt32(&stunServerAddressSucceededCount, 1) }
 	stunServerAddressFailedCount := int32(0)
 	stunServerAddressFailed := func(bool, string) { atomic.AddInt32(&stunServerAddressFailedCount, 1) }
+	var disabledSTUNCallCount atomic.Int32
+	unexpectedSTUNCall := func(bool, string) { disabledSTUNCallCount.Add(1) }
 
 	roundTripperSucceededCount := int32(0)
 	roundTripperSucceded := func(RoundTripper) { atomic.AddInt32(&roundTripperSucceededCount, 1) }
@@ -1065,6 +1067,14 @@ func runTestInproxy(doMustUpgrade bool) error {
 			return errors.Trace(err)
 		}
 
+		// Exercise host-only client ICE with candidate gathering disabled.
+		if i%2 != 0 {
+			webRTCCoordinator.disableSTUNCandidateGathering = true
+			webRTCCoordinator.disablePortMapping = true
+			webRTCCoordinator.stunServerAddressSucceeded = unexpectedSTUNCall
+			webRTCCoordinator.stunServerAddressFailed = unexpectedSTUNCall
+		}
+
 		// Exercise unreliable data channel framing both with and without
 		// configured traffic shaping.
 		if !isTCP && !useMediaStreams && !isPersonalClient {
@@ -1102,6 +1112,10 @@ func runTestInproxy(doMustUpgrade bool) error {
 		}
 
 		logger.WithTrace().Info("DONE DATA TRANSFER")
+
+		if disabledSTUNCallCount.Load() != 0 {
+			return errors.TraceNew("unexpected STUN call with candidate gathering disabled")
+		}
 
 		if hasPendingBrokerServerReports() {
 			return errors.TraceNew("unexpected pending broker server requests")

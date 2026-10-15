@@ -876,6 +876,8 @@ type ResponderSessions struct {
 	obfuscationReplayHistory    *obfuscationReplayHistory
 	expectedInitiatorPublicKeys *sessionPublicKeyLookup
 
+	// TODO: Reduce session cache lock contention. Consider sharding the cache.
+
 	mutex    sync.RWMutex
 	sessions *lrucache.Cache
 

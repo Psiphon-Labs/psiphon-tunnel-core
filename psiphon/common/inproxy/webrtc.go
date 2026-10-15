@@ -547,7 +547,9 @@ func newWebRTCConn(
 	// Proceed even when stunServerAddress is "" and !DisableSTUN, as ICE may
 	// find other host candidates.
 
-	doSTUN := stunServerAddress != "" && !disableInbound && !config.WebRTCDialCoordinator.DisableSTUN()
+	doSTUN := stunServerAddress != "" && !disableInbound &&
+		!config.WebRTCDialCoordinator.DisableSTUN() &&
+		!config.WebRTCDialCoordinator.DisableSTUNCandidateGathering()
 
 	var ICEServers []webrtc.ICEServer
 

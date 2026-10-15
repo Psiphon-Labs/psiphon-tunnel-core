@@ -1626,6 +1626,7 @@ type InproxyWebRTCDialInstance struct {
 
 	discoverNAT                     bool
 	disableSTUN                     bool
+	disableSTUNCandidateGathering   bool
 	disablePortMapping              bool
 	disableInboundForMobileNetworks bool
 	disableIPv6ICECandidates        bool
@@ -1675,6 +1676,7 @@ func NewInproxyWebRTCDialInstance(
 	}
 
 	disableSTUN := p.Bool(parameters.InproxyDisableSTUN)
+	disableSTUNCandidateGathering := p.Bool(parameters.InproxyDisableSTUNCandidateGathering)
 	disablePortMapping := p.Bool(parameters.InproxyDisablePortMapping)
 	disableInboundForMobileNetworks := p.Bool(parameters.InproxyDisableInboundForMobileNetworks)
 	disableIPv6ICECandidates := p.Bool(parameters.InproxyDisableIPv6ICECandidates)
@@ -1684,6 +1686,9 @@ func NewInproxyWebRTCDialInstance(
 	if isProxy {
 
 		disableSTUN = disableSTUN || p.Bool(parameters.InproxyProxyDisableSTUN)
+
+		disableSTUNCandidateGathering = disableSTUNCandidateGathering ||
+			p.Bool(parameters.InproxyProxyDisableSTUNCandidateGathering)
 
 		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyProxyDisablePortMapping)
 
@@ -1700,6 +1705,9 @@ func NewInproxyWebRTCDialInstance(
 	} else {
 
 		disableSTUN = disableSTUN || p.Bool(parameters.InproxyClientDisableSTUN)
+
+		disableSTUNCandidateGathering = disableSTUNCandidateGathering ||
+			p.Bool(parameters.InproxyClientDisableSTUNCandidateGathering)
 
 		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyClientDisablePortMapping)
 
@@ -1736,6 +1744,7 @@ func NewInproxyWebRTCDialInstance(
 
 		discoverNAT:                     p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
 		disableSTUN:                     disableSTUN,
+		disableSTUNCandidateGathering:   disableSTUNCandidateGathering,
 		disablePortMapping:              disablePortMapping,
 		disableInboundForMobileNetworks: disableInboundForMobileNetworks,
 		disableIPv6ICECandidates:        disableIPv6ICECandidates,
@@ -1855,6 +1864,11 @@ func (w *InproxyWebRTCDialInstance) DiscoverNAT() bool {
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) DisableSTUN() bool {
 	return w.disableSTUN
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) DisableSTUNCandidateGathering() bool {
+	return w.disableSTUNCandidateGathering
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
