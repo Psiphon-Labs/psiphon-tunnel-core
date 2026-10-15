@@ -187,7 +187,13 @@ func emitDNSMetrics(resolver *resolver.Resolver) {
 	NoticeInfo("DNS metrics at %s: %s", stacktrace.GetParentFunctionName(), resolver.GetMetrics())
 }
 
+var disableForcedGarbageCollection atomic.Bool
+
 func DoGarbageCollection() {
+	if disableForcedGarbageCollection.Load() {
+		return
+	}
+
 	debug.SetGCPercent(5)
 	debug.FreeOSMemory()
 }
