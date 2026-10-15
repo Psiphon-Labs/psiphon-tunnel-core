@@ -33,6 +33,7 @@ package portmapper
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"reflect"
 	"strconv"
@@ -117,6 +118,57 @@ func TestProbeIntegration(t *testing.T) {
 	t.Logf("Probe: %+v", res)
 	t.Logf("IGD stats: %+v", st)
 	// TODO(bradfitz): finish
+}
+
+func TestCloneSetLocalPortPreservesProbeResults(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+	igd.SetUPnPHandler(&upnpServer{
+		t:    t,
+		Desc: testRootDesc,
+		Control: map[string]map[string]any{
+			"/ctl/IPConn": {
+				"AddPortMapping":       testAddPortMappingResponse,
+				"GetExternalIPAddress": testGetExternalIPAddressResponse,
+				"GetStatusInfo":        testGetStatusInfoResponse,
+				"DeletePortMapping":    "",
+			},
+		},
+	})
+
+	probed := newTestClient(t, igd)
+	mustProbeUPnP(t, context.Background(), probed)
+
+	clone := probed.Clone(nil)
+	clone.SetLocalPort(12345)
+	upnp, pmp, pcp := clone.RespondingPortMappingTypes()
+	if !upnp || pmp || pcp {
+		t.Errorf("RespondingPortMappingTypes() = (%v, %v, %v), want (true, false, false)", upnp, pmp, pcp)
+	}
+	clone.mu.Lock()
+	metas := len(clone.uPnPMetas)
+	clone.mu.Unlock()
+	if metas == 0 {
+		t.Error("SetLocalPort cleared cloned UPnP discovery metadata")
+	}
+
+	// The one-shot probe is intentionally old: clone users create mappings on
+	// demand, after the five-second probe fast-path has elapsed.
+	clone.mu.Lock()
+	clone.lastProbe = time.Now().Add(-6 * time.Second)
+	clone.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, external, err := clone.createOrGetMapping(ctx)
+	if err != nil {
+		t.Fatalf("createOrGetMapping: %v", err)
+	}
+	if external.Addr() != netip.MustParseAddr("123.123.123.123") {
+		t.Errorf("external address = %v, want 123.123.123.123", external)
+	}
 }
 
 func TestPCPIntegration(t *testing.T) {
