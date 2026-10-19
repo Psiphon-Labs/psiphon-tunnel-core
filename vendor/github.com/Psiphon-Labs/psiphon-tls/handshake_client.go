@@ -784,6 +784,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 	if certRequested {
 		certMsg = new(certificateMsg)
 		certMsg.certificates = chainToSend.Certificate
+		hs.c.localCertificate = chainToSend.Certificate
 		if _, err := hs.c.writeHandshakeRecord(certMsg, &hs.finishedHash); err != nil {
 			return err
 		}
