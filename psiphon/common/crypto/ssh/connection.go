@@ -7,6 +7,7 @@ package ssh
 import (
 	"fmt"
 	"net"
+	"sync"
 )
 
 // OpenChannelError is returned if the other side rejects an
@@ -69,6 +70,11 @@ type Conn interface {
 	// error causing the shutdown.
 	Wait() error
 
+	// [Psiphon]
+	// ConnectionError returns a failed connection's underlying network error.
+	// This includes SSH protocol errors; nil means no error has been recorded.
+	ConnectionError() error
+
 	// TODO(hanwen): consider exposing:
 	//   RequestKeyChange
 	//   Disconnect
@@ -97,6 +103,46 @@ type connTransport interface {
 	getAlgorithms() NegotiatedAlgorithms
 	getSessionID() []byte
 	waitSession() error
+
+	// [Psiphon]
+	getConnectionError() error
+	recordConnectionError(error)
+}
+
+// [Psiphon]
+// connectionErrorState tracks the underlying network error.
+type connectionErrorState struct {
+	mutex  sync.Mutex
+	err    error
+	closed bool
+}
+
+// [Psiphon]
+func (s *connectionErrorState) getConnectionError() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.err
+}
+
+// [Psiphon]
+// markClosed stops recording errors, as any error after a local Close is
+// close-induced rather than a connection failure.
+func (s *connectionErrorState) markClosed() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.closed = true
+}
+
+// [Psiphon]
+func (s *connectionErrorState) recordConnectionError(err error) {
+	if err == nil {
+		return
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.err == nil && !s.closed {
+		s.err = err
+	}
 }
 
 // A connection represents an incoming connection.
@@ -106,6 +152,11 @@ type connection struct {
 
 	// The connection protocol.
 	*mux
+}
+
+// [Psiphon]
+func (c *connection) ConnectionError() error {
+	return c.transport.getConnectionError()
 }
 
 func (c *connection) Close() error {

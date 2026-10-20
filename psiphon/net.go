@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
+	"golang.org/x/net/http/httpguts"
 )
 
 // listenUnixProxySocket creates a Unix domain socket listener for a local
@@ -798,6 +799,21 @@ func ResumeDownload(
 	}
 	defer file.Close()
 
+	resetPartialDownload := func() {
+		// On Windows, file must be closed before it can be deleted.
+		file.Close()
+
+		err := os.Remove(partialFilename)
+		if err != nil && !os.IsNotExist(err) {
+			NoticeWarning("reset partial download failed: %s", err)
+		}
+
+		err = os.Remove(partialETagFilename)
+		if err != nil && !os.IsNotExist(err) {
+			NoticeWarning("reset partial download ETag failed: %s", err)
+		}
+	}
+
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return 0, "", errors.Trace(err)
@@ -810,25 +826,16 @@ func ResumeDownload(
 	if fileInfo.Size() > 0 {
 
 		partialETag, err = ioutil.ReadFile(partialETagFilename)
+		if err == nil && (len(partialETag) == 0 ||
+			!httpguts.ValidHeaderFieldValue(string(partialETag))) {
+			err = std_errors.New("empty or invalid ETag")
+		}
 
-		// When the ETag can't be loaded, delete the partial download. To keep the
-		// code simple, there is no immediate, inline retry here, on the assumption
-		// that the controller's upgradeDownloader will shortly call DownloadUpgrade
-		// again.
+		// When the ETag can't be loaded or is invalid, delete the partial download.
+		// To keep the code simple, there is no immediate, inline retry here;
+		// the caller is expected to retry on its normal schedule.
 		if err != nil {
-
-			// On Windows, file must be closed before it can be deleted
-			file.Close()
-
-			tempErr := os.Remove(partialFilename)
-			if tempErr != nil && !os.IsNotExist(tempErr) {
-				NoticeWarning("reset partial download failed: %s", tempErr)
-			}
-
-			tempErr = os.Remove(partialETagFilename)
-			if tempErr != nil && !os.IsNotExist(tempErr) {
-				NoticeWarning("reset partial download ETag failed: %s", tempErr)
-			}
+			resetPartialDownload()
 
 			return 0, "", errors.Tracef(
 				"failed to load partial download ETag: %s", err)
@@ -906,16 +913,14 @@ func ResumeDownload(
 	if response.StatusCode == http.StatusPreconditionFailed {
 		// When the ETag no longer matches, delete the partial download. As above,
 		// simply failing and relying on the caller's retry schedule.
-		os.Remove(partialFilename)
-		os.Remove(partialETagFilename)
+		resetPartialDownload()
 		return 0, "", errors.TraceNew("partial download ETag mismatch")
 
 	} else if response.StatusCode == http.StatusNotModified {
 		// This status code is possible in the "If-None-Match" case. Don't leave
 		// any partial download in progress. Caller should check that responseETag
 		// matches ifNoneMatchETag.
-		os.Remove(partialFilename)
-		os.Remove(partialETagFilename)
+		resetPartialDownload()
 		return 0, responseETag, nil
 	}
 

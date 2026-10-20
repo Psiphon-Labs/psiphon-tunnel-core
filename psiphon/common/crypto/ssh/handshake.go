@@ -135,6 +135,9 @@ type handshakeTransport struct {
 	strictMode bool
 
 	// [Psiphon]
+	connectionErrorState
+
+	// [Psiphon]
 	// Unblocks readLoop blocked on sending to incoming channel.
 	doSignalCloseReadLoop sync.Once
 	signalCloseReadLoop   chan struct{}
@@ -251,6 +254,8 @@ func (t *handshakeTransport) readLoop() {
 		p, err := t.readOnePacket(first)
 		first = false
 		if err != nil {
+			// [Psiphon]
+			t.recordConnectionError(err)
 			t.readError = err
 			close(t.incoming)
 			break
@@ -291,7 +296,10 @@ func (t *handshakeTransport) pushPacket(p []byte) error {
 	if debugHandshake {
 		t.printPacket(p, true)
 	}
-	return t.conn.writePacket(p)
+	// [Psiphon]
+	err := t.conn.writePacket(p)
+	t.recordConnectionError(err)
+	return err
 }
 
 func (t *handshakeTransport) getWriteError() error {
@@ -348,6 +356,8 @@ write:
 
 			if !sent {
 				if err := t.sendKexInit(); err != nil {
+					// [Psiphon]
+					t.recordConnectionError(err)
 					t.recordWriteError(err)
 					break
 				}
@@ -371,6 +381,9 @@ write:
 		// channel on the pendingKex request.
 
 		err := t.enterKeyExchange(request.otherInit)
+
+		// [Psiphon]
+		t.recordConnectionError(err)
 
 		t.mu.Lock()
 		t.writeError = err
@@ -1195,6 +1208,9 @@ func (t *handshakeTransport) writePacket(p []byte) error {
 }
 
 func (t *handshakeTransport) Close() error {
+	// [Psiphon]
+	t.markClosed()
+
 	// Close the connection. This should cause the readLoop goroutine to wake up
 	// and close t.startKex, which will shut down kexLoop if running.
 	err := t.conn.Close()
