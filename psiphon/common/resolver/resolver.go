@@ -338,8 +338,7 @@ func NewResolver(networkConfig *NetworkConfig, networkID string) *Resolver {
 
 // Stop clears the Resolver cache and resets metrics. Stop must be called only
 // after ceasing all in-flight ResolveIP goroutines, or else the cache or
-// metrics may repopulate. A Resolver may be resumed after calling Stop, but
-// Update must be called first.
+// metrics may repopulate.
 func (r *Resolver) Stop() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -375,9 +374,19 @@ func (r *Resolver) MakeResolveParameters(
 			return nil, errors.TraceNew("missing fronting dial domain")
 		}
 		if p.WeightedCoinFlip(parameters.DNSResolverPreresolvedIPAddressProbability) {
+
+			// Limitation: hasIPv6Route is the snapshot from the last
+			// ResolveIP or NewResolver, which may reflect a previous
+			// network. In practice, as called from psiphon.Controller in
+			// tunnel establishment, the stale window is small and any IPv6
+			// dials without a route fail fast. To eliminate this window,
+			// pass the current network ID to MakeResolveParameters and call
+			// updateNetworkState.
+
 			CIDRs := p.LabeledCIDRs(parameters.DNSResolverPreresolvedIPAddressCIDRs, frontingProviderID)
-			if len(CIDRs) > 0 {
-				CIDR := CIDRs[prng.Intn(len(CIDRs))]
+			hasIPv6Route, _ := r.getNetworkState()
+			CIDR := selectPreresolvedCIDR(CIDRs, hasIPv6Route)
+			if CIDR != "" {
 				IP, err := generateIPAddressFromCIDR(CIDR)
 				if err != nil {
 					return nil, errors.Trace(err)
@@ -623,6 +632,14 @@ func (r *Resolver) ResolveIP(
 		}
 	}
 
+	// Use a snapshot of the current network state, including IPv6 routing and
+	// system DNS servers.
+	//
+	// Limitation: these values are used even if the network changes in the
+	// middle of a ResolveIP call; ResolveIP is not interrupted if the
+	// network changes.
+	hasIPv6Route, systemServers := r.getNetworkState()
+
 	// When PreresolvedIPAddress is set, tactics parameters determined the IP address
 	// in this case.
 	if params.PreresolvedIPAddress != "" && params.PreresolvedDomain == hostname {
@@ -631,16 +648,12 @@ func (r *Resolver) ResolveIP(
 			// Unexpected case, as MakeResolveParameters selects the IP address.
 			return nil, errors.TraceNew("invalid IP address")
 		}
+		// Replayed parameters may have been selected with an IPv6 route.
+		if IP.To4() == nil && !hasIPv6Route {
+			return nil, errors.TraceNew("no IPv6 route for preresolved IP address")
+		}
 		return []net.IP{IP}, nil
 	}
-
-	// Use a snapshot of the current network state, including IPv6 routing and
-	// system DNS servers.
-	//
-	// Limitation: these values are used even if the network changes in the
-	// middle of a ResolveIP call; ResolveIP is not interrupted if the
-	// network changes.
-	hasIPv6Route, systemServers := r.getNetworkState()
 
 	// Use the standard library resolver when there's no GetDNSServers, or the
 	// system server list is otherwise empty, and no alternate DNS server is
@@ -1501,6 +1514,50 @@ func hasRoutableIPv6Interface() (bool, error) {
 	}
 
 	return false, nil
+}
+
+// selectPreresolvedCIDR selects uniformly among eligible CIDRs.
+func selectPreresolvedCIDR(CIDRs []string, hasIPv6Route bool) string {
+	if len(CIDRs) == 0 {
+		return ""
+	}
+
+	// CIDRs were validated when parameters are applied. Masking before
+	// unmapping includes IPv4-mapped prefixes only when all addresses are IPv4.
+
+	isIPv4 := func(CIDR string) bool {
+		prefix, err := netip.ParsePrefix(CIDR)
+		return err == nil && prefix.Masked().Addr().Unmap().Is4()
+	}
+
+	CIDR := CIDRs[prng.Intn(len(CIDRs))]
+	if hasIPv6Route || isIPv4(CIDR) {
+		return CIDR
+	}
+
+	// Scan the list for IPv4 CIDRs only when the initial selection is IPv6
+	// and no IPv6 route is available.
+
+	count := 0
+	for _, CIDR := range CIDRs {
+		if isIPv4(CIDR) {
+			count++
+		}
+	}
+	if count == 0 {
+		return ""
+	}
+
+	index := prng.Intn(count)
+	for _, CIDR := range CIDRs {
+		if isIPv4(CIDR) {
+			if index == 0 {
+				return CIDR
+			}
+			index--
+		}
+	}
+	return ""
 }
 
 func generateIPAddressFromCIDR(CIDR string) (net.IP, error) {
