@@ -225,6 +225,11 @@ func (m *mux) loop() {
 	}
 
 	// [Psiphon]
+	if t, ok := m.conn.(connTransport); ok {
+		t.recordConnectionError(err)
+	}
+
+	// [Psiphon]
 	// Interrupt any blocked readers or writers before closing channels.
 	if t, ok := m.conn.(*handshakeTransport); ok {
 		t.interrupt(err)
@@ -372,7 +377,13 @@ func (m *mux) openChannel(chanType string, extra []byte) (*channel, error) {
 		return nil, err
 	}
 
-	switch msg := (<-ch.msg).(type) {
+	// [Psiphon]
+	// Return EOF when shutdown closes the channel-open response channel.
+	msg, ok := <-ch.msg
+	if !ok {
+		return nil, io.EOF
+	}
+	switch msg := msg.(type) {
 	case *channelOpenConfirmMsg:
 		return ch, nil
 	case *channelOpenFailureMsg:

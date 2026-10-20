@@ -98,8 +98,12 @@ func datastoreOpenDB(
 		// process and not corrupt. As the file lock is advisory, deleting
 		// the file would succeed despite the lock. In this case, still retry
 		// in case the lock is released.
+		//
+		// mmap failures also do not indicate corruption.
 
-		reset = !std_errors.Is(err, bolt.ErrTimeout)
+		var mmapErr bolt.MmapError
+		reset = !std_errors.Is(err, bolt.ErrTimeout) &&
+			!std_errors.As(err, &mmapErr)
 	}
 
 	return db, err

@@ -30,6 +30,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -3411,6 +3412,7 @@ type pionNetwork struct {
 	logger                pion_logging.LeveledLogger
 	webRTCDialCoordinator WebRTCDialCoordinator
 	excludeInterfaceName  string
+	logFallbackOnce       sync.Once
 }
 
 func newPionNetwork(
@@ -3481,7 +3483,7 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 
 	netInterfaces, err := anet.Interfaces()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return p.fallbackInterfaces(defaultIPv4, defaultIPv6, err)
 	}
 
 	for _, netInterface := range netInterfaces {
@@ -3497,7 +3499,7 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 		}
 		addrs, err := anet.InterfaceAddrsByInterface(&netInterface)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return p.fallbackInterfaces(defaultIPv4, defaultIPv6, err)
 		}
 		var transportInterface *transport.Interface
 		for _, addr := range addrs {
@@ -3519,6 +3521,42 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 	}
 
 	return transportInterfaces, nil
+}
+
+// fallbackInterfaces creates fallback interface information when anet fails
+// due to permission errors. The bound socket IPs are used to create stub
+// interfaces. The fallback stub interface is not fully populated and has no
+// name, index, or subnet masks, but contains sufficient information for pion.
+//
+// Limitation: when an excluded interface is specified, the bound socket IPs
+// can't be checked for exclusion, so no fallback is allowed.
+func (p *pionNetwork) fallbackInterfaces(
+	defaultIPv4, defaultIPv6 net.IP, interfaceErr error) ([]*transport.Interface, error) {
+
+	if p.excludeInterfaceName != "" || !std_errors.Is(interfaceErr, os.ErrPermission) {
+		return nil, errors.Trace(interfaceErr)
+	}
+
+	var transportInterface *transport.Interface
+	for _, IP := range []net.IP{defaultIPv4, defaultIPv6} {
+		if !IP.IsGlobalUnicast() {
+			continue
+		}
+		if transportInterface == nil {
+			transportInterface = transport.NewInterface(net.Interface{Flags: net.FlagUp})
+		}
+		transportInterface.AddAddress(&net.IPAddr{IP: IP})
+	}
+	if transportInterface == nil {
+		return nil, errors.Trace(interfaceErr)
+	}
+
+	// Interfaces is called many times per dial; log the fallback once.
+	p.logFallbackOnce.Do(func() {
+		p.logger.Warnf("using socket addresses after interface enumeration failed: %v", interfaceErr)
+	})
+
+	return []*transport.Interface{transportInterface}, nil
 }
 
 func (p *pionNetwork) ResolveUDPAddr(network, address string) (retAddr *net.UDPAddr, retErr error) {
