@@ -192,13 +192,13 @@ type DialParameters struct {
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
 
 	inproxyDialInitialized         bool                         `json:"-"`
-	inproxyBrokerClient            *inproxy.BrokerClient        `json:"-"`
+	inproxyBrokerClientManager     *InproxyBrokerClientManager  `json:"-"`
 	inproxyBrokerDialParameters    *InproxyBrokerDialParameters `json:"-"`
 	inproxyPackedSignedServerEntry []byte                       `json:"-"`
 	inproxyNATStateManager         *InproxyNATStateManager      `json:"-"`
 	InproxySTUNDialParameters      *InproxySTUNDialParameters   `json:",omitempty"`
 	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters `json:",omitempty"`
-	inproxyConn                    atomic.Value                 `json:"-"`
+	inproxyConn                    atomic.Value                 `json:"-"` // *inproxyBrokerOwnedConn
 
 	TunnelLightProxyID string `json:"-"`
 
@@ -1408,16 +1408,12 @@ func MakeDialParameters(
 		// up, and this isn't an untunneled tactics request (isTactics).
 		dialParams.inproxyDialInitialized = true
 
-		// Store a reference to the current, shared in-proxy broker client.
+		// Store a reference to the shared in-proxy broker client manager.
 		//
-		// The broker client has its own, independent replay scheme and its
-		// own dial parameters which are reported for metrics.
-		dialParams.inproxyBrokerClient,
-			dialParams.inproxyBrokerDialParameters,
-			err = inproxyClientBrokerClientManager.GetBrokerClient(networkID)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+		// Broker clients created by the in-proxy broker client manager have
+		// their own independent replay scheme and dial parameters which are
+		// reported for metrics.
+		dialParams.inproxyBrokerClientManager = inproxyClientBrokerClientManager
 
 		// Load the signed server entry to be presented to the broker as proof
 		// that the in-proxy destination is a Psiphon server. The original
@@ -1534,9 +1530,8 @@ func MakeDialParameters(
 			dialParams.ObfuscatedQUICPaddingSeed = nil
 			dialParams.ObfuscatedQUICNonceTransformerParameters = nil
 		}
-
 		// dialParams.inproxyConn is left uninitialized until after the dial,
-		// and until then Load will return nil.
+		// and until then getInproxyConn will return nil.
 	}
 
 	// Set dial address fields. This portion of configuration is
@@ -2024,7 +2019,9 @@ func (dialParams *DialParameters) GetInproxyMetrics() common.LogFields {
 		return inproxyMetrics
 	}
 
-	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetMetrics())
+	if dialParams.inproxyBrokerDialParameters != nil {
+		inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetMetrics())
+	}
 	inproxyMetrics.Add(dialParams.InproxySTUNDialParameters.GetMetrics())
 	inproxyMetrics.Add(dialParams.InproxyWebRTCDialParameters.GetMetrics())
 

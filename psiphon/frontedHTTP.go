@@ -52,7 +52,8 @@ func newFrontedHTTPClientInstance(
 		return nil, errors.TraceNew("no fronting specs")
 	}
 
-	// This function duplicates some code from NewInproxyBrokerClientInstance.
+	// Replay selection and dial parameter preparation here overlap with
+	// inproxyBrokerSelector and MakeInproxyBrokerDialParameters.
 	//
 	// TODO: merge common functionality?
 
