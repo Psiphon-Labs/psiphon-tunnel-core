@@ -1399,27 +1399,27 @@ func (conn *webRTCConn) Close() error {
 	// awaiting the close of each component.
 	close(conn.closedSignal)
 
-	// Close the udpConn to interrupt any blocking DTLS handshake:
-	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
+	var closeUDPOnce sync.Once
+	closeUDP := func() {
+		closeUDPOnce.Do(func() {
+			if udpConn != nil {
+				_ = udpConn.Close()
+			}
+		})
+	}
+
+	// Close in top down order so closing packets, including DTLS
+	// close_notify, can be sent to the peer before the UDP socket is closed.
 	//
-	// Limitation: there is no guarantee that pion sends any closing packets
-	// before the UDP socket is closed here.
+	// Close the media receivers before waiting for QUIC cleanup, which may
+	// wait for receiveMediaTrack.Read to return. Closing the peer connection
+	// stops those receivers (see commit b770337a).
+	//
+	// The timer is a backstop that closes the UDP socket after a short delay
+	// if any pion close operation blocks on network I/O.
 
-	if udpConn != nil {
-		_ = udpConn.Close()
-	}
+	forceClose := time.AfterFunc(time.Second, closeUDP)
 
-	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
-
-	if portMapper != nil {
-		portMapper.close()
-	}
-	if sendMediaTrackRTP != nil {
-		_ = sendMediaTrackRTP.Stop()
-	}
-	if mediaTrackReliabilityLayer != nil {
-		_ = mediaTrackReliabilityLayer.Close()
-	}
 	if dataChannelConn != nil {
 		_ = dataChannelConn.Close()
 	}
@@ -1427,8 +1427,27 @@ func (conn *webRTCConn) Close() error {
 		_ = dataChannel.Close()
 	}
 	if peerConnection != nil {
-		// TODO: use PeerConnection.GracefulClose (requires pion/webrtc 3.2.51)?
+		// Pion sends the DTLS close_notify here, while UDP is still open.
+		// This notifies the peer in both data channel and media stream modes.
 		_ = peerConnection.Close()
+	}
+
+	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
+
+	if sendMediaTrackRTP != nil {
+		_ = sendMediaTrackRTP.Stop()
+	}
+	if mediaTrackReliabilityLayer != nil {
+		_ = mediaTrackReliabilityLayer.Close()
+	}
+
+	forceClose.Stop()
+	closeUDP()
+
+	// Keep the mapping available for closing packets. Release it after UDP
+	// cleanup so router I/O cannot consume the forceClose grace period.
+	if portMapper != nil {
+		portMapper.close()
 	}
 
 	return nil
