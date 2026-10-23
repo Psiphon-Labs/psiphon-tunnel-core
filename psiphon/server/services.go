@@ -725,7 +725,8 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 
 // Reload reinitializes traffic rules, psinet database, and geo IP database
 // components. If any component fails to reload, an error is logged and
-// Reload proceeds, using the previous state of the component.
+// Reload proceeds, using the previous state of the component. Each file's
+// load and post-action results are logged as config_reload events.
 func (support *SupportServices) Reload() {
 
 	reloaders := append(
@@ -741,67 +742,57 @@ func (support *SupportServices) Reload() {
 		reloaders = append(reloaders, support.dslRelay)
 	}
 
-	reloadDiscovery := func(reloadedTactics bool) {
-		err := support.discovery.reload(reloadedTactics)
-		if err != nil {
-			log.WithTraceFields(
-				LogFields{"error": errors.Trace(err)}).Warning(
-				"failed to reload discovery")
-			return
-		}
-	}
-
-	// Note: established clients aren't notified when tactics change after a
-	// reload; new tactics will be obtained on the next client handshake or
-	// tactics request.
-
-	reloadTactics := func() {
-
-		// Don't use stale tactics.
-		support.ReplayCache.Flush()
-		support.ServerTacticsParametersCache.Flush()
-
-		err := support.TunnelServer.ReloadTactics()
-		if err != nil {
-			log.WithTraceFields(
-				LogFields{"error": errors.Trace(err)}).Warning(
-				"failed to reload tunnel server tactics")
-		}
-
-		if support.Config.RunPacketManipulator {
-			err := reloadPacketManipulationSpecs(support)
-			if err != nil {
-				log.WithTraceFields(
-					LogFields{"error": errors.Trace(err)}).Warning(
-					"failed to reload packet manipulation specs")
-			}
-		}
-
-		reloadDiscovery(true)
-
-		if support.dslRelay != nil {
-			err := dslReloadRelayTactics(support)
-			if err != nil {
-				log.WithTraceFields(
-					LogFields{"error": errors.Trace(err)}).Warning(
-					"failed to reload DSL relay tactics")
-			}
-
-		}
-	}
-
 	// Take these actions only after the corresponding Reloader has reloaded.
 	// In both the traffic rules and OSL cases, there is some impact from state
 	// reset, so the reset should be avoided where possible.
 	//
-	// Note: if both tactics and psinet are reloaded at the same time and
-	// the discovery strategy tactic has changed, then discovery will be reloaded
-	// twice.
-	reloadPostActions := map[common.Reloader]func(){
-		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
-		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
-		support.TacticsServer:   reloadTactics,
-		support.PsinetDatabase:  func() { reloadDiscovery(false) },
+	// Established clients aren't notified when tactics change after a reload;
+	// new tactics will be obtained on the next client handshake or tactics
+	// request.
+	//
+	// Limitation: if both tactics and psinet are reloaded at the same time
+	// and the discovery strategy tactic has changed, then discovery will be
+	// reloaded twice.
+
+	reloadDiscovery := func(reloadedTactics bool) error {
+		return errors.TraceMsg(support.discovery.reload(reloadedTactics), "reload discovery")
+	}
+
+	tacticsPostActions := []func() error{
+		func() error {
+			// Don't use stale tactics.
+			support.ReplayCache.Flush()
+			support.ServerTacticsParametersCache.Flush()
+			return errors.TraceMsg(support.TunnelServer.ReloadTactics(), "reload tunnel server tactics")
+		},
+	}
+	if support.Config.RunPacketManipulator {
+		tacticsPostActions = append(tacticsPostActions, func() error {
+			return errors.TraceMsg(reloadPacketManipulationSpecs(support), "reload packet manipulation specs")
+		})
+	}
+	tacticsPostActions = append(tacticsPostActions, func() error {
+		return reloadDiscovery(true)
+	})
+	if support.dslRelay != nil {
+		tacticsPostActions = append(tacticsPostActions, func() error {
+			return errors.TraceMsg(dslReloadRelayTactics(support), "reload DSL relay tactics")
+		})
+	}
+
+	reloadPostActions := map[common.Reloader][]func() error{
+		support.TrafficRulesSet: {func() error {
+			support.TunnelServer.ResetAllClientTrafficRules()
+			return nil
+		}},
+		support.OSLConfig: {func() error {
+			support.TunnelServer.ResetAllClientOSLConfigs()
+			return nil
+		}},
+		support.TacticsServer: tacticsPostActions,
+		support.PsinetDatabase: {func() error {
+			return reloadDiscovery(false)
+		}},
 	}
 
 	for _, reloader := range reloaders {
@@ -811,26 +802,30 @@ func (support *SupportServices) Reload() {
 			continue
 		}
 
-		// "reloaded" flag indicates if file was actually reloaded or ignored
-		reloaded, err := reloader.Reload()
+		results := reloader.Reload(reloadPostActions[reloader]...)
 
-		if reloaded {
-			if action, ok := reloadPostActions[reloader]; ok {
-				action()
-			}
-		}
-
+		err := results.Err()
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{
 					"reloader": reloader.ReloadLogDescription(),
 					"error":    err}).Error("reload failed")
-			// Keep running with previous state
-		} else {
-			log.WithTraceFields(
-				LogFields{
-					"reloader": reloader.ReloadLogDescription(),
-					"reloaded": reloaded}).Info("reload success")
+			// Keep running. A failed load retains the previous state; a
+			// failed post action retains the newly loaded state.
+		}
+
+		for _, result := range results {
+			reloadErrors := make([]string, len(result.Errors))
+			for i, err := range result.Errors {
+				reloadErrors[i] = err.Error()
+			}
+			log.LogRawFieldsWithTimestamp(LogFields{
+				"event_name":  "config_reload",
+				"description": result.Description,
+				"reloaded":    result.Reloaded,
+				"hash_sha256": result.HashSHA256,
+				"errors":      reloadErrors,
+			})
 		}
 	}
 }

@@ -499,11 +499,12 @@ func TestReloadHomepageURLQueryParameterClientFeatures(t *testing.T) {
 		t.Helper()
 
 		writeTacticsConfig(value)
-		reloaded, err := tacticsServer.Reload()
+		results := tacticsServer.Reload()
+		err := results.Err()
 		if err != nil {
 			t.Fatalf("TacticsServer.Reload failed: %s", err)
 		}
-		if !reloaded {
+		if !results.Reloaded() {
 			t.Fatal("tactics configuration was not reloaded")
 		}
 
@@ -529,11 +530,12 @@ func TestReloadHomepageURLQueryParameterClientFeatures(t *testing.T) {
 		t.Helper()
 
 		writeTacticsConfig(value)
-		reloaded, err := tacticsServer.Reload()
+		results := tacticsServer.Reload()
+		err := results.Err()
 		if err != nil {
 			t.Fatalf("TacticsServer.Reload failed: %s", err)
 		}
-		if !reloaded {
+		if !results.Reloaded() {
 			t.Fatal("tactics configuration was not reloaded")
 		}
 

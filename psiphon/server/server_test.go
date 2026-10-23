@@ -22,6 +22,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -1346,6 +1347,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["DSLRelayCACertificatesFilename"] = dslTestConfig.relayCACertificatesFilename
 		serverConfig["DSLRelayHostCertificateFilename"] = dslTestConfig.relayHostCertificateFilename
 		serverConfig["DSLRelayHostKeyFilename"] = dslTestConfig.relayHostKeyFilename
+	} else if runConfig.doHotReload {
+		tlsConfig, err := testutils.NewTestDSLTLSConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		caFilename, certificateFilename, keyFilename, err := tlsConfig.WriteRelayFiles(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		serverConfig["DSLRelayServiceAddress"] = "127.0.0.1:1"
+		serverConfig["DSLRelayCACertificatesFilename"] = caFilename
+		serverConfig["DSLRelayHostCertificateFilename"] = certificateFilename
+		serverConfig["DSLRelayHostKeyFilename"] = keyFilename
 	}
 
 	var proxyProtocolHeaderMACKey []byte
@@ -1388,6 +1402,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverTunnelLog := make(chan map[string]interface{}, 1)
 	uniqueUserLog := make(chan map[string]interface{}, 1)
 	asnDestBytesLog := make(chan map[string]interface{}, 1)
+	reloadFilenames := []string{trafficRulesFilename, oslConfigFilename, psinetFilename}
+	if doServerTactics {
+		reloadFilenames = append(reloadFilenames, tacticsConfigFilename)
+	}
+	reloadFilenames = append(reloadFilenames,
+		blocklistFilename, geoIPCityDatabaseFilename, geoIPISPDatabaseFilename)
+	var relayFilenames []string
+	if doDSL || runConfig.doHotReload {
+		for _, name := range []string{
+			"DSLRelayCACertificatesFilename", "DSLRelayHostCertificateFilename", "DSLRelayHostKeyFilename"} {
+			relayFilenames = append(relayFilenames, serverConfig[name].(string))
+		}
+		reloadFilenames = append(reloadFilenames, relayFilenames...)
+	}
+	configReloadLog := make(chan map[string]interface{}, len(reloadFilenames))
 
 	// Max 3 discovery logs:
 	// 1. server startup
@@ -1422,6 +1451,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		switch logFields["event_name"].(string) {
+		case "config_reload":
+			select {
+			case configReloadLog <- logFields:
+			default:
+			}
 		case "unique_user":
 			select {
 			case uniqueUserLog <- logFields:
@@ -1673,11 +1707,75 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				runConfig.doProxyProtocolHeader)
 		}
 
-		p, _ := os.FindProcess(os.Getpid())
-		p.Signal(syscall.SIGUSR1)
+		reload := func(changed []string, tlsError bool) {
+			t.Helper()
+			expectedHashes := make(map[string]string)
+			for _, filename := range reloadFilenames {
+				content, err := os.ReadFile(filename)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expectedHashes[filename] = fmt.Sprintf("%x", sha256.Sum256(content))
+			}
+			p, err := os.FindProcess(os.Getpid())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = p.Signal(syscall.SIGUSR1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			timer := time.NewTimer(5 * time.Second)
+			defer timer.Stop()
+			for range reloadFilenames {
+				select {
+				case fields := <-configReloadLog:
+					filename, _ := fields["description"].(string)
+					hash, ok := expectedHashes[filename]
+					if !ok || fields["hash_sha256"] != hash || fields["reloaded"] != slices.Contains(changed, filename) {
+						t.Fatalf("unexpected config_reload: %+v", fields)
+					}
+					reloadErrors, ok := fields["errors"].([]interface{})
+					if !ok {
+						t.Fatalf("missing config_reload.errors: %+v", fields)
+					}
+					if tlsError && slices.Contains(relayFilenames, filename) {
+						if len(reloadErrors) != 1 || !strings.Contains(fmt.Sprint(reloadErrors[0]), "AppendCertsFromPEM failed") {
+							t.Fatalf("missing TLS reload error: %+v", fields)
+						}
+					} else if len(reloadErrors) != 0 {
+						t.Fatalf("unexpected config_reload.errors: %+v", fields)
+					}
+					delete(expectedHashes, filename)
+				case <-timer.C:
+					t.Fatalf("missing config_reload events: %v", expectedHashes)
+				}
+			}
+		}
+		changed := []string{trafficRulesFilename, oslConfigFilename, psinetFilename}
+		if doServerTactics {
+			changed = append(changed, tacticsConfigFilename)
+		}
+		reload(changed, false)
+		reload(nil, false)
 
-		// TODO: monitor logs for more robust wait-until-reloaded
-		time.Sleep(1 * time.Second)
+		caFilename := relayFilenames[0]
+		caContent, err := os.ReadFile(caFilename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = os.WriteFile(caFilename, []byte("invalid CA certificate"), 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reload(nil, true)
+		reload(nil, true)
+		err = os.WriteFile(caFilename, caContent, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reload(relayFilenames, false)
+		reload(nil, false)
 
 		// After reloading psinet, the new sponsorID/expectedHomepageURL
 		// should be active, as tested in the client "Homepage" notice
@@ -3026,7 +3124,7 @@ func protoToLogFields(msg proto.Message, logFields map[string]interface{}, runCo
 		}
 
 		// Never skip these fields, even if unset
-		if slices.Contains([]string{"last_connected"}, fd.TextName()) {
+		if slices.Contains([]string{"last_connected", "errors"}, fd.TextName()) {
 			return false
 		}
 

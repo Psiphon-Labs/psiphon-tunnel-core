@@ -184,7 +184,7 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 				return nil
 			})
 
-		_, err := database.Reload()
+		err := database.Reload().Err()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
