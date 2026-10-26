@@ -42,7 +42,7 @@ github.com/Psiphon-Labs/covert-dtls/pkg/utils
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026144336-26503853b2e2
+# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059
 ## explicit; go 1.24.0
 github.com/Psiphon-Labs/pion-ice/v4
 github.com/Psiphon-Labs/pion-ice/v4/internal/atomic

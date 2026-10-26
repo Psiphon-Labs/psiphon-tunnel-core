@@ -461,7 +461,13 @@ func (s *controlledSelector) HandleBindingRequest(message *stun.Message, local, 
 	}
 
 	s.agent.sendBindingSuccess(message, local, remote)
-	s.PingCandidate(local, remote)
+
+	// [Psiphon] Apply a variant of the following upstream fix: don't send
+	// triggered checks for succeeded pairs, even before any pair is selected.
+	// https://github.com/pion/ice/commit/99fbdeaadb4fc7a01fa14df030fcb546962e076f
+	if pair.state != CandidatePairStateSucceeded {
+		s.PingCandidate(local, remote)
+	}
 
 	if s.agent.userBindingRequestHandler != nil {
 		if shouldSwitch := s.agent.userBindingRequestHandler(message, local, remote, pair); shouldSwitch {
