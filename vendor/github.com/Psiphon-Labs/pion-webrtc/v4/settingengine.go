@@ -44,6 +44,9 @@ type SettingEngine struct {
 		ICEPrflxAcceptanceMinWait *time.Duration
 		ICERelayAcceptanceMinWait *time.Duration
 		ICESTUNGatherTimeout      *time.Duration
+
+		// [Psiphon] Keepalive jitter fraction.
+		ICEKeepaliveIntervalJitter float64
 	}
 	renomination renominationSettings
 	candidates   struct {
@@ -233,9 +236,26 @@ func (e *SettingEngine) SetSRTPProtectionProfiles(profiles ...dtls.SRTPProtectio
 //
 // Default is 2 seconds.
 func (e *SettingEngine) SetICETimeouts(disconnectedTimeout, failedTimeout, keepAliveInterval time.Duration) {
+	// [Psiphon] Zero jitter preserves the existing API.
+	_ = e.SetICETimeoutsWithJitter(disconnectedTimeout, failedTimeout, keepAliveInterval, 0)
+}
+
+// [Psiphon] SetICETimeoutsWithJitter adds per-period keepalive jitter in [0, 1).
+// Zero uses a fixed interval. Invalid jitter leaves the settings unchanged.
+func (e *SettingEngine) SetICETimeoutsWithJitter(
+	disconnectedTimeout, failedTimeout, keepAliveInterval time.Duration,
+	jitter float64,
+) error {
+	if !(jitter >= 0 && jitter < 1) {
+		return ice.ErrInvalidKeepaliveIntervalJitter
+	}
+
 	e.timeout.ICEDisconnectedTimeout = &disconnectedTimeout
 	e.timeout.ICEFailedTimeout = &failedTimeout
 	e.timeout.ICEKeepaliveInterval = &keepAliveInterval
+	e.timeout.ICEKeepaliveIntervalJitter = jitter
+
+	return nil
 }
 
 // SetHostAcceptanceMinWait sets the ICEHostAcceptanceMinWait.

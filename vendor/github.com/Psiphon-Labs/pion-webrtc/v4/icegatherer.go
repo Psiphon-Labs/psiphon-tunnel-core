@@ -299,7 +299,7 @@ func (g *ICEGatherer) addressRewriteOptions(candidateType ice.CandidateType) ([]
 }
 
 func (g *ICEGatherer) timeoutOptions() []ice.AgentOption {
-	opts := make([]ice.AgentOption, 0, 8)
+	opts := make([]ice.AgentOption, 0, 9) // [Psiphon]
 
 	if g.api.settingEngine.timeout.ICEDisconnectedTimeout != nil {
 		opts = append(opts, ice.WithDisconnectedTimeout(*g.api.settingEngine.timeout.ICEDisconnectedTimeout))
@@ -310,6 +310,8 @@ func (g *ICEGatherer) timeoutOptions() []ice.AgentOption {
 	if g.api.settingEngine.timeout.ICEKeepaliveInterval != nil {
 		opts = append(opts, ice.WithKeepaliveInterval(*g.api.settingEngine.timeout.ICEKeepaliveInterval))
 	}
+	// [Psiphon]
+	opts = append(opts, ice.WithKeepaliveIntervalJitter(g.api.settingEngine.timeout.ICEKeepaliveIntervalJitter))
 	if g.api.settingEngine.timeout.ICEHostAcceptanceMinWait != nil {
 		opts = append(opts, ice.WithHostAcceptanceMinWait(*g.api.settingEngine.timeout.ICEHostAcceptanceMinWait))
 	}

@@ -24,8 +24,8 @@ require (
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
-	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
+	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026144336-26503853b2e2
+	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
 	github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d

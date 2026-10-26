@@ -42,7 +42,7 @@ github.com/Psiphon-Labs/covert-dtls/pkg/utils
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
+# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026144336-26503853b2e2
 ## explicit; go 1.24.0
 github.com/Psiphon-Labs/pion-ice/v4
 github.com/Psiphon-Labs/pion-ice/v4/internal/atomic
@@ -50,7 +50,7 @@ github.com/Psiphon-Labs/pion-ice/v4/internal/fakenet
 github.com/Psiphon-Labs/pion-ice/v4/internal/netutil
 github.com/Psiphon-Labs/pion-ice/v4/internal/stun
 github.com/Psiphon-Labs/pion-ice/v4/internal/taskloop
-# github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
+# github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88
 ## explicit; go 1.24.0
 github.com/Psiphon-Labs/pion-webrtc/v4
 github.com/Psiphon-Labs/pion-webrtc/v4/internal/fmtp

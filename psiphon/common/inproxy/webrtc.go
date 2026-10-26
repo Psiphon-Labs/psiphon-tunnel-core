@@ -223,6 +223,12 @@ func newWebRTCConn(
 
 	isOffer := peerSDP == nil
 
+	keepaliveBaseInterval, keepaliveJitter, err := makeICEKeepaliveSchedule(
+		config.DTLSFingerprint, config.ClientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
 	udpConn, err := config.WebRTCDialCoordinator.UDPListen(ctx)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
@@ -374,21 +380,11 @@ func newWebRTCConn(
 	// - Reduce the wait time for STUN and peer reflexive candidates from the
 	//   default 500ms and 1s.
 	//
-	// - Reduce keepalives from the default 2s to +/-15s and increase
-	//   disconnect timeout from the default 5s to 3x15s.
+	// - Match periodic ICE timing to the DTLS fingerprint.
 	//
 	// TODO:
 	//
 	// - Configuration via tactics.
-	//
-	// - While the RFC,
-	//   https://datatracker.ietf.org/doc/html/rfc5245#section-10, calls for
-	//   keep alives no less than 15s, implementations such as Chrome send
-	//   keep alives much more frequently,
-	//   https://issues.webrtc.org/issues/42221718.
-	//
-	// - Varying the period bewteen each keepalive, as is done with SSH via
-	//   SSHKeepAlivePeriodMin/Max, requires changes to pion/dtls.
 	//
 	// - Some traffic-related timeouts are not yet exposed via settingEngine,
 	//   including ice.defaultSTUNGatherTimeout, ice.maxBindingRequestTimeout.
@@ -397,13 +393,19 @@ func newWebRTCConn(
 	settingEngine.SetHostAcceptanceMinWait(0)
 	settingEngine.SetSrflxAcceptanceMinWait(prng.JitterDuration(100*time.Millisecond, 0.1))
 	settingEngine.SetPrflxAcceptanceMinWait(prng.JitterDuration(200*time.Millisecond, 0.1))
-	settingEngine.SetICETimeouts(45*time.Second, 0, prng.JitterDuration(15*time.Second, 0.2))
+	if err := settingEngine.SetICETimeoutsWithJitter(
+		45*time.Second, 0, keepaliveBaseInterval, keepaliveJitter); err != nil {
+		_ = udpMux.Close()
+		return nil, nil, nil, errors.Trace(err)
+	}
 	settingEngine.SetICEMaxBindingRequests(10)
 
 	// Initialize data channel or media streams obfuscation
 
 	config.Logger.WithTraceFields(common.LogFields{
 		"dtls_fingerprint":             config.DTLSFingerprint,
+		"ice_keepalive_base_ms":        keepaliveBaseInterval.Milliseconds(),
+		"ice_keepalive_jitter":         keepaliveJitter,
 		"data_channel_traffic_shaping": config.TrafficShapingParameters != nil,
 		"use_media_streams":            config.UseMediaStreams,
 	}).Info("webrtc_obfuscation")
@@ -3397,6 +3399,66 @@ func getDTLSFingerprintData(dtlsFingerprint string) (fingerprints.ClientHelloFin
 	default:
 		return "", false
 	}
+}
+
+type iceKeepaliveTiming struct {
+	baseMin time.Duration
+	baseMax time.Duration
+	jitter  float64
+}
+
+// Established-connection timing; excludes Chrome's startup and weak states.
+var iceKeepaliveTimings = map[string]iceKeepaliveTiming{
+	protocol.DTLS_FINGERPRINT_CHROME_138: {
+		baseMin: 2500 * time.Millisecond,
+		baseMax: 2500 * time.Millisecond,
+	},
+	protocol.DTLS_FINGERPRINT_FIREFOX_148: {
+		baseMin: 5 * time.Second,
+		baseMax: 5 * time.Second,
+		jitter:  0.2,
+	},
+	protocol.DTLS_FINGERPRINT_RANDOMIZED: {
+		baseMin: 5 * time.Second,
+		baseMax: 10 * time.Second,
+		jitter:  0.2,
+	},
+}
+
+func makeICEKeepaliveSchedule(
+	fingerprint string,
+	rootSecret ObfuscationSecret,
+	isOffer bool,
+) (time.Duration, float64, error) {
+	// Legacy callers may omit the fingerprint.
+	if fingerprint == "" {
+		fingerprint = protocol.DTLS_FINGERPRINT_RANDOMIZED
+	}
+	timing, ok := iceKeepaliveTimings[fingerprint]
+	if !ok {
+		return 0, 0, errors.TraceNew("unsupported DTLS fingerprint")
+	}
+
+	if timing.baseMin == timing.baseMax {
+		return timing.baseMin, timing.jitter, nil
+	}
+
+	context := "in-proxy-ICE-keepalive-offer"
+	if !isOffer {
+		context = "in-proxy-ICE-keepalive-answer"
+	}
+	secret, err := deriveObfuscationSecret(rootSecret, context)
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+	seed := prng.Seed(secret)
+	PRNG := prng.NewPRNGWithSeed(&seed)
+
+	// Replay the base keepalive period.
+	baseMS := PRNG.Range(
+		int(timing.baseMin/time.Millisecond),
+		int(timing.baseMax/time.Millisecond))
+	return time.Duration(baseMS) * time.Millisecond, timing.jitter, nil
 }
 
 // pionNetwork implements pion/transport.Net.
