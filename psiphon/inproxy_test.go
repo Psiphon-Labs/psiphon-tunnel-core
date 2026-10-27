@@ -1470,11 +1470,12 @@ func TestInproxyBrokerProviderPersonal(t *testing.T) {
 	}
 }
 
-// TestInproxyBrokerProviderPersonalRestart verifies that a personal pairing
-// client advances to the next rendezvous broker after its visit is exhausted,
-// restarts at the primary broker after shared idle expiry, and replays the
-// stored record only when it reaches that broker again in rendezvous order.
-func TestInproxyBrokerProviderPersonalRestart(t *testing.T) {
+// TestInproxyBrokerProviderPersonalSharedLoss verifies that a personal
+// pairing client advances to the next rendezvous broker after its visit is
+// exhausted, stays at that broker with the same visit after shared idle
+// expiry, replaying the record stored there, and advances in rendezvous
+// order only when that broker is exhausted too.
+func TestInproxyBrokerProviderPersonalSharedLoss(t *testing.T) {
 	m := newProviderTestManager(t, 2, newProviderTestBroker(t, "A"), newProviderTestBroker(t, "B"))
 	id, err := inproxy.MakeID()
 	if err != nil {
@@ -1493,14 +1494,16 @@ func TestInproxyBrokerProviderPersonalRestart(t *testing.T) {
 	releaseSecondary()
 	expireSharedClientForTest(m, secondary)
 	next := getGateTestClient(t, m, &releaseNext)
-	if next.frontingProviderID != primary.frontingProviderID {
-		t.Fatal("new search did not restart rendezvous order")
+	if next.frontingProviderID != secondary.frontingProviderID ||
+		next.brokerSelection != secondary.brokerSelection ||
+		!next.brokerDialParams.isReplay {
+		t.Fatal("shared loss did not retain the rendezvous broker, visit and replay")
 	}
 	next.BrokerClientRoundTripperFailed(next.roundTripper)
 	releaseNext()
 	next = getGateTestClient(t, m)
-	if next.frontingProviderID != secondary.frontingProviderID || !next.brokerDialParams.isReplay {
-		t.Fatal("later rendezvous broker did not replay its distinct unused provider")
+	if next.frontingProviderID != primary.frontingProviderID || next.brokerSelection == secondary.brokerSelection {
+		t.Fatal("exhausting the retained broker did not advance in rendezvous order")
 	}
 }
 
@@ -5973,10 +5976,12 @@ func TestInproxyBrokerPersonalProviderGateWake(t *testing.T) {
 	}
 }
 
-// TestInproxyBrokerPersonalVisitIdentity verifies that NoMatch wraparound,
-// shared failure and idle expiry each allocate a new visit even at the same
-// broker, so an older client's response cannot share it, while the new
-// visit's client can be shared and the old client's cleanup is harmless.
+// TestInproxyBrokerPersonalVisitIdentity verifies that NoMatch wraparound
+// allocates a new visit even at the same broker, so an older client's
+// response cannot share it, while the new visit's client can be shared and
+// the old client's cleanup is harmless; and that shared failure and idle
+// expiry retain the visit, so a surviving candidate from it becomes shared
+// on its decoded response and the next acquisition reuses it.
 func TestInproxyBrokerPersonalVisitIdentity(t *testing.T) {
 	for _, event := range []string{"wrap", "shared-failure", "idle"} {
 		t.Run(event, func(t *testing.T) {
@@ -5997,12 +6002,26 @@ func TestInproxyBrokerPersonalVisitIdentity(t *testing.T) {
 				releaseA()
 				expireSharedClientForTest(m, a)
 			}
+			if event != "wrap" {
+				m.mutex.Lock()
+				retained := m.selector.currentBrokerSelection == b.brokerSelection
+				m.mutex.Unlock()
+				if !retained {
+					t.Fatal("shared loss did not retain the visit")
+				}
+				b.BrokerClientResponseReceived(b.roundTripper, false)
+				if m.sharedClient != b {
+					t.Fatal("surviving candidate at the retained visit was not shared")
+				}
+				if getGateTestClient(t, m) != b {
+					t.Fatal("acquisition did not reuse the surviving candidate")
+				}
+				releaseB()
+				return
+			}
 			c := getGateTestClient(t, m)
 			if c.brokerSelection == b.brokerSelection || c.brokerDialParams.brokerSpec.BrokerPublicKey != b.brokerDialParams.brokerSpec.BrokerPublicKey {
 				t.Fatal("same-broker selection did not get a new visit")
-			}
-			if event != "wrap" && c.brokerSelection.index != 0 {
-				t.Fatal("shared loss did not restart at primary broker")
 			}
 			b.BrokerClientResponseReceived(b.roundTripper, false)
 			if m.sharedClient != nil || b.roundTripper.runCtx.Err() != nil {

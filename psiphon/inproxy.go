@@ -243,9 +243,8 @@ func (b *InproxyBrokerClientManager) brokerClientFailed(instance *InproxyBrokerC
 	entry.failed = true
 	// A failed client held by callers stays tracked until released, so it
 	// still counts toward the client limit and toward the fronting providers
-	// tried at the current broker selection, unless shared loss allocated a
-	// new selection. Unsharing it or closing it closes b.changed, waking
-	// GetBrokerClient calls blocked on either.
+	// tried at the current broker selection. Unsharing it or closing it
+	// closes b.changed, waking GetBrokerClient calls blocked on either.
 	wasShared := b.sharedClient == instance
 	if wasShared {
 		b.stopSharedIdleTimerLocked()
@@ -687,8 +686,8 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //   - After all providers have been tried, selection waits for clients from
 //     the current selection to close before advancing to the next broker.
 //   - NoMatch failover advances immediately, even when other broker clients
-//     are still held by callers. Losing the shared client restarts at the
-//     first broker.
+//     are still held by callers. Losing the shared client retains the
+//     current broker selection state.
 //
 // Personal pairing proxies:
 //   - Follow the broker order shared with the personal client, trying different
@@ -725,8 +724,8 @@ type inproxyBrokerSelector struct {
 	brokers parameters.InproxyBrokerSpecsValue
 
 	// Current broker and provider attempts for personal pairing clients and
-	// proxies. Replaced when advancing or restarting selection, even when
-	// selecting the same broker again. Proxies retain it on shared client loss.
+	// proxies. Replaced when advancing or resetting selection, even when
+	// selecting the same broker again. Retained on shared client loss.
 	currentBrokerSelection *inproxyBrokerSelectionState
 
 	// Starting position in brokers for a provider not yet in
@@ -808,21 +807,16 @@ func (s *inproxyBrokerSelector) reset() {
 // sharedLost refreshes the search after the shared client fails or idle
 // expires: provider order and replay allowances are rebuilt so the lost
 // client's provider may be replayed again, while broker cursors and the
-// session seed are kept. Personal pairing clients restart at the first
-// rendezvous broker with a new selection state; proxies keep their current
-// broker and selection state so surviving candidates there can still
-// become shared.
+// session seed are kept. Personal pairing clients and proxies keep their
+// current broker and selection state: the lost client was proven at that
+// broker, surviving candidates there can still become shared, and a
+// personal client that left would have to re-walk every broker between the
+// first in rendezvous order and the one where its proxy is.
 func (s *inproxyBrokerSelector) sharedLost() {
 	s.providers, s.replayedByProvider = nil, nil
 	s.nextProvider, s.preferBrokerOrder = 0, false
 	if s.exhaustBrokerProviders {
 		s.currentBrokerSelection.tried = nil
-		if !s.proxy {
-			// Restart personal pairing clients at the first broker with a new
-			// selection state. Proxies retain their selection state so other
-			// clients at that broker may still become shared.
-			s.currentBrokerSelection = &inproxyBrokerSelectionState{}
-		}
 	}
 }
 
@@ -958,9 +952,9 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 		visit := s.currentBrokerSelection
 
 		// Shared client loss clears the provider order and tried
-		// providers but retains the selection for proxies, so both are
-		// rebuilt from the clients that remain tracked. Clients from
-		// earlier selections occupy capacity but cannot delay this one.
+		// providers but retains the selection, so both are rebuilt from
+		// the clients that remain tracked. Clients from earlier
+		// selections occupy capacity but cannot delay this one.
 		if visit.spec != nil {
 			s.initializeProviders(parameters.InproxyBrokerSpecsValue{visit.spec})
 		}
