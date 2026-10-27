@@ -6143,6 +6143,258 @@ func TestInproxyProxySharedLossReplayExclusion(t *testing.T) {
 	releaseB()
 }
 
+// newPersonalProxyReturnHomeTestManager builds a personal pairing proxy
+// manager at M=1 over three one-provider brokers with the given
+// return-to-home period, and exhausts the first rendezvous broker so the
+// proxy is displaced to the second. It returns the manager and the shared
+// client at the second broker.
+func newPersonalProxyReturnHomeTestManager(
+	t *testing.T, period string) (*InproxyBrokerClientManager, *InproxyBrokerClientInstance) {
+
+	t.Helper()
+	specs := []*parameters.InproxyBrokerSpec{
+		newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A")}
+	m := newProxyRaceTestManager(t, 1, specs...)
+	id, err := inproxy.MakeID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.config.InproxyProxyPersonalCompartmentID = id.String()
+	if err := setGateTestParameters(m.config, "return-home", map[string]interface{}{
+		parameters.InproxyBrokerSpecs:                   parameters.InproxyBrokerSpecsValue(specs),
+		parameters.InproxyProxyMaxBrokerClients:         1,
+		parameters.InproxyProxyPersonalReturnHomePeriod: period,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var releaseHome func()
+	home := getGateTestClient(t, m, &releaseHome)
+	if home.brokerSelection.index != 0 {
+		t.Fatal("personal proxy did not start at the first rendezvous broker")
+	}
+	home.BrokerClientRoundTripperFailed(home.roundTripper)
+	releaseHome()
+	away := getGateTestClient(t, m)
+	away.brokerResponseSucceededForTest(away.roundTripper)
+	m.mutex.Lock()
+	displaced := away.brokerSelection.index == 1 && m.sharedClient == away && !m.selector.awayFromHomeSince.IsZero()
+	m.mutex.Unlock()
+	if !displaced {
+		t.Fatal("exhausting the first broker did not displace the proxy or start the return interval")
+	}
+	return m, away
+}
+
+// TestInproxyProxyPersonalReturnHome verifies return-to-home for a
+// displaced personal pairing proxy. Once the return period has elapsed, the
+// next acquisition closes the shared client at the away broker despite its
+// outstanding leases, wakes a parked worker, and selects a new visit at the
+// first broker; a late release of the closed client is harmless. Exhausting
+// the first broker again advances in rendezvous order and restarts the
+// interval, so returns repeat every period while the first broker stays
+// unreachable. The interval is not restarted by leaving a later broker, and
+// the mechanism is inert for common proxies, for personal clients and with
+// a zero period; a reset clears it.
+func TestInproxyProxyPersonalReturnHome(t *testing.T) {
+	t.Run("return", func(t *testing.T) {
+		m, away := newPersonalProxyReturnHomeTestManager(t, "1h")
+		// Unshare the away client so that, still held by its lease, it
+		// fills M=1 and a second worker parks on it.
+		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		_, _, changed, err := m.tryGetClientBrokerClient("TEST")
+		if err != nil || changed == nil {
+			t.Fatalf("expected the held away client to fill the limit: %v", err)
+		}
+		m.mutex.Lock()
+		m.selector.awayFromHomeSince = time.Now().Add(-2 * time.Hour)
+		m.mutex.Unlock()
+		home := getGateTestClient(t, m)
+		select {
+		case <-changed:
+		default:
+			t.Fatal("return home did not wake the parked worker")
+		}
+		m.mutex.Lock()
+		returned := home.brokerSelection.index == 0 &&
+			m.selector.currentBrokerSelection == home.brokerSelection &&
+			m.selector.awayFromHomeSince.IsZero() && m.sharedClient == nil && len(m.clients) == 1
+		m.mutex.Unlock()
+		if !returned || away.roundTripper.runCtx.Err() == nil {
+			t.Fatal("return home did not close the held away client and select the first broker")
+		}
+		if away.brokerDialParams.brokerSpec.BrokerPublicKey == home.brokerDialParams.brokerSpec.BrokerPublicKey {
+			t.Fatal("returned to the away broker")
+		}
+		home.brokerResponseSucceededForTest(home.roundTripper)
+		if m.sharedClient != home {
+			t.Fatal("response at the first broker did not share")
+		}
+	})
+
+	t.Run("repeated", func(t *testing.T) {
+		m, _ := newPersonalProxyReturnHomeTestManager(t, "1h")
+		for attempt := 1; attempt <= 3; attempt++ {
+			m.mutex.Lock()
+			m.selector.awayFromHomeSince = time.Now().Add(-2 * time.Hour)
+			m.mutex.Unlock()
+			var releaseHome func()
+			home := getGateTestClient(t, m, &releaseHome)
+			if home.brokerSelection.index != 0 {
+				t.Fatalf("return %d did not select the first broker", attempt)
+			}
+			// The first broker fails again: selection advances in
+			// rendezvous order and the interval restarts.
+			home.BrokerClientRoundTripperFailed(home.roundTripper)
+			releaseHome()
+			next := getGateTestClient(t, m)
+			m.mutex.Lock()
+			advanced := next.brokerSelection.index == 1 && !m.selector.awayFromHomeSince.IsZero() &&
+				time.Since(m.selector.awayFromHomeSince) < time.Minute
+			m.mutex.Unlock()
+			if !advanced {
+				t.Fatalf("failed return %d did not advance in order and restart the interval", attempt)
+			}
+			next.brokerResponseSucceededForTest(next.roundTripper)
+			m.mutex.Lock()
+			due := m.selector.returnHomeDue()
+			m.mutex.Unlock()
+			if due {
+				t.Fatal("return due before the period elapsed")
+			}
+		}
+	})
+
+	t.Run("inert", func(t *testing.T) {
+		// Leaving a later broker does not restart the interval: the
+		// proxy is still away from the first broker, so the interval
+		// already running continues.
+		m, away := newPersonalProxyReturnHomeTestManager(t, "1h")
+		m.mutex.Lock()
+		since := time.Now().Add(-30 * time.Minute)
+		m.selector.awayFromHomeSince = since
+		m.mutex.Unlock()
+		// Shared loss retains the visit and retries its provider; a
+		// second failure with no client left exhausts the broker.
+		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		m.mutex.Lock()
+		if entry := m.clients[away]; entry != nil {
+			entry.refs = 0
+			m.closeClientLocked(away, "test")
+		}
+		m.mutex.Unlock()
+		var releaseRetry func()
+		retry := getGateTestClient(t, m, &releaseRetry)
+		if retry.brokerSelection != away.brokerSelection {
+			t.Fatal("shared loss did not retain the away visit")
+		}
+		retry.BrokerClientRoundTripperFailed(retry.roundTripper)
+		releaseRetry()
+		next := getGateTestClient(t, m)
+		m.mutex.Lock()
+		unchanged := next.brokerSelection.index == 2 && m.selector.awayFromHomeSince.Equal(since)
+		m.mutex.Unlock()
+		if !unchanged {
+			t.Fatalf("leaving a later broker changed the return interval: index %d",
+				next.brokerSelection.index)
+		}
+
+		// Zero period disables the mechanism.
+		m2, _ := newPersonalProxyReturnHomeTestManager(t, "0s")
+		m2.mutex.Lock()
+		m2.selector.awayFromHomeSince = time.Now().Add(-100 * time.Hour)
+		due := m2.selector.returnHomeDue()
+		m2.mutex.Unlock()
+		if due {
+			t.Fatal("return home due with a zero period")
+		}
+
+		// A common proxy and a personal client never arm it.
+		common := newProxyRaceTestManager(t, 1, newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A"))
+		var releaseCommon func()
+		c := getGateTestClient(t, common, &releaseCommon)
+		c.BrokerClientRoundTripperFailed(c.roundTripper)
+		releaseCommon()
+		getGateTestClient(t, common)
+		client := newPersonalRaceTestManager(t, 1, 1, newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A"))
+		var releaseClient func()
+		k := getGateTestClient(t, client, &releaseClient)
+		k.BrokerClientRoundTripperFailed(k.roundTripper)
+		releaseClient()
+		getGateTestClient(t, client)
+		for name, mm := range map[string]*InproxyBrokerClientManager{"common proxy": common, "personal client": client} {
+			mm.mutex.Lock()
+			armed := !mm.selector.awayFromHomeSince.IsZero() || mm.selector.returnHomePeriod != 0
+			mm.mutex.Unlock()
+			if armed {
+				t.Fatalf("%s armed return home", name)
+			}
+		}
+	})
+
+	t.Run("wrap-arrives-home", func(t *testing.T) {
+		// Exhausting the last broker wraps the order back to the first
+		// rendezvous broker. Arriving there ends the interval, so no
+		// return fires against the working client the proxy then
+		// shares at home.
+		m, away := newPersonalProxyReturnHomeTestManager(t, "1h")
+		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		m.mutex.Lock()
+		if entry := m.clients[away]; entry != nil {
+			entry.refs = 0
+			m.closeClientLocked(away, "test")
+		}
+		m.mutex.Unlock()
+		// Shared loss retained index 1; fail its retry and then index 2
+		// to wrap to index 3, the first broker again.
+		for want := 1; want <= 2; want++ {
+			var release func()
+			c := getGateTestClient(t, m, &release)
+			if c.brokerSelection.index != want {
+				t.Fatalf("expected index %d, got %d", want, c.brokerSelection.index)
+			}
+			c.BrokerClientRoundTripperFailed(c.roundTripper)
+			release()
+		}
+		home := getGateTestClient(t, m)
+		m.mutex.Lock()
+		arrived := home.brokerSelection.index == 3 && m.selector.awayFromHomeSince.IsZero()
+		m.mutex.Unlock()
+		if !arrived || home.brokerDialParams.brokerSpec.BrokerPublicKey == away.brokerDialParams.brokerSpec.BrokerPublicKey {
+			t.Fatalf("wrap to the first broker did not end the interval: index %d", home.brokerSelection.index)
+		}
+		home.brokerResponseSucceededForTest(home.roundTripper)
+		// Even a long-elapsed departure time cannot fire a return at
+		// home, since arrival cleared it; simulate a stale value to be
+		// sure returnHomeDue is false while the interval is unset.
+		m.mutex.Lock()
+		due := m.selector.returnHomeDue()
+		m.mutex.Unlock()
+		if due {
+			t.Fatal("return due while at the first broker")
+		}
+		again := getGateTestClient(t, m)
+		m.mutex.Lock()
+		stable := again == home && m.sharedClient == home && home.roundTripper.runCtx.Err() == nil
+		m.mutex.Unlock()
+		if !stable {
+			t.Fatal("a return fired against the shared client at the first broker")
+		}
+	})
+
+	t.Run("reset-clears", func(t *testing.T) {
+		m, _ := newPersonalProxyReturnHomeTestManager(t, "1h")
+		if err := m.NetworkChanged(); err != nil {
+			t.Fatal(err)
+		}
+		m.mutex.Lock()
+		cleared := m.selector.awayFromHomeSince.IsZero()
+		m.mutex.Unlock()
+		if !cleared {
+			t.Fatal("reset did not clear return home state")
+		}
+	})
+}
+
 // TestInproxyBrokerPersonalConstructionFailure verifies that a local
 // construction failure consumes one provider turn without occupying a live
 // slot, does not advance the broker visit while a client remains, and

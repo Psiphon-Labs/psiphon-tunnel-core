@@ -279,6 +279,13 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 		b.networkID = networkID
 	}
 
+	// A personal pairing proxy away from its first rendezvous broker
+	// returns to it on a schedule, checked here since proxy workers
+	// acquire at least once per announce cycle.
+	if b.selector.returnHomeDue() {
+		b.returnHomeLocked()
+	}
+
 	// Reusing the shared client ends its idle period.
 	if b.sharedClient != nil {
 		b.stopSharedIdleTimerLocked()
@@ -572,6 +579,27 @@ func (b *InproxyBrokerClientManager) resetClientBrokerClientsLocked(reason strin
 	b.signalClientChangedLocked()
 }
 
+// returnHomeLocked closes all clients and selects the first rendezvous
+// broker again for a personal pairing proxy that has been away for the
+// return-to-home interval. Unlike resetClientBrokerClientsLocked, the
+// network ID, broker order and compartment IDs are retained. The caller
+// must hold b.mutex.
+func (b *InproxyBrokerClientManager) returnHomeLocked() {
+	for instance, entry := range b.clients {
+		_ = instance.Close()
+		NoticeInfo(
+			"inproxy: broker client %s closed: return home, shared %t, callers %d",
+			instance.brokerClientID, b.sharedClient == instance, entry.refs)
+	}
+	clear(b.clients)
+	b.sharedClient = nil
+	b.stopSharedIdleTimerLocked()
+	away := b.selector.returnHome()
+	NoticeInfo(
+		"inproxy: returning to first rendezvous broker after %s away", away)
+	b.signalClientChangedLocked()
+}
+
 // closeClientBrokerClients closes all clients and resets broker selection.
 // It is safe to call on a nil receiver. The caller must not hold b.mutex.
 func (b *InproxyBrokerClientManager) closeClientBrokerClients() {
@@ -763,6 +791,16 @@ type inproxyBrokerSelector struct {
 	// NoMatch failover. Replay at the selected broker is still allowed.
 	// Cleared after the next selection.
 	preferBrokerOrder bool
+
+	// Interval after which a personal pairing proxy away from the first
+	// rendezvous broker returns to it; see returnHome. Zero disables
+	// returns.
+	returnHomePeriod time.Duration
+
+	// When a personal pairing proxy last advanced from the first
+	// rendezvous broker. Zero while it is there or when the selector is
+	// not a personal pairing proxy's.
+	awayFromHomeSince time.Time
 }
 
 // inproxyBrokerSelectionState tracks attempts at one broker. Each selection
@@ -802,6 +840,7 @@ func (s *inproxyBrokerSelector) reset() {
 	s.nextBrokerByProvider, s.replayedByProvider = nil, nil
 	s.preferBrokerOrder = false
 	s.currentBrokerSelection = &inproxyBrokerSelectionState{}
+	s.awayFromHomeSince = time.Time{}
 }
 
 // sharedLost refreshes the search after the shared client fails or idle
@@ -899,8 +938,33 @@ func (s *inproxyBrokerSelector) initialize(config *Config, p parameters.Paramete
 			s.brokers = s.brokers[:max]
 		}
 	}
+	if s.personal && s.proxy {
+		s.returnHomePeriod = p.Duration(parameters.InproxyProxyPersonalReturnHomePeriod)
+	}
 	s.commonCompartmentIDs, s.personalCompartmentIDs = commonIDs, personalIDs
 	return nil
+}
+
+// returnHomeDue reports whether a personal pairing proxy away from the first
+// rendezvous broker should return to it now: returnHomePeriod has elapsed
+// since it left, and the period is not zero, which disables returns.
+// Elapsed time is measured with the monotonic clock, so sleep on mobile
+// delays a return rather than forcing one.
+func (s *inproxyBrokerSelector) returnHomeDue() bool {
+	return s.personal && s.proxy && !s.awayFromHomeSince.IsZero() &&
+		s.returnHomePeriod > 0 && time.Since(s.awayFromHomeSince) >= s.returnHomePeriod
+}
+
+// returnHome selects the first rendezvous broker again with a new selection
+// state and returns the time spent away. If the first broker is exhausted
+// again, selection advances in rendezvous order as usual and the interval
+// restarts. The caller closes the tracked broker clients; see
+// InproxyBrokerClientManager.returnHomeLocked.
+func (s *inproxyBrokerSelector) returnHome() time.Duration {
+	away := time.Since(s.awayFromHomeSince)
+	s.advanceBroker(0)
+	s.awayFromHomeSince = time.Time{}
+	return away
 }
 
 // initializeProviders builds s.providers, the cyclic order of distinct
@@ -978,6 +1042,19 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 		if len(s.providers) > 0 && len(visit.tried) == len(s.providers) {
 			if currentLive > 0 {
 				return nil, nil
+			}
+			if s.personal && s.proxy {
+				// Track a personal pairing proxy's time away
+				// from the first rendezvous broker: leaving it
+				// starts the interval, and arriving at it again
+				// by wrapping around the order ends it without
+				// a return.
+				switch {
+				case visit.index%len(s.brokers) == 0:
+					s.awayFromHomeSince = time.Now()
+				case (visit.index+1)%len(s.brokers) == 0:
+					s.awayFromHomeSince = time.Time{}
+				}
 			}
 			s.advanceBroker(visit.index + 1)
 		}
