@@ -88,7 +88,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 			return nil
 		})
 
-	_, err := blocklist.Reload()
+	err := blocklist.Reload().Err()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

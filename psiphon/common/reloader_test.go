@@ -21,6 +21,9 @@ package common
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -61,12 +64,13 @@ func TestReloader(t *testing.T) {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
 
-	reloaded, err := file.Reload()
+	results := file.Reload()
+	err = results.Err()
 	if err != nil {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
-	if !reloaded {
+	if !results.Reloaded() {
 		t.Fatalf("Unexpected non-reload")
 	}
 
@@ -76,12 +80,16 @@ func TestReloader(t *testing.T) {
 
 	// Test: reload unchanged file
 
-	reloaded, err = file.Reload()
+	results = file.Reload(func() error {
+		t.Fatal("post action called for unchanged file")
+		return nil
+	})
+	err = results.Err()
 	if err != nil {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
-	if reloaded {
+	if results.Reloaded() {
 		t.Fatalf("Unexpected reload")
 	}
 
@@ -96,16 +104,75 @@ func TestReloader(t *testing.T) {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
 
-	reloaded, err = file.Reload()
+	results = file.Reload()
+	err = results.Err()
 	if err != nil {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
-	if !reloaded {
+	if !results.Reloaded() {
 		t.Fatalf("Unexpected non-reload")
 	}
 
 	if !bytes.Equal(file.contents, modifiedContents) {
 		t.Fatalf("Unexpected contents")
+	}
+
+	loadError := errors.New("load failed")
+	file.reloadAction = func([]byte, time.Time) error { return loadError }
+	err = os.WriteFile(filename, initialContents, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results = file.Reload(func() error {
+		t.Fatal("post action called after failed load")
+		return nil
+	})
+	err = results.Err()
+	if !errors.Is(err, loadError) || len(results) != 1 || results.Reloaded() ||
+		len(results[0].Errors) != 1 || !errors.Is(results[0].Errors[0], loadError) ||
+		results[0].HashSHA256 != fmt.Sprintf("%x", sha256.Sum256(initialContents)) ||
+		!bytes.Equal(file.contents, modifiedContents) {
+		t.Fatalf("unexpected failed reload: %+v, %v", results, err)
+	}
+
+	file.reloadAction = func(content []byte, _ time.Time) error {
+		file.contents = content
+		return nil
+	}
+	postErrors := []error{errors.New("first post action"), errors.New("second post action")}
+	var calls []int
+	postAction := func(i int) func() error {
+		return func() error {
+			file.RLock()
+			defer file.RUnlock()
+			if !bytes.Equal(file.contents, initialContents) {
+				t.Fatal("post action did not observe reloaded contents")
+			}
+			calls = append(calls, i)
+			return postErrors[i]
+		}
+	}
+	results = file.Reload(postAction(0), postAction(1))
+	err = results.Err()
+	if len(results) != 1 || !results.Reloaded() || len(results[0].Errors) != 2 ||
+		!errors.Is(err, postErrors[0]) || !errors.Is(err, postErrors[1]) ||
+		len(calls) != 2 || calls[0] != 0 || calls[1] != 1 {
+		t.Fatalf("unexpected post action results: %+v, %v, %v", results, err, calls)
+	}
+
+	results = file.Reload(postAction(0))
+	err = results.Err()
+	if err != nil || len(results) != 1 || results.Reloaded() || len(calls) != 2 {
+		t.Fatalf("unexpected retry after post action failure: %+v, %v", results, err)
+	}
+	err = os.Remove(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results = file.Reload()
+	err = results.Err()
+	if err == nil || len(results) != 1 || results[0].HashSHA256 != "" || len(results[0].Errors) != 1 {
+		t.Fatalf("unexpected missing file result: %+v, %v", results, err)
 	}
 }
