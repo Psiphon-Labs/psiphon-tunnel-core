@@ -29,8 +29,8 @@ import (
 // combination of NoMatch, Limited and MustUpgrade flags, that a decoded
 // response invokes BrokerClientResponseReceived once with the original round
 // tripper after transport success, that retryableNoMatch is true only for a
-// ClientOffer with NoMatch and without Limited, and that malformed responses
-// and ProxyAnswer produce no notification.
+// ClientOffer with NoMatch and without Limited, and that MustUpgrade
+// responses, malformed responses and ProxyAnswer produce no notification.
 func TestBrokerClientResponseFlags(t *testing.T) {
 	type responseFlags struct {
 		NoMatch, Limited, MustUpgrade bool
@@ -103,7 +103,8 @@ func TestBrokerClientResponseFlags(t *testing.T) {
 				return payload, nil
 			}}
 			transportSucceeded, callbacks := false, 0
-			wantRetryableNoMatch := tc.api == "offer" && tc.flags.NoMatch && !tc.flags.Limited
+			wantRetryableNoMatch := tc.api == "offer" && tc.flags.NoMatch &&
+				!tc.flags.Limited && !tc.flags.MustUpgrade
 			coordinator := &testBrokerDialCoordinator{
 				brokerPublicKey: publicKey, brokerRootObfuscationSecret: secret, brokerClientRoundTripper: rt,
 				brokerClientRoundTripperSucceeded: func(RoundTripper) { transportSucceeded = true },
@@ -137,7 +138,7 @@ func TestBrokerClientResponseFlags(t *testing.T) {
 				t.Fatalf("unexpected response error/transport outcome: %v", err)
 			}
 			wantCallbacks := 1
-			if tc.malformed || tc.api == "answer" {
+			if tc.malformed || tc.api == "answer" || tc.flags.MustUpgrade {
 				wantCallbacks = 0
 			}
 			if callbacks != wantCallbacks {

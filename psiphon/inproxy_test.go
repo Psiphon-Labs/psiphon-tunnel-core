@@ -4124,9 +4124,9 @@ func TestInproxyProxyStableReplayOrder(t *testing.T) {
 
 // TestInproxyProxyDecodedAnnouncePolicy verifies through a real cold Noise
 // exchange that every decoded ProxyAnnounce response, including precheck,
-// NoMatch, Limited and MustUpgrade, makes the proxy client shared and
-// retained, while a malformed response records transport success only and
-// the client closes on release.
+// NoMatch and Limited, makes the proxy client shared and retained, while a
+// MustUpgrade response or a malformed response records transport success
+// only and the client closes on release.
 func TestInproxyProxyDecodedAnnouncePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -4139,8 +4139,8 @@ func TestInproxyProxyDecodedAnnouncePolicy(t *testing.T) {
 		{name: "match", shared: true},
 		{name: "limited", response: inproxy.ProxyAnnounceResponse{Limited: true}, shared: true},
 		{name: "limited-no-match", response: inproxy.ProxyAnnounceResponse{Limited: true, NoMatch: true}, shared: true},
-		{name: "upgrade", response: inproxy.ProxyAnnounceResponse{MustUpgrade: true, NoMatch: true}, shared: true},
-		{name: "upgrade-limited-no-match", response: inproxy.ProxyAnnounceResponse{MustUpgrade: true, Limited: true, NoMatch: true}, shared: true},
+		{name: "upgrade", response: inproxy.ProxyAnnounceResponse{MustUpgrade: true, NoMatch: true}},
+		{name: "upgrade-limited-no-match", response: inproxy.ProxyAnnounceResponse{MustUpgrade: true, Limited: true, NoMatch: true}},
 		{name: "malformed", malformed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4164,7 +4164,7 @@ func TestInproxyProxyDecodedAnnouncePolicy(t *testing.T) {
 				t.Fatal("precheck/announce did not retain its shared transport")
 			}
 			if !tc.shared && len(m.clients) != 0 {
-				t.Fatal("unsuccessful response leaked lease")
+				t.Fatal("unshared response leaked lease")
 			}
 		})
 	}
@@ -4422,8 +4422,10 @@ func newBrokerResponseTestClientWithParameters(t *testing.T, payload []byte, par
 // responses make an unshared client shared. Through a cold Noise session, it
 // checks offers with NoMatch, Limited and MustUpgrade flags under retain and
 // failover probabilities, DSL and relayed-packet responses, and malformed or
-// wrong-type payloads that produce no notification. Transport success,
-// sharing, immediate close and release cleanup are checked for each case.
+// wrong-type payloads that produce no notification. A MustUpgrade offer
+// neither shares nor fails over, even with NoMatch, and the client closes
+// on release. Transport success, sharing, immediate close and release
+// cleanup are checked for each case.
 func TestInproxyBrokerDecodedResponsePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -4440,10 +4442,10 @@ func TestInproxyBrokerDecodedResponsePolicy(t *testing.T) {
 		{name: "no-match-failover", offer: inproxy.ClientOfferResponse{NoMatch: true}, probability: 1, closed: true},
 		{name: "limited", offer: inproxy.ClientOfferResponse{Limited: true}, probability: 1, shared: true},
 		{name: "limited-precedes-no-match", offer: inproxy.ClientOfferResponse{Limited: true, NoMatch: true}, probability: 1, shared: true},
-		{name: "must-upgrade", offer: inproxy.ClientOfferResponse{MustUpgrade: true}, shared: true},
-		{name: "upgrade-no-match-retain", offer: inproxy.ClientOfferResponse{MustUpgrade: true, NoMatch: true}, shared: true},
-		{name: "upgrade-no-match-failover", offer: inproxy.ClientOfferResponse{MustUpgrade: true, NoMatch: true}, probability: 1, closed: true},
-		{name: "upgrade-limited-no-match", offer: inproxy.ClientOfferResponse{MustUpgrade: true, Limited: true, NoMatch: true}, probability: 1, shared: true},
+		{name: "must-upgrade", offer: inproxy.ClientOfferResponse{MustUpgrade: true}},
+		{name: "upgrade-no-match-retain", offer: inproxy.ClientOfferResponse{MustUpgrade: true, NoMatch: true}},
+		{name: "upgrade-no-match-no-failover", offer: inproxy.ClientOfferResponse{MustUpgrade: true, NoMatch: true}, probability: 1},
+		{name: "upgrade-limited-no-match", offer: inproxy.ClientOfferResponse{MustUpgrade: true, Limited: true, NoMatch: true}, probability: 1},
 		{name: "malformed-offer", malformed: true},
 		{name: "wrong-response-type", wrongType: true},
 		{name: "dsl-backend-error", api: "dsl", shared: true},

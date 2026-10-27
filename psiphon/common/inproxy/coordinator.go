@@ -209,8 +209,8 @@ type BrokerDialCoordinator interface {
 
 	// BrokerClientResponseReceived is called after a broker response is
 	// successfully decoded, indicating that the broker client works; a
-	// malformed or wrong-type response does not signal. This signal may
-	// be used to share the broker client with other requests.
+	// malformed, wrong-type, or MustUpgrade response does not signal. This
+	// signal may be used to share the broker client with other requests.
 	//
 	// retryableNoMatch is true only for a client offer with no match,
 	// as derived from the response flags in BrokerClient.ClientOffer.
