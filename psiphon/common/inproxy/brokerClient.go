@@ -129,10 +129,9 @@ func (b *BrokerClient) ProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
-	// MustUpgrade and Limited responses remain eligible for sharing.
-	// TODO: During code review, reconsider whether these responses should
-	// prevent sharing because further requests may not be useful.
-	b.coordinator.BrokerClientResponseReceived(roundTripper, false)
+	if !response.MustUpgrade {
+		b.coordinator.BrokerClientResponseReceived(roundTripper, false)
+	}
 
 	return response, nil
 }
@@ -170,14 +169,11 @@ func (b *BrokerClient) ClientOffer(
 		return nil, errors.Trace(err)
 	}
 
-	// NoMatch without Limited. A Limited response aborts the dial but
-	// does not discard the broker client, even when NoMatch is also set.
-	//
-	// TODO: During code review, reconsider whether MustUpgrade or Limited
-	// responses should prevent sharing because further requests may not
-	// be useful.
-	retryableNoMatch := response.NoMatch && !response.Limited
-	b.coordinator.BrokerClientResponseReceived(roundTripper, retryableNoMatch)
+	if !response.MustUpgrade {
+		retryableNoMatch := response.NoMatch && !response.Limited
+		b.coordinator.BrokerClientResponseReceived(
+			roundTripper, retryableNoMatch)
+	}
 
 	return response, nil
 }
