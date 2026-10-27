@@ -169,6 +169,9 @@ var (
 	// ErrInvalidNetworkMonitorInterval indicates an invalid network monitor interval was provided.
 	ErrInvalidNetworkMonitorInterval = errors.New("network monitor interval must be greater than 0")
 
+	// [Psiphon] Invalid keepalive jitter fraction.
+	ErrInvalidKeepaliveIntervalJitter = errors.New("keepalive jitter fraction must be in [0, 1)")
+
 	// ErrAgentOptionNotUpdatable indicates an option cannot be updated after construction.
 	ErrAgentOptionNotUpdatable = errors.New("option can only be set during agent construction")
 
