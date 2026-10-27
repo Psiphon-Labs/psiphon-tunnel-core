@@ -181,11 +181,25 @@ func (r *Relay) Reload(postActions ...func() error) common.ReloadResults {
 		results = append(results, fileResults...)
 	}
 
-	if !r.unappliedChanges || results.Err() != nil {
+	err := results.Err()
+	if err != nil {
+		// A file error prevents applying the complete TLS configuration.
+		// Preserve each file's own errors and report the shared failure on
+		// files that were read successfully.
+		err = errors.TraceMsg(err, "TLS configuration reload failed")
+		for i := range results {
+			if len(results[i].Errors) == 0 {
+				results[i].Errors = append(results[i].Errors, err)
+			}
+		}
 		return results
 	}
 
-	err := r.reloadTLS()
+	if !r.unappliedChanges {
+		return results
+	}
+
+	err = r.reloadTLS()
 	if err != nil {
 		// The TLS configuration is validated as a whole, so a single error
 		// is reported for all files.
