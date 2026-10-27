@@ -1374,6 +1374,7 @@ type Config struct {
 	InproxyClientBrokerClientIdleTimeoutSeconds             *int                                             `json:",omitempty"`
 	InproxyClientShareBrokerClientTransport                 *bool                                            `json:",omitempty"`
 	InproxyProxyShareBrokerClientTransport                  *bool                                            `json:",omitempty"`
+	InproxyProxyPersonalReturnHomePeriodSeconds             *int                                             `json:",omitempty"`
 	InproxyProxyIncompatibleNetworkTypes                    []string                                         `json:",omitempty"`
 	InproxyClientIncompatibleNetworkTypes                   []string                                         `json:",omitempty"`
 	InproxyReplayRetainFailedProbability                    *float64                                         `json:",omitempty"`
@@ -3679,6 +3680,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyShareBrokerClientTransport != nil {
 		applyParameters[parameters.InproxyProxyShareBrokerClientTransport] = *config.InproxyProxyShareBrokerClientTransport
+	}
+
+	if config.InproxyProxyPersonalReturnHomePeriodSeconds != nil {
+		applyParameters[parameters.InproxyProxyPersonalReturnHomePeriod] = fmt.Sprintf("%ds", *config.InproxyProxyPersonalReturnHomePeriodSeconds)
 	}
 
 	if len(config.InproxyProxyIncompatibleNetworkTypes) > 0 {
