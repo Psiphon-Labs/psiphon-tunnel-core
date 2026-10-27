@@ -561,10 +561,13 @@ func (b *InproxyBrokerClientManager) clientTransportEstablished(
 	NoticeInfo("inproxy: broker client %s shared transport", instance.brokerClientID)
 }
 
-// resetClientBrokerClientsLocked closes all clients, clears network and broker
-// selection state, and wakes waiting GetBrokerClient calls. reason is
-// included in the per-client diagnostic notice. The caller must hold b.mutex.
-func (b *InproxyBrokerClientManager) resetClientBrokerClientsLocked(reason string) {
+// closeAllClientsLocked closes every tracked client, even those still held
+// by callers, clears the registry, shared pointer and idle timer, and wakes
+// waiting GetBrokerClient calls, as closeClientLocked does for one client.
+// reason is included in the per-client diagnostic notice. Selection state
+// is left to the caller; woken waiters re-check it only after the caller
+// releases b.mutex. The caller must hold b.mutex.
+func (b *InproxyBrokerClientManager) closeAllClientsLocked(reason string) {
 	for instance, entry := range b.clients {
 		_ = instance.Close()
 		NoticeInfo(
@@ -574,9 +577,16 @@ func (b *InproxyBrokerClientManager) resetClientBrokerClientsLocked(reason strin
 	clear(b.clients)
 	b.sharedClient = nil
 	b.stopSharedIdleTimerLocked()
+	b.signalClientChangedLocked()
+}
+
+// resetClientBrokerClientsLocked closes all clients and clears network and
+// broker selection state. reason is included in the per-client diagnostic
+// notice. The caller must hold b.mutex.
+func (b *InproxyBrokerClientManager) resetClientBrokerClientsLocked(reason string) {
+	b.closeAllClientsLocked(reason)
 	b.networkID = ""
 	b.selector.reset()
-	b.signalClientChangedLocked()
 }
 
 // returnHomeLocked closes all clients and selects the first rendezvous
@@ -585,19 +595,10 @@ func (b *InproxyBrokerClientManager) resetClientBrokerClientsLocked(reason strin
 // network ID, broker order and compartment IDs are retained. The caller
 // must hold b.mutex.
 func (b *InproxyBrokerClientManager) returnHomeLocked() {
-	for instance, entry := range b.clients {
-		_ = instance.Close()
-		NoticeInfo(
-			"inproxy: broker client %s closed: return home, shared %t, callers %d",
-			instance.brokerClientID, b.sharedClient == instance, entry.refs)
-	}
-	clear(b.clients)
-	b.sharedClient = nil
-	b.stopSharedIdleTimerLocked()
+	b.closeAllClientsLocked("return home")
 	away := b.selector.returnHome()
 	NoticeInfo(
 		"inproxy: returning to first rendezvous broker after %s away", away)
-	b.signalClientChangedLocked()
 }
 
 // closeClientBrokerClients closes all clients and resets broker selection.
