@@ -864,6 +864,10 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	certMsg := new(certificateMsg)
 	certMsg.certificates = hs.cert.Certificate
+	// Set localCertificate here, rather than at certificate selection time, so
+	// that it is only populated when a certificate is actually presented to the
+	// peer, and not on resumed connections.
+	c.localCertificate = hs.cert.Certificate
 	if _, err := hs.c.writeHandshakeRecord(certMsg, &hs.finishedHash); err != nil {
 		return err
 	}

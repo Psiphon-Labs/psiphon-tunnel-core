@@ -2,7 +2,7 @@ module github.com/Psiphon-Labs/psiphon-tunnel-core
 
 go 1.26.0
 
-toolchain go1.26.8
+toolchain go1.26.10
 
 // The following replaces are required only when the build tag
 // PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
@@ -20,13 +20,13 @@ require (
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Inc/uds-ipc v1.0.1
-	github.com/Psiphon-Labs/bolt v0.0.0-20260921192800-17f196515990
+	github.com/Psiphon-Labs/bolt v0.0.0-20261020160549-5e39149d57c2
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/covert-dtls v0.0.0-20260423180104-2d3b15cbc8be
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
-	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304
+	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059
+	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
 	github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f

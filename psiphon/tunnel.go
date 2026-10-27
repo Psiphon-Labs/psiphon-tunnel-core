@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -230,7 +231,7 @@ func (tunnel *Tunnel) Activate(
 					tunnel.livenessTestMetrics,
 					-1,
 					-1,
-					retErr)
+					getFailedTunnelError(retErr, tunnel.sshClient))
 			}
 		}
 	}()
@@ -888,6 +889,7 @@ func dialTunnel(
 	dialSucceeded := false
 	baseCtx := ctx
 	var failedTunnelLivenessTestMetrics *livenessTestMetrics
+	var failedTunnelErr error
 	var extraFailureAction func()
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() != context.Canceled {
@@ -896,13 +898,16 @@ func dialTunnel(
 				extraFailureAction()
 			}
 			if retErr != nil {
+				if failedTunnelErr == nil {
+					failedTunnelErr = retErr
+				}
 				_ = RecordFailedTunnelStat(
 					config,
 					dialParams,
 					failedTunnelLivenessTestMetrics,
 					-1,
 					-1,
-					retErr)
+					failedTunnelErr)
 			}
 		}
 	}()
@@ -1290,13 +1295,20 @@ func dialTunnel(
 	}()
 
 	var result sshNewClientResult
+	var failedTunnelSSHClient *ssh.Client
 
 	select {
 	case result = <-resultChannel:
+		failedTunnelSSHClient = result.sshClient
 	case <-ctx.Done():
 
 		// Interrupt the goroutine and capture its error context to
 		// distinguish point of failure.
+		//
+		// sshConn is closed directly here, not via ssh.Client.Close, so the
+		// ssh package can't tell this is a local close and will record the
+		// resulting read error as if it were a connection failure. Leave
+		// failedTunnelSSHClient nil so that error isn't reported.
 		err := ctx.Err()
 		sshConn.Close()
 		result = <-resultChannel
@@ -1309,7 +1321,14 @@ func dialTunnel(
 
 	if result.err != nil {
 		failedTunnelLivenessTestMetrics = result.livenessTestMetrics
-		return nil, errors.Trace(result.err)
+
+		// Capture the SSH connection error before the deferred
+		// cleanupConn.Close call closes the underlying dialConn directly,
+		// which bypasses the ssh.connectionErrorState.markClosed mechanism.
+
+		err := errors.Trace(result.err)
+		failedTunnelErr = getFailedTunnelError(err, failedTunnelSSHClient)
+		return nil, err
 	}
 
 	dialSucceeded = true
@@ -2394,8 +2413,6 @@ loop:
 	err = errors.Trace(err)
 
 	if err != nil {
-		tunnel.sshClient.Close()
-		tunnel.conn.Close()
 
 		// Don't perform log or reset actions when the keep alive may have been
 		// interrupted due to shutdown.
@@ -2410,11 +2427,13 @@ loop:
 		// Ensure that at most one of the two SSH keep alive workers (periodic and
 		// probe) perform the log and reset actions.
 
-		wasHandled := atomic.CompareAndSwapInt32(&tunnel.handledSSHKeepAliveFailure, 0, 1)
+		handleFailure := continuousNetworkConnectivity && !isShutdown &&
+			atomic.CompareAndSwapInt32(&tunnel.handledSSHKeepAliveFailure, 0, 1)
 
-		if continuousNetworkConnectivity &&
-			!isShutdown &&
-			!wasHandled {
+		tunnel.sshClient.Close()
+		tunnel.conn.Close()
+
+		if handleFailure {
 
 			// Note that tunnel.dialParams.Failed is not called in this failed
 			// tunnel case, and any replay parameters are retained.
@@ -2435,7 +2454,7 @@ loop:
 				tunnel.livenessTestMetrics,
 				bytesUp,
 				bytesDown,
-				err)
+				getFailedTunnelError(err, tunnel.sshClient))
 			if tunnel.extraFailureAction != nil {
 				tunnel.extraFailureAction()
 			}
@@ -2462,6 +2481,22 @@ loop:
 	}
 
 	return err
+}
+
+// getFailedTunnelError adds distinct SSH connection error details to tunnelErr,
+// excluding EOF and closed-connection errors. The original error is preserved.
+func getFailedTunnelError(tunnelErr error, sshClient *ssh.Client) error {
+	if tunnelErr == nil || sshClient == nil {
+		return tunnelErr
+	}
+	connectionErr := sshClient.ConnectionError()
+	if connectionErr == nil ||
+		std_errors.Is(connectionErr, io.EOF) ||
+		std_errors.Is(connectionErr, net.ErrClosed) ||
+		strings.Contains(tunnelErr.Error(), connectionErr.Error()) {
+		return tunnelErr
+	}
+	return fmt.Errorf("%w: ssh connection error: %s", tunnelErr, connectionErr)
 }
 
 // sendStats is a helper for sending session stats to the server.

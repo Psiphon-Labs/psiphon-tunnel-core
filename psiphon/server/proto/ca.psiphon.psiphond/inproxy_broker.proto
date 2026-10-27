@@ -60,4 +60,5 @@ message InproxyBroker {
     optional int64 allowed_geoip_mismatches = 146;
     optional string ice_region = 147;
     optional string ice_asn = 148;
+    optional bool no_awaiting_client = 149;
 }

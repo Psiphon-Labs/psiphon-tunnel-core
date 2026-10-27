@@ -479,14 +479,17 @@ const (
 	InproxyClientSTUNServerAddressesRFC5780            = "InproxyClientSTUNServerAddressesRFC5780"
 	InproxyClientDiscoverNATProbability                = "InproxyClientDiscoverNATProbability"
 	InproxyDisableSTUN                                 = "InproxyDisableSTUN"
+	InproxyDisableSTUNCandidateGathering               = "InproxyDisableSTUNCandidateGathering"
 	InproxyDisablePortMapping                          = "InproxyDisablePortMapping"
 	InproxyDisableInboundForMobileNetworks             = "InproxyDisableInboundForMobileNetworks"
 	InproxyDisableIPv6ICECandidates                    = "InproxyDisableIPv6ICECandidates"
 	InproxyProxyDisableSTUN                            = "InproxyProxyDisableSTUN"
+	InproxyProxyDisableSTUNCandidateGathering          = "InproxyProxyDisableSTUNCandidateGathering"
 	InproxyProxyDisablePortMapping                     = "InproxyProxyDisablePortMapping"
 	InproxyProxyDisableInboundForMobileNetworks        = "InproxyProxyDisableInboundForMobileNetworks"
 	InproxyProxyDisableIPv6ICECandidates               = "InproxyProxyDisableIPv6ICECandidates"
 	InproxyClientDisableSTUN                           = "InproxyClientDisableSTUN"
+	InproxyClientDisableSTUNCandidateGathering         = "InproxyClientDisableSTUNCandidateGathering"
 	InproxyClientDisablePortMapping                    = "InproxyClientDisablePortMapping"
 	InproxyClientDisableInboundForMobileNetworks       = "InproxyClientDisableInboundForMobileNetworks"
 	InproxyClientDisableIPv6ICECandidates              = "InproxyClientDisableIPv6ICECandidates"
@@ -1161,14 +1164,17 @@ var defaultParameters = map[string]struct {
 	InproxyClientSTUNServerAddressesRFC5780:            {value: []string{}},
 	InproxyClientDiscoverNATProbability:                {value: 0.0, minimum: 0.0},
 	InproxyDisableSTUN:                                 {value: false},
+	InproxyDisableSTUNCandidateGathering:               {value: false},
 	InproxyDisablePortMapping:                          {value: false},
 	InproxyDisableInboundForMobileNetworks:             {value: false},
 	InproxyDisableIPv6ICECandidates:                    {value: false},
 	InproxyProxyDisableSTUN:                            {value: false},
+	InproxyProxyDisableSTUNCandidateGathering:          {value: false},
 	InproxyProxyDisablePortMapping:                     {value: false},
 	InproxyProxyDisableInboundForMobileNetworks:        {value: false},
 	InproxyProxyDisableIPv6ICECandidates:               {value: false},
 	InproxyClientDisableSTUN:                           {value: false},
+	InproxyClientDisableSTUNCandidateGathering:         {value: false},
 	InproxyClientDisablePortMapping:                    {value: false},
 	InproxyClientDisableInboundForMobileNetworks:       {value: false},
 	InproxyClientDisableIPv6ICECandidates:              {value: false},

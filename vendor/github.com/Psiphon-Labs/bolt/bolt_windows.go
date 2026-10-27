@@ -111,11 +111,15 @@ func mmap(db *DB, sz int) error {
 	// Create the memory map.
 	addr, errno := syscall.MapViewOfFile(h, syscall.FILE_MAP_READ, 0, 0, uintptr(sz))
 	if addr == 0 {
+		// [Psiphon] Close the mapping handle even when mapping fails.
+		_ = syscall.CloseHandle(h)
 		return os.NewSyscallError("MapViewOfFile", errno)
 	}
 
 	// Close mapping handle.
-	if err := syscall.CloseHandle(syscall.Handle(h)); err != nil {
+	if err := syscall.CloseHandle(h); err != nil {
+		// [Psiphon] Don't leave an orphaned view that munmap can't see.
+		_ = syscall.UnmapViewOfFile(addr)
 		return os.NewSyscallError("CloseHandle", err)
 	}
 
@@ -137,5 +141,8 @@ func munmap(db *DB) error {
 	if err := syscall.UnmapViewOfFile(addr); err != nil {
 		return os.NewSyscallError("UnmapViewOfFile", err)
 	}
+	// [Psiphon] Prevent double unmapping if the next mmap fails.
+	db.data = nil
+	db.datasz = 0
 	return nil
 }

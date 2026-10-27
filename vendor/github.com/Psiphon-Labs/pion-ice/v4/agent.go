@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"strings"
@@ -97,6 +98,10 @@ type Agent struct {
 	// How often should we send keepalive packets?
 	// 0 means never
 	keepaliveInterval time.Duration
+
+	// [Psiphon] Per-period jitter.
+	keepaliveIntervalJitter float64
+	keepaliveIntervalSample time.Duration
 
 	// How often should we run our internal taskLoop to check for state changes when connecting
 	checkInterval time.Duration
@@ -454,6 +459,9 @@ func newAgentWithConfig(agent *Agent, opts ...AgentOption) (*Agent, error) {
 		}
 	}
 
+	// [Psiphon] Sample the first interval.
+	agent.keepaliveIntervalSample = agent.sampleKeepaliveInterval()
+
 	agent.connectionStateNotifier = &handlerNotifier{
 		connectionStateFunc: agent.onConnectionStateChange,
 		done:                make(chan struct{}),
@@ -654,11 +662,23 @@ func (a *Agent) startConnectivityChecks(isControlling bool, remoteUfrag, remoteP
 func (a *Agent) connectivityChecks() { //nolint:cyclop
 	lastConnectionState := ConnectionState(0)
 	checkingDuration := time.Time{}
+	// [Psiphon]
+	nextKeepalive := time.Time{}
 
 	contact := func() {
 		if err := a.loop.Run(a.loop, func(_ context.Context) {
 			defer func() {
 				lastConnectionState = a.connectionState
+				// [Psiphon] Next periodic request deadline.
+				nextKeepalive = time.Time{}
+				if pair := a.getSelectedPair(); pair != nil && a.keepaliveIntervalSample > 0 {
+					now := time.Now()
+					nextKeepalive = pair.LastRequestSentAt().Add(a.keepaliveIntervalSample)
+					if !nextKeepalive.After(now) {
+						// Avoid spinning on an overdue timer.
+						nextKeepalive = now.Add(a.keepaliveIntervalSample)
+					}
+				}
 			}()
 
 			switch a.connectionState {
@@ -703,7 +723,10 @@ func (a *Agent) connectivityChecks() { //nolint:cyclop
 		case ConnectionStateNew, ConnectionStateChecking: // While connecting, check candidates more frequently
 			updateInterval(a.checkInterval)
 		case ConnectionStateConnected, ConnectionStateDisconnected:
-			updateInterval(a.keepaliveInterval)
+			// [Psiphon] Schedule the remaining interval.
+			if !nextKeepalive.IsZero() {
+				updateInterval(max(time.Until(nextKeepalive), time.Nanosecond))
+			}
 		default:
 		}
 		// Ensure we run our task loop as quickly as the minimum of our various configured timeouts
@@ -931,10 +954,48 @@ func (a *Agent) checkKeepalive() {
 	}
 
 	if a.keepaliveInterval != 0 {
+
+		// [Psiphon]
+		// In addition to adding optional jitter, this patch fixes a
+		// regression in pion/ice 45d5e72b354fbdba588f48c3de9329f551495bba,
+		// which correctly made ICE keep alives independent of app traffic
+		// but also caused the keep alive value specified in SetICETimeouts
+		// to be ignored when larger than the 2s default
+		lastRequestSent := selectedPair.LastRequestSentAt()
+		if a.keepaliveIntervalSample <= 0 || time.Since(lastRequestSent) < a.keepaliveIntervalSample {
+			return
+		}
+
 		// We use binding request instead of indication to support refresh consent schemas
 		// see https://tools.ietf.org/html/rfc7675
 		a.getSelector().PingCandidate(selectedPair.Local, selectedPair.Remote)
+
+		// [Psiphon]
+		if !selectedPair.LastRequestSentAt().Equal(lastRequestSent) {
+			a.keepaliveIntervalSample = a.sampleKeepaliveInterval()
+		}
 	}
+}
+
+// [Psiphon] Sample jitter in whole milliseconds.
+func (a *Agent) sampleKeepaliveInterval() time.Duration {
+	interval := a.keepaliveInterval
+	if interval <= 0 || a.keepaliveIntervalJitter == 0 {
+		return interval
+	}
+
+	// Keep durations positive and representable.
+	spread := min(
+		time.Duration(float64(interval)*a.keepaliveIntervalJitter),
+		interval-time.Nanosecond,
+		time.Duration(math.MaxInt64)-interval,
+	)
+	spreadMS := int64(spread / time.Millisecond)
+	if spreadMS == 0 {
+		return interval
+	}
+
+	return interval + time.Duration(rand.Int64N(2*spreadMS)-spreadMS)*time.Millisecond
 }
 
 // AddRemoteCandidate adds a new remote candidate.

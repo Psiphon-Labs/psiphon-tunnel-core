@@ -56,8 +56,10 @@ func runTestNATDiscovery() error {
 		stunServerAddressFailedCallCount int32
 
 	coordinator := &testWebRTCDialCoordinator{
-		stunServerAddress:        stunServerAddress,
-		stunServerAddressRFC5780: stunServerAddress,
+		// Disabling candidate gathering must leave NAT discovery enabled.
+		disableSTUNCandidateGathering: true,
+		stunServerAddress:             stunServerAddress,
+		stunServerAddressRFC5780:      stunServerAddress,
 
 		setNATType: func(NATType) {
 			atomic.AddInt32(&setNATTypeCallCount, 1)
@@ -130,6 +132,9 @@ func runTestNATDiscovery() error {
 
 	// Should do port mapping only
 
+	// Clear the cached NAT type to exercise DisableSTUN suppressing discovery.
+	natType := coordinator.NATType()
+	coordinator.natType = NATTypeUnknown
 	coordinator.disableSTUN = true
 	coordinator.disablePortMapping = false
 
@@ -142,6 +147,7 @@ func runTestNATDiscovery() error {
 
 	// Should skip both and use values cached in WebRTCDialCoordinator
 
+	coordinator.natType = natType
 	coordinator.disableSTUN = false
 	coordinator.disablePortMapping = false
 

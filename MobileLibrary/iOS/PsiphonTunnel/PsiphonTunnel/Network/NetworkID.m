@@ -29,10 +29,24 @@
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
                          tunnelWholeDevice:(BOOL)tunnelWholeDevice
+                                 wifiBSSID:(NSString *_Nullable)wifiBSSID
                                    warning:(NSError *_Nullable *_Nonnull)outWarn {
 
     *outWarn = nil;
 
+    NSString *vpnNetworkID = [NetworkID vpnNetworkIDWithTunnelWholeDevice:tunnelWholeDevice];
+    if (vpnNetworkID != nil) {
+        return vpnNetworkID;
+    }
+
+    return [NetworkID networkIDWithReachability:reachability
+                        andCurrentNetworkStatus:currentNetworkStatus
+                                      wifiBSSID:wifiBSSID
+                                        warning:outWarn];
+}
+
+// See comment in header.
++ (NSString *_Nullable)vpnNetworkIDWithTunnelWholeDevice:(BOOL)tunnelWholeDevice {
     // NetworkID is "VPN" if the library is used in non-VPN mode,
     // and an active VPN is found on the system.
     // This method is not exact and relies on CFNetworkCopySystemProxySettings,
@@ -45,6 +59,16 @@
             }
         }
     }
+    return nil;
+}
+
+// See comment in header.
++ (NSString *)networkIDWithReachability:(id<ReachabilityProtocol>)reachability
+                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                              wifiBSSID:(NSString *_Nullable)wifiBSSID
+                                warning:(NSError *_Nullable *_Nonnull)outWarn {
+
+    *outWarn = nil;
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {
@@ -64,22 +88,25 @@
         }
         [networkID appendFormat:@"-%@", activeInterfaceAddress];
 #else
-        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
-        for (NSString *networkInterfaceName in networkInterfaceNames) {
-            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
-            if (networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]) {
-                [networkID appendFormat:@"-%@", networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]];
-            }
+        return [NetworkID wifiNetworkIDWithBSSID:wifiBSSID
+                        currentNetworkInfoBSSIDs:^NSArray<NSString *> *{
+            return [NetworkID currentNetworkInfoBSSIDs];
         }
+                                interfaceAddress:^NSString *(NSError *_Nullable *_Nonnull outError) {
+            // As the Android library does with WifiInfo.getIpAddress when it has no BSSID.
+            return [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                       andCurrentNetworkStatus:currentNetworkStatus
+                                                                         error:outError];
+        }
+                                         warning:outWarn];
 #endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
 
 #if TARGET_OS_IOS
         if (@available(iOS 16.0, *)) {
-            // Testing showed that the IP address of the active interface uniquely identified the
-            // corresponding network and did not change over long periods of time, which makes it a
-            // useful addition to the network ID value.
+            // Use the active interface address as a best-effort network identifier now that
+            // CTCarrier no longer provides useful carrier codes.
             NSError *err;
             NSString *activeInterfaceAddress =
                 [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
@@ -126,5 +153,50 @@
     }
     return networkID;
 }
+
+// See comment in header.
++ (NSString *)wifiNetworkIDWithBSSID:(NSString *_Nullable)wifiBSSID
+            currentNetworkInfoBSSIDs:(NetworkIDCurrentNetworkInfoBSSIDs)currentNetworkInfoBSSIDs
+                    interfaceAddress:(NetworkIDInterfaceAddress)interfaceAddress
+                             warning:(NSError *_Nullable *_Nonnull)outWarn {
+
+    *outWarn = nil;
+
+    if (wifiBSSID.length > 0) {
+        return [@"WIFI-" stringByAppendingString:wifiBSSID];
+    }
+
+    NSArray<NSString *> *bssids = currentNetworkInfoBSSIDs();
+    if (bssids.count > 0) {
+        return [@"WIFI-" stringByAppendingString:[bssids componentsJoinedByString:@"-"]];
+    }
+
+    NSError *err;
+    NSString *activeInterfaceAddress = interfaceAddress(&err);
+    if (err != nil || activeInterfaceAddress.length == 0) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@",
+                                          err != nil ? err.localizedDescription : @"empty address"];
+        *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                              code:1
+                                          userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"WIFI";
+    }
+    return [@"WIFI-" stringByAppendingString:activeInterfaceAddress];
+}
+
+#if TARGET_OS_IPHONE
++ (NSArray<NSString *> *)currentNetworkInfoBSSIDs {
+    NSMutableArray<NSString *> *bssids = [NSMutableArray array];
+    NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
+    for (NSString *networkInterfaceName in networkInterfaceNames) {
+        NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
+        id bssid = networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID];
+        if ([bssid isKindOfClass:[NSString class]] && [bssid length] > 0) {
+            [bssids addObject:bssid];
+        }
+    }
+    return bssids;
+}
+#endif
 
 @end

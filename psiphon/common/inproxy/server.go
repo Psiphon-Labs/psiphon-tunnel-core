@@ -97,10 +97,19 @@ type ServerBrokerSessionsConfig struct {
 func NewServerBrokerSessions(
 	config *ServerBrokerSessionsConfig) (*ServerBrokerSessions, error) {
 
+	// Disable the obfuscation replay history. Packets here are relayed by
+	// clients over established Psiphon SSH connections, after the tunnel's
+	// anti-probing checks have succeeded. The Bloom filter's additional
+	// anti-probing defense is unnecessary at this stage, and disabling it
+	// avoids false positives and filter memory overhead. Broker authentication,
+	// timestamp validation, and Noise session anti-replay remain enabled.
+	antiReplayHistorySize := -1
+
 	sessions, err := NewResponderSessionsForKnownInitiators(
 		config.ServerPrivateKey,
 		config.ServerRootObfuscationSecret,
-		config.BrokerPublicKeys)
+		config.BrokerPublicKeys,
+		antiReplayHistorySize)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

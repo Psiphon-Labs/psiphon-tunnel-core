@@ -304,7 +304,7 @@ func NewConfig(filename string) (*Config, error) {
 			return nil
 		})
 
-	_, err := config.Reload()
+	err := config.Reload().Err()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

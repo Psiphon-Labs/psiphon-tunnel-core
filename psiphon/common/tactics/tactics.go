@@ -553,7 +553,7 @@ func NewServer(
 			return nil
 		})
 
-	_, err := server.Reload()
+	err := server.Reload().Err()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

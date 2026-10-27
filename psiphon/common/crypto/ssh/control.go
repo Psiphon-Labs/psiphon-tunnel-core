@@ -68,7 +68,8 @@ func handshakeControlProxy(rw io.ReadWriteCloser) (connTransport, error) {
 	if reqID != controlProxyRequestID {
 		return nil, fmt.Errorf("expected request id %v, got %v", controlProxyRequestID, reqID)
 	}
-	return &controlProxyTransport{rw}, nil
+	// [Psiphon]
+	return &controlProxyTransport{rw: rw}, nil
 }
 
 // controlProxyTransport implements the connTransport interface for
@@ -76,20 +77,31 @@ func handshakeControlProxy(rw io.ReadWriteCloser) (connTransport, error) {
 // no MAC.
 type controlProxyTransport struct {
 	rw io.ReadWriteCloser
+
+	// [Psiphon]
+	connectionErrorState
 }
 
 func (p *controlProxyTransport) Close() error {
+	// [Psiphon]
+	p.markClosed()
 	return p.rw.Close()
 }
 
+// [Psiphon]
 func (p *controlProxyTransport) writePacket(controlMessage []byte) error {
-	return controlProxyWritePacket(p.rw, func(b *cryptobyte.Builder) {
+	err := controlProxyWritePacket(p.rw, func(b *cryptobyte.Builder) {
 		b.AddUint8(0) // Padding length.
 		b.AddBytes(controlMessage)
 	})
+	p.recordConnectionError(err)
+	return err
 }
 
-func (p *controlProxyTransport) readPacket() ([]byte, error) {
+// [Psiphon]
+func (p *controlProxyTransport) readPacket() (_ []byte, retErr error) {
+	defer func() { p.recordConnectionError(retErr) }()
+
 	buf, err := controlProxyReadPacket(p.rw)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: error reading control message: %w", err)

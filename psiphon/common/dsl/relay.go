@@ -95,6 +95,7 @@ type Relay struct {
 	caCertificatesFile  common.ReloadableFile
 	hostCertificateFile common.ReloadableFile
 	hostKeyFile         common.ReloadableFile
+	unappliedChanges    bool
 
 	mutex                   sync.Mutex
 	tlsSessionCache         tls.ClientSessionCache
@@ -126,7 +127,7 @@ func NewRelay(config *RelayConfig) (*Relay, error) {
 		tlsSessionCache: tls.NewLRUClientSessionCache(0),
 	}
 
-	_, err := relay.Reload()
+	err := relay.Reload().Err()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -152,53 +153,97 @@ func NewRelay(config *RelayConfig) (*Relay, error) {
 
 // Reload reloads the TLS configuration when the file contents have changed.
 //
-// Reload implements the  common.Reloader interface.
-func (r *Relay) Reload() (bool, error) {
+// Reload implements the common.Reloader interface.
+func (r *Relay) Reload(postActions ...func() error) common.ReloadResults {
 
 	// The common.ReloadableFile.reloadAction callback not used; instead,
 	// ReloadableFiles are used to check for changed file contents. When any
 	// file has changed, all TLS configuration files are reloaded and the TLS
 	// configuration is reinitialized.
 
-	reloadedAny := false
+	// unappliedChanges indicates file changes not yet accepted by the TLS
+	// configuration. File reloaders update their hashes before TLS validation,
+	// so subsequent hot reloads must validate these changes again to report
+	// errors instead of reporting no file change / no errors.
+	//
+	// Only Reload accesses unappliedChanges, and Reload must not run
+	// concurrently, so no mutex protection is needed.
 
-	reloaded, err := r.caCertificatesFile.Reload()
+	files := []*common.ReloadableFile{
+		&r.caCertificatesFile, &r.hostCertificateFile, &r.hostKeyFile}
+	results := make(common.ReloadResults, 0, len(files))
+	for _, file := range files {
+		fileResults := file.Reload()
+		r.unappliedChanges = r.unappliedChanges || fileResults.Reloaded()
+		for i := range fileResults {
+			fileResults[i].Reloaded = false
+		}
+		results = append(results, fileResults...)
+	}
+
+	err := results.Err()
 	if err != nil {
-		return false, errors.Trace(err)
+		// A file error prevents applying the complete TLS configuration.
+		// Preserve each file's own errors and report the shared failure on
+		// files that were read successfully.
+		err = errors.TraceMsg(err, "TLS configuration reload failed")
+		for i := range results {
+			if len(results[i].Errors) == 0 {
+				results[i].Errors = append(results[i].Errors, err)
+			}
+		}
+		return results
 	}
-	reloadedAny = reloadedAny || reloaded
 
-	reloaded, err = r.hostCertificateFile.Reload()
+	if !r.unappliedChanges {
+		return results
+	}
+
+	err = r.reloadTLS()
 	if err != nil {
-		return false, errors.Trace(err)
+		// The TLS configuration is validated as a whole, so a single error
+		// is reported for all files.
+		//
+		// Limitation: ReloadResults.Err joins the errors from every file,
+		// so this one error is repeated once per file.
+		for i := range results {
+			results[i].Errors = append(results[i].Errors, err)
+		}
+		return results
 	}
-	reloadedAny = reloadedAny || reloaded
+	r.unappliedChanges = false
+	for i := range results {
+		results[i].Reloaded = true
+	}
 
-	reloaded, err = r.hostKeyFile.Reload()
-	if err != nil {
-		return false, errors.Trace(err)
+	for _, action := range postActions {
+		err := action()
+		if err != nil {
+			for i := range results {
+				results[i].Errors = append(results[i].Errors, err)
+			}
+		}
 	}
-	reloadedAny = reloadedAny || reloaded
+	return results
+}
 
-	if !reloadedAny {
-		return false, nil
-	}
+func (r *Relay) reloadTLS() error {
 
 	caCertsPEM, err := os.ReadFile(r.config.CACertificatesFilename)
 	if err != nil {
-		return false, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	caCertificates := x509.NewCertPool()
 	if !caCertificates.AppendCertsFromPEM(caCertsPEM) {
-		return false, errors.TraceNew("AppendCertsFromPEM failed")
+		return errors.TraceNew("AppendCertsFromPEM failed")
 	}
 
 	hostCertificate, err := tls.LoadX509KeyPair(
 		r.config.HostCertificateFilename,
 		r.config.HostKeyFilename)
 	if err != nil {
-		return false, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	r.mutex.Lock()
@@ -233,7 +278,7 @@ func (r *Relay) Reload() (bool, error) {
 		}
 	}
 
-	return true, nil
+	return nil
 }
 
 // WillReload implements the common.Reloader interface.

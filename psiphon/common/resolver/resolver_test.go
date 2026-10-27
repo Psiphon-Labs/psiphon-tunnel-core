@@ -923,3 +923,99 @@ func (s *testDNSServer) stop() {
 	s.server.PacketConn.Close()
 	s.server.Shutdown()
 }
+
+func TestSelectPreresolvedCIDR(t *testing.T) {
+	IPv4 := []string{"1.1.1.1/32", "8.8.8.8/32"}
+	IPv6 := []string{"2606:4700:4700::1111/128", "2001:4860:4860::8888/128"}
+	mixed := []string{IPv4[0], IPv6[0], IPv6[1], IPv4[1]}
+	mapped := "::ffff:1.1.1.1/128"
+
+	for _, test := range []struct {
+		name         string
+		CIDRs        []string
+		hasIPv6Route bool
+		eligible     []string
+	}{
+		{"empty", nil, false, []string{""}},
+		{"IPv4", IPv4, false, IPv4},
+		{"IPv6_no_route", IPv6, false, []string{""}},
+		{"mixed_no_route", mixed, false, IPv4},
+		{"mixed_with_route", mixed, true, mixed},
+		{"mapped", []string{IPv6[0], mapped}, false, []string{mapped}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			counts := make(map[string]int)
+			for _, CIDR := range test.eligible {
+				counts[CIDR] = 0
+			}
+			const samples = 4096
+			for i := 0; i < samples; i++ {
+				CIDR := selectPreresolvedCIDR(test.CIDRs, test.hasIPv6Route)
+				if _, ok := counts[CIDR]; !ok {
+					t.Fatalf("selected ineligible CIDR %q", CIDR)
+				}
+				counts[CIDR]++
+			}
+			// The initial selection and IPv4 fallback should together select
+			// eligible CIDRs uniformly. Use a wide tolerance to allow for random
+			// sampling variation.
+			expected := samples / len(test.eligible)
+			for CIDR, count := range counts {
+				if count < expected*4/5 || count > expected*6/5 {
+					t.Fatalf("CIDR %q selected %d times; expected about %d", CIDR, count, expected)
+				}
+			}
+		})
+	}
+}
+
+func TestPreresolvedIPv6Route(t *testing.T) {
+	hasIPv6Route := true
+	r := NewResolver(&NetworkConfig{
+		HasIPv6Route: func() bool { return hasIPv6Route },
+	}, "IPv6")
+	defer r.Stop()
+
+	p, err := parameters.NewParameters(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Set("", 0, map[string]interface{}{
+		parameters.DNSResolverPreresolvedIPAddressProbability: 1.0,
+		parameters.DNSResolverPreresolvedIPAddressCIDRs: parameters.LabeledCIDRs{
+			"provider": []string{exampleIPv6CIDR},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	params, err := r.MakeResolveParameters(p.Get(), "provider", exampleDomain)
+	if err != nil || params.PreresolvedIPAddress == "" {
+		t.Fatalf("expected preresolved IPv6 address: params=%+v err=%v", params, err)
+	}
+	IPs, err := r.ResolveIP(context.Background(), "IPv6", params, exampleDomain)
+	if err != nil || len(IPs) != 1 || IPs[0].To4() != nil {
+		t.Fatalf("expected IPv6 result: IPs=%v err=%v", IPs, err)
+	}
+
+	// Reuse the selected parameters after changing to an IPv4-only network.
+	hasIPv6Route = false
+	IPs, err = r.ResolveIP(context.Background(), "IPv4", params, exampleDomain)
+	if err == nil || len(IPs) != 0 {
+		t.Fatalf("expected unavailable IPv6 route error: IPs=%v err=%v", IPs, err)
+	}
+
+	// New parameters must leave pre-resolution unset for this IPv6-only list.
+	params, err = r.MakeResolveParameters(p.Get(), "provider", exampleDomain)
+	if err != nil || params.PreresolvedIPAddress != "" || params.PreresolvedDomain != "" {
+		t.Fatalf("expected no preresolved address: params=%+v err=%v", params, err)
+	}
+
+	params.PreresolvedIPAddress = exampleIPv4
+	params.PreresolvedDomain = exampleDomain
+	IPs, err = r.ResolveIP(context.Background(), "IPv4", params, exampleDomain)
+	if err != nil || len(IPs) != 1 || IPs[0].String() != exampleIPv4 {
+		t.Fatalf("expected IPv4 result: IPs=%v err=%v", IPs, err)
+	}
+}
