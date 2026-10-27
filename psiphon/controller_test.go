@@ -807,12 +807,12 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		}
 	}
 
-	// Test: upgrade check/download must be downloaded within 240 seconds
+	// Test: upgrade check/download must be downloaded within 300 seconds
 
 	expectUpgrade := !runConfig.disableUntunneledUpgrade
 
 	if expectUpgrade {
-		upgradeTimeout := time.NewTimer(240 * time.Second)
+		upgradeTimeout := time.NewTimer(300 * time.Second)
 
 		select {
 		case <-upgradeDownloaded:

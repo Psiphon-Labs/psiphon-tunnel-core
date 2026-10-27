@@ -172,6 +172,9 @@ func attemptConnectionsWithUserAgent(
 	// Connections are made through a mock upstream proxy that
 	// counts user agents. No server is running, and the upstream
 	// proxy rejects connections after counting the user agent.
+	//
+	// PickUserAgentProbability is set to produce an equal change of producing
+	// each of blank/A/B.
 
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSON := `
@@ -184,6 +187,7 @@ func attemptConnectionsWithUserAgent(
         "EstablishTunnelPausePeriodSeconds" : 1,
         "DisableRemoteServerListFetcher" : true,
         "TransformHostNameProbability" : 0.0,
+        "PickUserAgentProbability" : 0.6666666666666666,
         "UpstreamProxyUrl" : "http://127.0.0.1:2163",
         "UpstreamProxyAllowAllServerEntrySources" : true
     }`
@@ -242,7 +246,7 @@ func attemptConnectionsWithUserAgent(
 
 	// repeat attempts for long enough to select each user agent
 
-	time.Sleep(30 * time.Second)
+	time.Sleep(45 * time.Second)
 
 	cancelFunc()
 

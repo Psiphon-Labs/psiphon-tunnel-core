@@ -467,7 +467,11 @@ func (c *Client) SetLocalPort(localPort uint16) {
 		return
 	}
 	c.localPort = localPort
-	c.invalidateMappingsLocked(true)
+	// A local port does not affect which mapping services are reachable. In
+	// particular, Clone returns a probed client with a zero local port and its
+	// caller must set the destination port before mapping; retain that probe
+	// state so the clone can reuse it as documented.
+	c.invalidateMappingLocked(true)
 }
 
 // SetProtocol sets the transport protocol (UDP or TCP) to map. The default is
@@ -480,7 +484,7 @@ func (c *Client) SetProtocol(protocol MapProtocol) {
 		return
 	}
 	c.protocol = protocol
-	c.invalidateMappingsLocked(true)
+	c.invalidateMappingLocked(true)
 }
 
 // SetPreferredExternalPort sets a preferred external port to suggest to the
@@ -553,12 +557,7 @@ func (c *Client) listenPacket(ctx context.Context, network, addr string) (packet
 }
 
 func (c *Client) invalidateMappingsLocked(releaseOld bool) {
-	if c.mapping != nil {
-		if releaseOld {
-			c.mapping.Release(context.Background())
-		}
-		c.mapping = nil
-	}
+	c.invalidateMappingLocked(releaseOld)
 
 	c.pmpPubIP = netip.Addr{}
 	c.pmpPubIPTime = time.Time{}
@@ -569,6 +568,18 @@ func (c *Client) invalidateMappingsLocked(releaseOld bool) {
 
 	c.uPnPSawTime = time.Time{}
 	c.uPnPMetas = nil
+}
+
+// invalidateMappingLocked drops only the active port mapping. Changing a
+// mapping parameter does not make the network's discovery results stale.
+// c.mu must be held.
+func (c *Client) invalidateMappingLocked(releaseOld bool) {
+	if c.mapping != nil {
+		if releaseOld {
+			c.mapping.Release(context.Background())
+		}
+		c.mapping = nil
+	}
 }
 
 func (c *Client) sawPMPRecently() bool {

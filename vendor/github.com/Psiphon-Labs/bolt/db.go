@@ -527,9 +527,8 @@ func (db *DB) close() error {
 	db.ops.writeAt = nil
 
 	// Close the mmap.
-	if err := db.munmap(); err != nil {
-		return err
-	}
+	// [Psiphon] Continue file cleanup even if unmapping fails.
+	err := db.munmap()
 
 	// Close file handles.
 	if db.file != nil {
@@ -545,14 +544,14 @@ func (db *DB) close() error {
 		}
 
 		// Close the file descriptor.
-		if err := db.file.Close(); err != nil {
-			return fmt.Errorf("db file close: %s", err)
+		if closeErr := db.file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("db file close: %s", closeErr)
 		}
 		db.file = nil
 	}
 
 	db.path = ""
-	return nil
+	return err
 }
 
 // Begin starts a new transaction.
@@ -989,7 +988,8 @@ func (db *DB) allocate(txid txid, count int) (*page, error) {
 	var minsz = int((p.id+pgid(count))+1) * db.pageSize
 	if minsz >= db.datasz {
 		if err := db.mmap(minsz); err != nil {
-			return nil, fmt.Errorf("mmap allocate error: %s", err)
+			// [Psiphon] Preserve MmapError for callers.
+			return nil, fmt.Errorf("mmap allocate error: %w", err)
 		}
 	}
 

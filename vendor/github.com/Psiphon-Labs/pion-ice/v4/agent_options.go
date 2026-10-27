@@ -419,6 +419,23 @@ func WithKeepaliveInterval(interval time.Duration) AgentOption {
 	}
 }
 
+// [Psiphon] WithKeepaliveIntervalJitter sets per-period jitter in [0, 1).
+// Zero disables jitter. Samples use whole-millisecond offsets.
+func WithKeepaliveIntervalJitter(fraction float64) AgentOption {
+	return func(a *Agent) error {
+		if a.constructed {
+			return ErrAgentOptionNotUpdatable
+		}
+		if !(fraction >= 0 && fraction < 1) {
+			return ErrInvalidKeepaliveIntervalJitter
+		}
+
+		a.keepaliveIntervalJitter = fraction
+
+		return nil
+	}
+}
+
 // WithHostAcceptanceMinWait sets the minimum wait before selecting host candidates.
 func WithHostAcceptanceMinWait(wait time.Duration) AgentOption {
 	return func(a *Agent) error {

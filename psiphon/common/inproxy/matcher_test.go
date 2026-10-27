@@ -21,6 +21,7 @@ package inproxy
 
 import (
 	"context"
+	std_errors "errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -353,7 +354,7 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			proxyFunc(maxEntriesProxyResultChan, rateLimitProxyIP, matchProperties, 1*time.Microsecond, nil, true)
+			proxyFunc(maxEntriesProxyResultChan, rateLimitProxyIP, matchProperties, time.Second, nil, true)
 		}()
 	}
 
@@ -381,7 +382,7 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			clientFunc(maxEntriesClientResultChan, rateLimitClientIP, matchProperties, 1*time.Microsecond)
+			clientFunc(maxEntriesClientResultChan, rateLimitClientIP, matchProperties, time.Second)
 		}()
 	}
 
@@ -479,6 +480,58 @@ func runTestMatcher() error {
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "no pending answer") {
 		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// Test: cancellation of a matched offer while the offer queue is locked
+
+	offerCtx, cancelOffer := context.WithTimeout(context.Background(), time.Minute)
+	defer cancelOffer()
+	cancelledOfferResult := make(chan error, 1)
+	go func() {
+		_, _, _, err := m.Offer(offerCtx, clientIP, makeOffer(geoIPData2, false))
+		cancelledOfferResult <- err
+	}()
+
+	announcement := makeAnnouncement(geoIPData1)
+	announceCtx, cancelAnnounce := context.WithTimeout(context.Background(), time.Second)
+	_, _, err = m.Announce(announceCtx, proxyIP, announcement)
+	cancelAnnounce()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	m.offerQueueMutex.Lock()
+	cancelOffer()
+	_, lookupErr := m.AnnouncementHasPersonalCompartmentIDs(
+		announcement.ProxyID, announcement.ConnectionID)
+	key := m.pendingAnswerKey(announcement.ProxyID, announcement.ConnectionID)
+	_, pendingAnswerRetained := m.pendingAnswers.Get(key)
+	answerErr := m.Answer(&MatchAnswer{
+		ProxyID:      announcement.ProxyID,
+		ConnectionID: announcement.ConnectionID,
+	})
+	select {
+	case err = <-cancelledOfferResult:
+	case <-time.After(time.Second):
+		m.offerQueueMutex.Unlock()
+		return errors.TraceNew("cancelled offer did not return while queue locked")
+	}
+	m.offerQueueMutex.Unlock()
+
+	if !std_errors.Is(lookupErr, errNoPendingAnswer) {
+		return errors.Tracef("unexpected pending answer lookup after cancellation: %v", lookupErr)
+	}
+	if pendingAnswerRetained {
+		return errors.TraceNew("pending answer retained after cancelled lookup")
+	}
+	if !std_errors.Is(answerErr, errNoPendingAnswer) {
+		return errors.Tracef("unexpected answer result after cancellation: %v", answerErr)
+	}
+	if !std_errors.Is(err, context.Canceled) {
+		return errors.Tracef("unexpected cancelled offer result: %v", err)
+	}
+	if _, ok := m.pendingAnswers.Get(key); ok {
+		return errors.TraceNew("pending answer retained after cancellation")
 	}
 
 	// Test: no compartment match
@@ -1277,7 +1330,8 @@ func BenchmarkMatcherQueue(b *testing.B) {
 					b.Fatal(errors.Trace(err).Error())
 				}
 
-				match, _ := m.matchOffer(offerEntry)
+				var metrics MatcherMetrics
+				match, _ := m.matchOffer(offerEntry, &metrics)
 				if match == nil {
 					b.Fatal(errors.TraceNew("unexpected no match").Error())
 				}

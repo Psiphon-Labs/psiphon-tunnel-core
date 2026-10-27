@@ -417,6 +417,23 @@ Returns the path where the rotated notices file will be created.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
 
+ @note On Wi-Fi, the network ID that tunnel-core uses to key per-network state, such as stored tactics and replay
+ parameters, includes the BSSID when available. On iOS 14 and Mac Catalyst 14 and later, the BSSID is obtained with
+ NEHotspotNetwork, which requires the `com.apple.developer.networking.wifi-info` entitlement in the process that
+ runs PsiphonTunnel, such as the Network Extension, and one of Apple's conditions, such as an active VPN
+ configuration or precise location authorization. Without them, NEHotspotNetwork returns nothing and the user is
+ not prompted; the network ID then falls back to CNCopyCurrentNetworkInfo, which returns nothing to apps built
+ with the iOS 19 SDK or later, and finally to the Wi-Fi interface address.
+
+ @note The Wi-Fi network ID is chosen once per network, and kept until the network changes, as tunnel-core requires.
+ It is chosen before the library starts, so this method waits up to 1 second for the BSSID; if it is not fetched in
+ time, then the fallback network ID is used for that network, and the BSSID is ignored when it arrives.
+ NEHotspotNetwork reports the BSSID on the main queue, so it cannot arrive while the main thread is blocked: when this
+ method is called on the main thread, it does not wait, and the fallback network ID is typically used for the current
+ network; later networks are unaffected. To use the BSSID for the current network, call this method off the main
+ thread. This method returns only after the library has started or failed to start, which may take longer than 1
+ second.
+
  @warning Direct calls from a TunneledAppDelegate callback is unsupported as this can deadlock.
  */
 - (BOOL)start:(BOOL)ifNeeded;
@@ -424,6 +441,8 @@ Returns the path where the rotated notices file will be created.
 /*!
  Reconnect a previously started PsiphonTunnel with the specified config changes.
  reconnectWithConfig has no effect if there is no running PsiphonTunnel.
+ @param newSponsorID A nil or empty sponsor ID leaves the sponsor ID unchanged.
+ @param newAuthorizations Replaces the authorizations; nil or an empty array clears them.
 
  @warning Direct calls from a TunneledAppDelegate callback is unsupported as this can deadlock.
  */

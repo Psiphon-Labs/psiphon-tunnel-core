@@ -570,6 +570,7 @@ func logServerLoad(
 	serverLoad.Add(support.ReplayCache.GetMetrics())
 
 	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
+	serverLoad.Add(support.TunnelServer.GetInproxyBrokerMetrics())
 
 	upstreamStats, protocolStats, regionStats :=
 		support.TunnelServer.GetLoadStats()

@@ -27,7 +27,7 @@ github.com/Psiphon-Inc/rotate-safe-writer
 # github.com/Psiphon-Inc/uds-ipc v1.0.1
 ## explicit; go 1.24.0
 github.com/Psiphon-Inc/uds-ipc
-# github.com/Psiphon-Labs/bolt v0.0.0-20260921192800-17f196515990
+# github.com/Psiphon-Labs/bolt v0.0.0-20261020160549-5e39149d57c2
 ## explicit; go 1.12
 github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
@@ -42,7 +42,7 @@ github.com/Psiphon-Labs/covert-dtls/pkg/utils
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20260423180031-37d6e92d021f
+# github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059
 ## explicit; go 1.24.0
 github.com/Psiphon-Labs/pion-ice/v4
 github.com/Psiphon-Labs/pion-ice/v4/internal/atomic
@@ -50,7 +50,7 @@ github.com/Psiphon-Labs/pion-ice/v4/internal/fakenet
 github.com/Psiphon-Labs/pion-ice/v4/internal/netutil
 github.com/Psiphon-Labs/pion-ice/v4/internal/stun
 github.com/Psiphon-Labs/pion-ice/v4/internal/taskloop
-# github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20260423180049-7ff453f9681a
+# github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88
 ## explicit; go 1.24.0
 github.com/Psiphon-Labs/pion-webrtc/v4
 github.com/Psiphon-Labs/pion-webrtc/v4/internal/fmtp
@@ -58,7 +58,7 @@ github.com/Psiphon-Labs/pion-webrtc/v4/internal/mux
 github.com/Psiphon-Labs/pion-webrtc/v4/internal/util
 github.com/Psiphon-Labs/pion-webrtc/v4/pkg/media
 github.com/Psiphon-Labs/pion-webrtc/v4/pkg/rtcerr
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20260612202619-4944f00a8304
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d
 ## explicit; go 1.26
 github.com/Psiphon-Labs/psiphon-tls
 github.com/Psiphon-Labs/psiphon-tls/internal/boring

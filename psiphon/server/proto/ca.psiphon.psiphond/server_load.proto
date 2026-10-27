@@ -76,4 +76,11 @@ message ServerLoad {
     optional int64 total_tcp_port_forwards = 143;
     optional int64 total_udp_port_forwards = 144;
     optional string server_entry_tag = 145;
+    optional int64 inproxy_matcher_pass_count = 146;
+    optional int64 inproxy_matcher_no_match_pass_count = 147;
+    optional int64 inproxy_matcher_pass_duration_sum_us = 148;
+    optional int64 inproxy_matcher_pass_duration_max_us = 149;
+    optional int64 inproxy_matcher_offers_visited = 150;
+    optional int64 inproxy_matcher_offers_without_eligible_queue = 151;
+    optional int64 inproxy_matcher_announcements_examined = 152;
 }

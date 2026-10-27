@@ -183,55 +183,62 @@ func (x *ServerLoadDNS) GetServerEntryTag() string {
 }
 
 type ServerLoad struct {
-	state                                   protoimpl.MessageState `protogen:"open.v1"`
-	CpuPercent                              *float64               `protobuf:"fixed64,100,opt,name=cpu_percent,json=cpuPercent,proto3,oneof" json:"cpu_percent,omitempty"`
-	HeapAlloc                               *int64                 `protobuf:"varint,101,opt,name=heap_alloc,json=heapAlloc,proto3,oneof" json:"heap_alloc,omitempty"`
-	HeapIdle                                *int64                 `protobuf:"varint,102,opt,name=heap_idle,json=heapIdle,proto3,oneof" json:"heap_idle,omitempty"`
-	HeapInuse                               *int64                 `protobuf:"varint,103,opt,name=heap_inuse,json=heapInuse,proto3,oneof" json:"heap_inuse,omitempty"`
-	HeapObjects                             *int64                 `protobuf:"varint,104,opt,name=heap_objects,json=heapObjects,proto3,oneof" json:"heap_objects,omitempty"`
-	HeapReleased                            *int64                 `protobuf:"varint,105,opt,name=heap_released,json=heapReleased,proto3,oneof" json:"heap_released,omitempty"`
-	HeapSys                                 *int64                 `protobuf:"varint,106,opt,name=heap_sys,json=heapSys,proto3,oneof" json:"heap_sys,omitempty"`
-	NetworkBytesReceived                    *int64                 `protobuf:"varint,107,opt,name=network_bytes_received,json=networkBytesReceived,proto3,oneof" json:"network_bytes_received,omitempty"`
-	NetworkBytesSent                        *int64                 `protobuf:"varint,108,opt,name=network_bytes_sent,json=networkBytesSent,proto3,oneof" json:"network_bytes_sent,omitempty"`
-	EstablishTunnels                        *bool                  `protobuf:"varint,109,opt,name=establish_tunnels,json=establishTunnels,proto3,oneof" json:"establish_tunnels,omitempty"`
-	EstablishTunnelsLimitedCount            *int64                 `protobuf:"varint,110,opt,name=establish_tunnels_limited_count,json=establishTunnelsLimitedCount,proto3,oneof" json:"establish_tunnels_limited_count,omitempty"`
-	LastGc                                  *timestamppb.Timestamp `protobuf:"bytes,111,opt,name=last_gc,json=lastGc,proto3,oneof" json:"last_gc,omitempty"`
-	NumForcedGc                             *int64                 `protobuf:"varint,112,opt,name=num_forced_gc,json=numForcedGc,proto3,oneof" json:"num_forced_gc,omitempty"`
-	NumGc                                   *int64                 `protobuf:"varint,113,opt,name=num_gc,json=numGc,proto3,oneof" json:"num_gc,omitempty"`
-	NumGoroutine                            *int64                 `protobuf:"varint,114,opt,name=num_goroutine,json=numGoroutine,proto3,oneof" json:"num_goroutine,omitempty"`
-	ReplayDeleteReplayCount                 *int64                 `protobuf:"varint,115,opt,name=replay_delete_replay_count,json=replayDeleteReplayCount,proto3,oneof" json:"replay_delete_replay_count,omitempty"`
-	ReplayFailedReplayCount                 *int64                 `protobuf:"varint,116,opt,name=replay_failed_replay_count,json=replayFailedReplayCount,proto3,oneof" json:"replay_failed_replay_count,omitempty"`
-	ReplayGetReplayHitCount                 *int64                 `protobuf:"varint,117,opt,name=replay_get_replay_hit_count,json=replayGetReplayHitCount,proto3,oneof" json:"replay_get_replay_hit_count,omitempty"`
-	ReplayGetReplayMissCount                *int64                 `protobuf:"varint,118,opt,name=replay_get_replay_miss_count,json=replayGetReplayMissCount,proto3,oneof" json:"replay_get_replay_miss_count,omitempty"`
-	ReplayMaxCacheEntries                   *int64                 `protobuf:"varint,119,opt,name=replay_max_cache_entries,json=replayMaxCacheEntries,proto3,oneof" json:"replay_max_cache_entries,omitempty"`
-	ReplaySetReplayCount                    *int64                 `protobuf:"varint,120,opt,name=replay_set_replay_count,json=replaySetReplayCount,proto3,oneof" json:"replay_set_replay_count,omitempty"`
-	ServerTacticsCacheHitCount              *int64                 `protobuf:"varint,121,opt,name=server_tactics_cache_hit_count,json=serverTacticsCacheHitCount,proto3,oneof" json:"server_tactics_cache_hit_count,omitempty"`
-	ServerTacticsCacheMissCount             *int64                 `protobuf:"varint,122,opt,name=server_tactics_cache_miss_count,json=serverTacticsCacheMissCount,proto3,oneof" json:"server_tactics_cache_miss_count,omitempty"`
-	ServerTacticsMaxCacheEntries            *int64                 `protobuf:"varint,123,opt,name=server_tactics_max_cache_entries,json=serverTacticsMaxCacheEntries,proto3,oneof" json:"server_tactics_max_cache_entries,omitempty"`
-	ServerTacticsMaxParameterReferences     *int64                 `protobuf:"varint,124,opt,name=server_tactics_max_parameter_references,json=serverTacticsMaxParameterReferences,proto3,oneof" json:"server_tactics_max_parameter_references,omitempty"`
-	DialingTcpPortForwards                  *int64                 `protobuf:"varint,125,opt,name=dialing_tcp_port_forwards,json=dialingTcpPortForwards,proto3,oneof" json:"dialing_tcp_port_forwards,omitempty"`
-	TcpIpv4PortForwardDialedCount           *int64                 `protobuf:"varint,126,opt,name=tcp_ipv4_port_forward_dialed_count,json=tcpIpv4PortForwardDialedCount,proto3,oneof" json:"tcp_ipv4_port_forward_dialed_count,omitempty"`
-	TcpIpv4PortForwardDialedDuration        *int64                 `protobuf:"varint,127,opt,name=tcp_ipv4_port_forward_dialed_duration,json=tcpIpv4PortForwardDialedDuration,proto3,oneof" json:"tcp_ipv4_port_forward_dialed_duration,omitempty"`
-	TcpIpv4PortForwardFailedCount           *int64                 `protobuf:"varint,128,opt,name=tcp_ipv4_port_forward_failed_count,json=tcpIpv4PortForwardFailedCount,proto3,oneof" json:"tcp_ipv4_port_forward_failed_count,omitempty"`
-	TcpIpv4PortForwardFailedDuration        *int64                 `protobuf:"varint,129,opt,name=tcp_ipv4_port_forward_failed_duration,json=tcpIpv4PortForwardFailedDuration,proto3,oneof" json:"tcp_ipv4_port_forward_failed_duration,omitempty"`
-	TcpIpv6PortForwardDialedCount           *int64                 `protobuf:"varint,130,opt,name=tcp_ipv6_port_forward_dialed_count,json=tcpIpv6PortForwardDialedCount,proto3,oneof" json:"tcp_ipv6_port_forward_dialed_count,omitempty"`
-	TcpIpv6PortForwardDialedDuration        *int64                 `protobuf:"varint,131,opt,name=tcp_ipv6_port_forward_dialed_duration,json=tcpIpv6PortForwardDialedDuration,proto3,oneof" json:"tcp_ipv6_port_forward_dialed_duration,omitempty"`
-	TcpIpv6PortForwardFailedCount           *int64                 `protobuf:"varint,132,opt,name=tcp_ipv6_port_forward_failed_count,json=tcpIpv6PortForwardFailedCount,proto3,oneof" json:"tcp_ipv6_port_forward_failed_count,omitempty"`
-	TcpIpv6PortForwardFailedDuration        *int64                 `protobuf:"varint,133,opt,name=tcp_ipv6_port_forward_failed_duration,json=tcpIpv6PortForwardFailedDuration,proto3,oneof" json:"tcp_ipv6_port_forward_failed_duration,omitempty"`
-	TcpPortForwardDialedCount               *int64                 `protobuf:"varint,134,opt,name=tcp_port_forward_dialed_count,json=tcpPortForwardDialedCount,proto3,oneof" json:"tcp_port_forward_dialed_count,omitempty"`
-	TcpPortForwardDialedDuration            *int64                 `protobuf:"varint,135,opt,name=tcp_port_forward_dialed_duration,json=tcpPortForwardDialedDuration,proto3,oneof" json:"tcp_port_forward_dialed_duration,omitempty"`
-	TcpPortForwardFailedCount               *int64                 `protobuf:"varint,136,opt,name=tcp_port_forward_failed_count,json=tcpPortForwardFailedCount,proto3,oneof" json:"tcp_port_forward_failed_count,omitempty"`
-	TcpPortForwardFailedDuration            *int64                 `protobuf:"varint,137,opt,name=tcp_port_forward_failed_duration,json=tcpPortForwardFailedDuration,proto3,oneof" json:"tcp_port_forward_failed_duration,omitempty"`
-	TcpPortForwardRejectedDialingLimitCount *int64                 `protobuf:"varint,138,opt,name=tcp_port_forward_rejected_dialing_limit_count,json=tcpPortForwardRejectedDialingLimitCount,proto3,oneof" json:"tcp_port_forward_rejected_dialing_limit_count,omitempty"`
-	TcpPortForwardRejectedDisallowedCount   *int64                 `protobuf:"varint,139,opt,name=tcp_port_forward_rejected_disallowed_count,json=tcpPortForwardRejectedDisallowedCount,proto3,oneof" json:"tcp_port_forward_rejected_disallowed_count,omitempty"`
-	TcpPortForwards                         *int64                 `protobuf:"varint,140,opt,name=tcp_port_forwards,json=tcpPortForwards,proto3,oneof" json:"tcp_port_forwards,omitempty"`
-	UdpPortForwardRejectedDisallowedCount   *int64                 `protobuf:"varint,141,opt,name=udp_port_forward_rejected_disallowed_count,json=udpPortForwardRejectedDisallowedCount,proto3,oneof" json:"udp_port_forward_rejected_disallowed_count,omitempty"`
-	UdpPortForwards                         *int64                 `protobuf:"varint,142,opt,name=udp_port_forwards,json=udpPortForwards,proto3,oneof" json:"udp_port_forwards,omitempty"`
-	TotalTcpPortForwards                    *int64                 `protobuf:"varint,143,opt,name=total_tcp_port_forwards,json=totalTcpPortForwards,proto3,oneof" json:"total_tcp_port_forwards,omitempty"`
-	TotalUdpPortForwards                    *int64                 `protobuf:"varint,144,opt,name=total_udp_port_forwards,json=totalUdpPortForwards,proto3,oneof" json:"total_udp_port_forwards,omitempty"`
-	ServerEntryTag                          *string                `protobuf:"bytes,145,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
-	unknownFields                           protoimpl.UnknownFields
-	sizeCache                               protoimpl.SizeCache
+	state                                    protoimpl.MessageState `protogen:"open.v1"`
+	CpuPercent                               *float64               `protobuf:"fixed64,100,opt,name=cpu_percent,json=cpuPercent,proto3,oneof" json:"cpu_percent,omitempty"`
+	HeapAlloc                                *int64                 `protobuf:"varint,101,opt,name=heap_alloc,json=heapAlloc,proto3,oneof" json:"heap_alloc,omitempty"`
+	HeapIdle                                 *int64                 `protobuf:"varint,102,opt,name=heap_idle,json=heapIdle,proto3,oneof" json:"heap_idle,omitempty"`
+	HeapInuse                                *int64                 `protobuf:"varint,103,opt,name=heap_inuse,json=heapInuse,proto3,oneof" json:"heap_inuse,omitempty"`
+	HeapObjects                              *int64                 `protobuf:"varint,104,opt,name=heap_objects,json=heapObjects,proto3,oneof" json:"heap_objects,omitempty"`
+	HeapReleased                             *int64                 `protobuf:"varint,105,opt,name=heap_released,json=heapReleased,proto3,oneof" json:"heap_released,omitempty"`
+	HeapSys                                  *int64                 `protobuf:"varint,106,opt,name=heap_sys,json=heapSys,proto3,oneof" json:"heap_sys,omitempty"`
+	NetworkBytesReceived                     *int64                 `protobuf:"varint,107,opt,name=network_bytes_received,json=networkBytesReceived,proto3,oneof" json:"network_bytes_received,omitempty"`
+	NetworkBytesSent                         *int64                 `protobuf:"varint,108,opt,name=network_bytes_sent,json=networkBytesSent,proto3,oneof" json:"network_bytes_sent,omitempty"`
+	EstablishTunnels                         *bool                  `protobuf:"varint,109,opt,name=establish_tunnels,json=establishTunnels,proto3,oneof" json:"establish_tunnels,omitempty"`
+	EstablishTunnelsLimitedCount             *int64                 `protobuf:"varint,110,opt,name=establish_tunnels_limited_count,json=establishTunnelsLimitedCount,proto3,oneof" json:"establish_tunnels_limited_count,omitempty"`
+	LastGc                                   *timestamppb.Timestamp `protobuf:"bytes,111,opt,name=last_gc,json=lastGc,proto3,oneof" json:"last_gc,omitempty"`
+	NumForcedGc                              *int64                 `protobuf:"varint,112,opt,name=num_forced_gc,json=numForcedGc,proto3,oneof" json:"num_forced_gc,omitempty"`
+	NumGc                                    *int64                 `protobuf:"varint,113,opt,name=num_gc,json=numGc,proto3,oneof" json:"num_gc,omitempty"`
+	NumGoroutine                             *int64                 `protobuf:"varint,114,opt,name=num_goroutine,json=numGoroutine,proto3,oneof" json:"num_goroutine,omitempty"`
+	ReplayDeleteReplayCount                  *int64                 `protobuf:"varint,115,opt,name=replay_delete_replay_count,json=replayDeleteReplayCount,proto3,oneof" json:"replay_delete_replay_count,omitempty"`
+	ReplayFailedReplayCount                  *int64                 `protobuf:"varint,116,opt,name=replay_failed_replay_count,json=replayFailedReplayCount,proto3,oneof" json:"replay_failed_replay_count,omitempty"`
+	ReplayGetReplayHitCount                  *int64                 `protobuf:"varint,117,opt,name=replay_get_replay_hit_count,json=replayGetReplayHitCount,proto3,oneof" json:"replay_get_replay_hit_count,omitempty"`
+	ReplayGetReplayMissCount                 *int64                 `protobuf:"varint,118,opt,name=replay_get_replay_miss_count,json=replayGetReplayMissCount,proto3,oneof" json:"replay_get_replay_miss_count,omitempty"`
+	ReplayMaxCacheEntries                    *int64                 `protobuf:"varint,119,opt,name=replay_max_cache_entries,json=replayMaxCacheEntries,proto3,oneof" json:"replay_max_cache_entries,omitempty"`
+	ReplaySetReplayCount                     *int64                 `protobuf:"varint,120,opt,name=replay_set_replay_count,json=replaySetReplayCount,proto3,oneof" json:"replay_set_replay_count,omitempty"`
+	ServerTacticsCacheHitCount               *int64                 `protobuf:"varint,121,opt,name=server_tactics_cache_hit_count,json=serverTacticsCacheHitCount,proto3,oneof" json:"server_tactics_cache_hit_count,omitempty"`
+	ServerTacticsCacheMissCount              *int64                 `protobuf:"varint,122,opt,name=server_tactics_cache_miss_count,json=serverTacticsCacheMissCount,proto3,oneof" json:"server_tactics_cache_miss_count,omitempty"`
+	ServerTacticsMaxCacheEntries             *int64                 `protobuf:"varint,123,opt,name=server_tactics_max_cache_entries,json=serverTacticsMaxCacheEntries,proto3,oneof" json:"server_tactics_max_cache_entries,omitempty"`
+	ServerTacticsMaxParameterReferences      *int64                 `protobuf:"varint,124,opt,name=server_tactics_max_parameter_references,json=serverTacticsMaxParameterReferences,proto3,oneof" json:"server_tactics_max_parameter_references,omitempty"`
+	DialingTcpPortForwards                   *int64                 `protobuf:"varint,125,opt,name=dialing_tcp_port_forwards,json=dialingTcpPortForwards,proto3,oneof" json:"dialing_tcp_port_forwards,omitempty"`
+	TcpIpv4PortForwardDialedCount            *int64                 `protobuf:"varint,126,opt,name=tcp_ipv4_port_forward_dialed_count,json=tcpIpv4PortForwardDialedCount,proto3,oneof" json:"tcp_ipv4_port_forward_dialed_count,omitempty"`
+	TcpIpv4PortForwardDialedDuration         *int64                 `protobuf:"varint,127,opt,name=tcp_ipv4_port_forward_dialed_duration,json=tcpIpv4PortForwardDialedDuration,proto3,oneof" json:"tcp_ipv4_port_forward_dialed_duration,omitempty"`
+	TcpIpv4PortForwardFailedCount            *int64                 `protobuf:"varint,128,opt,name=tcp_ipv4_port_forward_failed_count,json=tcpIpv4PortForwardFailedCount,proto3,oneof" json:"tcp_ipv4_port_forward_failed_count,omitempty"`
+	TcpIpv4PortForwardFailedDuration         *int64                 `protobuf:"varint,129,opt,name=tcp_ipv4_port_forward_failed_duration,json=tcpIpv4PortForwardFailedDuration,proto3,oneof" json:"tcp_ipv4_port_forward_failed_duration,omitempty"`
+	TcpIpv6PortForwardDialedCount            *int64                 `protobuf:"varint,130,opt,name=tcp_ipv6_port_forward_dialed_count,json=tcpIpv6PortForwardDialedCount,proto3,oneof" json:"tcp_ipv6_port_forward_dialed_count,omitempty"`
+	TcpIpv6PortForwardDialedDuration         *int64                 `protobuf:"varint,131,opt,name=tcp_ipv6_port_forward_dialed_duration,json=tcpIpv6PortForwardDialedDuration,proto3,oneof" json:"tcp_ipv6_port_forward_dialed_duration,omitempty"`
+	TcpIpv6PortForwardFailedCount            *int64                 `protobuf:"varint,132,opt,name=tcp_ipv6_port_forward_failed_count,json=tcpIpv6PortForwardFailedCount,proto3,oneof" json:"tcp_ipv6_port_forward_failed_count,omitempty"`
+	TcpIpv6PortForwardFailedDuration         *int64                 `protobuf:"varint,133,opt,name=tcp_ipv6_port_forward_failed_duration,json=tcpIpv6PortForwardFailedDuration,proto3,oneof" json:"tcp_ipv6_port_forward_failed_duration,omitempty"`
+	TcpPortForwardDialedCount                *int64                 `protobuf:"varint,134,opt,name=tcp_port_forward_dialed_count,json=tcpPortForwardDialedCount,proto3,oneof" json:"tcp_port_forward_dialed_count,omitempty"`
+	TcpPortForwardDialedDuration             *int64                 `protobuf:"varint,135,opt,name=tcp_port_forward_dialed_duration,json=tcpPortForwardDialedDuration,proto3,oneof" json:"tcp_port_forward_dialed_duration,omitempty"`
+	TcpPortForwardFailedCount                *int64                 `protobuf:"varint,136,opt,name=tcp_port_forward_failed_count,json=tcpPortForwardFailedCount,proto3,oneof" json:"tcp_port_forward_failed_count,omitempty"`
+	TcpPortForwardFailedDuration             *int64                 `protobuf:"varint,137,opt,name=tcp_port_forward_failed_duration,json=tcpPortForwardFailedDuration,proto3,oneof" json:"tcp_port_forward_failed_duration,omitempty"`
+	TcpPortForwardRejectedDialingLimitCount  *int64                 `protobuf:"varint,138,opt,name=tcp_port_forward_rejected_dialing_limit_count,json=tcpPortForwardRejectedDialingLimitCount,proto3,oneof" json:"tcp_port_forward_rejected_dialing_limit_count,omitempty"`
+	TcpPortForwardRejectedDisallowedCount    *int64                 `protobuf:"varint,139,opt,name=tcp_port_forward_rejected_disallowed_count,json=tcpPortForwardRejectedDisallowedCount,proto3,oneof" json:"tcp_port_forward_rejected_disallowed_count,omitempty"`
+	TcpPortForwards                          *int64                 `protobuf:"varint,140,opt,name=tcp_port_forwards,json=tcpPortForwards,proto3,oneof" json:"tcp_port_forwards,omitempty"`
+	UdpPortForwardRejectedDisallowedCount    *int64                 `protobuf:"varint,141,opt,name=udp_port_forward_rejected_disallowed_count,json=udpPortForwardRejectedDisallowedCount,proto3,oneof" json:"udp_port_forward_rejected_disallowed_count,omitempty"`
+	UdpPortForwards                          *int64                 `protobuf:"varint,142,opt,name=udp_port_forwards,json=udpPortForwards,proto3,oneof" json:"udp_port_forwards,omitempty"`
+	TotalTcpPortForwards                     *int64                 `protobuf:"varint,143,opt,name=total_tcp_port_forwards,json=totalTcpPortForwards,proto3,oneof" json:"total_tcp_port_forwards,omitempty"`
+	TotalUdpPortForwards                     *int64                 `protobuf:"varint,144,opt,name=total_udp_port_forwards,json=totalUdpPortForwards,proto3,oneof" json:"total_udp_port_forwards,omitempty"`
+	ServerEntryTag                           *string                `protobuf:"bytes,145,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
+	InproxyMatcherPassCount                  *int64                 `protobuf:"varint,146,opt,name=inproxy_matcher_pass_count,json=inproxyMatcherPassCount,proto3,oneof" json:"inproxy_matcher_pass_count,omitempty"`
+	InproxyMatcherNoMatchPassCount           *int64                 `protobuf:"varint,147,opt,name=inproxy_matcher_no_match_pass_count,json=inproxyMatcherNoMatchPassCount,proto3,oneof" json:"inproxy_matcher_no_match_pass_count,omitempty"`
+	InproxyMatcherPassDurationSumUs          *int64                 `protobuf:"varint,148,opt,name=inproxy_matcher_pass_duration_sum_us,json=inproxyMatcherPassDurationSumUs,proto3,oneof" json:"inproxy_matcher_pass_duration_sum_us,omitempty"`
+	InproxyMatcherPassDurationMaxUs          *int64                 `protobuf:"varint,149,opt,name=inproxy_matcher_pass_duration_max_us,json=inproxyMatcherPassDurationMaxUs,proto3,oneof" json:"inproxy_matcher_pass_duration_max_us,omitempty"`
+	InproxyMatcherOffersVisited              *int64                 `protobuf:"varint,150,opt,name=inproxy_matcher_offers_visited,json=inproxyMatcherOffersVisited,proto3,oneof" json:"inproxy_matcher_offers_visited,omitempty"`
+	InproxyMatcherOffersWithoutEligibleQueue *int64                 `protobuf:"varint,151,opt,name=inproxy_matcher_offers_without_eligible_queue,json=inproxyMatcherOffersWithoutEligibleQueue,proto3,oneof" json:"inproxy_matcher_offers_without_eligible_queue,omitempty"`
+	InproxyMatcherAnnouncementsExamined      *int64                 `protobuf:"varint,152,opt,name=inproxy_matcher_announcements_examined,json=inproxyMatcherAnnouncementsExamined,proto3,oneof" json:"inproxy_matcher_announcements_examined,omitempty"`
+	unknownFields                            protoimpl.UnknownFields
+	sizeCache                                protoimpl.SizeCache
 }
 
 func (x *ServerLoad) Reset() {
@@ -586,6 +593,55 @@ func (x *ServerLoad) GetServerEntryTag() string {
 	return ""
 }
 
+func (x *ServerLoad) GetInproxyMatcherPassCount() int64 {
+	if x != nil && x.InproxyMatcherPassCount != nil {
+		return *x.InproxyMatcherPassCount
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherNoMatchPassCount() int64 {
+	if x != nil && x.InproxyMatcherNoMatchPassCount != nil {
+		return *x.InproxyMatcherNoMatchPassCount
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherPassDurationSumUs() int64 {
+	if x != nil && x.InproxyMatcherPassDurationSumUs != nil {
+		return *x.InproxyMatcherPassDurationSumUs
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherPassDurationMaxUs() int64 {
+	if x != nil && x.InproxyMatcherPassDurationMaxUs != nil {
+		return *x.InproxyMatcherPassDurationMaxUs
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherOffersVisited() int64 {
+	if x != nil && x.InproxyMatcherOffersVisited != nil {
+		return *x.InproxyMatcherOffersVisited
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherOffersWithoutEligibleQueue() int64 {
+	if x != nil && x.InproxyMatcherOffersWithoutEligibleQueue != nil {
+		return *x.InproxyMatcherOffersWithoutEligibleQueue
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetInproxyMatcherAnnouncementsExamined() int64 {
+	if x != nil && x.InproxyMatcherAnnouncementsExamined != nil {
+		return *x.InproxyMatcherAnnouncementsExamined
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_server_load_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
@@ -616,7 +672,7 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\r_dns_durationB\x13\n" +
 	"\x11_dns_failed_countB\x16\n" +
 	"\x14_dns_failed_durationB\x13\n" +
-	"\x11_server_entry_tag\"\x81\"\n" +
+	"\x11_server_entry_tag\"\xe7(\n" +
 	"\n" +
 	"ServerLoad\x12$\n" +
 	"\vcpu_percent\x18d \x01(\x01H\x00R\n" +
@@ -668,7 +724,14 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\x11udp_port_forwards\x18\x8e\x01 \x01(\x03H*R\x0fudpPortForwards\x88\x01\x01\x12;\n" +
 	"\x17total_tcp_port_forwards\x18\x8f\x01 \x01(\x03H+R\x14totalTcpPortForwards\x88\x01\x01\x12;\n" +
 	"\x17total_udp_port_forwards\x18\x90\x01 \x01(\x03H,R\x14totalUdpPortForwards\x88\x01\x01\x12.\n" +
-	"\x10server_entry_tag\x18\x91\x01 \x01(\tH-R\x0eserverEntryTag\x88\x01\x01B\x0e\n" +
+	"\x10server_entry_tag\x18\x91\x01 \x01(\tH-R\x0eserverEntryTag\x88\x01\x01\x12A\n" +
+	"\x1ainproxy_matcher_pass_count\x18\x92\x01 \x01(\x03H.R\x17inproxyMatcherPassCount\x88\x01\x01\x12Q\n" +
+	"#inproxy_matcher_no_match_pass_count\x18\x93\x01 \x01(\x03H/R\x1einproxyMatcherNoMatchPassCount\x88\x01\x01\x12S\n" +
+	"$inproxy_matcher_pass_duration_sum_us\x18\x94\x01 \x01(\x03H0R\x1finproxyMatcherPassDurationSumUs\x88\x01\x01\x12S\n" +
+	"$inproxy_matcher_pass_duration_max_us\x18\x95\x01 \x01(\x03H1R\x1finproxyMatcherPassDurationMaxUs\x88\x01\x01\x12I\n" +
+	"\x1einproxy_matcher_offers_visited\x18\x96\x01 \x01(\x03H2R\x1binproxyMatcherOffersVisited\x88\x01\x01\x12e\n" +
+	"-inproxy_matcher_offers_without_eligible_queue\x18\x97\x01 \x01(\x03H3R(inproxyMatcherOffersWithoutEligibleQueue\x88\x01\x01\x12Y\n" +
+	"&inproxy_matcher_announcements_examined\x18\x98\x01 \x01(\x03H4R#inproxyMatcherAnnouncementsExamined\x88\x01\x01B\x0e\n" +
 	"\f_cpu_percentB\r\n" +
 	"\v_heap_allocB\f\n" +
 	"\n" +
@@ -716,7 +779,14 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\x12_udp_port_forwardsB\x1a\n" +
 	"\x18_total_tcp_port_forwardsB\x1a\n" +
 	"\x18_total_udp_port_forwardsB\x13\n" +
-	"\x11_server_entry_tagBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x11_server_entry_tagB\x1d\n" +
+	"\x1b_inproxy_matcher_pass_countB&\n" +
+	"$_inproxy_matcher_no_match_pass_countB'\n" +
+	"%_inproxy_matcher_pass_duration_sum_usB'\n" +
+	"%_inproxy_matcher_pass_duration_max_usB!\n" +
+	"\x1f_inproxy_matcher_offers_visitedB0\n" +
+	"._inproxy_matcher_offers_without_eligible_queueB)\n" +
+	"'_inproxy_matcher_announcements_examinedBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_load_proto_rawDescOnce sync.Once

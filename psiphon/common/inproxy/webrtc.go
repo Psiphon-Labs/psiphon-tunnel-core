@@ -30,6 +30,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -222,6 +223,12 @@ func newWebRTCConn(
 
 	isOffer := peerSDP == nil
 
+	keepaliveBaseInterval, keepaliveJitter, err := makeICEKeepaliveSchedule(
+		config.DTLSFingerprint, config.ClientRootObfuscationSecret, isOffer)
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
 	udpConn, err := config.WebRTCDialCoordinator.UDPListen(ctx)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
@@ -373,21 +380,11 @@ func newWebRTCConn(
 	// - Reduce the wait time for STUN and peer reflexive candidates from the
 	//   default 500ms and 1s.
 	//
-	// - Reduce keepalives from the default 2s to +/-15s and increase
-	//   disconnect timeout from the default 5s to 3x15s.
+	// - Match periodic ICE timing to the DTLS fingerprint.
 	//
 	// TODO:
 	//
 	// - Configuration via tactics.
-	//
-	// - While the RFC,
-	//   https://datatracker.ietf.org/doc/html/rfc5245#section-10, calls for
-	//   keep alives no less than 15s, implementations such as Chrome send
-	//   keep alives much more frequently,
-	//   https://issues.webrtc.org/issues/42221718.
-	//
-	// - Varying the period bewteen each keepalive, as is done with SSH via
-	//   SSHKeepAlivePeriodMin/Max, requires changes to pion/dtls.
 	//
 	// - Some traffic-related timeouts are not yet exposed via settingEngine,
 	//   including ice.defaultSTUNGatherTimeout, ice.maxBindingRequestTimeout.
@@ -396,13 +393,19 @@ func newWebRTCConn(
 	settingEngine.SetHostAcceptanceMinWait(0)
 	settingEngine.SetSrflxAcceptanceMinWait(prng.JitterDuration(100*time.Millisecond, 0.1))
 	settingEngine.SetPrflxAcceptanceMinWait(prng.JitterDuration(200*time.Millisecond, 0.1))
-	settingEngine.SetICETimeouts(45*time.Second, 0, prng.JitterDuration(15*time.Second, 0.2))
+	if err := settingEngine.SetICETimeoutsWithJitter(
+		45*time.Second, 0, keepaliveBaseInterval, keepaliveJitter); err != nil {
+		_ = udpMux.Close()
+		return nil, nil, nil, errors.Trace(err)
+	}
 	settingEngine.SetICEMaxBindingRequests(10)
 
 	// Initialize data channel or media streams obfuscation
 
 	config.Logger.WithTraceFields(common.LogFields{
 		"dtls_fingerprint":             config.DTLSFingerprint,
+		"ice_keepalive_base_ms":        keepaliveBaseInterval.Milliseconds(),
+		"ice_keepalive_jitter":         keepaliveJitter,
 		"data_channel_traffic_shaping": config.TrafficShapingParameters != nil,
 		"use_media_streams":            config.UseMediaStreams,
 	}).Info("webrtc_obfuscation")
@@ -547,7 +550,9 @@ func newWebRTCConn(
 	// Proceed even when stunServerAddress is "" and !DisableSTUN, as ICE may
 	// find other host candidates.
 
-	doSTUN := stunServerAddress != "" && !disableInbound && !config.WebRTCDialCoordinator.DisableSTUN()
+	doSTUN := stunServerAddress != "" && !disableInbound &&
+		!config.WebRTCDialCoordinator.DisableSTUN() &&
+		!config.WebRTCDialCoordinator.DisableSTUNCandidateGathering()
 
 	var ICEServers []webrtc.ICEServer
 
@@ -973,12 +978,38 @@ func newWebRTCConn(
 		// the case of personal pairing. For that reason, the await timeout
 		// should be no more than a couple of seconds.
 		//
-		// TODO: also await port mappings when doSTUN, in case there are no
-		// STUN candidates; see hasServerReflexive check below; as it stands,
-		// in this case, it's more likely that port mapping won the previous
-		// select race.
+		// Also await a potential port mapping when STUN completes without any
+		// server-reflexive candidates that survive SDP filtering. Host
+		// candidates are ignored in this check since they could be private
+		// IPs in personal pairing mode, or public IPv6 which may not be
+		// dialable by the peer.
 
-		if iceCompleted && portMappingExternalAddr == "" && !doSTUN && doPortMapping {
+		awaitPortMapping := !doSTUN
+		if iceCompleted && portMappingExternalAddr == "" && doPortMapping && doSTUN {
+
+			// Check for no STUN candidates. This prepareSDPAddresses call is
+			// potentially, but not always, a duplicate with the one below,
+			// but should only take on the order of microseconds.
+
+			_, metrics, err := prepareSDPAddresses(
+				[]byte(conn.peerConnection.LocalDescription().SDP),
+				false,
+				"",
+				config.WebRTCDialCoordinator.DisableIPv6ICECandidates(),
+				hasPersonalCompartmentIDs)
+			if err != nil {
+				return nil, nil, nil, errors.Trace(err)
+			}
+			awaitPortMapping = true
+			for _, candidateType := range metrics.iceCandidateTypes {
+				if candidateType == ICECandidateServerReflexive {
+					awaitPortMapping = false
+					break
+				}
+			}
+		}
+
+		if iceCompleted && portMappingExternalAddr == "" && doPortMapping && awaitPortMapping {
 
 			timer := time.NewTimer(
 				common.ValueOrDefault(
@@ -1370,27 +1401,27 @@ func (conn *webRTCConn) Close() error {
 	// awaiting the close of each component.
 	close(conn.closedSignal)
 
-	// Close the udpConn to interrupt any blocking DTLS handshake:
-	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
+	var closeUDPOnce sync.Once
+	closeUDP := func() {
+		closeUDPOnce.Do(func() {
+			if udpConn != nil {
+				_ = udpConn.Close()
+			}
+		})
+	}
+
+	// Close in top down order so closing packets, including DTLS
+	// close_notify, can be sent to the peer before the UDP socket is closed.
 	//
-	// Limitation: there is no guarantee that pion sends any closing packets
-	// before the UDP socket is closed here.
+	// Close the media receivers before waiting for QUIC cleanup, which may
+	// wait for receiveMediaTrack.Read to return. Closing the peer connection
+	// stops those receivers (see commit b770337a).
+	//
+	// The timer is a backstop that closes the UDP socket after a short delay
+	// if any pion close operation blocks on network I/O.
 
-	if udpConn != nil {
-		_ = udpConn.Close()
-	}
+	forceClose := time.AfterFunc(time.Second, closeUDP)
 
-	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
-
-	if portMapper != nil {
-		portMapper.close()
-	}
-	if sendMediaTrackRTP != nil {
-		_ = sendMediaTrackRTP.Stop()
-	}
-	if mediaTrackReliabilityLayer != nil {
-		_ = mediaTrackReliabilityLayer.Close()
-	}
 	if dataChannelConn != nil {
 		_ = dataChannelConn.Close()
 	}
@@ -1398,8 +1429,27 @@ func (conn *webRTCConn) Close() error {
 		_ = dataChannel.Close()
 	}
 	if peerConnection != nil {
-		// TODO: use PeerConnection.GracefulClose (requires pion/webrtc 3.2.51)?
+		// Pion sends the DTLS close_notify here, while UDP is still open.
+		// This notifies the peer in both data channel and media stream modes.
 		_ = peerConnection.Close()
+	}
+
+	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
+
+	if sendMediaTrackRTP != nil {
+		_ = sendMediaTrackRTP.Stop()
+	}
+	if mediaTrackReliabilityLayer != nil {
+		_ = mediaTrackReliabilityLayer.Close()
+	}
+
+	forceClose.Stop()
+	closeUDP()
+
+	// Keep the mapping available for closing packets. Release it after UDP
+	// cleanup so router I/O cannot consume the forceClose grace period.
+	if portMapper != nil {
+		portMapper.close()
 	}
 
 	return nil
@@ -3370,6 +3420,66 @@ func getDTLSFingerprintData(dtlsFingerprint string) (fingerprints.ClientHelloFin
 	}
 }
 
+type iceKeepaliveTiming struct {
+	baseMin time.Duration
+	baseMax time.Duration
+	jitter  float64
+}
+
+// Established-connection timing; excludes Chrome's startup and weak states.
+var iceKeepaliveTimings = map[string]iceKeepaliveTiming{
+	protocol.DTLS_FINGERPRINT_CHROME_138: {
+		baseMin: 2500 * time.Millisecond,
+		baseMax: 2500 * time.Millisecond,
+	},
+	protocol.DTLS_FINGERPRINT_FIREFOX_148: {
+		baseMin: 5 * time.Second,
+		baseMax: 5 * time.Second,
+		jitter:  0.2,
+	},
+	protocol.DTLS_FINGERPRINT_RANDOMIZED: {
+		baseMin: 5 * time.Second,
+		baseMax: 10 * time.Second,
+		jitter:  0.2,
+	},
+}
+
+func makeICEKeepaliveSchedule(
+	fingerprint string,
+	rootSecret ObfuscationSecret,
+	isOffer bool,
+) (time.Duration, float64, error) {
+	// Legacy callers may omit the fingerprint.
+	if fingerprint == "" {
+		fingerprint = protocol.DTLS_FINGERPRINT_RANDOMIZED
+	}
+	timing, ok := iceKeepaliveTimings[fingerprint]
+	if !ok {
+		return 0, 0, errors.TraceNew("unsupported DTLS fingerprint")
+	}
+
+	if timing.baseMin == timing.baseMax {
+		return timing.baseMin, timing.jitter, nil
+	}
+
+	context := "in-proxy-ICE-keepalive-offer"
+	if !isOffer {
+		context = "in-proxy-ICE-keepalive-answer"
+	}
+	secret, err := deriveObfuscationSecret(rootSecret, context)
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+	seed := prng.Seed(secret)
+	PRNG := prng.NewPRNGWithSeed(&seed)
+
+	// Replay the base keepalive period.
+	baseMS := PRNG.Range(
+		int(timing.baseMin/time.Millisecond),
+		int(timing.baseMax/time.Millisecond))
+	return time.Duration(baseMS) * time.Millisecond, timing.jitter, nil
+}
+
 // pionNetwork implements pion/transport.Net.
 //
 // Via the SettingsEngine, pion is configured to use a pionNetwork instance,
@@ -3383,6 +3493,7 @@ type pionNetwork struct {
 	logger                pion_logging.LeveledLogger
 	webRTCDialCoordinator WebRTCDialCoordinator
 	excludeInterfaceName  string
+	logFallbackOnce       sync.Once
 }
 
 func newPionNetwork(
@@ -3453,7 +3564,7 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 
 	netInterfaces, err := anet.Interfaces()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return p.fallbackInterfaces(defaultIPv4, defaultIPv6, err)
 	}
 
 	for _, netInterface := range netInterfaces {
@@ -3469,7 +3580,7 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 		}
 		addrs, err := anet.InterfaceAddrsByInterface(&netInterface)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return p.fallbackInterfaces(defaultIPv4, defaultIPv6, err)
 		}
 		var transportInterface *transport.Interface
 		for _, addr := range addrs {
@@ -3491,6 +3602,42 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 	}
 
 	return transportInterfaces, nil
+}
+
+// fallbackInterfaces creates fallback interface information when anet fails
+// due to permission errors. The bound socket IPs are used to create stub
+// interfaces. The fallback stub interface is not fully populated and has no
+// name, index, or subnet masks, but contains sufficient information for pion.
+//
+// Limitation: when an excluded interface is specified, the bound socket IPs
+// can't be checked for exclusion, so no fallback is allowed.
+func (p *pionNetwork) fallbackInterfaces(
+	defaultIPv4, defaultIPv6 net.IP, interfaceErr error) ([]*transport.Interface, error) {
+
+	if p.excludeInterfaceName != "" || !std_errors.Is(interfaceErr, os.ErrPermission) {
+		return nil, errors.Trace(interfaceErr)
+	}
+
+	var transportInterface *transport.Interface
+	for _, IP := range []net.IP{defaultIPv4, defaultIPv6} {
+		if !IP.IsGlobalUnicast() {
+			continue
+		}
+		if transportInterface == nil {
+			transportInterface = transport.NewInterface(net.Interface{Flags: net.FlagUp})
+		}
+		transportInterface.AddAddress(&net.IPAddr{IP: IP})
+	}
+	if transportInterface == nil {
+		return nil, errors.Trace(interfaceErr)
+	}
+
+	// Interfaces is called many times per dial; log the fallback once.
+	p.logFallbackOnce.Do(func() {
+		p.logger.Warnf("using socket addresses after interface enumeration failed: %v", interfaceErr)
+	})
+
+	return []*transport.Interface{transportInterface}, nil
 }
 
 func (p *pionNetwork) ResolveUDPAddr(network, address string) (retAddr *net.UDPAddr, retErr error) {
