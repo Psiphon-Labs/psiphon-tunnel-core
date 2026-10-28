@@ -1046,15 +1046,18 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 			}
 			if s.personal && s.proxy {
 				// Track a personal pairing proxy's time away
-				// from the first rendezvous broker: leaving it
-				// starts the interval, and arriving at it again
-				// by wrapping around the order ends it without
-				// a return.
+				// from the first rendezvous broker: advancing
+				// onto it, by wrapping around the order, ends
+				// the interval without a return; advancing off
+				// it starts the interval. Arrival is checked
+				// first so that a single-broker order, where
+				// every advance both leaves and arrives, never
+				// marks the proxy away.
 				switch {
-				case visit.index%len(s.brokers) == 0:
-					s.awayFromHomeSince = time.Now()
 				case (visit.index+1)%len(s.brokers) == 0:
 					s.awayFromHomeSince = time.Time{}
+				case visit.index%len(s.brokers) == 0:
+					s.awayFromHomeSince = time.Now()
 				}
 			}
 			s.advanceBroker(visit.index + 1)
@@ -1397,11 +1400,14 @@ func newInproxyBrokerClientInstance(
 	// Inproxy{Client,Proxy}DisableWaitToShareSession governs whether they
 	// wait for the first Noise handshake or run their own. By default, the
 	// broker client is shared only after a decoded response; see
-	// InproxyBrokerClientManager.sharedClient.
-	shareOnTransport := p.Bool(parameters.InproxyClientShareBrokerClientTransport)
+	// InproxyBrokerClientManager.sharedClient. The choice is made once per
+	// broker client, here, so that a given client is consistently shared at
+	// one point or the other.
+	shareOnTransportProbability := parameters.InproxyClientShareBrokerClientTransportProbability
 	if isProxy {
-		shareOnTransport = p.Bool(parameters.InproxyProxyShareBrokerClientTransport)
+		shareOnTransportProbability = parameters.InproxyProxyShareBrokerClientTransportProbability
 	}
+	shareOnTransport := p.WeightedCoinFlip(shareOnTransportProbability)
 
 	// InproxyBrokerClientInstance implements the
 	// inproxy.BrokerDialCoordinator interface and passes itself to

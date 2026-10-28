@@ -102,4 +102,7 @@ message InproxyDialParams {
     optional string inproxy_client_ice_asn = 95;
     optional string inproxy_proxy_ice_region = 96;
     optional string inproxy_proxy_ice_asn = 97;
+    optional bool inproxy_broker_is_shared = 98;
+    optional int64 inproxy_broker_candidate_number = 99;
+    optional int64 inproxy_broker_acquire_wait_ms = 100;
 }
