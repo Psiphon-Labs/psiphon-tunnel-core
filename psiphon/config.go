@@ -1372,8 +1372,8 @@ type Config struct {
 	InproxyClientMaxBrokerClients                           *int                                             `json:",omitempty"`
 	InproxyProxyMaxBrokerClients                            *int                                             `json:",omitempty"`
 	InproxyClientBrokerClientIdleTimeoutSeconds             *int                                             `json:",omitempty"`
-	InproxyClientShareBrokerClientTransport                 *bool                                            `json:",omitempty"`
-	InproxyProxyShareBrokerClientTransport                  *bool                                            `json:",omitempty"`
+	InproxyClientShareBrokerClientTransportProbability      *float64                                         `json:",omitempty"`
+	InproxyProxyShareBrokerClientTransportProbability       *float64                                         `json:",omitempty"`
 	InproxyProxyPersonalReturnHomePeriodSeconds             *int                                             `json:",omitempty"`
 	InproxyProxyIncompatibleNetworkTypes                    []string                                         `json:",omitempty"`
 	InproxyClientIncompatibleNetworkTypes                   []string                                         `json:",omitempty"`
@@ -3674,12 +3674,12 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyClientBrokerClientIdleTimeout] = fmt.Sprintf("%ds", *config.InproxyClientBrokerClientIdleTimeoutSeconds)
 	}
 
-	if config.InproxyClientShareBrokerClientTransport != nil {
-		applyParameters[parameters.InproxyClientShareBrokerClientTransport] = *config.InproxyClientShareBrokerClientTransport
+	if config.InproxyClientShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyClientShareBrokerClientTransportProbability] = *config.InproxyClientShareBrokerClientTransportProbability
 	}
 
-	if config.InproxyProxyShareBrokerClientTransport != nil {
-		applyParameters[parameters.InproxyProxyShareBrokerClientTransport] = *config.InproxyProxyShareBrokerClientTransport
+	if config.InproxyProxyShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyProxyShareBrokerClientTransportProbability] = *config.InproxyProxyShareBrokerClientTransportProbability
 	}
 
 	if config.InproxyProxyPersonalReturnHomePeriodSeconds != nil {

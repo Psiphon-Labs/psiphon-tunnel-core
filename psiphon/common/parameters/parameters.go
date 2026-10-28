@@ -465,8 +465,8 @@ const (
 	InproxyClientMaxBrokerClients                      = "InproxyClientMaxBrokerClients"
 	InproxyProxyMaxBrokerClients                       = "InproxyProxyMaxBrokerClients"
 	InproxyClientBrokerClientIdleTimeout               = "InproxyClientBrokerClientIdleTimeout"
-	InproxyClientShareBrokerClientTransport            = "InproxyClientShareBrokerClientTransport"
-	InproxyProxyShareBrokerClientTransport             = "InproxyProxyShareBrokerClientTransport"
+	InproxyClientShareBrokerClientTransportProbability = "InproxyClientShareBrokerClientTransportProbability"
+	InproxyProxyShareBrokerClientTransportProbability  = "InproxyProxyShareBrokerClientTransportProbability"
 	InproxyProxyPersonalReturnHomePeriod               = "InproxyProxyPersonalReturnHomePeriod"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyLimitDTLSFingerprintsProbability            = "InproxyLimitDTLSFingerprintsProbability"
@@ -1155,8 +1155,8 @@ var defaultParameters = map[string]struct {
 	InproxyClientMaxBrokerClients:                      {value: 2, minimum: 1},
 	InproxyProxyMaxBrokerClients:                       {value: 1, minimum: 1},
 	InproxyClientBrokerClientIdleTimeout:               {value: time.Duration(0), minimum: time.Duration(0)},
-	InproxyClientShareBrokerClientTransport:            {value: false},
-	InproxyProxyShareBrokerClientTransport:             {value: false},
+	InproxyClientShareBrokerClientTransportProbability: {value: 0.0, minimum: 0.0},
+	InproxyProxyShareBrokerClientTransportProbability:  {value: 0.0, minimum: 0.0},
 	InproxyProxyPersonalReturnHomePeriod:               {value: 10 * time.Minute, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},

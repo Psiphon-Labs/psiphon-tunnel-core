@@ -4367,6 +4367,15 @@ func newBrokerResponseTestClient(t *testing.T, payload []byte, proxy ...bool) (*
 	return newBrokerResponseTestClientWithParameters(t, payload, nil, proxy...)
 }
 
+// boolProbability maps a test switch to the probability that selects it
+// deterministically: 1.0 for on, 0.0 for off.
+func boolProbability(on bool) float64 {
+	if on {
+		return 1.0
+	}
+	return 0.0
+}
+
 // newBrokerResponseTestClientWithParameters is newBrokerResponseTestClient
 // with params published before the first acquisition, so that parameters
 // read at broker client construction, such as transport-time sharing, are
@@ -4809,7 +4818,7 @@ func TestInproxyBrokerFirstOfferOrdering(t *testing.T) {
 }
 
 // TestInproxyBrokerShareOnTransport verifies transport-time sharing under
-// Inproxy{Client,Proxy}ShareBrokerClientTransport: once a fresh broker
+// Inproxy{Client,Proxy}ShareBrokerClientTransportProbability: once a fresh broker
 // client's transport is established it becomes shared before any broker
 // response, so a second worker acquires it and, with waitToShareSession
 // disabled, sends its own offer with its own Noise handshake concurrently
@@ -4825,8 +4834,8 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 			t.Fatal(err)
 		}
 		m, a, releaseA := newBrokerResponseTestClientWithParameters(t, nil, map[string]interface{}{
-			parameters.InproxyClientMaxBrokerClients:           1,
-			parameters.InproxyClientShareBrokerClientTransport: true,
+			parameters.InproxyClientMaxBrokerClients:                      1,
+			parameters.InproxyClientShareBrokerClientTransportProbability: 1.0,
 		})
 		if !a.DisableWaitToShareSession() {
 			t.Fatal("test expects the client waitToShareSession default")
@@ -4949,8 +4958,8 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 	t.Run("failed-first-request-not-shared", func(t *testing.T) {
 		m := newGateTestManager(t)
 		if err := setGateTestParameters(m.config, "transport", map[string]interface{}{
-			parameters.InproxyClientMaxBrokerClients:           2,
-			parameters.InproxyClientShareBrokerClientTransport: true,
+			parameters.InproxyClientMaxBrokerClients:                      2,
+			parameters.InproxyClientShareBrokerClientTransportProbability: 1.0,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -4976,7 +4985,7 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 		// returns the cached error without invoking it.
 		m := newGateTestManager(t)
 		if err := setGateTestParameters(m.config, "transport", map[string]interface{}{
-			parameters.InproxyClientShareBrokerClientTransport: true,
+			parameters.InproxyClientShareBrokerClientTransportProbability: 1.0,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -5003,9 +5012,48 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 	})
 }
 
+// TestInproxyBrokerShareOnTransportProbability verifies that the
+// share-on-transport decision is a per-broker-client coin flip at
+// construction: at probability 0 no client wires the transport callback, at
+// 1 every client does, and at 0.5 a population of clients contains both
+// kinds, so a deployment can run a mix of transport-time and
+// response-time sharing.
+func TestInproxyBrokerShareOnTransportProbability(t *testing.T) {
+	for _, tc := range []struct {
+		probability float64
+		wantMin     int
+		wantMax     int
+	}{
+		{0.0, 0, 0},
+		{1.0, 40, 40},
+		{0.5, 1, 39},
+	} {
+		t.Run(fmt.Sprintf("p=%v", tc.probability), func(t *testing.T) {
+			m := newGateTestManager(t)
+			if err := setGateTestParameters(m.config, "share-probability", map[string]interface{}{
+				parameters.InproxyClientShareBrokerClientTransportProbability: tc.probability,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			wired := 0
+			for i := 0; i < 40; i++ {
+				var release func()
+				c := getGateTestClient(t, m, &release)
+				if c.roundTripper.transportEstablished != nil {
+					wired++
+				}
+				release()
+			}
+			if wired < tc.wantMin || wired > tc.wantMax {
+				t.Fatalf("probability %v wired the transport callback on %d of 40 clients", tc.probability, wired)
+			}
+		})
+	}
+}
+
 // TestInproxyBrokerShareOnTransportRealDial drives a fresh broker client's
 // own DialMeek against a local TLS server so the round tripper's CAS branch
-// runs. With Inproxy{Client,Proxy}ShareBrokerClientTransport on, the client
+// runs. With Inproxy{Client,Proxy}ShareBrokerClientTransportProbability on, the client
 // is shared as soon as the TLS transport is established, while the first
 // request is still held at the server; off, it is shared only after the
 // first decoded response. Both broker client managers are checked.
@@ -5074,13 +5122,13 @@ func TestInproxyBrokerShareOnTransportRealDial(t *testing.T) {
 			m := newProviderTestManager(t, 1, spec)
 			m.isProxy = tc.proxy
 			params := map[string]interface{}{
-				parameters.InproxyBrokerSpecs:                           parameters.InproxyBrokerSpecsValue{spec},
-				parameters.InproxyProxyBrokerSpecs:                      parameters.InproxyBrokerSpecsValue{spec},
-				parameters.InproxyClientMaxBrokerClients:                1,
-				parameters.InproxyProxyMaxBrokerClients:                 1,
-				parameters.InproxyReplayBrokerDialParametersProbability: 0.0,
-				parameters.InproxyClientShareBrokerClientTransport:      tc.on && !tc.proxy,
-				parameters.InproxyProxyShareBrokerClientTransport:       tc.on && tc.proxy,
+				parameters.InproxyBrokerSpecs:                                 parameters.InproxyBrokerSpecsValue{spec},
+				parameters.InproxyProxyBrokerSpecs:                            parameters.InproxyBrokerSpecsValue{spec},
+				parameters.InproxyClientMaxBrokerClients:                      1,
+				parameters.InproxyProxyMaxBrokerClients:                       1,
+				parameters.InproxyReplayBrokerDialParametersProbability:       0.0,
+				parameters.InproxyClientShareBrokerClientTransportProbability: boolProbability(tc.on && !tc.proxy),
+				parameters.InproxyProxyShareBrokerClientTransportProbability:  boolProbability(tc.on && tc.proxy),
 			}
 			if err := setGateTestParameters(m.config, "", params); err != nil {
 				t.Fatal(err)
@@ -6378,6 +6426,42 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		m.mutex.Unlock()
 		if !stable {
 			t.Fatal("a return fired against the shared client at the first broker")
+		}
+	})
+
+	t.Run("single-broker-never-away", func(t *testing.T) {
+		// With one broker in the order every exhaustion advance both
+		// leaves and arrives at the first broker; the proxy is never
+		// away, so no return can close a working client there.
+		spec := newProviderTestBroker(t, "A")
+		m := newProxyRaceTestManager(t, 1, spec)
+		id, err := inproxy.MakeID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.config.InproxyProxyPersonalCompartmentID = id.String()
+		if err := setGateTestParameters(m.config, "single", map[string]interface{}{
+			parameters.InproxyBrokerSpecs:                   parameters.InproxyBrokerSpecsValue{spec},
+			parameters.InproxyProxyMaxBrokerClients:         1,
+			parameters.InproxyProxyPersonalReturnHomePeriod: "1h",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var release func()
+		first := getGateTestClient(t, m, &release)
+		first.BrokerClientRoundTripperFailed(first.roundTripper)
+		release()
+		second := getGateTestClient(t, m)
+		second.brokerResponseSucceededForTest(second.roundTripper)
+		m.mutex.Lock()
+		away := !m.selector.awayFromHomeSince.IsZero()
+		m.selector.awayFromHomeSince = time.Time{}
+		m.mutex.Unlock()
+		if away || second.brokerSelection.index != 1 {
+			t.Fatalf("single-broker exhaustion marked the proxy away: index %d", second.brokerSelection.index)
+		}
+		if getGateTestClient(t, m) != second || second.roundTripper.runCtx.Err() != nil {
+			t.Fatal("a return closed the working client at the only broker")
 		}
 	})
 
