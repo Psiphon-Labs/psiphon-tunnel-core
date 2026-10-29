@@ -5544,6 +5544,59 @@ func TestInproxyBrokerDiverseReplay(t *testing.T) {
 	}
 }
 
+// TestInproxyBrokerNoMatchFailoverChangesBroker verifies that a common
+// pairing client's NoMatch failover does not offer again at the broker that
+// reported no supply. With two providers and the later-created candidate
+// winning sharing, the other provider's cursor sits at the broker that just
+// returned NoMatch; the order-first selection must pass over it to that
+// provider's next broker. With a single broker the failover has nowhere
+// else to go and selects it again, and a selection after the failover
+// selection no longer skips it.
+func TestInproxyBrokerNoMatchFailoverChangesBroker(t *testing.T) {
+	for _, brokers := range []int{4, 1} {
+		t.Run(fmt.Sprintf("brokers=%d", brokers), func(t *testing.T) {
+			var specs []*parameters.InproxyBrokerSpec
+			for i := 0; i < brokers; i++ {
+				specs = append(specs, newProviderTestBroker(t, "A", "B"))
+			}
+			for trial := 0; trial < 10; trial++ {
+				m := newProviderTestManager(t, 2, specs...)
+				if err := setGateTestParameters(m.config, "", map[string]interface{}{
+					parameters.InproxyBrokerSpecs:                           parameters.InproxyBrokerSpecsValue(specs),
+					parameters.InproxyClientMaxBrokerClients:                2,
+					parameters.InproxyReplayBrokerDialParametersProbability: 0.0,
+					parameters.InproxyClientNoMatchFailoverProbability:      1.0,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				var releaseA, releaseB func()
+				a := getGateTestClient(t, m, &releaseA)
+				b := getGateTestClient(t, m, &releaseB)
+				m.mutex.Lock()
+				m.closeClientLocked(a, "lost the race")
+				m.mutex.Unlock()
+				releaseA()
+				b.brokerResponseSucceededForTest(b.roundTripper)
+				b.BrokerClientResponseReceived(b.roundTripper, true)
+				releaseB()
+				next := getGateTestClient(t, m)
+				sameBroker := next.brokerDialParams.brokerSpec == b.brokerDialParams.brokerSpec
+				if sameBroker != (brokers == 1) {
+					t.Fatalf("trial %d: failover selected the NoMatch broker again: %v (providers %s then %s)",
+						trial, sameBroker, b.frontingProviderID, next.frontingProviderID)
+				}
+				m.mutex.Lock()
+				cleared := m.selector.noMatchBroker == nil && !m.selector.preferBrokerOrder
+				m.mutex.Unlock()
+				if !cleared {
+					t.Fatal("failover selection did not clear the NoMatch broker")
+				}
+				m.closeClientBrokerClients()
+			}
+		})
+	}
+}
+
 // TestInproxyBrokerReplayCursorAndNoMatch verifies that replay may jump ahead
 // to a later broker in the common order and advances the provider cursor
 // past it, and that after NoMatch failover the next selection follows broker

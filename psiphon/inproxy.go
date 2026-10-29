@@ -529,7 +529,7 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 			NoticeInfo(
 				"inproxy: broker client %s no match: failover",
 				instance.brokerClientID)
-			b.selector.noMatch()
+			b.selector.noMatch(instance.brokerDialParams.brokerSpec)
 			b.closeClientLocked(instance, "no match failover")
 			return
 		}
@@ -806,6 +806,12 @@ type inproxyBrokerSelector struct {
 	// Cleared after the next selection.
 	preferBrokerOrder bool
 
+	// The broker whose NoMatch response caused the pending common pairing
+	// failover, so that the next selection does not offer at it again
+	// through another fronting provider. Supply is per broker, not per
+	// provider. Set with preferBrokerOrder and cleared with it.
+	noMatchBroker *parameters.InproxyBrokerSpec
+
 	// Interval after which a personal pairing proxy away from the first
 	// rendezvous broker returns to it; see returnHome. Zero disables
 	// returns.
@@ -857,22 +863,26 @@ func (s *inproxyBrokerSelector) reset() {
 	s.providers = nil
 	s.nextProvider, s.nextBroker = 0, 0
 	s.nextBrokerByProvider, s.replayedByProvider = nil, nil
-	s.preferBrokerOrder = false
+	s.preferBrokerOrder, s.noMatchBroker = false, nil
 	s.currentBrokerSelection = &inproxyBrokerSelectionState{}
-	s.awayFromHomeSince = time.Time{}
+	// returnHomePeriod is re-read by initialize with the broker list.
+	s.returnHomePeriod, s.awayFromHomeSince = 0, time.Time{}
 }
 
 // sharedLost refreshes the search after the shared client fails or idle
 // expires: provider order and replay allowances are rebuilt so the lost
 // client's provider may be replayed again, while broker cursors and the
 // session seed are kept. Personal pairing clients and proxies keep their
-// current broker and selection state: the lost client was proven at that
-// broker, surviving candidates there can still become shared, and a
-// personal client that left would have to re-walk every broker between the
-// first in rendezvous order and the one where its proxy is.
+// current broker and selection state pointer, with its tried providers
+// cleared so the next selection rebuilds them from the clients still
+// tracked: the lost client was proven at that broker, surviving candidates
+// there can still become shared, and a personal client that left would have
+// to re-walk every broker between the first in rendezvous order and the one
+// where its proxy is.
 func (s *inproxyBrokerSelector) sharedLost() {
 	s.providers, s.replayedByProvider = nil, nil
-	s.nextProvider, s.preferBrokerOrder = 0, false
+	s.nextProvider = 0
+	s.preferBrokerOrder, s.noMatchBroker = false, nil
 	if s.exhaustBrokerProviders {
 		s.currentBrokerSelection.tried = nil
 	}
@@ -890,17 +900,19 @@ func (s *inproxyBrokerSelector) advanceBroker(index int, reason string) {
 	s.nextProvider = 0
 }
 
-// noMatch applies client NoMatch failover at the current selection. Personal
-// clients advance to the next rendezvous broker; common pairing clients
-// keep their cursors but make the next selection order-first, so replay
-// cannot jump ahead of the next route. Replay allowances already consumed
-// in this search are preserved. The caller must verify that the responding
-// client belongs to the current selection.
-func (s *inproxyBrokerSelector) noMatch() {
+// noMatch applies client NoMatch failover after broker returned no match.
+// Personal clients advance to the next rendezvous broker; common pairing
+// clients keep their cursors but make the next selection order-first, so
+// replay cannot jump ahead of the next route, and skip broker, which has
+// just reported no supply, when the selected provider has another broker.
+// Replay allowances already consumed in this search are preserved. The
+// caller must verify that the responding client belongs to the current
+// selection.
+func (s *inproxyBrokerSelector) noMatch(broker *parameters.InproxyBrokerSpec) {
 	if s.exhaustBrokerProviders {
 		s.advanceBroker(s.currentBrokerSelection.index+1, "no match failover")
 	}
-	s.preferBrokerOrder = true
+	s.preferBrokerOrder, s.noMatchBroker = true, broker
 }
 
 // matchesCurrentBrokerSelection reports whether the instance holds the
@@ -1130,7 +1142,7 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 			break
 		}
 	}
-	s.preferBrokerOrder = false
+	s.preferBrokerOrder, s.noMatchBroker = false, nil
 	return &inproxyBrokerClientSelection{
 		brokerSelection:        s.currentBrokerSelection,
 		brokerSpec:             spec,
@@ -1193,12 +1205,26 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 				provider, minCount = id, counts[id]
 			}
 		}
+		// Take the provider's next broker in order, passing over the
+		// broker that just returned NoMatch unless it is the only one
+		// that supports the provider.
+		fallback := -1
 		for i := range specs {
 			k := (cursor(provider) + i) % len(specs)
-			if inproxyBrokerSupportsProvider(specs[k], provider) {
-				index = k
-				break
+			if !inproxyBrokerSupportsProvider(specs[k], provider) {
+				continue
 			}
+			if specs[k] == s.noMatchBroker {
+				if fallback < 0 {
+					fallback = k
+				}
+				continue
+			}
+			index = k
+			break
+		}
+		if index < 0 {
+			index = fallback
 		}
 		if index < 0 {
 			return nil, "", nil, errors.TraceNew("no broker for selected fronting provider")
