@@ -40,24 +40,56 @@ import (
 )
 
 // gatewayForInterface returns the gateway IPv4 address from the Windows IPv4
-// forwarding table, picking the default route (0.0.0.0/0) with the lowest
-// route metric. If ifaceName is non-empty, only default routes on that
-// interface are considered.
+// forwarding table: the next hop of the lowest-metric default route
+// (0.0.0.0/0) on one interface: the named one when ifaceName is non-empty,
+// otherwise the one the stack routes Internet-bound traffic through.
+//
+// The interface is selected before the default routes are compared because
+// the forwarding table alone does not say which of several default routes
+// is in use: the stack ranks them by route metric plus interface metric and
+// resolves ties itself. A gateway on any other interface is not on the path
+// return traffic takes, so a mapping obtained from it would carry nothing.
 func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
-	rows, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
-	if err != nil {
-		return netip.Addr{}, false
-	}
-
-	var wantIndex uint32 // 0 means "any"
+	var wantIndex uint32
 	if ifaceName != "" {
 		iface, err := net.InterfaceByName(ifaceName)
 		if err != nil {
 			return netip.Addr{}, false
 		}
 		wantIndex = uint32(iface.Index)
+	} else {
+		var ok bool
+		wantIndex, ok = internetInterfaceIndex()
+		if !ok {
+			return netip.Addr{}, false
+		}
 	}
 
+	rows, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return defaultRouteGateway(rows, wantIndex)
+}
+
+// internetInterfaceIndex returns the index of the interface the stack would
+// send Internet-bound IPv4 traffic through. The destination is a TEST-NET-1
+// address, which no local route is more specific than, so the lookup
+// resolves to the default route; nothing is sent to it.
+func internetInterfaceIndex() (uint32, bool) {
+	var index uint32
+	err := windows.GetBestInterfaceEx(&windows.SockaddrInet4{Addr: [4]byte{192, 0, 2, 1}}, &index)
+	if err != nil || index == 0 {
+		return 0, false
+	}
+	return index, true
+}
+
+// defaultRouteGateway returns the next hop of the lowest-metric IPv4 default
+// route on the interface with index ifIndex, if it is a private address.
+// Routes on one interface share its interface metric, so the route metric
+// alone orders them.
+func defaultRouteGateway(rows []winipcfg.MibIPforwardRow2, ifIndex uint32) (netip.Addr, bool) {
 	v4unspec := netip.IPv4Unspecified()
 	var best netip.Addr
 	var bestMetric uint32
@@ -70,7 +102,7 @@ func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
 		if r.DestinationPrefix.Prefix().Addr().Unmap() != v4unspec {
 			continue
 		}
-		if wantIndex != 0 && r.InterfaceIndex != wantIndex {
+		if r.InterfaceIndex != ifIndex {
 			continue
 		}
 		gw := r.NextHop.Addr().Unmap()
