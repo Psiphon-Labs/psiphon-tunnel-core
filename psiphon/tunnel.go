@@ -219,11 +219,18 @@ func (tunnel *Tunnel) Activate(
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
-	// activate.
+	// activate. As in dialTunnel, a failure caused by the broker client
+	// being closed under this tunnel is not attributed to the server entry.
+	// Here that can only surface through the broker/server relay, whose
+	// error is consumed by the relay handler below rather than returned, so
+	// the handler records it in relayClosedErr; the handler goroutine is
+	// joined before this function returns.
 	activationSucceeded := false
 	baseCtx := ctx
+	var relayClosedErr error
 	defer func() {
-		if !activationSucceeded && baseCtx.Err() != context.Canceled {
+		if !activationSucceeded && relayClosedErr == nil &&
+			isServerEntryFailure(baseCtx, retErr) {
 			tunnel.dialParams.Failed(tunnel.config, retErr)
 			if tunnel.extraFailureAction != nil {
 				tunnel.extraFailureAction()
@@ -310,6 +317,10 @@ func (tunnel *Tunnel) Activate(
 							}
 							err := tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
 							if err != nil {
+								var closedErr *inproxyBrokerClientClosedError
+								if std_errors.As(err, &closedErr) {
+									relayClosedErr = err
+								}
 								NoticeWarning(
 									"relay inproxy broker packets failed: %v",
 									errors.Trace(err))
