@@ -28,11 +28,11 @@ import (
 // TestProtobufInproxyBrokerSelectionFields verifies that the in-proxy
 // broker client selection metrics (which concurrent broker client a tunnel
 // used, whether it replayed, and the acquisition wait) reach their protobuf
-// messages. Population is by reflection
-// over the generated struct's field names, so a field missing from the
-// proto definition is dropped silently rather than failing; the JSON log
-// path does not catch this, and the server integration tests check only
-// the JSON fields.
+// messages. Population is by reflection over the generated struct's field
+// names, so a field missing from the proto definition is dropped silently
+// rather than failing. The server integration tests catch the same
+// omission only when built with PSIPHON_RUN_PROTOBUF_LOGGING_TEST and only
+// for the fields their expected-field lists name.
 func TestProtobufInproxyBrokerSelectionFields(t *testing.T) {
 
 	// Handshake fields, logged with server_tunnel and failed_tunnel through
@@ -42,12 +42,10 @@ func TestProtobufInproxyBrokerSelectionFields(t *testing.T) {
 	dialParams := protobufPopulateInproxyDialParams(LogFields{
 		"inproxy_broker_is_replay":        true,
 		"inproxy_broker_is_reuse":         true,
-		"inproxy_broker_is_shared":        true,
 		"inproxy_broker_candidate_number": 3,
 		"inproxy_broker_acquire_wait_ms":  1250,
 	})
-	if !dialParams.GetInproxyBrokerIsShared() ||
-		dialParams.GetInproxyBrokerCandidateNumber() != 3 ||
+	if dialParams.GetInproxyBrokerCandidateNumber() != 3 ||
 		dialParams.GetInproxyBrokerAcquireWaitMs() != 1250 {
 		t.Fatalf("InproxyDialParams dropped broker selection fields: %+v", dialParams)
 	}

@@ -2978,10 +2978,11 @@ func TestInproxyMetricsBeforeBrokerAcquisition(t *testing.T) {
 // TestInproxyBrokerRacingMetrics verifies the handshake and broker-request
 // metrics that identify which broker client a tunnel used and what its
 // acquisition cost: candidate numbers are creation ordinals within the
-// manager's counting window and continue past M, a new client reports not
-// shared with no wait, a reused client reports shared with the winner's
-// ordinal, an acquisition parked at the limit reports its wait, every
-// candidate's broker requests carry its replay flag and ordinal, and that
+// broker client manager's counting window and continue past M, a new
+// client reports no reuse and no wait, a reused client reports reuse with
+// the winner's ordinal, an acquisition parked at the limit reports its
+// wait, every candidate's broker requests carry its replay flag and
+// ordinal, and that
 // takeBrokerClientCounts reports the window's creations and peak, restarts
 // the ordinal, and seeds the next window's peak with the clients still
 // tracked.
@@ -3039,7 +3040,7 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 		t.Fatal("parked acquisition did not wake")
 	}
 	fields := metrics(waited.dialParams)
-	if waited.instance != b || fields["inproxy_broker_is_reuse"] != "1" || fields["inproxy_broker_is_shared"] != "1" ||
+	if waited.instance != b || fields["inproxy_broker_is_reuse"] != "1" ||
 		fields["inproxy_broker_candidate_number"] != "2" {
 		t.Fatalf("reused client metrics: %v", fields)
 	}
@@ -3047,7 +3048,7 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 		t.Fatalf("parked acquisition wait not reported: %v", fields["inproxy_broker_acquire_wait_ms"])
 	}
 	// A fresh candidate after the first two close continues the ordinal
-	// past M and reports neither reuse nor sharing.
+	// past M and reports no reuse.
 	releaseA()
 	releaseB()
 	waited.release()
@@ -3055,7 +3056,7 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	c, cDialParams, releaseC := acquire(context.Background())
 	fields = metrics(cDialParams)
 	if c.candidateNumber != 3 || fields["inproxy_broker_candidate_number"] != "3" ||
-		fields["inproxy_broker_is_reuse"] != "0" || fields["inproxy_broker_is_shared"] != "0" {
+		fields["inproxy_broker_is_reuse"] != "0" {
 		t.Fatalf("fresh candidate metrics: %v", fields)
 	}
 	releaseC()
