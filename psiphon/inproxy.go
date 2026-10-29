@@ -1459,6 +1459,12 @@ func newInproxyBrokerClientInstance(
 	// so that round trip failure notices can report it.
 	brokerDialParams.brokerClientID = prng.HexString(4)
 
+	// The broker ID is the broker's session public key in Curve25519 form.
+	brokerID, err := brokerPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	roundTripper := NewInproxyBrokerRoundTripper(p, brokerDialParams)
 
 	// With transport sharing, the broker client becomes shared as soon as its
@@ -1562,6 +1568,7 @@ func newInproxyBrokerClientInstance(
 
 	b.brokerClient, err = inproxy.NewBrokerClient(b)
 	if err != nil {
+		_ = roundTripper.Close()
 		return nil, errors.Trace(err)
 	}
 
@@ -1571,11 +1578,6 @@ func newInproxyBrokerClientInstance(
 		}
 	}
 
-	// The broker ID is the broker's session public key in Curve25519 form.
-	brokerID, err := brokerPublicKey.ToCurve25519()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
 	// Include the client ID, fronting provider and replay state, as
 	// concurrent broker clients may select the same broker via different
 	// providers; the client ID also appears in close notices and in
