@@ -1,4 +1,4 @@
-//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB
+//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB && !PSIPHON_USE_SQLITE_DB
 
 /*
  * Copyright (c) 2026, Psiphon Inc.
