@@ -25,13 +25,15 @@ import (
 	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
 )
 
-// TestProtobufInproxyBrokerRacingFields verifies that the in-proxy broker
-// racing metrics reach their protobuf messages. Population is by reflection
+// TestProtobufInproxyBrokerSelectionFields verifies that the in-proxy
+// broker client selection metrics (which concurrent broker client a tunnel
+// used, whether it replayed, and the acquisition wait) reach their protobuf
+// messages. Population is by reflection
 // over the generated struct's field names, so a field missing from the
 // proto definition is dropped silently rather than failing; the JSON log
 // path does not catch this, and the server integration tests check only
 // the JSON fields.
-func TestProtobufInproxyBrokerRacingFields(t *testing.T) {
+func TestProtobufInproxyBrokerSelectionFields(t *testing.T) {
 
 	// Handshake fields, logged with server_tunnel and failed_tunnel through
 	// InproxyDialParams. Values are as emitted by getRequestLogFields:
@@ -47,7 +49,7 @@ func TestProtobufInproxyBrokerRacingFields(t *testing.T) {
 	if !dialParams.GetInproxyBrokerIsShared() ||
 		dialParams.GetInproxyBrokerCandidateNumber() != 3 ||
 		dialParams.GetInproxyBrokerAcquireWaitMs() != 1250 {
-		t.Fatalf("InproxyDialParams dropped racing fields: %+v", dialParams)
+		t.Fatalf("InproxyDialParams dropped broker selection fields: %+v", dialParams)
 	}
 	if !dialParams.GetInproxyBrokerIsReplay() || !dialParams.GetInproxyBrokerIsReuse() {
 		t.Fatalf("InproxyDialParams dropped pre-existing broker fields: %+v", dialParams)
@@ -62,6 +64,6 @@ func TestProtobufInproxyBrokerRacingFields(t *testing.T) {
 		"inproxy_broker_candidate_number": 2,
 	}, broker, "inproxy_broker")
 	if !broker.GetInproxyBrokerIsReplay() || broker.GetInproxyBrokerCandidateNumber() != 2 {
-		t.Fatalf("InproxyBroker dropped racing fields: %+v", broker)
+		t.Fatalf("InproxyBroker dropped broker selection fields: %+v", broker)
 	}
 }
