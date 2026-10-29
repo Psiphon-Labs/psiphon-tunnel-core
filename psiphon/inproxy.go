@@ -537,8 +537,9 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 // client is shared and instance belongs to the current broker selection,
 // so other callers reuse the transport before the first broker response.
 // Failed clients and clients from earlier selections are not shared, as in
-// clientResponseReceived. A later decoded response on a client shared here
-// is a no-op in clientResponseReceived.
+// clientResponseReceived. A later ordinary decoded response on a client
+// shared here finds it already shared and changes nothing; a retryable
+// NoMatch still applies the failover policy and may close it.
 func (b *InproxyBrokerClientManager) clientTransportEstablished(
 	instance *InproxyBrokerClientInstance) {
 	b.mutex.Lock()
@@ -1813,7 +1814,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 	// InproxyBrokerDialParameters.
 
 	if b.replayEnabled && now.Sub(b.lastStoreReplay) > b.replayUpdateFrequency {
-		b.brokerDialParams.LastUsedTimestamp = time.Now()
+		b.brokerDialParams.LastUsedTimestamp = now
 
 		err := storeInproxyBrokerReplayParameters(b.networkID, b.brokerDialParams)
 		if err != nil {
@@ -2347,12 +2348,12 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	}
 	logFields["inproxy_broker_is_reuse"] = isReuse
 
-	// Racing diagnostics. Handshake metrics reach the server only for
-	// the winning tunnel; these fields identify which broker client it
-	// won on and what the acquisition cost. candidate_number is an
-	// ordinal, not bounded by Inproxy{Client,Proxy}MaxBrokerClients,
-	// since broker clients close and new ones are created within an
-	// establishment.
+	// Broker client selection diagnostics. Handshake metrics reach the
+	// server only for the winning tunnel; these fields identify which
+	// of the concurrent broker clients it won on and what acquiring it
+	// cost. candidate_number is an ordinal, not bounded by
+	// Inproxy{Client,Proxy}MaxBrokerClients, since broker clients close
+	// and new ones are created within an establishment.
 	isShared := "0"
 	if brokerDialParams.isShared {
 		isShared = "1"
