@@ -1257,12 +1257,21 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 
 	visit := s.currentBrokerSelection
 	if visit.spec == nil {
-		// Common proxies may start at a broker with replay.
-		// Personal pairing must retain its rendezvous order.
-		if !s.personal && replayEnabled && !s.preferBrokerOrder {
-			for i := range s.brokers {
-				index := (visit.index + i) % len(s.brokers)
-				if params := load(s.brokers[index]); params != nil && canReplay(params.FrontedHTTPDialParameters.FrontingProviderID) {
+		// Common proxies may start at a broker with replay. Personal
+		// pairing must retain its rendezvous order. A visit that follows
+		// an exhaustion advance (index > 0, since common proxies start at
+		// 0 and never return there) does not scan back to the broker it
+		// just left, whose providers all failed; a replay record there
+		// would otherwise pull the proxy straight back when the coin flip
+		// or another live client had kept its allowance unconsumed.
+		if !s.personal && replayEnabled {
+			scan := len(s.brokers)
+			if visit.index > 0 && scan > 1 {
+				scan--
+			}
+			for i := 0; i < scan; i++ {
+				brokerIndex := (visit.index + i) % len(s.brokers)
+				if params := load(s.brokers[brokerIndex]); params != nil && canReplay(params.FrontedHTTPDialParameters.FrontingProviderID) {
 					visit.index += i
 					break
 				}
