@@ -812,8 +812,8 @@ type inproxyBrokerSelector struct {
 	preferBrokerOrder bool
 
 	// The broker whose NoMatch response caused the pending common pairing
-	// failover, so that the next selection does not offer at it again
-	// through another fronting provider. Supply is per broker, not per
+	// failover. The next selection offers elsewhere when the selected
+	// provider has another broker, since supply is per broker, not per
 	// provider. Set with preferBrokerOrder and cleared with it.
 	noMatchBroker *parameters.InproxyBrokerSpec
 
