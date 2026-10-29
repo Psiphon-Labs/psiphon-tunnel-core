@@ -5709,6 +5709,10 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				c.lastSuccess = time.Now().Add(-2 * time.Hour)
 				c.mutex.Unlock()
 			}
+			// Record a failure as RoundTrip would before the callback, so
+			// the in-window branch's consumption of the record is tested
+			// rather than a nil swap.
+			c.roundTripper.recordFailure("request after 1s", stderrors.New("first"))
 			c.BrokerClientRoundTripperFailed(c.roundTripper)
 			retained := mode == "within"
 			if (m.sharedClient == c) != retained || m.clients[c].failed == retained ||

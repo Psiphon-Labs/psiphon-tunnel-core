@@ -1928,6 +1928,13 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		return
 	}
 
+	// An already failed broker client is draining; later failures on it,
+	// including from requests that outlive a retry window, change nothing
+	// and are not logged.
+	if b.failed {
+		return
+	}
+
 	// For common pairing proxies, skip both the replay deletion and demotion
 	// of a shared client for a short duration after a recent round trip
 	// success. In this case, subsequent broker requests will use the existing
@@ -1987,9 +1994,6 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	// Concurrent requests on a failed shared transport each report the
 	// failure. Decide replay retention, evict the TLS session and notify the
 	// broker client manager once per failure event.
-	if b.failed {
-		return
-	}
 	b.failed = true
 
 	// Delete stored replay dial parameters unless selected for retention.
