@@ -2937,6 +2937,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 						t.Errorf("unexpected inproxy_broker.fronting_provider_id")
 					}
 				}
+
+				// Client and proxy broker requests report the
+				// broker client that sent them: whether it
+				// replayed dial parameters, and its creation
+				// ordinal in the broker client manager. The
+				// server's proxy quality report is not sent by
+				// a managed broker client.
+				if logChannel == inproxyProxyAnnounceLog ||
+					logChannel == inproxyClientOfferLog {
+					if _, ok := logFields["inproxy_broker_is_replay"].(bool); !ok {
+						t.Errorf("missing inproxy_broker.inproxy_broker_is_replay")
+					}
+					if logFields["inproxy_broker_candidate_number"] == nil {
+						t.Errorf("missing inproxy_broker.inproxy_broker_candidate_number")
+					}
+				}
 			default:
 				t.Fatalf("missing in-proxy broker log")
 			}

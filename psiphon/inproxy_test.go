@@ -1024,6 +1024,29 @@ func TestInproxyBrokerNoMatchFailover(t *testing.T) {
 	}
 }
 
+// TestInproxyBrokerNetworkIDMismatch verifies that an acquisition whose
+// caller reports a network ID other than the current one fails immediately
+// with "network changed", without waiting and without creating a client,
+// and that the same manager still serves the current network ID.
+func TestInproxyBrokerNetworkIDMismatch(t *testing.T) {
+	m := newGateTestManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, _, release, err := m.GetBrokerClient(ctx, "STALE")
+	if err == nil || !strings.Contains(err.Error(), "network changed") || release != nil {
+		t.Fatalf("stale network ID: err=%v release=%v", err, release != nil)
+	}
+	if time.Since(start) > time.Second || len(m.clients) != 0 {
+		t.Fatal("stale network ID acquisition waited or created a client")
+	}
+	if _, _, release, err := m.GetBrokerClient(ctx, "TEST"); err != nil {
+		t.Fatal(err)
+	} else {
+		release()
+	}
+}
+
 // TestInproxyBrokerClientNoSpecs verifies that the empty-manager tactics
 // callback invalidates cached broker specs, that acquisition then fails
 // immediately with "no broker specs" without waiting for the caller's
@@ -2545,9 +2568,10 @@ func TestInproxyBrokerCallerDeadline(t *testing.T) {
 // rt.runCtx synchronously but the merged context is cancelled from it
 // asynchronously, so the transport error can race ahead of ctx.Err(). The
 // request must return a plain error, BrokerClientRoundTripperFailed must not
-// run, and the stored replay record must survive. Each of the three
-// classification points after the dial is exercised: request error, fast
-// non-200 response, and response body read error.
+// run, no failure must be recorded on the round tripper, and the stored
+// replay record must survive. Each of the three classification points after
+// the dial is exercised: request error, fast non-200 response, and response
+// body read error.
 func TestInproxyBrokerCloseRaceNotTransportFailure(t *testing.T) {
 	for _, phase := range []string{"request", "status", "body"} {
 		t.Run(phase, func(t *testing.T) {
@@ -3744,6 +3768,11 @@ func TestInproxyBrokerConnectionOwnedRelay(t *testing.T) {
 //     Check that the server report's connection ID matches B's connection.
 //  6. Clean up B's broker client while A remains shared.
 //
+// A third case closes B's broker client under the relay, as a tactics
+// reset or sibling NoMatch failover would during activation, and checks
+// that the relay error reaching the caller is inproxyBrokerClientClosedError,
+// which Tunnel.Activate uses to withhold server entry attribution.
+//
 // The early-release variant calls releaseInproxyBrokerClient before closing
 // the connection, as activation does, then checks that the WebRTC data path
 // still carries traffic. The other variant relies on Close to release the
@@ -3767,8 +3796,9 @@ func TestInproxyDialConnectionOwnedRelay(t *testing.T) {
 		inproxy.SetAllowBogonWebRTCConnections(oldBrokerBogons)
 		inproxy.SetAllowCommonASNMatching(oldMatching)
 	}()
-	for _, earlyRelease := range []bool{false, true} {
-		t.Run(fmt.Sprintf("early-release=%v", earlyRelease), func(t *testing.T) {
+	for _, mode := range []string{"close-after-relay", "early-release", "close-during-relay"} {
+		earlyRelease, closeDuringRelay := mode == "early-release", mode == "close-during-relay"
+		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			logger := NoticeCommonLogger(false)
@@ -4059,6 +4089,30 @@ func TestInproxyDialConnectionOwnedRelay(t *testing.T) {
 					t.Fatal(err)
 				}
 				if len(packet) > 0 {
+					if closeDuringRelay {
+						// The manager closes B under the relay, as a
+						// reset would. The relay fails with the closed
+						// marker rather than a transport failure, and
+						// B's replay record survives.
+						m.mutex.Lock()
+						m.closeClientLocked(b, "test reset")
+						m.mutex.Unlock()
+						_, err = conn.RelayPacket(ctx, packet)
+						var closed *inproxyBrokerClientClosedError
+						var failure *inproxy.RoundTripperFailedError
+						if !stderrors.As(err, &closed) || stderrors.As(err, &failure) ||
+							isServerEntryFailure(context.Background(), err) {
+							t.Fatalf("relay on closed broker client: %v", err)
+						}
+						if b.roundTripper.failure.Load() != nil {
+							t.Fatal("close under relay recorded a transport failure")
+						}
+						if err := conn.Close(); err != nil {
+							t.Fatal(err)
+						}
+						dialParams.releaseInproxyBrokerClient()
+						return
+					}
 					packet, err = conn.RelayPacket(ctx, packet)
 					if err != nil {
 						t.Fatal(err)
@@ -4506,6 +4560,79 @@ func newBrokerResponseTestClientWithParameters(t *testing.T, payload []byte, par
 	c.roundTripper.dial = 1
 	close(c.roundTripper.dialCompleted)
 	return m, c, release
+}
+
+// TestInproxyUntunneledDSLRequestLease verifies the lease contract the
+// untunneled DSL fetcher's round tripper relies on: a broker client
+// acquired for one relayed request and released on return leaves no lease
+// outstanding after a successful relay, after a failed relay, and after an
+// acquisition error, and successive requests reuse the shared client. The
+// sequence mirrors the closure in runUntunneledDSLFetcher.
+func TestInproxyUntunneledDSLRequestLease(t *testing.T) {
+	payload, err := inproxy.MarshalClientDSLResponse(&inproxy.ClientDSLResponse{ResponsePayload: []byte("dsl")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, c, release := newBrokerResponseTestClient(t, payload)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// Share the fixture client through a decoded response, then drop the
+	// fixture's lease so the request leases are the only ones.
+	if _, err := c.brokerClient.ClientDSL(ctx, &inproxy.ClientDSLRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	refs := func() int {
+		m.mutex.Lock()
+		defer m.mutex.Unlock()
+		if entry := m.clients[c]; entry != nil {
+			return entry.refs
+		}
+		return -1
+	}
+	if m.sharedClient != c || refs() != 0 {
+		t.Fatalf("fixture client not shared at zero leases: refs=%d", refs())
+	}
+	relay := func(networkID string) ([]byte, error) {
+		brokerClient, _, release, err := m.GetBrokerClient(ctx, networkID)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		if refs() != 1 {
+			t.Fatalf("lease not held during the request: refs=%d", refs())
+		}
+		response, err := brokerClient.ClientDSL(ctx, &inproxy.ClientDSLRequest{RequestPayload: []byte("request")})
+		if err != nil {
+			return nil, err
+		}
+		return response.ResponsePayload, nil
+	}
+	for i := 0; i < 2; i++ {
+		response, err := relay("TEST")
+		if err != nil || string(response) != "dsl" {
+			t.Fatalf("relay %d: %v %q", i, err, response)
+		}
+		if refs() != 0 || len(m.clients) != 1 {
+			t.Fatalf("relay %d left refs=%d clients=%d", i, refs(), len(m.clients))
+		}
+	}
+	// A relay that fails after acquisition still releases.
+	transport := c.roundTripper.conn.transport.(*inproxyRelayTestTransport)
+	transport.handle = func([]byte) ([]byte, error) { return []byte("malformed"), nil }
+	if _, err := relay("TEST"); err == nil {
+		t.Fatal("malformed relay response did not fail")
+	}
+	if refs() != 0 || len(m.clients) != 1 {
+		t.Fatalf("failed relay left refs=%d clients=%d", refs(), len(m.clients))
+	}
+	// An acquisition failure holds no lease.
+	if _, err := relay("STALE"); err == nil {
+		t.Fatal("stale network ID acquisition did not fail")
+	}
+	if refs() != 0 {
+		t.Fatalf("failed acquisition left refs=%d", refs())
+	}
 }
 
 // TestInproxyBrokerDecodedResponsePolicy verifies which decoded broker
@@ -5690,6 +5817,102 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestInproxyBrokerConcurrentInitialDial verifies the one-shot DialMeek
+// handoff while a dial is in progress: a second caller awaits the first
+// caller's dial rather than starting its own, its own deadline returns its
+// context error without classifying a failure or closing the dial, the
+// first caller's cancellation leaves a cached non-failure dial error, and a
+// later caller receives that cached error immediately. The client is never
+// marked failed.
+func TestInproxyBrokerConcurrentInitialDial(t *testing.T) {
+	// A listener that never accepts: the TCP connect completes from the
+	// backlog and the TLS handshake blocks until the dial context ends.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	privateKey, err := inproxy.GenerateSessionPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := privateKey.GetPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := inproxy.GenerateRootObfuscationSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &parameters.InproxyBrokerSpec{BrokerPublicKey: publicKey.String(),
+		BrokerRootObfuscationSecret: secret.String(), BrokerFrontingSpecs: parameters.FrontingSpecs{
+			{FrontingProviderID: "AA", Addresses: []string{regexp.QuoteMeta(listener.Addr().String())}, Host: "example.org", SkipVerify: true},
+		}}
+	m := newProviderTestManager(t, 1, spec)
+	if err := setGateTestParameters(m.config, "", map[string]interface{}{
+		parameters.InproxyBrokerSpecs:                           parameters.InproxyBrokerSpecsValue{spec},
+		parameters.InproxyClientMaxBrokerClients:                1,
+		parameters.InproxyReplayBrokerDialParametersProbability: 0.0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := getGateTestClient(t, m)
+	rt := a.roundTripper
+
+	ctxA, cancelA := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelA()
+	resultA := make(chan error, 1)
+	go func() {
+		_, err := rt.RoundTrip(ctxA, 0, 0, nil)
+		resultA <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for atomic.LoadInt32(&rt.dial) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("first caller did not start the dial")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctxB, cancelB := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelB()
+	_, errB := rt.RoundTrip(ctxB, 0, 0, nil)
+	var failure *inproxy.RoundTripperFailedError
+	if !stderrors.Is(errB, context.DeadlineExceeded) || stderrors.As(errB, &failure) {
+		t.Fatalf("awaiting caller's deadline: %v", errB)
+	}
+	select {
+	case <-rt.dialCompleted:
+		t.Fatal("awaiting caller's deadline ended the dial")
+	default:
+	}
+
+	cancelA()
+	errA := <-resultA
+	if errA == nil || stderrors.As(errA, &failure) {
+		t.Fatalf("cancelled initial dial classified as failure: %v", errA)
+	}
+	select {
+	case <-rt.dialCompleted:
+	default:
+		t.Fatal("cancelled dial did not complete")
+	}
+
+	ctxC, cancelC := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelC()
+	start := time.Now()
+	_, errC := rt.RoundTrip(ctxC, 0, 0, nil)
+	if errC == nil || stderrors.As(errC, &failure) || time.Since(start) > time.Second {
+		t.Fatalf("later caller did not get the cached dial error promptly: %v", errC)
+	}
+	m.mutex.Lock()
+	failed := m.clients[a] == nil || m.clients[a].failed
+	m.mutex.Unlock()
+	if failed {
+		t.Fatal("caller-aborted initial dial marked the client failed")
 	}
 }
 
