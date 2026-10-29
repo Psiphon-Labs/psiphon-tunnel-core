@@ -2413,31 +2413,42 @@ func TestInproxyBrokerAbortedInitialDialCleanup(t *testing.T) {
 }
 
 // TestInproxyBrokerCallerDeadline verifies that a caller deadline during the
-// initial dial, the request or the response body read is not classified as
-// a transport failure, while a per-request timeout with a live caller is a
-// failure that unshares the client and deletes its replay record. The
-// request and body phases drive a real broker API request through
-// inproxy.BrokerClient, so its RoundTripperFailedError classification, not
-// the test, decides whether BrokerClientRoundTripperFailed is invoked.
+// initial dial, the request or the response body read is classified as a
+// transport failure, like a per-request timeout with a live caller: it
+// unshares the client, marks it failed and deletes its replay record. A
+// caller's explicit cancellation in the same phases is not a failure and
+// leaves sharing and replay untouched. The request and body phases drive a
+// real broker API request through inproxy.BrokerClient, so its
+// RoundTripperFailedError classification, not the test, decides whether
+// BrokerClientRoundTripperFailed is invoked.
 func TestInproxyBrokerCallerDeadline(t *testing.T) {
-	t.Run("dial", func(t *testing.T) {
-		m := newGateTestManager(t)
-		c := getGateTestClient(t, m)
-		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-		defer cancel()
-		_, err := c.roundTripper.RoundTrip(ctx, 0, time.Second, nil)
-		var failure *inproxy.RoundTripperFailedError
-		if err == nil || stderrors.As(err, &failure) {
-			t.Fatalf("caller deadline during initial dial classified as transport failure: %v", err)
-		}
-	})
+	for _, cancelled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dial/cancelled=%v", cancelled), func(t *testing.T) {
+			m := newGateTestManager(t)
+			c := getGateTestClient(t, m)
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if cancelled {
+				ctx, cancel = context.WithCancel(context.Background())
+				cancel()
+			} else {
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			}
+			defer cancel()
+			_, err := c.roundTripper.RoundTrip(ctx, 0, time.Second, nil)
+			var failure *inproxy.RoundTripperFailedError
+			if err == nil || stderrors.As(err, &failure) == cancelled {
+				t.Fatalf("incorrect classification of caller-ended initial dial: %v", err)
+			}
+		})
+	}
 	payload, err := inproxy.MarshalClientRelayedPacketResponse(&inproxy.ClientRelayedPacketResponse{PacketToServer: []byte("reply")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, phase := range []string{"request", "body"} {
-		for _, callerDeadline := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/caller=%v", phase, callerDeadline), func(t *testing.T) {
+		for _, ending := range []string{"request-timeout", "caller-deadline", "caller-cancel"} {
+			t.Run(phase+"/"+ending, func(t *testing.T) {
 				m, c, release := newBrokerResponseTestClient(t, payload)
 				defer release()
 				c.replayRetainFailedProbability = 0
@@ -2459,22 +2470,28 @@ func TestInproxyBrokerCallerDeadline(t *testing.T) {
 					<-req.Context().Done()
 					return nil, req.Context().Err()
 				})
-				callerTimeout, requestTimeout := time.Second, 20*time.Millisecond
-				if callerDeadline {
-					callerTimeout, requestTimeout = requestTimeout, callerTimeout
-				}
-				c.relayedPacketRequestTimeout = requestTimeout
-				ctx, cancel := context.WithTimeout(context.Background(), callerTimeout)
+				c.relayedPacketRequestTimeout = time.Second
+				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
+				switch ending {
+				case "request-timeout":
+					c.relayedPacketRequestTimeout = 20 * time.Millisecond
+				case "caller-deadline":
+					ctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+					defer cancel()
+				case "caller-cancel":
+					time.AfterFunc(20*time.Millisecond, cancel)
+				}
 				_, err := c.brokerClient.ClientRelayedPacket(ctx, &inproxy.ClientRelayedPacketRequest{})
+				wantFailure := ending != "caller-cancel"
 				var failure *inproxy.RoundTripperFailedError
-				if err == nil || stderrors.As(err, &failure) == callerDeadline {
+				if err == nil || stderrors.As(err, &failure) != wantFailure {
 					t.Fatalf("incorrect failure classification: %v", err)
 				}
 				stored := loadBrokerReplayTestParameters(t, c.brokerDialParams.brokerSpec)
-				if (stored != nil) != callerDeadline || (m.sharedClient == c) != callerDeadline ||
-					m.clients[c].failed == callerDeadline {
-					t.Fatalf("incorrect sharing/replay after deadline: stored=%v shared=%v failed=%v",
+				if (stored == nil) != wantFailure || (m.sharedClient != c) != wantFailure ||
+					m.clients[c].failed != wantFailure {
+					t.Fatalf("incorrect sharing/replay: stored=%v shared=%v failed=%v",
 						stored != nil, m.sharedClient == c, m.clients[c].failed)
 				}
 			})
