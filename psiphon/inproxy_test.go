@@ -4082,6 +4082,48 @@ func TestInproxyProxyProviderRace(t *testing.T) {
 	}
 }
 
+// TestInproxyProxyReplayJumpSkipsExhaustedBroker verifies that a common
+// proxy's replay-first visit start does not return to the broker it just
+// exhausted. Both providers at the first broker are tried fresh and fail
+// while replay is disabled by probability, leaving that broker's replay
+// record and the provider's allowance intact; when replay is enabled
+// again the new visit must start at the next broker, not wrap back.
+func TestInproxyProxyReplayJumpSkipsExhaustedBroker(t *testing.T) {
+	specs := parameters.InproxyBrokerSpecsValue{
+		newProviderTestBroker(t, "A", "B"), newProviderTestBroker(t, "A", "B"), newProviderTestBroker(t, "A", "B")}
+	m := newProxyRaceTestManager(t, 1, specs...)
+	setReplay := func(probability float64) {
+		if err := setGateTestParameters(m.config, "jump", map[string]interface{}{
+			parameters.InproxyBrokerSpecs:                           specs,
+			parameters.InproxyProxyMaxBrokerClients:                 1,
+			parameters.InproxyReplayBrokerDialParametersProbability: probability,
+			parameters.InproxyReplayBrokerRetainFailedProbability:   1.0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setReplay(0.0)
+	var release func()
+	first := getGateTestClient(t, m, &release)
+	exhausted := first.brokerDialParams.brokerSpec
+	if err := storeInproxyBrokerReplayParameters("TEST", makeBrokerReplayTestParameters(t, m, exhausted, "A")); err != nil {
+		t.Fatal(err)
+	}
+	first.BrokerClientRoundTripperFailed(first.roundTripper)
+	release()
+	second := getGateTestClient(t, m, &release)
+	if second.brokerDialParams.brokerSpec != exhausted || second.frontingProviderID == first.frontingProviderID {
+		t.Fatal("second provider was not tried at the same broker")
+	}
+	second.BrokerClientRoundTripperFailed(second.roundTripper)
+	release()
+	setReplay(1.0)
+	next := getGateTestClient(t, m)
+	if next.brokerDialParams.brokerSpec == exhausted {
+		t.Fatalf("replay jump returned to the exhausted broker (index %d)", next.brokerSelection.index)
+	}
+}
+
 // TestInproxyProxyStableReplayOrder verifies that a common proxy starts its
 // visit at the broker holding eligible replay, then continues the stable
 // broker order from that position without replaying the same provider
