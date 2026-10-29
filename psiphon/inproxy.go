@@ -2504,14 +2504,25 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	defer cancelFunc()
 
 	// isTransportFailure reports whether an error should be classified as
-	// a RoundTripperFailedError. Errors caused by the caller's cancellation
-	// or deadline, or by Close, are not transport failures. Close cancels
-	// rt.runCtx synchronously and then closes the MeekConn, but the merged
-	// ctx is cancelled from rt.runCtx asynchronously, so a request failing
-	// on the closed connection may observe ctx.Err() == nil; check
-	// rt.runCtx directly as well.
+	// a RoundTripperFailedError. An error is a transport failure unless
+	// the caller cancelled the request or Close was called.
+	//
+	// A caller deadline does count as a transport failure. The caller's
+	// deadline may expire before the request's own timeout, in which case
+	// it is the only thing that ends a request hung on a shared client.
+	// If it were not a failure, the client would stay shared, every later
+	// acquisition would reuse it before broker selection ran, and the
+	// client would never try another provider or broker; treating it as
+	// a failure is what unshares the client and lets selection move on.
+	//
+	// Close cancels rt.runCtx synchronously and then closes the MeekConn,
+	// but the merged ctx is cancelled from rt.runCtx asynchronously, so a
+	// request failing on the closed connection may observe ctx.Err() ==
+	// nil; check rt.runCtx directly as well.
 	isTransportFailure := func() bool {
-		return ctx.Err() == nil && rt.runCtx.Err() == nil
+		ctxErr := ctx.Err()
+		return (ctxErr == nil || ctxErr == context.DeadlineExceeded) &&
+			rt.runCtx.Err() == nil
 	}
 
 	// Apply any round trip delay. Currently, this is used to apply an
@@ -2577,8 +2588,8 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		if err != nil && isTransportFailure() {
 
 			// DialMeek performs an initial TLS handshake. DialMeek errors,
-			// excluding caller cancellation or deadline expiry, are
-			// classified as RoundTripperFailedErrors. These invoke
+			// excluding caller cancellation, are classified as
+			// RoundTripperFailedErrors. These invoke
 			// BrokerClientRoundTripperFailed to handle sharing and replay.
 
 			err = inproxy.NewRoundTripperFailedError(err)
