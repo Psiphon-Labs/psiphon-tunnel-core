@@ -664,6 +664,45 @@ func (b *InproxyBrokerClientInstance) brokerResponseSucceededForTest(rt inproxy.
 	b.BrokerClientResponseReceived(rt, false)
 }
 
+// TestInproxyBrokerWaitChannel verifies the wait channel lifecycle behind
+// the acquisition-waiting notice: a change leaves no channel, the first
+// acquisition that parks afterwards creates it (and is the one that logs),
+// later parkers reuse it, and the next change closes it and again leaves
+// none, so each park event is reported once.
+func TestInproxyBrokerWaitChannel(t *testing.T) {
+	m := newGateTestManager(t)
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.changed != nil {
+		t.Fatal("new manager has a wait channel")
+	}
+	first := m.waitLocked("first %d", 1)
+	if first == nil || m.changed != first {
+		t.Fatal("first waiter did not create the channel")
+	}
+	if second := m.waitLocked("second"); second != first {
+		t.Fatal("later waiter did not reuse the channel")
+	}
+	m.signalClientChangedLocked()
+	select {
+	case <-first:
+	default:
+		t.Fatal("change did not close the channel")
+	}
+	if m.changed != nil {
+		t.Fatal("change left a channel for the next waiter to reuse")
+	}
+	if next := m.waitLocked("next"); next == first || next == nil {
+		t.Fatal("waiter after a change did not create a new channel")
+	}
+	// A change with no waiter closes nothing and leaves none.
+	m.signalClientChangedLocked()
+	m.signalClientChangedLocked()
+	if m.changed != nil {
+		t.Fatal("repeated changes without waiters left a channel")
+	}
+}
+
 // TestInproxyBrokerClientGate verifies the client limit, decoded-response
 // sharing and lease-driven closure with one broker: unproven clients are not
 // shared, a competitor survives promotion and a competing success, a failed
@@ -2709,9 +2748,6 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	m.mutex.Lock()
-	changed := m.changed
-	m.mutex.Unlock()
 	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
 	defer cancelWaiter()
 	waiterDone := make(chan error, 1)
@@ -2722,14 +2758,20 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 		}
 		waiterDone <- err
 	}()
-	// The waiter parks on the current b.changed, which the first failure
-	// created when it signalled. Allow it to reach the select, then
-	// confirm it did not acquire (the limit is full).
+	// The waiter creates b.changed when it parks. Allow it to reach the
+	// select, then confirm it did not acquire (the limit is full) and
+	// capture the channel it parked on.
 	time.Sleep(20 * time.Millisecond)
 	select {
 	case err := <-waiterDone:
 		t.Fatalf("acquisition did not park on the full gate: %v", err)
 	default:
+	}
+	m.mutex.Lock()
+	changed := m.changed
+	m.mutex.Unlock()
+	if changed == nil {
+		t.Fatal("parked acquisition did not create the wait channel")
 	}
 	m.brokerClientFailed(c)
 	m.mutex.Lock()

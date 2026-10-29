@@ -306,10 +306,8 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 		limit = p.Int(parameters.InproxyProxyMaxBrokerClients)
 	}
 	if len(b.clients) >= limit {
-		if b.changed == nil {
-			b.changed = make(chan struct{})
-		}
-		return nil, false, b.changed, nil
+		return nil, false, b.waitLocked(
+			"%d of %d broker clients tracked", len(b.clients), limit), nil
 	}
 
 	liveClients := make([]*InproxyBrokerClientInstance, 0, len(b.clients))
@@ -321,10 +319,8 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 		return nil, false, nil, errors.Trace(err)
 	}
 	if selection == nil {
-		if b.changed == nil {
-			b.changed = make(chan struct{})
-		}
-		return nil, false, b.changed, nil
+		return nil, false, b.waitLocked(
+			"all fronting providers tried at the current broker"), nil
 	}
 	instance, err = newInproxyBrokerClientInstance(b.config, p, b, networkID, b.isProxy, selection)
 	if err != nil {
@@ -379,13 +375,31 @@ func (b *InproxyBrokerClientManager) brokerClientPrivateKey() (inproxy.SessionPr
 	return b.proxyKey, b.proxyKeyErr
 }
 
+// waitLocked returns the channel an acquisition waits on, creating it if no
+// acquisition has waited since it was last closed. The reason is logged
+// only when the channel is created, so a parked proxy worker, which has no
+// deadline of its own, is visible in the notices once per park event
+// rather than once per worker. The caller must hold b.mutex.
+func (b *InproxyBrokerClientManager) waitLocked(reasonFormat string, args ...any) <-chan struct{} {
+	if b.changed == nil {
+		b.changed = make(chan struct{})
+		NoticeInfo(
+			"inproxy: broker client acquisition waiting: "+reasonFormat, args...)
+	}
+	return b.changed
+}
+
 // signalClientChangedLocked wakes waiting GetBrokerClient calls. The caller
 // must hold b.mutex.
 func (b *InproxyBrokerClientManager) signalClientChangedLocked() {
 	if b.changed != nil {
 		close(b.changed)
 	}
-	b.changed = make(chan struct{})
+	// The next channel is created by waitLocked for the first
+	// tryGetClientBrokerClient call that waits after this change, at the
+	// client limit or at provider exhaustion, so that call can be told
+	// apart from later waiters and log the wait once.
+	b.changed = nil
 }
 
 type inproxyBrokerClientEntry struct {
