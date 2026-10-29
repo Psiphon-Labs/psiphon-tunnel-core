@@ -2623,8 +2623,9 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+	parent, cancelWaiter := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelWaiter()
+	waiterCtx := &inproxyGateWaitContext{Context: parent, waiting: make(chan struct{})}
 	waiterDone := make(chan error, 1)
 	go func() {
 		_, _, release, err := m.GetBrokerClient(waiterCtx, "TEST")
@@ -2633,14 +2634,14 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 		}
 		waiterDone <- err
 	}()
-	// The waiter creates b.changed when it parks. Allow it to reach the
-	// select, then confirm it did not acquire (the limit is full) and
-	// capture the channel it parked on.
-	time.Sleep(20 * time.Millisecond)
+	// The waiter creates b.changed when it parks; observe the park
+	// deterministically, then capture the channel it parked on.
 	select {
+	case <-waiterCtx.waiting:
 	case err := <-waiterDone:
 		t.Fatalf("acquisition did not park on the full gate: %v", err)
-	default:
+	case <-parent.Done():
+		t.Fatal("acquisition neither parked nor returned")
 	}
 	m.mutex.Lock()
 	changed := m.changed
