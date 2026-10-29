@@ -6183,7 +6183,7 @@ func TestInproxyBrokerStaleVisitNoMatch(t *testing.T) {
 			// Advance the selection as exhaustion would, leaving a
 			// tracked at the previous visit.
 			m.mutex.Lock()
-			m.selector.advanceBroker(a.brokerSelection.index + 1)
+			m.selector.advanceBroker(a.brokerSelection.index+1, "test")
 			current := m.selector.currentBrokerSelection
 			m.mutex.Unlock()
 			a.BrokerClientResponseReceived(a.roundTripper, true)

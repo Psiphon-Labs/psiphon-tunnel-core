@@ -834,6 +834,11 @@ type inproxyBrokerSelectionState struct {
 	// attempts. Providers used by broker clients still tracked for this
 	// selection are also marked as tried.
 	tried map[string]bool
+
+	// Why selection moved to this broker, appended to the first broker
+	// client's selected notice and then cleared, so later clients at the
+	// same selection do not repeat it. Empty for the initial selection.
+	reason string
 }
 
 // reset clears broker selection while retaining the random seed. It creates
@@ -872,9 +877,12 @@ func (s *inproxyBrokerSelector) sharedLost() {
 
 // advanceBroker records the next broker index and clears the tried providers.
 // New state distinguishes this selection even if the broker order wraps
-// around to a previously selected broker.
-func (s *inproxyBrokerSelector) advanceBroker(index int) {
-	s.currentBrokerSelection = &inproxyBrokerSelectionState{index: index}
+// around to a previously selected broker. reason captures why selection moved
+// to this broker; newInproxyBrokerClientInstance appends it to the
+// "selected broker" notice of the first broker client created at the new
+// selection and then clears it.
+func (s *inproxyBrokerSelector) advanceBroker(index int, reason string) {
+	s.currentBrokerSelection = &inproxyBrokerSelectionState{index: index, reason: reason}
 	s.providers = nil
 	s.nextProvider = 0
 }
@@ -887,7 +895,7 @@ func (s *inproxyBrokerSelector) advanceBroker(index int) {
 // client belongs to the current selection.
 func (s *inproxyBrokerSelector) noMatch() {
 	if s.exhaustBrokerProviders {
-		s.advanceBroker(s.currentBrokerSelection.index + 1)
+		s.advanceBroker(s.currentBrokerSelection.index+1, "no match failover")
 	}
 	s.preferBrokerOrder = true
 }
@@ -973,7 +981,7 @@ func (s *inproxyBrokerSelector) returnHomeDue() bool {
 // InproxyBrokerClientManager.returnHomeLocked.
 func (s *inproxyBrokerSelector) returnHome() time.Duration {
 	away := time.Since(s.awayFromHomeSince)
-	s.advanceBroker(0)
+	s.advanceBroker(0, "returned home")
 	s.awayFromHomeSince = time.Time{}
 	return away
 }
@@ -1070,7 +1078,8 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 					s.awayFromHomeSince = time.Now()
 				}
 			}
-			s.advanceBroker(visit.index + 1)
+			s.advanceBroker(visit.index+1, fmt.Sprintf(
+				"advanced after %d providers tried", len(visit.tried)))
 		}
 	}
 	counts := make(map[string]int)
@@ -1522,10 +1531,18 @@ func newInproxyBrokerClientInstance(
 	// Include the client ID, fronting provider and replay state, as
 	// concurrent broker clients may select the same broker via different
 	// providers; the client ID also appears in close notices and in
-	// ConnectedServer as inproxy_broker_client_id.
+	// ConnectedServer as inproxy_broker_client_id. The first client at a
+	// new broker selection also reports why selection moved there; the
+	// reason is consumed here under InproxyBrokerClientManager.mutex,
+	// which serializes selection and construction.
+	reason := ""
+	if selection.brokerSelection != nil && selection.brokerSelection.reason != "" {
+		reason = ": " + selection.brokerSelection.reason
+		selection.brokerSelection.reason = ""
+	}
 	NoticeInfo(
-		"inproxy: broker client %s selected broker %s fronting provider %s replay %t",
-		b.brokerClientID, inproxy.ID(brokerID), b.frontingProviderID, brokerDialParams.isReplay)
+		"inproxy: broker client %s selected broker %s fronting provider %s replay %t%s",
+		b.brokerClientID, inproxy.ID(brokerID), b.frontingProviderID, brokerDialParams.isReplay, reason)
 
 	return b, nil
 }
