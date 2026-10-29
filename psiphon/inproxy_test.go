@@ -7185,12 +7185,15 @@ func TestInproxyProxySupplyDistribution(t *testing.T) {
 	}
 }
 
-// TestInproxyProxySupplyBrokerRestart models a broker outage and restore.
-// Proxies on the failed broker fail over to the next broker in their own
-// order, so survivors stay balanced. After restore, nothing moves proxies
-// back: a proxy only leaves its broker when that broker fails. Supply
-// returns to the restored broker only as other brokers fail or proxies
-// restart. The test records that asymmetry rather than asserting rebalance.
+// TestInproxyProxySupplyBrokerRestart models a broker outage and restore
+// for common pairing proxies. Proxies on the failed broker fail over to the
+// next broker in their own order, so survivors stay balanced. After
+// restore, nothing moves a common proxy back: it leaves its broker only
+// when that broker fails, so supply returns to the restored broker only as
+// other brokers fail or proxies restart. (Personal pairing proxies, not
+// simulated here, return to their first broker on
+// InproxyProxyPersonalReturnHomePeriod.) The test records that asymmetry
+// rather than asserting rebalance.
 func TestInproxyProxySupplyBrokerRestart(t *testing.T) {
 	const proxies = 800
 	brokers := newSupplySimBrokers(t, 4, "A", "B")
