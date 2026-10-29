@@ -24,7 +24,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	std_errors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -254,15 +253,19 @@ func (b *InproxyBrokerClientManager) brokerClientFailed(instance *InproxyBrokerC
 			b.signalClientChangedLocked()
 		}
 	}
+	// The recorded failure is the one notice carrying the underlying error,
+	// since the coordinator callback receives none; it is read atomically,
+	// without InproxyBrokerClientInstance.mutex.
+	failure := fmt.Sprintf("transport failure (%s)", instance.roundTripper.takeFailure())
 	// With no callers holding the broker client, no release will close it.
 	if entry.refs == 0 {
 		// Closes b.changed, waking GetBrokerClient calls blocked on it.
-		b.closeClientLocked(instance, "transport failure")
+		b.closeClientLocked(instance, failure)
 		return
 	}
-	NoticeInfo(
-		"inproxy: broker client %s failed: transport failure, shared %t, callers %d",
-		instance.brokerClientID, wasShared, entry.refs)
+	NoticeWarning(
+		"inproxy: broker client %s failed: %s, shared %t, callers %d",
+		instance.brokerClientID, failure, wasShared, entry.refs)
 }
 
 // tryGetClientBrokerClient reuses the shared client or creates a new client.
@@ -1333,6 +1336,11 @@ type InproxyBrokerClientInstance struct {
 	lastStoreReplay time.Time
 	lastSuccess     time.Time
 	failed          bool
+	// loggedRetry is set once a failure ridden out by the common pairing
+	// proxy retry window has been logged, and cleared by the next success,
+	// so a fast-failing transport logs once per window rather than once
+	// per announce.
+	loggedRetry bool
 }
 
 // inproxyBrokerClientSelection contains the broker and dial parameters for a
@@ -1827,6 +1835,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 
 	now := time.Now()
 	b.lastSuccess = now
+	b.loggedRetry = false
 
 	// Set replay or extend the broker dial parameters replay TTL after a
 	// success. With tunnel dial parameters, the replay TTL is extended after
@@ -1927,9 +1936,16 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		!b.lastSuccess.IsZero() &&
 		time.Since(b.lastSuccess) <= b.retryOnFailedPeriod {
 
-		NoticeWarning(
-			"inproxy: broker client %s round trip failed, retrying",
-			b.brokerClientID)
+		// Clear the recorded failure so a later failure outside the
+		// window is described by its own classification.
+		if !b.loggedRetry {
+			b.loggedRetry = true
+			NoticeWarning(
+				"inproxy: broker client %s round trip failed (%s), retrying within %s of last success",
+				b.brokerClientID, b.roundTripper.takeFailure(), b.retryOnFailedPeriod)
+		} else {
+			b.roundTripper.takeFailure()
+		}
 		return
 	}
 
@@ -2439,6 +2455,41 @@ type InproxyBrokerRoundTripper struct {
 	// DialMeek succeeds, before any request is sent. It is set by
 	// InproxyBrokerClientInstance when transport sharing is enabled.
 	transportEstablished func()
+
+	// failure records the first error classified as a transport failure,
+	// with its class, for the notices that report the failure; later
+	// failures on the same round tripper, such as the other long-polls on
+	// a dead connection, are not recorded. Set once with a compare-and-swap
+	// from the failing request's goroutine; takeFailure clears it.
+	failure atomic.Pointer[inproxyBrokerRoundTripFailure]
+}
+
+// inproxyBrokerRoundTripFailure describes a classified transport failure
+// for diagnostics: class is one of dial, status <code> after <duration>,
+// request after <duration>, or body, matching the classification cases in
+// InproxyBrokerRoundTripper.RoundTrip.
+type inproxyBrokerRoundTripFailure struct {
+	class string
+	err   error
+}
+
+func (f *inproxyBrokerRoundTripFailure) String() string {
+	if f == nil {
+		return "unrecorded"
+	}
+	return f.class + ": " + f.err.Error()
+}
+
+// recordFailure records err as the round tripper's first transport failure
+// and returns it wrapped as a RoundTripperFailedError.
+func (rt *InproxyBrokerRoundTripper) recordFailure(class string, err error) error {
+	rt.failure.CompareAndSwap(nil, &inproxyBrokerRoundTripFailure{class: class, err: err})
+	return inproxy.NewRoundTripperFailedError(err)
+}
+
+// takeFailure returns and clears the recorded transport failure.
+func (rt *InproxyBrokerRoundTripper) takeFailure() *inproxyBrokerRoundTripFailure {
+	return rt.failure.Swap(nil)
 }
 
 // NewInproxyBrokerRoundTripper creates a new InproxyBrokerRoundTripper. The
@@ -2506,13 +2557,6 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 
 	callerCtx := ctx
 	defer func() {
-		// Log any error which results in invoking BrokerClientRoundTripperFailed.
-		var failedError *inproxy.RoundTripperFailedError
-		if std_errors.As(retErr, &failedError) {
-			NoticeWarning(
-				"inproxy: broker client %s round trip failed: %v",
-				rt.brokerDialParams.brokerClientID, retErr)
-		}
 		// A request failing because Close cancelled rt.runCtx while
 		// the caller's own context was live, for example a sibling
 		// offer interrupted by NoMatch failover, reset or shutdown, is
@@ -2619,7 +2663,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 			// RoundTripperFailedErrors. These invoke
 			// BrokerClientRoundTripperFailed to handle sharing and replay.
 
-			err = inproxy.NewRoundTripperFailedError(err)
+			err = rt.recordFailure("dial", err)
 		}
 
 		rt.conn = conn
@@ -2701,16 +2745,21 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 			if isTransportFailure() && rt.failureThreshold > 0 &&
 				roundTripDuration <= rt.failureThreshold {
 
-				err = inproxy.NewRoundTripperFailedError(err)
+				err = rt.recordFailure(
+					fmt.Sprintf("status %d after %v", response.StatusCode, roundTripDuration),
+					err)
 			}
 		}
 	} else if isTransportFailure() {
 
-		// Request timeouts and other transport errors count as failures only
-		// while the caller's context is still active and the round tripper
-		// has not been closed.
+		// Request timeouts and other transport errors count as
+		// failures unless the caller cancelled or the round tripper
+		// was closed; see isTransportFailure. The duration
+		// distinguishes a request timeout from a prompt connection
+		// error.
 
-		err = inproxy.NewRoundTripperFailedError(err)
+		err = rt.recordFailure(
+			fmt.Sprintf("request after %v", roundTripDuration), err)
 	}
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -2719,7 +2768,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	responsePayload, err := io.ReadAll(response.Body)
 	if err != nil {
 		if isTransportFailure() {
-			err = inproxy.NewRoundTripperFailedError(err)
+			err = rt.recordFailure("body", err)
 		}
 		return nil, errors.Trace(err)
 	}

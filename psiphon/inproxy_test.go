@@ -2597,6 +2597,9 @@ func TestInproxyBrokerCloseRaceNotTransportFailure(t *testing.T) {
 			if err == nil || stderrors.As(err, &failure) {
 				t.Fatalf("request on closed round tripper classified as transport failure: %v", err)
 			}
+			if c.roundTripper.failure.Load() != nil {
+				t.Fatal("close race recorded a transport failure")
+			}
 			if loadBrokerReplayTestParameters(t, spec) == nil {
 				t.Fatal("close race deleted the replay record")
 			}
@@ -5652,11 +5655,30 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				// failure event: the instance is not marked failed, so a
 				// later failure outside the window is processed in full.
 				c.mutex.Lock()
-				failedInWindow := c.failed
-				c.lastSuccess = time.Now().Add(-2 * time.Hour)
+				failedInWindow, loggedRetry := c.failed, c.loggedRetry
 				c.mutex.Unlock()
 				if failedInWindow {
 					t.Fatal("in-window failure marked the instance failed")
+				}
+				// The in-window failure is logged once per window and
+				// consumes the recorded failure; repeats within the
+				// window neither log again nor retain a record, and a
+				// success clears the throttle.
+				if !loggedRetry || c.roundTripper.takeFailure() != nil {
+					t.Fatal("in-window failure was not logged once with its record consumed")
+				}
+				c.roundTripper.recordFailure("request after 1s", stderrors.New("again"))
+				c.BrokerClientRoundTripperFailed(c.roundTripper)
+				if c.roundTripper.takeFailure() != nil {
+					t.Fatal("repeated in-window failure retained its record")
+				}
+				c.BrokerClientRoundTripperSucceeded(c.roundTripper)
+				c.mutex.Lock()
+				loggedRetry = c.loggedRetry
+				c.lastSuccess = time.Now().Add(-2 * time.Hour)
+				c.mutex.Unlock()
+				if loggedRetry {
+					t.Fatal("success did not clear the retry log throttle")
 				}
 				c.BrokerClientRoundTripperFailed(c.roundTripper)
 				c.mutex.Lock()
@@ -5666,6 +5688,146 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 					loadBrokerReplayTestParameters(t, spec) != nil {
 					t.Fatal("failure outside the retry window was not processed")
 				}
+			}
+		})
+	}
+}
+
+// TestInproxyBrokerFailureRecord verifies that each classification site in
+// RoundTrip records the round tripper's first transport failure with the
+// class describing its phase and the underlying error: a refused initial
+// dial records dial; a request timeout records request with its duration;
+// a non-200 within the status threshold records the status and duration
+// while a slower one is not a failure and records nothing; and a stalled
+// body read records body. RoundTrip is driven directly so the record is
+// inspected before the coordinator's failure callback consumes it; the
+// callback then consumes it, and a second record on the same round tripper
+// does not replace the first.
+func TestInproxyBrokerFailureRecord(t *testing.T) {
+	var failure *inproxy.RoundTripperFailedError
+
+	t.Run("dial", func(t *testing.T) {
+		// A port that refuses connections: listen, note the address,
+		// close the listener before dialing.
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		address := listener.Addr().String()
+		listener.Close()
+		privateKey, err := inproxy.GenerateSessionPrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicKey, err := privateKey.GetPublicKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		secret, err := inproxy.GenerateRootObfuscationSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec := &parameters.InproxyBrokerSpec{BrokerPublicKey: publicKey.String(),
+			BrokerRootObfuscationSecret: secret.String(), BrokerFrontingSpecs: parameters.FrontingSpecs{
+				{FrontingProviderID: "AA", Addresses: []string{regexp.QuoteMeta(address)}, Host: "example.org", SkipVerify: true},
+			}}
+		m := newProviderTestManager(t, 1, spec)
+		if err := setGateTestParameters(m.config, "", map[string]interface{}{
+			parameters.InproxyBrokerSpecs:                           parameters.InproxyBrokerSpecsValue{spec},
+			parameters.InproxyClientMaxBrokerClients:                1,
+			parameters.InproxyReplayBrokerDialParametersProbability: 0.0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		c := getGateTestClient(t, m)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err = c.roundTripper.RoundTrip(ctx, 0, 0, nil)
+		if !stderrors.As(err, &failure) {
+			t.Fatalf("refused dial not classified: %v", err)
+		}
+		recorded := c.roundTripper.failure.Load()
+		if recorded == nil || recorded.class != "dial" || recorded.err == nil {
+			t.Fatalf("dial failure not recorded: %v", recorded)
+		}
+		c.BrokerClientRoundTripperFailed(c.roundTripper)
+		if c.roundTripper.failure.Load() != nil || !m.clients[c].failed {
+			t.Fatal("failure callback did not consume the record and fail the client")
+		}
+	})
+
+	payload, err := inproxy.MarshalClientRelayedPacketResponse(&inproxy.ClientRelayedPacketResponse{PacketToServer: []byte("reply")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		phase     string
+		status    int
+		threshold time.Duration
+		wantClass string
+	}{
+		{name: "request-timeout", phase: "request", wantClass: "request after "},
+		{name: "fast-non-200", phase: "status", status: http.StatusBadGateway, threshold: time.Hour, wantClass: "status 502 after "},
+		{name: "slow-non-200", phase: "status", status: http.StatusBadGateway, threshold: time.Nanosecond},
+		{name: "body-timeout", phase: "body", wantClass: "body"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, c, release := newBrokerResponseTestClient(t, payload)
+			defer release()
+			c.replayRetainFailedProbability = 0
+			sessionCtx, cancelSession := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelSession()
+			if _, err := c.brokerClient.ClientRelayedPacket(sessionCtx, &inproxy.ClientRelayedPacketRequest{}); err != nil {
+				t.Fatal(err)
+			}
+			if m.sharedClient != c {
+				t.Fatal("session request did not share the client")
+			}
+			if tc.threshold != 0 {
+				c.roundTripper.failureThreshold = tc.threshold
+			}
+			c.roundTripper.conn.transport = brokerHTTPTestTransport(func(req *http.Request) (*http.Response, error) {
+				switch tc.phase {
+				case "request":
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				case "body":
+					return &http.Response{StatusCode: http.StatusOK, Body: brokerDeadlineTestBody{req.Context()}}, nil
+				}
+				return &http.Response{StatusCode: tc.status, Body: http.NoBody}, nil
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			// Drive RoundTrip directly, with a short per-request timeout and
+			// a live caller, so no coordinator callback runs before the
+			// record is inspected.
+			_, err := c.roundTripper.RoundTrip(ctx, 0, 20*time.Millisecond, []byte("request"))
+			isFailure := stderrors.As(err, &failure)
+			if err == nil || isFailure != (tc.wantClass != "") {
+				t.Fatalf("classification: %v", err)
+			}
+			recorded := c.roundTripper.failure.Load()
+			if !isFailure {
+				if recorded != nil || m.sharedClient != c {
+					t.Fatalf("slow non-200 recorded %v or unshared the client", recorded)
+				}
+				return
+			}
+			if recorded == nil || !strings.HasPrefix(recorded.class, tc.wantClass) || recorded.err == nil {
+				t.Fatalf("recorded %v, want class %q with error", recorded, tc.wantClass)
+			}
+			// A later classified failure on the same round tripper does
+			// not replace the first record.
+			c.roundTripper.recordFailure("body", stderrors.New("second"))
+			if again := c.roundTripper.failure.Load(); again != recorded {
+				t.Fatalf("second failure replaced the record: %v", again)
+			}
+			// The coordinator callback consumes the record, unshares and
+			// fails the client.
+			c.BrokerClientRoundTripperFailed(c.roundTripper)
+			if c.roundTripper.failure.Load() != nil || m.sharedClient == c || !m.clients[c].failed {
+				t.Fatal("failure callback did not consume the record, unshare and fail the client")
 			}
 		})
 	}
