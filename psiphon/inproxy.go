@@ -342,29 +342,24 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 	return instance, false, nil, nil
 }
 
-// brokerClientCounts returns the number of broker clients created and the
-// peak number concurrently tracked since the last resetBrokerClientCounts.
-// It is safe to call on a nil receiver, returning zeros.
-func (b *InproxyBrokerClientManager) brokerClientCounts() (created, peakConcurrent int) {
+// takeBrokerClientCounts returns the number of broker clients created and
+// the peak number concurrently tracked since the previous call, and starts a
+// new window. The controller calls it at the end of each establishment,
+// alongside its own per-establishment counters. Reading and resetting under
+// one lock means a client created by a concurrent caller, such as the
+// untunneled DSL fetcher, is counted in exactly one window; the new window's
+// peak starts at the number of clients still tracked, so clients that
+// outlive the window are not forgotten. It is safe to call on a nil
+// receiver, returning zeros.
+func (b *InproxyBrokerClientManager) takeBrokerClientCounts() (created, peakConcurrent int) {
 	if b == nil {
 		return 0, 0
 	}
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	return b.createdBrokerClients, b.peakConcurrentBrokerClients
-}
-
-// resetBrokerClientCounts starts a new counting window for
-// brokerClientCounts. The controller calls it at the end of each
-// establishment, alongside its own per-establishment counters. It is safe
-// to call on a nil receiver.
-func (b *InproxyBrokerClientManager) resetBrokerClientCounts() {
-	if b == nil {
-		return
-	}
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-	b.createdBrokerClients, b.peakConcurrentBrokerClients = 0, 0
+	created, peakConcurrent = b.createdBrokerClients, b.peakConcurrentBrokerClients
+	b.createdBrokerClients, b.peakConcurrentBrokerClients = 0, len(b.clients)
+	return created, peakConcurrent
 }
 
 // brokerClientPrivateKey returns the configured proxy key, or generates an

@@ -3069,8 +3069,7 @@ func (controller *Controller) stopEstablishing() {
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 	NoticeInfo("peak concurrent establish tunnels: %d", peakConcurrent)
 	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
-	created, peakConcurrent := controller.inproxyClientBrokerClientManager.brokerClientCounts()
-	controller.inproxyClientBrokerClientManager.resetBrokerClientCounts()
+	created, peakConcurrent := controller.inproxyClientBrokerClientManager.takeBrokerClientCounts()
 	if created > 0 {
 		NoticeInfo("inproxy: broker clients created %d, peak concurrent %d", created, peakConcurrent)
 	}

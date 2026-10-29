@@ -2912,8 +2912,10 @@ func TestInproxyMetricsBeforeBrokerAcquisition(t *testing.T) {
 // manager's counting window and continue past M, a new client reports not
 // shared with no wait, a reused client reports shared with the winner's
 // ordinal, an acquisition parked at the limit reports its wait, every
-// candidate's broker requests carry its replay flag and ordinal, and the
-// ordinal restarts after resetBrokerClientCounts.
+// candidate's broker requests carry its replay flag and ordinal, and that
+// takeBrokerClientCounts reports the window's creations and peak, restarts
+// the ordinal, and seeds the next window's peak with the clients still
+// tracked.
 func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	m := newGateTestManager(t)
 	var releaseA, releaseB func()
@@ -2988,10 +2990,24 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 		t.Fatalf("fresh candidate metrics: %v", fields)
 	}
 	releaseC()
-	m.resetBrokerClientCounts()
+	if created, peak := m.takeBrokerClientCounts(); created != 3 || peak != 2 {
+		t.Fatalf("window counts created=%d peak=%d, want 3, 2", created, peak)
+	}
 	d, _, _ := acquire(context.Background())
 	if d.candidateNumber != 1 {
 		t.Fatalf("candidate number did not restart after reset: %d", d.candidateNumber)
+	}
+	// d is still tracked when the window is taken, so the next window's
+	// peak starts at one even though it creates nothing.
+	if created, peak := m.takeBrokerClientCounts(); created != 1 || peak != 1 {
+		t.Fatalf("second window counts created=%d peak=%d, want 1, 1", created, peak)
+	}
+	if created, peak := m.takeBrokerClientCounts(); created != 0 || peak != 1 {
+		t.Fatalf("window with no creations created=%d peak=%d, want 0, 1", created, peak)
+	}
+	var nilManager *InproxyBrokerClientManager
+	if created, peak := nilManager.takeBrokerClientCounts(); created != 0 || peak != 0 {
+		t.Fatal("nil manager counts")
 	}
 }
 
