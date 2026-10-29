@@ -1025,6 +1025,12 @@ func dialTunnel(
 			dialParams.QUICUseObfuscatedPSK,
 			dialParams.quicTLSClientSessionCache)
 		if err != nil {
+			// quic.Dial closes packetConn on its network dial
+			// failures but not on its early validation errors,
+			// which would otherwise leak the conn and, for
+			// in-proxy, its broker client lease. Both conn types
+			// tolerate a repeated Close.
+			_ = packetConn.Close()
 			return nil, errors.Trace(err)
 		}
 
