@@ -723,8 +723,9 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //   - Broker order is derived from the personal compartment ID. A client and
 //     proxy with the same ID and broker list obtain the same order, limited
 //     to InproxyPersonalPairingMaxBrokerSpecCount brokers.
-//   - Each provider at the current broker is tried once. Replay is considered
-//     only at that broker.
+//   - Each provider at the current broker is tried once per search; losing
+//     the shared client starts a new search at the same broker. Replay is
+//     considered only at that broker.
 //   - After all providers have been tried, selection waits for clients from
 //     the current selection to close before advancing to the next broker.
 //   - NoMatch failover advances immediately, even when other broker clients
@@ -742,6 +743,10 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //     proxies. Losing the shared client retains the current broker selection state.
 //   - On NoMatch the proxy keeps announcing at the same broker instead of
 //     rotating, so a client has an opportunity to find it.
+//   - A proxy that has advanced away from the first broker returns to it
+//     after InproxyProxyPersonalReturnHomePeriod, so clients, which start
+//     at the first broker, find it there once it is reachable again; see
+//     returnHome.
 //
 // inproxyBrokerSelector is not safe for concurrent use.
 type inproxyBrokerSelector struct {
@@ -1287,26 +1292,26 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 	var replay *InproxyBrokerDialParameters
 	if !s.preferBrokerOrder {
 		for i := range s.providers {
-			index := (s.nextProvider + i) % len(s.providers)
-			id := s.providers[index]
+			candidate := (s.nextProvider + i) % len(s.providers)
+			id := s.providers[candidate]
 			if !canReplay(id) {
 				continue
 			}
 			if params := load(visit.spec); params != nil && params.FrontedHTTPDialParameters.FrontingProviderID == id {
-				providerIndex, replay = index, params
+				providerIndex, replay = candidate, params
 				break
 			}
 		}
 	}
 	if providerIndex < 0 {
 		for i := range s.providers {
-			index := (s.nextProvider + i) % len(s.providers)
-			id := s.providers[index]
+			candidate := (s.nextProvider + i) % len(s.providers)
+			id := s.providers[candidate]
 			if visit.tried[id] {
 				continue
 			}
 			if providerIndex < 0 || counts[id] < counts[s.providers[providerIndex]] {
-				providerIndex = index
+				providerIndex = candidate
 			}
 		}
 		if providerIndex < 0 {
@@ -2028,9 +2033,9 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 
 	// Mark this broker client as failed so it cannot be shared again. Existing
 	// callers retain the same broker, dial parameters and round tripper until
-	// they release it; see brokerClientFailed. The manager records its own
-	// failed flag, which stops a later decoded response from re-sharing the
-	// client.
+	// they release it; see brokerClientFailed. brokerClientManager records
+	// its own failed flag, which stops a later decoded response from
+	// re-sharing the client.
 	//
 	// Limitation: a transport-level failure may unnecessarily reset the
 	// broker session state; see comment in newInproxyBrokerClientInstance.
@@ -2117,15 +2122,16 @@ func (b *InproxyBrokerClientInstance) DSLRequestTimeout() time.Duration {
 // InproxyBrokerDialParameters is similar to tunnel DialParameters, but is
 // specific to the in-proxy broker dial phase.
 //
-// The replay record is keyed by network ID and broker public key. There is
-// one record per broker, holding the last successful fronting provider and
-// dial parameters, and it is shared by the client and proxy broker client
-// managers, whose broker clients use the same broker specs. Concurrent broker
-// clients for the same broker may each succeed; the last writer's
-// configuration is retained. Every stored configuration succeeded, and
-// broker selection covers other fronting providers without replay, so this
-// overwrite is accepted. Failure deletes the record only when it still holds
-// the bytes this broker client loaded or stored; see replayRecordHash.
+// The replay record is keyed by network ID and broker public key: one
+// record per broker, holding the last successful fronting provider and dial
+// parameters. The client and proxy broker client managers share it but
+// validate it against their own broker spec, so when their specs for a
+// broker differ, each lookup discards the other's record and the next
+// success replaces it. Concurrent broker clients for the same broker may
+// also overwrite each other. Every stored record succeeded, and selection
+// covers other providers without replay, so overwrites are accepted. A
+// failure deletes the record only if it is still the one this broker client
+// loaded or stored; see replayRecordHash.
 type InproxyBrokerDialParameters struct {
 	brokerSpec *parameters.InproxyBrokerSpec `json:"-"`
 	isReplay   bool                          `json:"-"`
