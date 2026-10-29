@@ -199,10 +199,10 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		instance.mutex.Lock()
 		dialParams := *instance.brokerDialParams
 		instance.mutex.Unlock()
-		dialParams.isReuse = reused
 		// A reused client is the shared client by definition; a new
-		// client is never shared at acquisition.
-		dialParams.isShared = reused
+		// client is never shared at acquisition, so isReuse also says
+		// whether the acquisition got the shared client.
+		dialParams.isReuse = reused
 		dialParams.candidateNumber = instance.candidateNumber
 		dialParams.acquireDuration = time.Since(start)
 		release := sync.OnceFunc(func() {
@@ -2120,14 +2120,16 @@ type InproxyBrokerDialParameters struct {
 	// brokerClientID identifies the InproxyBrokerClientInstance that
 	// supplied this copy; see GetBrokerClient. Diagnostics only.
 	brokerClientID string `json:"-"`
-	// candidateNumber, isShared and acquireDuration are set on the copy
-	// returned by GetBrokerClient and reported as metrics; see
-	// GetMetrics. candidateNumber is the creation ordinal of the broker
-	// client within the manager's current counting window, isShared
-	// reports whether the broker client was shared at acquisition, and
-	// acquireDuration is the time the caller waited in GetBrokerClient.
+	// candidateNumber and acquireDuration are set on the copy returned by
+	// GetBrokerClient and reported as metrics; see GetMetrics.
+	// candidateNumber is the creation ordinal of the broker client within
+	// its InproxyBrokerClientManager's counting window: the client broker
+	// client manager's window is reset by the controller after each
+	// establishment, while the proxy broker client manager's counts for
+	// its lifetime. A shared client reused in a later window keeps the
+	// ordinal of the window it was created in. acquireDuration is the time
+	// the caller waited in GetBrokerClient.
 	candidateNumber int           `json:"-"`
-	isShared        bool          `json:"-"`
 	acquireDuration time.Duration `json:"-"`
 	// replayRecordHash is the SHA-256 of the stored record bytes this
 	// broker client loaded or stored, used to check for changes before
@@ -2426,12 +2428,8 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	// of the concurrent broker clients it won on and what acquiring it
 	// cost. candidate_number is an ordinal, not bounded by
 	// Inproxy{Client,Proxy}MaxBrokerClients, since broker clients close
-	// and new ones are created within an establishment.
-	isShared := "0"
-	if brokerDialParams.isShared {
-		isShared = "1"
-	}
-	logFields["inproxy_broker_is_shared"] = isShared
+	// and new ones are created within an establishment; see
+	// InproxyBrokerDialParameters for its counting window.
 	logFields["inproxy_broker_candidate_number"] = strconv.Itoa(brokerDialParams.candidateNumber)
 	logFields["inproxy_broker_acquire_wait_ms"] = strconv.FormatInt(
 		brokerDialParams.acquireDuration.Milliseconds(), 10)

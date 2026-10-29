@@ -880,11 +880,10 @@ func init() {
 		// Specs: server.inproxyDialParams,
 		// server.inproxyBrokerRequestParams
 
-		{187, "inproxy_broker_is_shared", intConverter},
-		{188, "inproxy_broker_candidate_number", intConverter},
-		{189, "inproxy_broker_acquire_wait_ms", intConverter},
+		{187, "inproxy_broker_candidate_number", intConverter},
+		{188, "inproxy_broker_acquire_wait_ms", intConverter},
 
-		// Next key value = 190
+		// Next key value = 189
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
