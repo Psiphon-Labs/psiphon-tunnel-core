@@ -104,4 +104,6 @@ message InproxyDialParams {
     optional string inproxy_proxy_ice_asn = 97;
     optional int64 inproxy_broker_candidate_number = 98;
     optional int64 inproxy_broker_acquire_wait_ms = 99;
+    optional bool inproxy_proxy_inproxy_broker_is_replay = 100;
+    optional int64 inproxy_proxy_inproxy_broker_candidate_number = 101;
 }
