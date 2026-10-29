@@ -122,6 +122,8 @@ type InproxyDialParams struct {
 	InproxyProxyIceAsn                               *string                `protobuf:"bytes,97,opt,name=inproxy_proxy_ice_asn,json=inproxyProxyIceAsn,proto3,oneof" json:"inproxy_proxy_ice_asn,omitempty"`
 	InproxyBrokerCandidateNumber                     *int64                 `protobuf:"varint,98,opt,name=inproxy_broker_candidate_number,json=inproxyBrokerCandidateNumber,proto3,oneof" json:"inproxy_broker_candidate_number,omitempty"`
 	InproxyBrokerAcquireWaitMs                       *int64                 `protobuf:"varint,99,opt,name=inproxy_broker_acquire_wait_ms,json=inproxyBrokerAcquireWaitMs,proto3,oneof" json:"inproxy_broker_acquire_wait_ms,omitempty"`
+	InproxyProxyInproxyBrokerIsReplay                *bool                  `protobuf:"varint,100,opt,name=inproxy_proxy_inproxy_broker_is_replay,json=inproxyProxyInproxyBrokerIsReplay,proto3,oneof" json:"inproxy_proxy_inproxy_broker_is_replay,omitempty"`
+	InproxyProxyInproxyBrokerCandidateNumber         *int64                 `protobuf:"varint,101,opt,name=inproxy_proxy_inproxy_broker_candidate_number,json=inproxyProxyInproxyBrokerCandidateNumber,proto3,oneof" json:"inproxy_proxy_inproxy_broker_candidate_number,omitempty"`
 	unknownFields                                    protoimpl.UnknownFields
 	sizeCache                                        protoimpl.SizeCache
 }
@@ -849,11 +851,25 @@ func (x *InproxyDialParams) GetInproxyBrokerAcquireWaitMs() int64 {
 	return 0
 }
 
+func (x *InproxyDialParams) GetInproxyProxyInproxyBrokerIsReplay() bool {
+	if x != nil && x.InproxyProxyInproxyBrokerIsReplay != nil {
+		return *x.InproxyProxyInproxyBrokerIsReplay
+	}
+	return false
+}
+
+func (x *InproxyDialParams) GetInproxyProxyInproxyBrokerCandidateNumber() int64 {
+	if x != nil && x.InproxyProxyInproxyBrokerCandidateNumber != nil {
+		return *x.InproxyProxyInproxyBrokerCandidateNumber
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_inproxy_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\x8bV\n" +
+	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xa6X\n" +
 	"\x11InproxyDialParams\x12>\n" +
 	"\x19inproxy_broker_client_bpf\x18\x01 \x01(\tH\x00R\x16inproxyBrokerClientBpf\x88\x01\x01\x12B\n" +
 	"\x1binproxy_broker_dial_address\x18\x02 \x01(\tH\x01R\x18inproxyBrokerDialAddress\x88\x01\x01\x12@\n" +
@@ -955,7 +971,9 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x18inproxy_proxy_ice_region\x18` \x01(\tH\\R\x15inproxyProxyIceRegion\x88\x01\x01\x126\n" +
 	"\x15inproxy_proxy_ice_asn\x18a \x01(\tH]R\x12inproxyProxyIceAsn\x88\x01\x01\x12J\n" +
 	"\x1finproxy_broker_candidate_number\x18b \x01(\x03H^R\x1cinproxyBrokerCandidateNumber\x88\x01\x01\x12G\n" +
-	"\x1einproxy_broker_acquire_wait_ms\x18c \x01(\x03H_R\x1ainproxyBrokerAcquireWaitMs\x88\x01\x01B\x1c\n" +
+	"\x1einproxy_broker_acquire_wait_ms\x18c \x01(\x03H_R\x1ainproxyBrokerAcquireWaitMs\x88\x01\x01\x12V\n" +
+	"&inproxy_proxy_inproxy_broker_is_replay\x18d \x01(\bH`R!inproxyProxyInproxyBrokerIsReplay\x88\x01\x01\x12d\n" +
+	"-inproxy_proxy_inproxy_broker_candidate_number\x18e \x01(\x03HaR(inproxyProxyInproxyBrokerCandidateNumber\x88\x01\x01B\x1c\n" +
 	"\x1a_inproxy_broker_client_bpfB\x1e\n" +
 	"\x1c_inproxy_broker_dial_addressB\x1d\n" +
 	"\x1b_inproxy_broker_dns_attemptB\x1f\n" +
@@ -1051,7 +1069,9 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x19_inproxy_proxy_ice_regionB\x18\n" +
 	"\x16_inproxy_proxy_ice_asnB\"\n" +
 	" _inproxy_broker_candidate_numberB!\n" +
-	"\x1f_inproxy_broker_acquire_wait_msBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x1f_inproxy_broker_acquire_wait_msB)\n" +
+	"'_inproxy_proxy_inproxy_broker_is_replayB0\n" +
+	"._inproxy_proxy_inproxy_broker_candidate_numberBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDescOnce sync.Once
