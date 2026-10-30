@@ -111,7 +111,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	roundTripperSucceededCount := int32(0)
 	roundTripperSucceded := func(RoundTripper) { atomic.AddInt32(&roundTripperSucceededCount, 1) }
 	roundTripperFailedCount := int32(0)
-	roundTripperFailed := func(RoundTripper) { atomic.AddInt32(&roundTripperFailedCount, 1) }
+	roundTripperFailed := func(RoundTripper, error) { atomic.AddInt32(&roundTripperFailedCount, 1) }
 	noMatch := func(RoundTripper) {}
 
 	// Per-region activity tracking for testing the region activity feature.
@@ -1533,7 +1533,7 @@ func TestProxyWorkerBrokerAcquisition(t *testing.T) {
 				networkID: "TEST", brokerPublicKey: publicKey, brokerRootObfuscationSecret: secret,
 				brokerClientRoundTripper:          rt,
 				brokerClientRoundTripperSucceeded: func(RoundTripper) {},
-				brokerClientRoundTripperFailed:    func(RoundTripper) {},
+				brokerClientRoundTripperFailed:    func(RoundTripper, error) {},
 				brokerClientResponseReceived: func(_ RoundTripper, noMatch bool) {
 					if noMatch {
 						t.Error("unexpected outcome")

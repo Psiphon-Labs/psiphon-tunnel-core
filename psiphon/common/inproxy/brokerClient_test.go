@@ -108,7 +108,7 @@ func TestBrokerClientResponseFlags(t *testing.T) {
 			coordinator := &testBrokerDialCoordinator{
 				brokerPublicKey: publicKey, brokerRootObfuscationSecret: secret, brokerClientRoundTripper: rt,
 				brokerClientRoundTripperSucceeded: func(RoundTripper) { transportSucceeded = true },
-				brokerClientRoundTripperFailed:    func(RoundTripper) { t.Error("unexpected transport failure") },
+				brokerClientRoundTripperFailed:    func(RoundTripper, error) { t.Error("unexpected transport failure") },
 				brokerClientResponseReceived: func(gotRT RoundTripper, retryableNoMatch bool) {
 					callbacks++
 					if gotRT != rt || retryableNoMatch != wantRetryableNoMatch || !transportSucceeded {

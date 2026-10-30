@@ -344,7 +344,7 @@ func (b *BrokerClient) roundTrip(
 			// The session will be closed, if necessary, by InitiatorSessions.
 			// It's possible that the session remains valid and only the
 			// RoundTripper transport layer needs to be reset.
-			b.coordinator.BrokerClientRoundTripperFailed(roundTripper)
+			b.coordinator.BrokerClientRoundTripperFailed(roundTripper, failedError)
 		}
 
 		return nil, nil, errors.Trace(err)
