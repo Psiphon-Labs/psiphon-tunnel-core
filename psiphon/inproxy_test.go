@@ -274,7 +274,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 		return errors.Trace(err)
 	}
 
-	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperFailed(roundTripper)
+	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperFailed(roundTripper, testRoundTripFailure)
 
 	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
 
@@ -663,6 +663,12 @@ func (b *InproxyBrokerClientInstance) brokerResponseSucceededForTest(rt inproxy.
 	b.BrokerClientResponseReceived(rt, false)
 }
 
+// testRoundTripFailure is the error passed to BrokerClientRoundTripperFailed
+// by tests that invoke the callback directly rather than through a failed
+// RoundTrip.
+var testRoundTripFailure = inproxy.NewRoundTripperFailedError(
+	stderrors.New("test failure"))
+
 // TestInproxyBrokerWaitChannel verifies the wait channel lifecycle behind
 // the acquisition-waiting notice: a change leaves no channel, the first
 // acquisition that parks afterwards creates it (and is the one that logs),
@@ -742,7 +748,7 @@ func TestInproxyBrokerClientGate(t *testing.T) {
 	if getGateTestClient(t, m, &releaseShared2) != a || b.roundTripper.runCtx.Err() != nil {
 		t.Fatal("competing success disrupted active clients")
 	}
-	b.BrokerClientRoundTripperFailed(b.roundTripper)
+	b.BrokerClientRoundTripperFailed(b.roundTripper, testRoundTripFailure)
 	if b.roundTripper.runCtx.Err() != nil {
 		t.Fatal("failure closed competitor while its lease was held")
 	}
@@ -780,7 +786,7 @@ func TestInproxyBrokerClientGate(t *testing.T) {
 	if getGateTestClient(t, m) != c {
 		t.Fatal("disabled idle expiry discarded shared client")
 	}
-	c.BrokerClientRoundTripperFailed(c.roundTripper)
+	c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 	if getGateTestClient(t, m) == c {
 		t.Fatal("failed shared client reused")
 	}
@@ -881,7 +887,7 @@ func TestInproxyBrokerClientRetainedCompetitor(t *testing.T) {
 			case "shutdown":
 				m.closeClientBrokerClients()
 			case "promote-after-failure":
-				winner.BrokerClientRoundTripperFailed(winner.roundTripper)
+				winner.BrokerClientRoundTripperFailed(winner.roundTripper, testRoundTripFailure)
 				releaseWinner()
 				releaseShared()
 				other := getGateTestClient(t, m)
@@ -1131,7 +1137,7 @@ func TestInproxyBrokerClientGateResetWake(t *testing.T) {
 				// A failed client still held by its caller
 				// occupies the limit; only its last release
 				// closes it and wakes the waiter.
-				a.BrokerClientRoundTripperFailed(a.roundTripper)
+				a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 				select {
 				case err := <-result:
 					t.Fatalf("failure alone woke the gate: %v", err)
@@ -1309,7 +1315,7 @@ func TestInproxyBrokerProviderRotation(t *testing.T) {
 					t.Fatalf("rotation restarted: got %s, want %s", id, order[i%3])
 				}
 				if !cancelAttempt {
-					instance.BrokerClientRoundTripperFailed(instance.roundTripper)
+					instance.BrokerClientRoundTripperFailed(instance.roundTripper, testRoundTripFailure)
 				}
 				cancel()
 				release()
@@ -1373,7 +1379,7 @@ func TestInproxyBrokerProviderOccupancy(t *testing.T) {
 				index := 1 + i%(limit-1)
 				old := active[index]
 				counts[old.frontingProviderID]--
-				old.BrokerClientRoundTripperFailed(old.roundTripper)
+				old.BrokerClientRoundTripperFailed(old.roundTripper, testRoundTripFailure)
 				releases[old]()
 				minCount := limit
 				for _, count := range counts {
@@ -1439,7 +1445,7 @@ func TestInproxyBrokerProviderReplay(t *testing.T) {
 		// Retention is forced on. After the first acquisition even
 		// another A attempt must skip replay, despite zero inflight and
 		// a valid record.
-		instance.BrokerClientRoundTripperFailed(instance.roundTripper)
+		instance.BrokerClientRoundTripperFailed(instance.roundTripper, testRoundTripFailure)
 		release()
 	}
 }
@@ -1476,7 +1482,7 @@ func TestInproxyBrokerProviderConstructionFailure(t *testing.T) {
 			if checkProviderTestClient(t, instance) != "B" {
 				t.Fatal("unexpected constructed provider")
 			}
-			instance.BrokerClientRoundTripperFailed(instance.roundTripper)
+			instance.BrokerClientRoundTripperFailed(instance.roundTripper, testRoundTripFailure)
 			release()
 		}
 		m.mutex.Lock()
@@ -1525,7 +1531,7 @@ func TestInproxyBrokerProviderPersonal(t *testing.T) {
 				t.Fatal("repeated a provider before exhausting rendezvous broker")
 			}
 			delete(remaining, providerID)
-			instance.BrokerClientRoundTripperFailed(instance.roundTripper)
+			instance.BrokerClientRoundTripperFailed(instance.roundTripper, testRoundTripFailure)
 			release()
 		}
 	}
@@ -1545,7 +1551,7 @@ func TestInproxyBrokerProviderPersonalSharedLoss(t *testing.T) {
 	m.config.InproxyClientPersonalCompartmentID = id.String()
 	var releasePrimary, releaseSecondary, releaseNext func()
 	primary := getGateTestClient(t, m, &releasePrimary)
-	primary.BrokerClientRoundTripperFailed(primary.roundTripper)
+	primary.BrokerClientRoundTripperFailed(primary.roundTripper, testRoundTripFailure)
 	releasePrimary()
 	secondary := getGateTestClient(t, m, &releaseSecondary)
 	if secondary.frontingProviderID == primary.frontingProviderID {
@@ -1560,7 +1566,7 @@ func TestInproxyBrokerProviderPersonalSharedLoss(t *testing.T) {
 		!next.brokerDialParams.isReplay {
 		t.Fatal("shared loss did not retain the rendezvous broker, visit and replay")
 	}
-	next.BrokerClientRoundTripperFailed(next.roundTripper)
+	next.BrokerClientRoundTripperFailed(next.roundTripper, testRoundTripFailure)
 	releaseNext()
 	next = getGateTestClient(t, m)
 	if next.frontingProviderID != primary.frontingProviderID || next.brokerSelection == secondary.brokerSelection {
@@ -1590,7 +1596,7 @@ func TestInproxyBrokerProviderLifecycle(t *testing.T) {
 				if event == "shared-failure-delete" {
 					a.replayRetainFailedProbability = 0
 				}
-				a.BrokerClientRoundTripperFailed(a.roundTripper)
+				a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 			} else {
 				expireSharedClientForTest(m, a)
 			}
@@ -1605,7 +1611,7 @@ func TestInproxyBrokerProviderLifecycle(t *testing.T) {
 			// A closed competitor's late success still records its
 			// provider as the broker's replay hint; the next unused
 			// provider replays it.
-			b.BrokerClientRoundTripperFailed(b.roundTripper)
+			b.BrokerClientRoundTripperFailed(b.roundTripper, testRoundTripFailure)
 			releaseB()
 			b.brokerResponseSucceededForTest(b.roundTripper)
 			d := getGateTestClient(t, m)
@@ -1723,7 +1729,7 @@ func TestInproxyBrokerReplayFirst(t *testing.T) {
 		loser.mutex.Lock()
 		loser.replayRetainFailedProbability = 0
 		loser.mutex.Unlock()
-		loser.BrokerClientRoundTripperFailed(loser.roundTripper)
+		loser.BrokerClientRoundTripperFailed(loser.roundTripper, testRoundTripFailure)
 	}
 	stored := loadBrokerReplayTestParameters(t, spec)
 	if stored == nil || !bytes.Equal(stored.replayRecordHash, winner.brokerDialParams.replayRecordHash) ||
@@ -1788,7 +1794,7 @@ func TestInproxyBrokerReplayConstructionFailure(t *testing.T) {
 	if b.frontingProviderID != "B" || b.brokerDialParams.isReplay {
 		t.Fatal("failed replay construction did not advance to fresh provider coverage")
 	}
-	b.BrokerClientRoundTripperFailed(b.roundTripper)
+	b.BrokerClientRoundTripperFailed(b.roundTripper, testRoundTripFailure)
 	releaseB()
 	a := getGateTestClient(t, m)
 	if a.frontingProviderID != "A" || a.brokerDialParams.isReplay {
@@ -1818,7 +1824,7 @@ func TestInproxyBrokerReplayConditionalDeletion(t *testing.T) {
 			old.replayRetainFailedProbability = 0
 			fresh.replayRetainFailedProbability = 0
 			succeed := func() { fresh.brokerResponseSucceededForTest(fresh.roundTripper) }
-			fail := func() { old.BrokerClientRoundTripperFailed(old.roundTripper) }
+			fail := func() { old.BrokerClientRoundTripperFailed(old.roundTripper, testRoundTripFailure) }
 			switch order {
 			case "success-first":
 				succeed()
@@ -1833,7 +1839,7 @@ func TestInproxyBrokerReplayConditionalDeletion(t *testing.T) {
 				go func() { defer wg.Done(); fail() }()
 				wg.Wait()
 			case "fresh-failure":
-				fresh.BrokerClientRoundTripperFailed(fresh.roundTripper)
+				fresh.BrokerClientRoundTripperFailed(fresh.roundTripper, testRoundTripFailure)
 				stored := loadBrokerReplayTestParameters(t, spec)
 				if stored == nil || !bytes.Equal(stored.replayRecordHash, params.replayRecordHash) {
 					t.Fatal("fresh failure deleted a record it never used")
@@ -1922,11 +1928,11 @@ func TestInproxyBrokerReplayOverwriteAndThrottle(t *testing.T) {
 
 	// The overwritten instance's failure deletes nothing; the refreshing
 	// instance's failure deletes its own record.
-	fresh.BrokerClientRoundTripperFailed(fresh.roundTripper)
+	fresh.BrokerClientRoundTripperFailed(fresh.roundTripper, testRoundTripFailure)
 	if !bytes.Equal(stored(), refreshed) {
 		t.Fatal("overwritten instance deleted another instance's record")
 	}
-	old.BrokerClientRoundTripperFailed(old.roundTripper)
+	old.BrokerClientRoundTripperFailed(old.roundTripper, testRoundTripFailure)
 	if stored() != nil {
 		t.Fatal("writer's failure did not delete its own record")
 	}
@@ -2469,9 +2475,6 @@ func TestInproxyBrokerCloseRaceNotTransportFailure(t *testing.T) {
 			if err == nil || stderrors.As(err, &failure) {
 				t.Fatalf("request on closed round tripper classified as transport failure: %v", err)
 			}
-			if c.roundTripper.failure.Load() != nil {
-				t.Fatal("close race recorded a transport failure")
-			}
 			if loadBrokerReplayTestParameters(t, spec) == nil {
 				t.Fatal("close race deleted the replay record")
 			}
@@ -2611,7 +2614,7 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 	if getGateTestClient(t, m, &second) != c {
 		t.Fatal("not shared")
 	}
-	m.brokerClientFailed(c)
+	m.brokerClientFailed(c, testRoundTripFailure)
 	first()
 	// A repeated failure report for an already-failed client is a no-op: it
 	// must not wake waiters again. With the client limit lowered so the
@@ -2649,7 +2652,7 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 	if changed == nil {
 		t.Fatal("parked acquisition did not create the wait channel")
 	}
-	m.brokerClientFailed(c)
+	m.brokerClientFailed(c, testRoundTripFailure)
 	m.mutex.Lock()
 	sameChannel := m.changed == changed
 	m.mutex.Unlock()
@@ -2678,12 +2681,12 @@ func TestInproxyBrokerFailureDrainsLeases(t *testing.T) {
 	c = getGateTestClient(t, m, &release)
 	c.brokerResponseSucceededForTest(c.roundTripper)
 	release()
-	m.brokerClientFailed(c)
+	m.brokerClientFailed(c, testRoundTripFailure)
 	if c.roundTripper.runCtx.Err() == nil {
 		t.Fatal("zero-lease failed client did not close immediately")
 	}
 	c = getGateTestClient(t, m)
-	m.brokerClientFailed(c)
+	m.brokerClientFailed(c, testRoundTripFailure)
 	m.closeClientBrokerClients()
 	if c.roundTripper.runCtx.Err() == nil {
 		t.Fatal("reset did not close draining client")
@@ -2901,7 +2904,7 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	releaseA()
 	releaseB()
 	waited.release()
-	m.brokerClientFailed(b)
+	m.brokerClientFailed(b, testRoundTripFailure)
 	c, cDialParams, releaseC := acquire(context.Background())
 	fields = metrics(cDialParams)
 	if c.candidateNumber != 3 || fields["inproxy_broker_candidate_number"] != "3" ||
@@ -3017,7 +3020,7 @@ func TestInproxyBrokerLeaseLifetime(t *testing.T) {
 	if b.roundTripper.runCtx.Err() != nil || len(m.clients) != 2 || m.sharedClient != a {
 		t.Fatal("cancellation/promotion interrupted an independent lease")
 	}
-	a.BrokerClientRoundTripperFailed(a.roundTripper)
+	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	releaseA()
 	if m.sharedClient != nil {
 		t.Fatal("historical success promoted automatically")
@@ -3153,7 +3156,7 @@ func TestInproxyBrokerTotalClientLimit(t *testing.T) {
 		t.Fatal("lowered cap evicted live work")
 	}
 	// A failed client draining its leases still occupies the limit.
-	a.BrokerClientRoundTripperFailed(a.roundTripper)
+	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	releaseB()
 	releaseC()
 	if instance, _, changed, err := m.tryGetClientBrokerClient("TEST"); err != nil || instance != nil || changed == nil {
@@ -3453,7 +3456,7 @@ func TestInproxyBrokerCompartmentIDsCachedUntilReset(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			m.brokerClientFailed(first)
+			m.brokerClientFailed(first, testRoundTripFailure)
 			for i := 0; i < 2; i++ {
 				c := getGateTestClient(t, m, &release)
 				ids := c.CommonCompartmentIDs()
@@ -3954,9 +3957,6 @@ func TestInproxyDialConnectionOwnedRelay(t *testing.T) {
 							isServerEntryFailure(context.Background(), err) {
 							t.Fatalf("relay on closed broker client: %v", err)
 						}
-						if b.roundTripper.failure.Load() != nil {
-							t.Fatal("close under relay recorded a transport failure")
-						}
 						if err := conn.Close(); err != nil {
 							t.Fatal(err)
 						}
@@ -4050,7 +4050,7 @@ func TestInproxyProxyProviderRace(t *testing.T) {
 			if c, _, changed, err := m.tryGetClientBrokerClient("TEST"); c != nil || changed == nil || err != nil {
 				t.Fatal("race exceeded distinct providers at the visit")
 			}
-			clients[0].BrokerClientRoundTripperFailed(clients[0].roundTripper)
+			clients[0].BrokerClientRoundTripperFailed(clients[0].roundTripper, testRoundTripFailure)
 			if c, _, changed, err := m.tryGetClientBrokerClient("TEST"); c != nil || changed == nil || err != nil {
 				t.Fatal("advanced broker while viable visit clients remained")
 			}
@@ -4074,7 +4074,7 @@ func TestInproxyProxyProviderRace(t *testing.T) {
 				t.Fatal("idle expiry applied to proxy")
 			}
 			next.retryOnFailedPeriod = 0
-			next.BrokerClientRoundTripperFailed(next.roundTripper)
+			next.BrokerClientRoundTripperFailed(next.roundTripper, testRoundTripFailure)
 			replacement := getGateTestClient(t, m)
 			if replacement.BrokerPublicKey() != next.BrokerPublicKey() {
 				t.Fatal("shared loss did not retain current broker")
@@ -4110,13 +4110,13 @@ func TestInproxyProxyReplayJumpSkipsExhaustedBroker(t *testing.T) {
 	if err := storeInproxyBrokerReplayParameters("TEST", makeBrokerReplayTestParameters(t, m, exhausted, "A")); err != nil {
 		t.Fatal(err)
 	}
-	first.BrokerClientRoundTripperFailed(first.roundTripper)
+	first.BrokerClientRoundTripperFailed(first.roundTripper, testRoundTripFailure)
 	release()
 	second := getGateTestClient(t, m, &release)
 	if second.brokerDialParams.brokerSpec != exhausted || second.frontingProviderID == first.frontingProviderID {
 		t.Fatal("second provider was not tried at the same broker")
 	}
-	second.BrokerClientRoundTripperFailed(second.roundTripper)
+	second.BrokerClientRoundTripperFailed(second.roundTripper, testRoundTripFailure)
 	release()
 	setReplay(1.0)
 	next := getGateTestClient(t, m)
@@ -4274,7 +4274,7 @@ func TestInproxyProxySharedLossPreservesCompetitors(t *testing.T) {
 	var releaseB, releaseC func()
 	b := getGateTestClient(t, m, &releaseB)
 	a.BrokerClientResponseReceived(a.roundTripper, false)
-	a.BrokerClientRoundTripperFailed(a.roundTripper)
+	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	// Proxies retain the visit on shared loss, so the visit pointer alone
 	// cannot reject a late response from the failed client while it is
 	// still held; the failed flag must.
@@ -4737,7 +4737,7 @@ func TestInproxyBrokerDecodedRelayReplacement(t *testing.T) {
 	m, survivor, release := newBrokerResponseTestClient(t, payload)
 	shared := getGateTestClient(t, m)
 	shared.brokerResponseSucceededForTest(shared.roundTripper)
-	shared.BrokerClientRoundTripperFailed(shared.roundTripper)
+	shared.BrokerClientRoundTripperFailed(shared.roundTripper, testRoundTripFailure)
 	if m.sharedClient != nil {
 		t.Fatal("failure promoted standby without a response")
 	}
@@ -5037,7 +5037,7 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 		// A transport failure unshares the client. With M=1 the failed
 		// client occupies the slot while its leases drain; once released
 		// it closes and the next acquisition constructs a new client.
-		a.BrokerClientRoundTripperFailed(a.roundTripper)
+		a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 		if m.sharedClient != nil || !m.clients[a].failed {
 			t.Fatal("failure did not unshare the transport-shared client")
 		}
@@ -5064,7 +5064,7 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 		c := getGateTestClient(t, m, &release)
 		// Mark failed before the transport callback, as a DialMeek that
 		// succeeds and whose first request then fails would.
-		c.BrokerClientRoundTripperFailed(c.roundTripper)
+		c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 		if c.roundTripper.transportEstablished == nil {
 			t.Fatal("tactic did not wire the transport-established callback")
 		}
@@ -5663,7 +5663,7 @@ func TestInproxyBrokerIdleExpiryPreservesReplay(t *testing.T) {
 		t.Fatal("replay after idle expiry did not consume the allowance")
 	}
 	// The replayed client owns the record: its transport failure deletes it.
-	second.BrokerClientRoundTripperFailed(second.roundTripper)
+	second.BrokerClientRoundTripperFailed(second.roundTripper, testRoundTripFailure)
 	if loadBrokerReplayTestParameters(t, spec) != nil {
 		t.Fatal("replayed client failure did not delete the record")
 	}
@@ -5710,11 +5710,7 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				c.lastSuccess = time.Now().Add(-2 * time.Hour)
 				c.mutex.Unlock()
 			}
-			// Record a failure as RoundTrip would before the callback, so
-			// the in-window branch's consumption of the record is tested
-			// rather than a nil swap.
-			c.roundTripper.recordFailure("request after 1s", stderrors.New("first"))
-			c.BrokerClientRoundTripperFailed(c.roundTripper)
+			c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 			retained := mode == "within"
 			if (m.sharedClient == c) != retained || m.clients[c].failed == retained ||
 				(loadBrokerReplayTestParameters(t, spec) != nil) != retained {
@@ -5736,17 +5732,18 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				if failedInWindow {
 					t.Fatal("in-window failure marked the instance failed")
 				}
-				// The in-window failure is logged once per window and
-				// consumes the recorded failure; repeats within the
-				// window neither log again nor retain a record, and a
+				// The in-window failure is logged once per window; a
+				// repeat within the window is still ridden out, and a
 				// success clears the throttle.
-				if !loggedRetry || c.roundTripper.takeFailure() != nil {
-					t.Fatal("in-window failure was not logged once with its record consumed")
+				if !loggedRetry {
+					t.Fatal("in-window failure was not logged")
 				}
-				c.roundTripper.recordFailure("request after 1s", stderrors.New("again"))
-				c.BrokerClientRoundTripperFailed(c.roundTripper)
-				if c.roundTripper.takeFailure() != nil {
-					t.Fatal("repeated in-window failure retained its record")
+				c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
+				c.mutex.Lock()
+				failedInWindow, loggedRetry = c.failed, c.loggedRetry
+				c.mutex.Unlock()
+				if failedInWindow || !loggedRetry {
+					t.Fatal("repeated in-window failure was not ridden out")
 				}
 				c.BrokerClientRoundTripperSucceeded(c.roundTripper)
 				c.mutex.Lock()
@@ -5756,7 +5753,7 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				if loggedRetry {
 					t.Fatal("success did not clear the retry log throttle")
 				}
-				c.BrokerClientRoundTripperFailed(c.roundTripper)
+				c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 				c.mutex.Lock()
 				failedAfterWindow := c.failed
 				c.mutex.Unlock()
@@ -5865,18 +5862,32 @@ func TestInproxyBrokerConcurrentInitialDial(t *testing.T) {
 	}
 }
 
-// TestInproxyBrokerFailureRecord verifies that each classification site in
-// RoundTrip records the round tripper's first transport failure with the
-// class describing its phase and the underlying error: a refused initial
-// dial records dial; a request timeout records request with its duration;
-// a non-200 within the status threshold records the status and duration
-// while a slower one is not a failure and records nothing; and a stalled
-// body read records body. RoundTrip is driven directly so the record is
-// inspected before the coordinator's failure callback consumes it; the
-// callback then consumes it, and a second record on the same round tripper
-// does not replace the first.
-func TestInproxyBrokerFailureRecord(t *testing.T) {
+// TestInproxyBrokerFailureTrace verifies that each classification site in
+// RoundTrip returns a RoundTripperFailedError traced at that site, followed
+// by the underlying error: a refused initial dial, a request timeout, a
+// non-200 within the status threshold, and a stalled body read each carry a
+// distinct RoundTrip trace, while a slower non-200 is not a failure.
+// RoundTrip is driven directly, and the error is then passed to the
+// coordinator's failure callback, as BrokerClient does, which fails the
+// client.
+func TestInproxyBrokerFailureTrace(t *testing.T) {
 	var failure *inproxy.RoundTripperFailedError
+
+	// traces maps each failure case to the RoundTrip trace prefix of its
+	// error. The subtests run sequentially.
+	traceRegexp := regexp.MustCompile(
+		`^psiphon\.\(\*InproxyBrokerRoundTripper\)\.RoundTrip#\d+: `)
+	traces := make(map[string]string)
+	checkTrace := func(t *testing.T, name string, wantCause string) {
+		t.Helper()
+		trace := traceRegexp.FindString(failure.Error())
+		cause := strings.TrimPrefix(failure.Error(), trace)
+		if trace == "" || cause == "" || !strings.Contains(cause, wantCause) {
+			t.Fatalf("failure %q, want RoundTrip trace and cause %q",
+				failure, wantCause)
+		}
+		traces[name] = trace
+	}
 
 	t.Run("dial", func(t *testing.T) {
 		// A port that refuses connections: listen, note the address,
@@ -5918,13 +5929,10 @@ func TestInproxyBrokerFailureRecord(t *testing.T) {
 		if !stderrors.As(err, &failure) {
 			t.Fatalf("refused dial not classified: %v", err)
 		}
-		recorded := c.roundTripper.failure.Load()
-		if recorded == nil || recorded.class != "dial" || recorded.err == nil {
-			t.Fatalf("dial failure not recorded: %v", recorded)
-		}
-		c.BrokerClientRoundTripperFailed(c.roundTripper)
-		if c.roundTripper.failure.Load() != nil || !m.clients[c].failed {
-			t.Fatal("failure callback did not consume the record and fail the client")
+		checkTrace(t, "dial", "")
+		c.BrokerClientRoundTripperFailed(c.roundTripper, failure)
+		if !m.clients[c].failed {
+			t.Fatal("failure callback did not fail the client")
 		}
 	})
 
@@ -5937,12 +5945,12 @@ func TestInproxyBrokerFailureRecord(t *testing.T) {
 		phase     string
 		status    int
 		threshold time.Duration
-		wantClass string
+		wantCause string
 	}{
-		{name: "request-timeout", phase: "request", wantClass: "request after "},
-		{name: "fast-non-200", phase: "status", status: http.StatusBadGateway, threshold: time.Hour, wantClass: "status 502 after "},
+		{name: "request-timeout", phase: "request", wantCause: "context deadline exceeded"},
+		{name: "fast-non-200", phase: "status", status: http.StatusBadGateway, threshold: time.Hour, wantCause: "unexpected response status code 502 after "},
 		{name: "slow-non-200", phase: "status", status: http.StatusBadGateway, threshold: time.Nanosecond},
-		{name: "body-timeout", phase: "body", wantClass: "body"},
+		{name: "body-timeout", phase: "body", wantCause: "context deadline exceeded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, c, release := newBrokerResponseTestClient(t, payload)
@@ -5973,35 +5981,34 @@ func TestInproxyBrokerFailureRecord(t *testing.T) {
 			defer cancel()
 			// Drive RoundTrip directly, with a short per-request timeout and
 			// a live caller, so no coordinator callback runs before the
-			// record is inspected.
+			// error is inspected.
 			_, err := c.roundTripper.RoundTrip(ctx, 0, 20*time.Millisecond, []byte("request"))
 			isFailure := stderrors.As(err, &failure)
-			if err == nil || isFailure != (tc.wantClass != "") {
+			if err == nil || isFailure != (tc.wantCause != "") {
 				t.Fatalf("classification: %v", err)
 			}
-			recorded := c.roundTripper.failure.Load()
 			if !isFailure {
-				if recorded != nil || m.sharedClient != c {
-					t.Fatalf("slow non-200 recorded %v or unshared the client", recorded)
+				if m.sharedClient != c {
+					t.Fatal("slow non-200 unshared the client")
 				}
 				return
 			}
-			if recorded == nil || !strings.HasPrefix(recorded.class, tc.wantClass) || recorded.err == nil {
-				t.Fatalf("recorded %v, want class %q with error", recorded, tc.wantClass)
-			}
-			// A later classified failure on the same round tripper does
-			// not replace the first record.
-			c.roundTripper.recordFailure("body", stderrors.New("second"))
-			if again := c.roundTripper.failure.Load(); again != recorded {
-				t.Fatalf("second failure replaced the record: %v", again)
-			}
-			// The coordinator callback consumes the record, unshares and
-			// fails the client.
-			c.BrokerClientRoundTripperFailed(c.roundTripper)
-			if c.roundTripper.failure.Load() != nil || m.sharedClient == c || !m.clients[c].failed {
-				t.Fatal("failure callback did not consume the record, unshare and fail the client")
+			checkTrace(t, tc.name, tc.wantCause)
+			// The coordinator callback unshares and fails the client.
+			c.BrokerClientRoundTripperFailed(c.roundTripper, failure)
+			if m.sharedClient == c || !m.clients[c].failed {
+				t.Fatal("failure callback did not unshare and fail the client")
 			}
 		})
+	}
+
+	// Each classification site has its own trace.
+	distinct := make(map[string]bool)
+	for _, trace := range traces {
+		distinct[trace] = true
+	}
+	if len(traces) != 4 || len(distinct) != 4 {
+		t.Fatalf("want 4 distinct RoundTrip traces, got %v", traces)
 	}
 }
 
@@ -6034,14 +6041,14 @@ func TestInproxyBrokerRepeatedFailureSingleDecision(t *testing.T) {
 			c.replayRetainFailedProbability = 1.0
 
 			if mode == "sequential" {
-				c.BrokerClientRoundTripperFailed(c.roundTripper)
+				c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 				if loadBrokerReplayTestParameters(t, spec) == nil || m.sharedClient == c || !m.clients[c].failed {
 					t.Fatal("first failure did not retain replay and unshare")
 				}
 				// A second callback must not re-decide: with retention now
 				// disabled it would delete the record.
 				c.replayRetainFailedProbability = 0
-				c.BrokerClientRoundTripperFailed(c.roundTripper)
+				c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 				if loadBrokerReplayTestParameters(t, spec) == nil {
 					t.Fatal("repeated failure callback re-decided replay retention")
 				}
@@ -6053,7 +6060,7 @@ func TestInproxyBrokerRepeatedFailureSingleDecision(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					c.BrokerClientRoundTripperFailed(c.roundTripper)
+					c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 				}()
 			}
 			wg.Wait()
@@ -6083,7 +6090,7 @@ func TestInproxyBrokerSelectionResetBoundaries(t *testing.T) {
 	seed := m.selector.seed
 	cursor := m.selector.nextBrokerByProvider[a.frontingProviderID]
 	m.selector.replayedByProvider = map[string]bool{"A": true, "B": true}
-	a.BrokerClientRoundTripperFailed(a.roundTripper)
+	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	releaseA()
 	if m.selector.seed != seed || m.selector.nextBrokerByProvider[a.frontingProviderID] != cursor || len(m.selector.replayedByProvider) != 0 {
 		t.Fatal("shared failure lost ordering or failed to refresh replay allowances")
@@ -6267,7 +6274,7 @@ func TestInproxyBrokerPersonalRaceGate(t *testing.T) {
 						t.Fatalf("expected M/provider gate: %v", err)
 					}
 					if len(seen) < 3 {
-						live[0].BrokerClientRoundTripperFailed(live[0].roundTripper)
+						live[0].BrokerClientRoundTripperFailed(live[0].roundTripper, testRoundTripFailure)
 						releases[live[0]]()
 						live = live[1:]
 					}
@@ -6405,7 +6412,7 @@ func TestInproxyBrokerPersonalProviderGateWake(t *testing.T) {
 				// A failed client still held by its caller is
 				// live for the visit; its failure alone must
 				// not wake the waiter.
-				a.BrokerClientRoundTripperFailed(a.roundTripper)
+				a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 				select {
 				case result := <-results:
 					t.Fatalf("failure alone woke provider-gated waiter: %v", result.err)
@@ -6453,7 +6460,7 @@ func TestInproxyBrokerPersonalVisitIdentity(t *testing.T) {
 			case "wrap":
 				a.BrokerClientResponseReceived(a.roundTripper, true)
 			case "shared-failure":
-				a.BrokerClientRoundTripperFailed(a.roundTripper)
+				a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 				releaseA()
 			case "idle":
 				releaseA()
@@ -6561,7 +6568,7 @@ func TestInproxyProxySharedLossReplayExclusion(t *testing.T) {
 	// Share via the decoded response only: a transport success would set
 	// lastSuccess and put the common proxy in its failure retry window.
 	a.BrokerClientResponseReceived(a.roundTripper, false)
-	a.BrokerClientRoundTripperFailed(a.roundTripper)
+	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	m.mutex.Lock()
 	visit := m.selector.currentBrokerSelection
 	retained := visit == a.brokerSelection && visit.tried == nil
@@ -6629,7 +6636,7 @@ func newPersonalProxyReturnHomeTestManager(
 	if home.brokerSelection.index != 0 {
 		t.Fatal("personal proxy did not start at the first rendezvous broker")
 	}
-	home.BrokerClientRoundTripperFailed(home.roundTripper)
+	home.BrokerClientRoundTripperFailed(home.roundTripper, testRoundTripFailure)
 	releaseHome()
 	away := getGateTestClient(t, m)
 	away.brokerResponseSucceededForTest(away.roundTripper)
@@ -6657,7 +6664,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		m, away := newPersonalProxyReturnHomeTestManager(t, "1h")
 		// Unshare the away client so that, still held by its lease, it
 		// fills M=1 and a second worker parks on it.
-		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		away.BrokerClientRoundTripperFailed(away.roundTripper, testRoundTripFailure)
 		_, _, changed, err := m.tryGetClientBrokerClient("TEST")
 		if err != nil || changed == nil {
 			t.Fatalf("expected the held away client to fill the limit: %v", err)
@@ -6701,7 +6708,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 			}
 			// The first broker fails again: selection advances in
 			// rendezvous order and the interval restarts.
-			home.BrokerClientRoundTripperFailed(home.roundTripper)
+			home.BrokerClientRoundTripperFailed(home.roundTripper, testRoundTripFailure)
 			releaseHome()
 			next := getGateTestClient(t, m)
 			m.mutex.Lock()
@@ -6732,7 +6739,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		m.mutex.Unlock()
 		// Shared loss retains the visit and retries its provider; a
 		// second failure with no client left exhausts the broker.
-		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		away.BrokerClientRoundTripperFailed(away.roundTripper, testRoundTripFailure)
 		m.mutex.Lock()
 		if entry := m.clients[away]; entry != nil {
 			entry.refs = 0
@@ -6744,7 +6751,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		if retry.brokerSelection != away.brokerSelection {
 			t.Fatal("shared loss did not retain the away visit")
 		}
-		retry.BrokerClientRoundTripperFailed(retry.roundTripper)
+		retry.BrokerClientRoundTripperFailed(retry.roundTripper, testRoundTripFailure)
 		releaseRetry()
 		next := getGateTestClient(t, m)
 		m.mutex.Lock()
@@ -6769,13 +6776,13 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		common := newProxyRaceTestManager(t, 1, newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A"))
 		var releaseCommon func()
 		c := getGateTestClient(t, common, &releaseCommon)
-		c.BrokerClientRoundTripperFailed(c.roundTripper)
+		c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 		releaseCommon()
 		getGateTestClient(t, common)
 		client := newPersonalRaceTestManager(t, 1, 1, newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A"))
 		var releaseClient func()
 		k := getGateTestClient(t, client, &releaseClient)
-		k.BrokerClientRoundTripperFailed(k.roundTripper)
+		k.BrokerClientRoundTripperFailed(k.roundTripper, testRoundTripFailure)
 		releaseClient()
 		getGateTestClient(t, client)
 		for name, mm := range map[string]*InproxyBrokerClientManager{"common proxy": common, "personal client": client} {
@@ -6794,7 +6801,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		// return fires against the working client the proxy then
 		// shares at home.
 		m, away := newPersonalProxyReturnHomeTestManager(t, "1h")
-		away.BrokerClientRoundTripperFailed(away.roundTripper)
+		away.BrokerClientRoundTripperFailed(away.roundTripper, testRoundTripFailure)
 		m.mutex.Lock()
 		if entry := m.clients[away]; entry != nil {
 			entry.refs = 0
@@ -6809,7 +6816,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 			if c.brokerSelection.index != want {
 				t.Fatalf("expected index %d, got %d", want, c.brokerSelection.index)
 			}
-			c.BrokerClientRoundTripperFailed(c.roundTripper)
+			c.BrokerClientRoundTripperFailed(c.roundTripper, testRoundTripFailure)
 			release()
 		}
 		home := getGateTestClient(t, m)
@@ -6858,7 +6865,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		}
 		var release func()
 		first := getGateTestClient(t, m, &release)
-		first.BrokerClientRoundTripperFailed(first.roundTripper)
+		first.BrokerClientRoundTripperFailed(first.roundTripper, testRoundTripFailure)
 		release()
 		second := getGateTestClient(t, m)
 		second.brokerResponseSucceededForTest(second.roundTripper)

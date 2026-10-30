@@ -42,7 +42,7 @@ type testBrokerDialCoordinator struct {
 	brokerRootObfuscationSecret       ObfuscationSecret
 	brokerClientRoundTripper          RoundTripper
 	brokerClientRoundTripperSucceeded func(RoundTripper)
-	brokerClientRoundTripperFailed    func(RoundTripper)
+	brokerClientRoundTripperFailed    func(RoundTripper, error)
 	brokerClientNoMatch               func(RoundTripper)
 	brokerClientResponseReceived      func(RoundTripper, bool)
 	metricsForBrokerRequests          common.LogFields
@@ -121,10 +121,10 @@ func (t *testBrokerDialCoordinator) BrokerClientRoundTripperSucceeded(roundTripp
 	t.brokerClientRoundTripperSucceeded(roundTripper)
 }
 
-func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper RoundTripper) {
+func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper RoundTripper, err error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	t.brokerClientRoundTripperFailed(roundTripper)
+	t.brokerClientRoundTripperFailed(roundTripper, err)
 }
 
 func (t *testBrokerDialCoordinator) BrokerClientResponseReceived(

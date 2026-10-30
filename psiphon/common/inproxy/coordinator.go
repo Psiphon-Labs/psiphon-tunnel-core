@@ -205,7 +205,7 @@ type BrokerDialCoordinator interface {
 	// BrokerClient, so that new callers obtain a different BrokerClient
 	// with its own RoundTripper while existing callers continue to use this
 	// one.
-	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
+	BrokerClientRoundTripperFailed(roundTripper RoundTripper, err error)
 
 	// BrokerClientResponseReceived is called after a broker response is
 	// successfully decoded, indicating that the broker client works; a
