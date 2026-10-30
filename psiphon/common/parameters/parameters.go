@@ -462,6 +462,12 @@ const (
 	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyClientRelayedPacketRequestTimeout"
 	InproxyClientDSLRequestTimeout                     = "InproxyClientDSLRequestTimeout"
+	InproxyClientMaxBrokerClients                      = "InproxyClientMaxBrokerClients"
+	InproxyProxyMaxBrokerClients                       = "InproxyProxyMaxBrokerClients"
+	InproxyClientBrokerClientIdleTimeout               = "InproxyClientBrokerClientIdleTimeout"
+	InproxyClientShareBrokerClientTransportProbability = "InproxyClientShareBrokerClientTransportProbability"
+	InproxyProxyShareBrokerClientTransportProbability  = "InproxyProxyShareBrokerClientTransportProbability"
+	InproxyProxyPersonalReturnHomePeriod               = "InproxyProxyPersonalReturnHomePeriod"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyLimitDTLSFingerprintsProbability            = "InproxyLimitDTLSFingerprintsProbability"
 	InproxyLimitDTLSFingerprints                       = "InproxyLimitDTLSFingerprints"
@@ -1145,7 +1151,13 @@ var defaultParameters = map[string]struct {
 	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
 	InproxyClientRelayedPacketRequestTimeout:           {value: 35 * time.Second, minimum: time.Duration(0)},
-	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0)},
+	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyClientMaxBrokerClients:                      {value: 2, minimum: 1},
+	InproxyProxyMaxBrokerClients:                       {value: 1, minimum: 1},
+	InproxyClientBrokerClientIdleTimeout:               {value: time.Duration(0), minimum: time.Duration(0)},
+	InproxyClientShareBrokerClientTransportProbability: {value: 0.0, minimum: 0.0},
+	InproxyProxyShareBrokerClientTransportProbability:  {value: 0.0, minimum: 0.0},
+	InproxyProxyPersonalReturnHomePeriod:               {value: 10 * time.Minute, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
 	InproxyLimitDTLSFingerprintsProbability:            {value: 1.0, minimum: 0.0},

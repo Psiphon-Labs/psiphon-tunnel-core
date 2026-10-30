@@ -325,14 +325,17 @@ func NewController(config *Config) (controller *Controller, err error) {
 		}
 	}
 
-	// Initialize shared in-proxy broker clients to be used for all in-proxy
-	// client dials and in-proxy proxy operations.
+	// Initialize the two in-proxy broker client managers: one for in-proxy
+	// client dials and one for in-proxy proxy operations.
 	//
 	// Using shared broker connections minimizes the overhead of establishing
-	// broker connections at the start of an in-proxy dial or operation. By
-	// design, established broker connections will be retained for up to the
-	// entire lifetime of the controller run, so past the end of client
-	// tunnel establishment.
+	// broker connections at the start of an in-proxy dial or operation.
+	// The broker client manager used for client dials and untunneled DSL
+	// closes its shared broker client after a configured idle timeout, which
+	// can be disabled. The broker client manager used for proxy operations
+	// does not expire its shared broker client when idle. Failures and resets
+	// may end sharing in either broker client manager, and controller
+	// shutdown closes all broker clients.
 	//
 	// No network operations are performed by NewInproxyBrokerClientManager or
 	// NewInproxyNATStateManager; each manager operates on demand, when
@@ -378,6 +381,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 // Run executes the controller. Run exits if a controller
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
+	// Ensure any open connections are cleaned up on shutdown.
+	defer controller.inproxyClientBrokerClientManager.closeClientBrokerClients()
+	defer controller.inproxyProxyBrokerClientManager.closeClientBrokerClients()
 
 	// Exported Controller methods may be called after NewController and
 	// before Run, so no exported method should depend on variables that are
@@ -3064,6 +3070,10 @@ func (controller *Controller) stopEstablishing() {
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 	NoticeInfo("peak concurrent establish tunnels: %d", peakConcurrent)
 	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
+	created, peakConcurrent := controller.inproxyClientBrokerClientManager.takeBrokerClientCounts()
+	if created > 0 {
+		NoticeInfo("inproxy: broker clients created %d, peak concurrent %d", created, peakConcurrent)
+	}
 
 	emitMemoryMetrics()
 	DoGarbageCollection()
@@ -3327,9 +3337,10 @@ loop:
 			}
 		}
 
-		// Trigger RSL, OSL, and upgrade checks after failing to establish a
-		// tunnel within parameters.EstablishTunnelWorkTime, or if there are
-		// no server entries present.
+		// Trigger RSL, OSL, untunneled DSL, and upgrade checks after
+		// failing to establish a tunnel within
+		// parameters.EstablishTunnelWorkTime, or if there are no server
+		// entries present.
 		//
 		// While the trigger is made after each round,
 		// parameter.FetchRemoteServerListStalePeriod will limit the actual
@@ -4220,6 +4231,7 @@ func (controller *Controller) runInproxyProxy() {
 		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
+		GetAnnounceDelayParameters:           controller.inproxyGetProxyAnnounceDelayParameters,
 		ExcludeInterfaceName:                 controller.config.splitInterfaceUpstreamInterfaceName(),
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
@@ -4408,16 +4420,15 @@ func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
 		isCompatibleNetwork)
 }
 
-// inproxyGetProxyBrokerClient returns the broker client shared by all proxy
-// operations.
-func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClient, error) {
-
-	brokerClient, _, err := controller.inproxyProxyBrokerClientManager.GetBrokerClient(
-		controller.config.GetNetworkID())
+// inproxyGetProxyBrokerClient acquires a broker client. The input ctx bounds
+// acquisition only. The caller must invoke release when the broker client is
+// no longer required.
+func (controller *Controller) inproxyGetProxyBrokerClient(ctx context.Context) (*inproxy.BrokerClient, func(), error) {
+	brokerClient, _, release, err := controller.inproxyProxyBrokerClientManager.GetBrokerClient(ctx, controller.config.GetNetworkID())
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
-	return brokerClient, nil
+	return brokerClient, release, nil
 }
 
 func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParameters bool) (
@@ -4483,6 +4494,19 @@ func (controller *Controller) inproxyMakeProxyWebRTCDialCoordinator() (
 	}
 
 	return webRTCDialInstance, nil
+}
+
+// inproxyGetProxyAnnounceDelayParameters returns the current tactics values
+// for proxy announcement staggering and failure backoff.
+func (controller *Controller) inproxyGetProxyAnnounceDelayParameters() (
+	time.Duration, time.Duration, float64) {
+
+	p := controller.config.GetParameters().Get()
+	defer p.Close()
+
+	return p.Duration(parameters.InproxyProxyAnnounceDelay),
+		p.Duration(parameters.InproxyProxyAnnounceMaxBackoffDelay),
+		p.Float(parameters.InproxyProxyAnnounceDelayJitter)
 }
 
 // inproxyHandleProxyTacticsPayload handles new tactics returned from the
