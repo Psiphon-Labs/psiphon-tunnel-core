@@ -116,8 +116,8 @@ github.com/Psiphon-Labs/utls/internal/quicvarint
 github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
 github.com/Psiphon-Labs/utls/internal/tls12
 github.com/Psiphon-Labs/utls/internal/tls13
-# github.com/andybalholm/brotli v1.1.1
-## explicit; go 1.13
+# github.com/andybalholm/brotli v1.2.7
+## explicit; go 1.22
 github.com/andybalholm/brotli
 github.com/andybalholm/brotli/matchfinder
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
@@ -250,13 +250,14 @@ github.com/kamstrup/intmap
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.18.0
-## explicit; go 1.22
+# github.com/klauspost/compress v1.20.3
+## explicit; go 1.25
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0
 github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/le
+github.com/klauspost/compress/internal/regmask
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
