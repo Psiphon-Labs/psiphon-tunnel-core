@@ -48,8 +48,9 @@ import (
 // InproxyBrokerClientManager manages a bounded set of
 // InproxyBrokerClientInstance values, each an in-proxy broker client with
 // its own broker dial parameters, for use by client dials or proxy
-// announcements. At most Inproxy{Client,Proxy}MaxBrokerClients are managed
-// at once.
+// announcements. At most InproxyClientMaxBrokerClients or
+// InproxyProxyMaxBrokerClients are managed at once for clients and proxies
+// respectively.
 //
 // One broker client at a time may be shared: the first to receive a valid
 // broker response is returned by subsequent GetBrokerClient calls and
@@ -57,10 +58,10 @@ import (
 // subsequent requests. Other broker clients are not closed until released
 // by all callers. For in-proxy clients, a shared broker client with no
 // callers is closed after InproxyClientBrokerClientIdleTimeout.
-// GetBrokerClient documents acquisition, sharing and closure.
+// GetBrokerClient documents acquisition, sharing, and closure.
 //
 // Each InproxyBrokerClientInstance binds one broker client to one broker,
-// round tripper and set of dial parameters for all of its requests, so that
+// round tripper, and set of dial parameters for all of its requests, so that
 // round tripper success/failure callbacks set or clear replay for the
 // correct dial parameters while several broker clients are live. Broker
 // dial parameters are replayed independently of tunnel dial parameters,
@@ -149,13 +150,14 @@ func (b *InproxyBrokerClientManager) NetworkChanged() error {
 // are first closed. A network ID that differs from the current network ID
 // returns an error.
 //
-// GetBrokerClient waits when Inproxy{Client,Proxy}MaxBrokerClients is reached
-// or, for personal pairing clients and proxies, when all fronting providers at
-// the current broker selection have been tried and InproxyBrokerClientManager
-// still manages broker clients from that selection. The wait ends and
-// acquisition is retried when a broker client becomes shared or unshared or
-// is closed. When tactics provides no broker specs, GetBrokerClient returns an
-// error immediately.
+// GetBrokerClient waits when InproxyClientMaxBrokerClients or
+// InproxyProxyMaxBrokerClients is reached, for clients and proxies
+// respectively, or, for personal pairing clients and proxies, when all
+// fronting providers at the current broker selection have been tried and
+// InproxyBrokerClientManager still manages broker clients from that
+// selection. The wait ends and acquisition is retried when a broker client
+// becomes shared or unshared or is closed. When tactics provides no broker
+// specs, GetBrokerClient returns an error immediately.
 //
 // ctx applies only while GetBrokerClient waits for a broker client. After
 // GetBrokerClient returns, canceling ctx does not close the broker client or
@@ -337,8 +339,10 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 }
 
 // takeBrokerClientCounts returns the number of broker clients created and
-// the peak number concurrently tracked since the previous call, and starts a
-// new window. It is safe to call on a nil receiver, returning zeros.
+// the peak number tracked concurrently since the previous call, then resets
+// both so they accumulate again afterwards. The peak restarts at the number of
+// clients still tracked, so clients that outlive the interval are not
+// forgotten. It is safe to call on a nil receiver, returning zeros.
 func (b *InproxyBrokerClientManager) takeBrokerClientCounts() (created, peakConcurrent int) {
 	if b == nil {
 		return 0, 0
@@ -707,7 +711,10 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //     may move to the next broker before those attempts finish.
 //   - Broker order is derived from the personal compartment ID. A client and
 //     proxy with the same ID and broker list obtain the same order, limited
-//     to InproxyPersonalPairingMaxBrokerSpecCount brokers.
+//     to InproxyPersonalPairingMaxBrokerSpecCount brokers. This shared
+//     order is the rendezvous order, and the brokers in it are rendezvous
+//     brokers: both sides walk it from the first rendezvous broker so that
+//     they meet at the same one.
 //   - Each provider at the current broker is tried once per search; losing
 //     the shared client starts a new search at the same broker. Replay is
 //     considered only at that broker.
@@ -718,19 +725,19 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //     current broker selection state.
 //
 // Personal pairing proxies:
-//   - Follow the broker order shared with the personal client, trying different
-//     fronting providers while remaining at the current broker for matching.
-//     Move on after its provider attempts are exhausted, not because an
-//     announcement returns NoMatch.
+//   - Follow the broker order shared with the personal pairing client, trying
+//     different fronting providers while remaining at the current broker for
+//     matching. Move on after its provider attempts are exhausted, not because
+//     an announcement returns NoMatch.
 //   - Broker order and its length limit are determined as for personal pairing
 //     clients. Replay does not change which broker is selected.
 //   - Providers are tried at one broker before advancing, as for common pairing
 //     proxies. Losing the shared client retains the current broker selection state.
 //   - On NoMatch the proxy keeps announcing at the same broker instead of
 //     rotating, so a client has an opportunity to find it.
-//   - A proxy that has advanced away from the first broker returns to it
-//     after InproxyProxyPersonalReturnHomePeriod, so clients, which start
-//     at the first broker, find it more quickly; see returnHome.
+//   - A proxy that has advanced away from the first rendezvous broker
+//     returns to it after InproxyProxyPersonalReturnHomePeriod, so clients,
+//     which start there, find it more quickly; see returnHome.
 //
 // inproxyBrokerSelector is not safe for concurrent use.
 type inproxyBrokerSelector struct {
@@ -854,15 +861,15 @@ func (s *inproxyBrokerSelector) reset() {
 }
 
 // sharedLost refreshes the search after the shared client fails or idle
-// expires: provider order and replay allowances are rebuilt so the lost
-// client's provider may be replayed again, while broker cursors and the
-// session seed are kept. Personal pairing clients and proxies keep their
-// current broker and selection state pointer, with its tried providers
-// cleared so the next selection rebuilds them from the clients still
-// tracked: the lost client was proven at that broker, surviving candidates
-// there can still become shared, and a personal client that left would have
-// to re-walk every broker between the first in rendezvous order and the one
-// where its proxy is.
+// expires: provider order is rebuilt and replayedByProvider is cleared, so
+// the lost client's provider may be replayed again, while broker cursors
+// and the session seed are kept. Personal pairing clients and proxies keep
+// their current broker and selection state pointer, with its tried
+// providers cleared so the next selection rebuilds them from the clients
+// still tracked: the lost client was proven at that broker, surviving
+// candidates there can still become shared, and a personal pairing client
+// that left would have to re-walk every broker between the first in
+// rendezvous order and the one where its proxy is.
 func (s *inproxyBrokerSelector) sharedLost() {
 	s.providers, s.replayedByProvider = nil, nil
 	s.nextProvider = 0
@@ -885,13 +892,13 @@ func (s *inproxyBrokerSelector) advanceBroker(index int, reason string) {
 }
 
 // noMatch applies client NoMatch failover after broker returned no match.
-// Personal clients advance to the next rendezvous broker; common pairing
-// clients keep their cursors but make the next selection order-first, so
-// replay cannot jump ahead of the next route, and skip broker, which has
+// Personal pairing clients advance to the next rendezvous broker; common
+// pairing clients keep their cursors but make the next selection order-first,
+// so replay cannot jump ahead of the next route, and skip broker, which has
 // just reported no supply, when the selected provider has another broker.
-// Replay allowances already consumed in this search are preserved. The
-// caller must verify that the responding client belongs to the current
-// selection.
+// replayedByProvider is kept, so a provider already replayed in this search
+// is not replayed again. The caller must verify that the responding client
+// belongs to the current selection.
 func (s *inproxyBrokerSelector) noMatch(broker *parameters.InproxyBrokerSpec) {
 	if s.exhaustBrokerProviders {
 		s.advanceBroker(s.currentBrokerSelection.index+1, "no match failover")
@@ -1069,7 +1076,7 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 				// it starts the interval. Arrival is checked
 				// first so that a single-broker order, where
 				// every advance both leaves and arrives, never
-				// marks the proxy away.
+				// marks the proxy as away.
 				switch {
 				case (visit.index+1)%len(s.brokers) == 0:
 					s.awayFromHomeSince = time.Time{}
@@ -1246,8 +1253,10 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 		// an exhaustion advance (index > 0, since common proxies start at
 		// 0 and never return there) does not scan back to the broker it
 		// just left, whose providers all failed; a replay record there
-		// would otherwise pull the proxy straight back when the coin flip
-		// or another live client had kept its allowance unconsumed.
+		// would otherwise pull the proxy straight back when that
+		// provider was not yet marked in replayedByProvider, because
+		// the coin flip chose fresh parameters or another live client
+		// occupied it.
 		if !s.personal && replayEnabled {
 			scan := len(s.brokers)
 			if visit.index > 0 && scan > 1 {
@@ -1373,9 +1382,14 @@ type inproxyBrokerClientSelection struct {
 	replayDialParams *InproxyBrokerDialParameters
 
 	// replayEnabled reports whether replay is in effect for the broker
-	// client's lifetime, so its first success stores dial parameters for
-	// later replay and a failure may delete them. It is true even when
-	// replayDialParams is nil and the dial is fresh.
+	// client's lifetime: its first success stores dial parameters as the
+	// broker's replay record and a transport failure may delete it. It is
+	// false when InproxyReplayBrokerDialParametersTTL is zero, when
+	// Config.DisableReplay is set, or when the per-selection coin flip
+	// against InproxyReplayBrokerDialParametersProbability fails; such a
+	// broker client neither reads nor changes the record. It is
+	// independent of whether this dial is itself a replay: a fresh dial
+	// with replay enabled is what creates the record.
 	replayEnabled bool
 
 	commonCompartmentIDs   []inproxy.ID
@@ -1557,9 +1571,7 @@ func newInproxyBrokerClientInstance(
 	// concurrent broker clients may select the same broker via different
 	// providers; the client ID also appears in close notices and in
 	// ConnectedServer as inproxy_broker_client_id. The first client at a
-	// new broker selection also reports why selection moved there; the
-	// reason is consumed here under InproxyBrokerClientManager.mutex,
-	// which serializes selection and construction.
+	// new broker selection also reports why selection moved there.
 	reason := ""
 	if selection.brokerSelection != nil && selection.brokerSelection.reason != "" {
 		reason = ": " + selection.brokerSelection.reason
@@ -2111,16 +2123,15 @@ type InproxyBrokerDialParameters struct {
 	isReplay   bool                          `json:"-"`
 	isReuse    bool                          `json:"-"`
 	// brokerClientID identifies the InproxyBrokerClientInstance that
-	// supplied this copy; see GetBrokerClient. Diagnostics only.
+	// supplied this copy; see GetBrokerClient. Only used for diagnostics.
 	brokerClientID string `json:"-"`
 	// candidateNumber and acquireDuration are set on the copy returned by
 	// GetBrokerClient and reported as metrics; see GetMetrics.
 	// candidateNumber is the creation ordinal of the broker client within
-	// its InproxyBrokerClientManager's counting window; see
-	// takeBrokerClientCounts, which restarts the window. A shared client
-	// reused in a later window keeps the ordinal of the window it was
-	// created in. acquireDuration is the time the caller waited in
-	// GetBrokerClient.
+	// its InproxyBrokerClientManager's count, which restarts at each
+	// takeBrokerClientCounts call. A shared client reused after a restart
+	// keeps the ordinal it was created with. acquireDuration is the time
+	// the caller waited in GetBrokerClient.
 	candidateNumber int           `json:"-"`
 	acquireDuration time.Duration `json:"-"`
 	// replayRecordHash is the SHA-256 of the stored record bytes this
@@ -2419,9 +2430,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	// server only for the winning tunnel; these fields identify which
 	// of the concurrent broker clients it won on and what acquiring it
 	// cost. candidate_number is an ordinal, not bounded by
-	// Inproxy{Client,Proxy}MaxBrokerClients, since broker clients close
-	// and new ones are created within an establishment; see
-	// InproxyBrokerDialParameters for its counting window.
+	// InproxyClientMaxBrokerClients or InproxyProxyMaxBrokerClients, since
+	// broker clients close and new ones are created within an establishment;
+	// see InproxyBrokerDialParameters for when the count restarts.
 	logFields["inproxy_broker_candidate_number"] = strconv.Itoa(brokerDialParams.candidateNumber)
 	logFields["inproxy_broker_acquire_wait_ms"] = strconv.FormatInt(
 		brokerDialParams.acquireDuration.Milliseconds(), 10)
