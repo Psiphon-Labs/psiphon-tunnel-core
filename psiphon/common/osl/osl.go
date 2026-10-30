@@ -292,6 +292,7 @@ func NewConfig(filename string) (*Config, error) {
 	config := &Config{}
 
 	config.ReloadableFile = common.NewReloadableFile(
+		"osl-config",
 		filename,
 		true,
 		func(fileContent []byte, _ time.Time) error {

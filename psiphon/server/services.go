@@ -25,6 +25,7 @@ package server
 
 import (
 	"context"
+	std_errors "errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -797,31 +798,28 @@ func (support *SupportServices) Reload() {
 
 	for _, reloader := range reloaders {
 
-		if !reloader.WillReload() {
-			// Skip logging
-			continue
-		}
-
 		results := reloader.Reload(reloadPostActions[reloader]...)
 
-		err := results.Err()
-		if err != nil {
-			log.WithTraceFields(
-				LogFields{
-					"reloader": reloader.ReloadLogDescription(),
-					"error":    err}).Error("reload failed")
-			// Keep running. A failed load retains the previous state; a
-			// failed post action retains the newly loaded state.
-		}
-
 		for _, result := range results {
+			err := std_errors.Join(result.Errors...)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{
+						"name":      result.Name,
+						"file_path": result.FilePath,
+						"error":     err}).Error("reload failed")
+				// Keep running. A failed load retains the previous state; a
+				// failed post action retains the newly loaded state.
+			}
+
 			reloadErrors := make([]string, len(result.Errors))
 			for i, err := range result.Errors {
 				reloadErrors[i] = err.Error()
 			}
 			log.LogRawFieldsWithTimestamp(LogFields{
 				"event_name":  "config_reload",
-				"description": result.Description,
+				"name":        result.Name,
+				"file_path":   result.FilePath,
 				"reloaded":    result.Reloaded,
 				"hash_sha256": result.HashSHA256,
 				"errors":      reloadErrors,

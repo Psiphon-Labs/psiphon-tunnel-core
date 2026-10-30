@@ -372,6 +372,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 	set := &TrafficRulesSet{}
 
 	set.ReloadableFile = common.NewReloadableFile(
+		"traffic-rules-config",
 		filename,
 		true,
 		func(fileContent []byte, _ time.Time) error {
