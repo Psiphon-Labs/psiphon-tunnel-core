@@ -1740,9 +1740,9 @@ func TestInproxyBrokerReplayFirst(t *testing.T) {
 
 // TestInproxyBrokerReplayAbandonedCandidate verifies that releasing an
 // unproven replay candidate does not clear its provider's replayedByProvider
-// mark or delete its record: later selections in the same search rotate through the
-// remaining providers and return to the replayed provider with fresh dial
-// parameters.
+// mark or delete its record: later selections in the same search rotate
+// through the remaining providers and return to the replayed provider with
+// fresh dial parameters.
 func TestInproxyBrokerReplayAbandonedCandidate(t *testing.T) {
 	spec := newProviderTestBroker(t, "A", "B", "C")
 	m := newProviderTestManager(t, 1, spec)
@@ -1770,9 +1770,9 @@ func TestInproxyBrokerReplayAbandonedCandidate(t *testing.T) {
 
 // TestInproxyBrokerReplayConstructionFailure verifies that a replay candidate
 // whose construction fails locally consumes its provider turn and marks the
-// provider replayed without occupying a client slot, so the next selection is a fresh
-// candidate on another provider and a later unshared failure does not restart
-// the replay-first search.
+// provider replayed without occupying a client slot, so the next selection is
+// a fresh candidate on another provider and a later unshared failure does not
+// restart the replay-first search.
 func TestInproxyBrokerReplayConstructionFailure(t *testing.T) {
 	spec := newProviderTestBroker(t, "A", "B")
 	m := newProviderTestManager(t, 1, spec)
@@ -4915,7 +4915,8 @@ func TestInproxyBrokerFirstOfferOrdering(t *testing.T) {
 }
 
 // TestInproxyBrokerShareOnTransport verifies transport-time sharing under
-// Inproxy{Client,Proxy}ShareBrokerClientTransportProbability: once a fresh broker
+// InproxyClientShareBrokerClientTransportProbability and
+// InproxyProxyShareBrokerClientTransportProbability: once a fresh broker
 // client's transport is established it becomes shared before any broker
 // response, so a second worker acquires it and, with waitToShareSession
 // disabled, sends its own offer with its own Noise handshake concurrently
@@ -5150,10 +5151,11 @@ func TestInproxyBrokerShareOnTransportProbability(t *testing.T) {
 
 // TestInproxyBrokerShareOnTransportRealDial drives a fresh broker client's
 // own DialMeek against a local TLS server so the round tripper's CAS branch
-// runs. With Inproxy{Client,Proxy}ShareBrokerClientTransportProbability on, the client
-// is shared as soon as the TLS transport is established, while the first
-// request is still held at the server; off, it is shared only after the
-// first decoded response. Both broker client managers are checked.
+// runs. With InproxyClientShareBrokerClientTransportProbability or
+// InproxyProxyShareBrokerClientTransportProbability on, the client is shared
+// as soon as the TLS transport is established, while the first request is
+// still held at the server; off, it is shared only after the first decoded
+// response. Both broker client managers are checked.
 func TestInproxyBrokerShareOnTransportRealDial(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -6077,10 +6079,11 @@ func TestInproxyBrokerRepeatedFailureSingleDecision(t *testing.T) {
 
 // TestInproxyBrokerSelectionResetBoundaries verifies which selector state
 // survives each boundary: shared failure and idle expiry clear
-// replayedByProvider while keeping the seed and cursors and avoiding a surviving
-// client's provider; a delivered tactics callback and a network change close
-// live clients and clear cursors while retaining the seed; late responses
-// cannot restore closed clients; new specs replace provider eligibility.
+// replayedByProvider while keeping the seed and cursors and avoiding a
+// surviving client's provider; a delivered tactics callback and a network
+// change close live clients and clear cursors while retaining the seed; late
+// responses cannot restore closed clients; new specs replace provider
+// eligibility.
 func TestInproxyBrokerSelectionResetBoundaries(t *testing.T) {
 	specs := parameters.InproxyBrokerSpecsValue{newProviderTestBroker(t, "A", "B"), newProviderTestBroker(t, "A", "B")}
 	m := newProviderTestManager(t, 3, specs...)
@@ -7047,7 +7050,8 @@ func TestInproxyBrokerNoMatchPreservesReplayed(t *testing.T) {
 // Replay is not simulated: the datastore-backed replay path is covered by
 // the replay tests, and modeling it here would require a datastore per
 // proxy. The replay-first broker jump for common proxies is therefore not
-// exercised; see the design document for its expected effect.
+// exercised here; TestInproxyProxyReplayJumpSkipsExhaustedBroker and
+// TestInproxyProxyStableReplayOrder cover it.
 //
 // The simulation reports per-broker proxy counts and an order correlation
 // measure. Set INPROXY_SUPPLY_SIM_VERBOSE=1 to print tables.

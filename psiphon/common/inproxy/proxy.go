@@ -1329,9 +1329,9 @@ func (p *Proxy) proxyOneClient(
 	p.nextAnnounceMutex.Lock()
 	nextDelay := prng.JitterDuration(announceDelay, announceDelayJitter)
 	if p.nextAnnounceBrokerKey != key || p.nextAnnounceNetworkID != networkID {
-		// Reset the delay when the broker or network changes. So that broker
-		// clients using different fronting providers for the same broker share
-		// one schedule.
+		// Reset the delay when the broker or network changes, so that broker
+		// clients using different fronting providers for the same broker
+		// share one schedule.
 		p.nextAnnounceNotBefore = time.Time{}
 		p.nextAnnounceBrokerKey, p.nextAnnounceNetworkID = key, networkID
 	}

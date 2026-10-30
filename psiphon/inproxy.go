@@ -144,11 +144,10 @@ func (b *InproxyBrokerClientManager) NetworkChanged() error {
 
 // GetBrokerClient returns the current, shared broker client and its
 // corresponding dial parameters (for metrics logging), along with a release
-// function. If there is no shared broker client, or if the network ID differs
-// from the network ID associated with existing broker clients, a new broker
-// client instance is initialized; in the latter case, existing broker clients
-// are first closed. A network ID that differs from the current network ID
-// returns an error.
+// function. If there is no shared broker client, a new broker client instance
+// is initialized. networkID must be the current network ID, or GetBrokerClient
+// returns an error; when it differs from the network ID of the tracked broker
+// clients, those are first closed.
 //
 // GetBrokerClient waits when InproxyClientMaxBrokerClients or
 // InproxyProxyMaxBrokerClients is reached, for clients and proxies
@@ -256,7 +255,6 @@ func (b *InproxyBrokerClientManager) brokerClientFailed(
 	failure := fmt.Sprintf("transport failure (%v)", err)
 	// With no callers holding the broker client, no release will close it.
 	if entry.refs == 0 {
-		// Closes b.changed, waking GetBrokerClient calls blocked on it.
 		b.closeClientLocked(instance, failure)
 		return
 	}
@@ -414,9 +412,10 @@ func (b *InproxyBrokerClientManager) stopSharedIdleTimerLocked() {
 	}
 }
 
-// startSharedIdleTimerLocked starts idle timeout for the shared client
-// instance, when it reaches zero leases and InproxyClientBrokerClientIdleTimeout > 0.
-// Any previous timer is stopped first.
+// startSharedIdleTimerLocked starts the idle timeout for the shared client
+// instance when its last caller releases it and
+// InproxyClientBrokerClientIdleTimeout is nonzero. Any previous timer is
+// stopped first. The caller must hold b.mutex.
 func (b *InproxyBrokerClientManager) startSharedIdleTimerLocked(instance *InproxyBrokerClientInstance) {
 	b.stopSharedIdleTimerLocked()
 	if b.isProxy {
@@ -442,14 +441,14 @@ func (b *InproxyBrokerClientManager) startSharedIdleTimerLocked(instance *Inprox
 
 // expireSharedClientLocked is the idle timer callback. It closes instance
 // only if timer is still the current b.sharedIdleTimer and instance is
-// still the shared client with no outstanding leases. The caller must hold
+// still the shared client with no callers holding it. The caller must hold
 // b.mutex.
 func (b *InproxyBrokerClientManager) expireSharedClientLocked(instance *InproxyBrokerClientInstance, timer *time.Timer) {
 	entry := b.clients[instance]
-	// A different timer means this callback's timer was stopped or replaced. The
-	// same client may have been reused and released since then; this callback
-	// must not end its new idle period. Also require that it is still shared
-	// and has no callers holding it.
+	// A different timer means this callback's timer was stopped or replaced.
+	// The same client may have been reused and released since then; this
+	// callback must not end its new idle period. Also require that it is
+	// still shared and has no callers holding it.
 	if timer == nil || timer != b.sharedIdleTimer || b.sharedClient != instance || entry == nil || entry.refs != 0 {
 		return
 	}
@@ -513,8 +512,8 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 		failover := p.WeightedCoinFlip(probability)
 		p.Close()
 		if failover {
-			// Retain replay dial parameters and other clients. Close this client
-			// immediately, including any concurrent requests using it.
+			// Retain replay dial parameters and other clients. Close this
+			// client immediately, including any concurrent requests using it.
 			NoticeInfo(
 				"inproxy: broker client %s no match: failover",
 				instance.brokerClientID)
@@ -644,42 +643,25 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 // clients and proxies at brokers where they can be matched: common pairing
 // clients may explore across brokers, personal pairing clients and proxies
 // follow a derived broker order, and proxies stay at one broker to remain
-// findable. The per-mode strategies are described below.
+// findable. The fields below describe the state each strategy keeps.
 //
-// Common pairing clients:
-//   - Try different fronting providers across available brokers to find a
-//     working broker client, preferring eligible replay before fresh dial
-//     parameters.
-//   - Brokers are shuffled into an order that remains stable while the broker
-//     list is unchanged, including across resets. Fronting providers are
-//     shuffled separately and considered in rotating order.
-//   - Each provider progresses independently through the broker list
-//     (illustrated in the diagram below), skipping brokers that do not support
-//     it and wrapping at the end. A provider being tried for the first time
-//     starts after the most recently selected broker, or at the beginning if
-//     no broker has been selected.
+// Common pairing clients explore across brokers (selectAcrossBrokers):
+//   - Each provider progresses independently through the stable broker order
+//     (illustrated below), skipping brokers that do not support it and
+//     wrapping at the end. A provider being tried for the first time starts
+//     after the most recently selected broker.
 //   - When replay is enabled, prefer valid stored dial parameters for a
-//     provider with no broker clients tracked by InproxyBrokerClientManager
-//     and has not already been replayed during this search. Consider providers
-//     in rotating order, then search brokers from each provider's saved
-//     position. The first eligible replay found is selected.
+//     provider with no tracked broker clients that has not already been
+//     replayed during this search, considering providers in rotating order
+//     and brokers from each provider's saved position.
 //   - Otherwise, choose the provider with the fewest tracked broker clients,
-//     breaking ties by rotating provider order. Search from that provider's
-//     saved position for the next supporting broker. Use eligible replay
-//     there if available; otherwise generate fresh dial parameters.
-//   - After selecting a broker, that provider's next search starts after it.
-//     Other providers retain their saved positions, and preference rotates
-//     to the next provider. A failed or canceled attempt does not undo this
-//     progress or restore a consumed replay attempt.
-//   - NoMatch failover skips the replay-first search for the next selection,
-//     but still allows replay at the broker selected through normal ordering.
-//   - Losing the shared client allows replay again and reshuffles provider
-//     order while retaining each provider's progress through the brokers.
-//     A full reset also clears that progress, retaining the random seed so
-//     unchanged broker specs produce the same broker order.
-//   - Attempts may use different brokers concurrently.
-//     InproxyBrokerClientManager limits the number of broker clients and
-//     reuses the shared client when one exists.
+//     breaking ties by rotating provider order, and take its next supporting
+//     broker. Use eligible replay there if available.
+//   - After a selection, that provider's position advances past the selected
+//     broker and preference rotates to the next provider. A failed or
+//     canceled attempt does not undo this progress or restore a consumed
+//     replay attempt.
+//   - NoMatch failover makes the next selection order-first; see noMatch.
 //
 // Example search positions for common pairing clients:
 //
@@ -693,51 +675,29 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 // then advances past the selected broker. Searches wrap from the end of the
 // broker list to the beginning.
 //
-// Common pairing proxies:
-//   - Find a working fronting provider at one broker while keeping proxy
-//     announcements at that broker. When choosing a broker, eligible replay
-//     may take precedence over broker order. Providers are then tried at
-//     that broker, with the same wait for existing clients as for personal
-//     pairing clients, and the proxy advances only after its provider
-//     attempts are exhausted.
-//   - Broker order is shuffled using a random seed retained across resets.
-//   - Losing the shared client retains the current broker selection state.
-//     Providers still in use count as tried; other providers may be tried again.
-//   - The proxy continues announcing without changing brokers on NoMatch.
+// Personal pairing clients and all proxies try each provider at one broker
+// before advancing (selectAtCurrentBroker):
+//   - Each provider at the current broker is tried once per search. After all
+//     have been tried, selection waits for clients from the current selection
+//     to close, then advances to the next broker in order.
+//   - Personal pairing clients and proxies follow the rendezvous order derived
+//     from the personal compartment ID, so a client and proxy with the same ID
+//     and broker list walk the same brokers from the same first rendezvous
+//     broker and meet at one of them. Replay is considered only at the
+//     selected broker.
+//   - Common pairing proxies follow the selector's own stable order, but may
+//     start a visit at a broker with eligible replay.
+//   - A personal pairing client advances immediately on NoMatch failover, even
+//     while other broker clients are still held by callers. Proxies never fail
+//     over on NoMatch: they keep announcing at the same broker so that a
+//     client can find them.
+//   - A personal pairing proxy that has advanced away from the first
+//     rendezvous broker returns to it after
+//     InproxyProxyPersonalReturnHomePeriod; see returnHome.
 //
-// Personal pairing clients:
-//   - Follow the broker order shared with the personal proxy, trying different
-//     fronting providers at each broker before moving on. NoMatch failover
-//     may move to the next broker before those attempts finish.
-//   - Broker order is derived from the personal compartment ID. A client and
-//     proxy with the same ID and broker list obtain the same order, limited
-//     to InproxyPersonalPairingMaxBrokerSpecCount brokers. This shared
-//     order is the rendezvous order, and the brokers in it are rendezvous
-//     brokers: both sides walk it from the first rendezvous broker so that
-//     they meet at the same one.
-//   - Each provider at the current broker is tried once per search; losing
-//     the shared client starts a new search at the same broker. Replay is
-//     considered only at that broker.
-//   - After all providers have been tried, selection waits for clients from
-//     the current selection to close before advancing to the next broker.
-//   - NoMatch failover advances immediately, even when other broker clients
-//     are still held by callers. Losing the shared client retains the
-//     current broker selection state.
-//
-// Personal pairing proxies:
-//   - Follow the broker order shared with the personal pairing client, trying
-//     different fronting providers while remaining at the current broker for
-//     matching. Move on after its provider attempts are exhausted, not because
-//     an announcement returns NoMatch.
-//   - Broker order and its length limit are determined as for personal pairing
-//     clients. Replay does not change which broker is selected.
-//   - Providers are tried at one broker before advancing, as for common pairing
-//     proxies. Losing the shared client retains the current broker selection state.
-//   - On NoMatch the proxy keeps announcing at the same broker instead of
-//     rotating, so a client has an opportunity to find it.
-//   - A proxy that has advanced away from the first rendezvous broker
-//     returns to it after InproxyProxyPersonalReturnHomePeriod, so clients,
-//     which start there, find it more quickly; see returnHome.
+// Losing the shared client refreshes the provider search in every mode without
+// changing broker positions or the current broker selection; see sharedLost. A
+// reset clears all selection state except the random seed.
 //
 // inproxyBrokerSelector is not safe for concurrent use.
 type inproxyBrokerSelector struct {
@@ -893,12 +853,13 @@ func (s *inproxyBrokerSelector) advanceBroker(index int, reason string) {
 
 // noMatch applies client NoMatch failover after broker returned no match.
 // Personal pairing clients advance to the next rendezvous broker; common
-// pairing clients keep their cursors but make the next selection order-first,
-// so replay cannot jump ahead of the next route, and skip broker, which has
+// pairing clients keep their broker positions but make the next selection
+// order-first, so replay cannot jump ahead of it, and skip broker, which has
 // just reported no supply, when the selected provider has another broker.
-// replayedByProvider is kept, so a provider already replayed in this search
-// is not replayed again. The caller must verify that the responding client
-// belongs to the current selection.
+// replayedByProvider is kept, so a provider already replayed in this search is
+// not replayed again. Only clients call noMatch: proxies never fail over on
+// NoMatch, and InproxyBrokerClientManager calls it only after verifying that
+// the responding client belongs to the current selection.
 func (s *inproxyBrokerSelector) noMatch(broker *parameters.InproxyBrokerSpec) {
 	if s.exhaustBrokerProviders {
 		s.advanceBroker(s.currentBrokerSelection.index+1, "no match failover")
@@ -1325,13 +1286,17 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 // associated, underlying broker dial parameters. InproxyBrokerClientInstance
 // implements broker client dial replay.
 type InproxyBrokerClientInstance struct {
-	// Set at construction and read without
-	// InproxyBrokerClientInstance.mutex.
+	// The fields above mutex are set before the broker client is returned by
+	// GetBrokerClient and are read without InproxyBrokerClientInstance.mutex.
+	// candidateNumber is assigned by InproxyBrokerClientManager, under its
+	// mutex, when it registers the broker client; the rest are set at
+	// construction.
 	frontingProviderID string
 	// brokerClientID is a random identifier for diagnostics.
 	brokerClientID string
-	// candidateNumber is the creation ordinal assigned by
-	// InproxyBrokerClientManager when registering the broker client.
+	// candidateNumber is the creation ordinal within the
+	// InproxyBrokerClientManager counting window; see
+	// InproxyBrokerDialParameters.candidateNumber.
 	candidateNumber               int
 	brokerSelection               *inproxyBrokerSelectionState
 	config                        *Config
@@ -1459,8 +1424,9 @@ func newInproxyBrokerClientInstance(
 	// With transport sharing, the broker client becomes shared as soon as its
 	// TLS transport is established, before the first broker response. Other
 	// callers then reuse the MeekConn, and
-	// Inproxy{Client,Proxy}DisableWaitToShareSession governs whether they
-	// wait for the first Noise handshake or run their own. By default, the
+	// InproxyClientDisableWaitToShareSession or
+	// InproxyProxyDisableWaitToShareSession governs whether they wait for the
+	// first Noise handshake or run their own. By default, the
 	// broker client is shared only after a decoded response; see
 	// InproxyBrokerClientManager.sharedClient. The choice is made once per
 	// broker client, here, so that a given client is consistently shared at
