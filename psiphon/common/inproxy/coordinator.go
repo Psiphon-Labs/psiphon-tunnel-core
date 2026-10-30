@@ -218,8 +218,7 @@ type BrokerDialCoordinator interface {
 	// set it. In personal pairing mode, clients should then rotate
 	// brokers, as the corresponding proxy may be announcing only on
 	// another broker; in common pairing mode, clients may rotate, in
-	// case common proxies are not well balanced across brokers. Decide
-	// whether to rotate before sharing the broker client.
+	// case common proxies are not well balanced across brokers.
 	//
 	// BrokerClient.ProxyAnswer does not signal. A proxy may answer on a
 	// broker client that is no longer shared, and the answer must not

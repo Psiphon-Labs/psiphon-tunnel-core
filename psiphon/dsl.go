@@ -36,8 +36,9 @@ import (
 // runUntunneledDSLFetcher runs DSL fetches relayed through an in-proxy
 // broker, acquiring a broker client from brokerClientManager for each
 // request and releasing it on return. It shares brokerClientManager with
-// in-proxy tunnel dials, so at the broker client limit the two contend for
-// the same unproven client until its first decoded response.
+// in-proxy tunnel dials, so at the broker client limit both wait on the
+// same unproven client until it is shared, by default at its first
+// decoded response.
 //
 // Limitation: dsl.Fetcher.Run requires a single concurrent run, but
 // nothing prevents this fetcher and the tunneled fetcher from overlapping

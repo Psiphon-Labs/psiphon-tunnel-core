@@ -986,11 +986,6 @@ func dialTunnel(
 			// resolves the domain, so just assume IPv6, which has lower max
 			// padding(see quic.getMaxPreDiscoveryPacketSize), and use a stub
 			// address.
-			//
-			// Parse before the in-proxy dial so that no broker client
-			// lease or connection is acquired for an address that will not
-			// be used. The address is constructed by MakeDialParameters
-			// and is not expected to fail to parse.
 
 			host, portStr, err := net.SplitHostPort(dialParams.DirectDialAddress)
 			if err != nil {
@@ -1039,8 +1034,7 @@ func dialTunnel(
 			// quic.Dial closes packetConn on its network dial
 			// failures but not on its early validation errors,
 			// which would otherwise leak the conn and, for
-			// in-proxy, its broker client lease. Both conn types
-			// tolerate a repeated Close.
+			// in-proxy, its broker client lease.
 			_ = packetConn.Close()
 			return nil, errors.Trace(err)
 		}
@@ -1641,8 +1635,7 @@ func (e inproxyDialFailedError) Unwrap() error {
 // destination server, for example because the caller's deadline expired
 // while waiting for a broker client, so the failure does not reflect on
 // the server entry: dialTunnel records no failed tunnel and does not clear
-// the server entry's replay. dialInproxy wraps it in inproxyDialFailedError
-// like any other error; errors.As finds it through the chain.
+// the server entry's replay.
 type inproxyBrokerAcquireFailedError struct {
 	err error
 }
@@ -1782,9 +1775,7 @@ func dialInproxy(
 	}
 
 	// Store the connection and broker client release function together for the
-	// broker/server relay, connection metrics and cleanup. Activation and
-	// connection Close may both call release; only the first call has an
-	// effect.
+	// broker/server relay, connection metrics and cleanup.
 	ownedConn := &inproxyBrokerOwnedConn{ClientConn: conn, release: release}
 	dialParams.inproxyConn.Store(ownedConn)
 

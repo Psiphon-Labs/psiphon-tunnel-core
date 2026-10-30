@@ -153,11 +153,6 @@ type ProxyConfig struct {
 	// to delay worker launches after failures. A zero value results in the
 	// default value being used instead; when GetAnnounceDelayParameters is
 	// nil, all defaults are used.
-	//
-	// GetAnnounceDelayParameters is invoked by announce workers and by the
-	// proxy supervisor, including after a failure to acquire a broker
-	// client, so it must return promptly and must not acquire a broker
-	// client, which may block.
 	GetAnnounceDelayParameters func() (
 		announceDelay time.Duration,
 		announceMaxBackoffDelay time.Duration,
@@ -1139,10 +1134,7 @@ func (p *Proxy) getLimits(isPersonal bool) (
 //
 // getAnnounceDelayParameters is used both to stagger announce requests in
 // proxyOneClient and to configure the supervisor's delay when
-// proxyOneClient fails. As having no broker client is a possible
-// proxyOneClient failure case, and as GetBrokerClient may block on
-// acquisition and consumes a broker client lease, the parameters are not
-// read from a broker client.
+// proxyOneClient fails.
 func (p *Proxy) getAnnounceDelayParameters() (time.Duration, time.Duration, float64) {
 	var delay, maxBackoffDelay time.Duration
 	var jitter float64
