@@ -563,7 +563,7 @@ func (b *InproxyBrokerClientManager) clientTransportEstablished(
 }
 
 // closeAllClientsLocked closes every tracked client, even those still held
-// by callers, clears the registry, shared pointer and idle timer, and wakes
+// by callers, clears b.clients, b.sharedClient and the idle timer, and wakes
 // waiting GetBrokerClient calls, as closeClientLocked does for one client.
 // reason is included in the per-client diagnostic notice. Selection state
 // is left to the caller; woken waiters re-check it only after the caller
@@ -822,8 +822,8 @@ func (s *inproxyBrokerSelector) reset() {
 
 // sharedLost refreshes the search after the shared client fails or idle
 // expires: provider order is rebuilt and replayedByProvider is cleared, so
-// the lost client's provider may be replayed again, while broker cursors
-// and the session seed are kept. Personal pairing clients and proxies keep
+// the lost client's provider may be replayed again, while broker positions
+// and the random seed are kept. Personal pairing clients and proxies keep
 // their current broker and selection state pointer, with its tried
 // providers cleared so the next selection rebuilds them from the clients
 // still tracked: the lost client was proven at that broker, surviving
@@ -1896,13 +1896,13 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(
 		return
 	}
 
-	// For common pairing proxies, skip both the replay deletion and demotion
-	// of a shared client for a short duration after a recent round trip
-	// success. In this case, subsequent broker requests will use the existing
-	// round tripper, wired up with the same dial parameters and fronting
-	// provider selection. If the failure was due to a transient TLS/TCP network
-	// failure, the net/http round tripper should establish a new connection on
-	// the next request.
+	// For common pairing proxies, skip both the replay deletion and the
+	// unsharing of a shared client for a short duration after a recent round
+	// trip success. In this case, subsequent broker requests will use the
+	// existing round tripper, wired up with the same dial parameters and
+	// fronting provider selection. If the failure was due to a transient
+	// TLS/TCP network failure, the net/http round tripper should establish a
+	// new connection on the next request.
 	//
 	// This retry is intended to retain proxy affinity with its currently
 	// selected broker in cases such as broker service upgrades/restarts or
