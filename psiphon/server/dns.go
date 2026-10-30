@@ -72,6 +72,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 	dns.lastReloadTime.Store(int64(monotime.Now()))
 
 	dns.ReloadableFile = common.NewReloadableFile(
+		"dns-config",
 		DNS_SYSTEM_CONFIG_FILENAME,
 		true,
 		func(fileContent []byte, _ time.Time) error {

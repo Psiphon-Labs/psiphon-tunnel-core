@@ -238,6 +238,25 @@ func runTestProcessSDP() error {
 
 	errorOnNoCandidates = true
 
+	// Test that metrics are returned with the "no candidates" error
+
+	if metrics.iceCandidateCount == 0 {
+		_, metrics, err = filterSDPAddresses(
+			SDP,
+			errorOnNoCandidates,
+			nil,
+			allowGeoIPMismatchCandidates,
+			common.GeoIPData{},
+			allowPrivateIPAddressCandidates,
+			filterPrivateIPAddressCandidates)
+		if err == nil {
+			return errors.TraceNew("unexpected success")
+		}
+		if metrics == nil || len(metrics.filteredICECandidates) == 0 {
+			return errors.TraceNew("unexpected nil metrics on error")
+		}
+	}
+
 	// Test private IP addresses
 
 	SetAllowBogonWebRTCConnections(false)

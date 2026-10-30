@@ -125,6 +125,7 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 		}
 
 		database.ReloadableFile = common.NewReloadableFile(
+			"geoip-database",
 			filename,
 			false,
 			func(_ []byte, _ time.Time) error {
@@ -193,6 +194,24 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 	}
 
 	return geoIP, nil
+}
+
+// Reload implements the common.Reloader interface.
+func (database *geoIPDatabase) Reload(postActions ...func() error) common.ReloadResults {
+	results := database.ReloadableFile.Reload(postActions...)
+
+	database.ReloadableFile.RLock()
+	defer database.ReloadableFile.RUnlock()
+
+	// Read the name after loading so it reflects the active database, including
+	// when a failed reload retains the previously loaded database.
+	if database.maxMindReader != nil && database.maxMindReader.Metadata.DatabaseType != "" {
+		reloadName := strings.ToLower(database.maxMindReader.Metadata.DatabaseType) + "-database"
+		for i := range results {
+			results[i].Name = reloadName
+		}
+	}
+	return results
 }
 
 // Reloaders gets the list of reloadable databases in use

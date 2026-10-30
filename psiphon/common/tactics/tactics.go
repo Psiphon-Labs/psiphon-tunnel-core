@@ -477,6 +477,7 @@ func NewServer(
 	}
 
 	server.ReloadableFile = common.NewReloadableFile(
+		"tactics-config",
 		configFilename,
 		true,
 		func(fileContent []byte, _ time.Time) error {
