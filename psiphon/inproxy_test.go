@@ -1739,8 +1739,8 @@ func TestInproxyBrokerReplayFirst(t *testing.T) {
 }
 
 // TestInproxyBrokerReplayAbandonedCandidate verifies that releasing an
-// unproven replay candidate does not restore its replay allowance or delete
-// its record: later selections in the same search rotate through the
+// unproven replay candidate does not clear its provider's replayedByProvider
+// mark or delete its record: later selections in the same search rotate through the
 // remaining providers and return to the replayed provider with fresh dial
 // parameters.
 func TestInproxyBrokerReplayAbandonedCandidate(t *testing.T) {
@@ -1769,8 +1769,8 @@ func TestInproxyBrokerReplayAbandonedCandidate(t *testing.T) {
 }
 
 // TestInproxyBrokerReplayConstructionFailure verifies that a replay candidate
-// whose construction fails locally consumes its provider turn and replay
-// allowance without occupying a client slot, so the next selection is a fresh
+// whose construction fails locally consumes its provider turn and marks the
+// provider replayed without occupying a client slot, so the next selection is a fresh
 // candidate on another provider and a later unshared failure does not restart
 // the replay-first search.
 func TestInproxyBrokerReplayConstructionFailure(t *testing.T) {
@@ -4087,7 +4087,7 @@ func TestInproxyProxyProviderRace(t *testing.T) {
 // proxy's replay-first visit start does not return to the broker it just
 // exhausted. Both providers at the first broker are tried fresh and fail
 // while replay is disabled by probability, leaving that broker's replay
-// record and the provider's allowance intact; when replay is enabled
+// record and the provider not yet marked replayed; when replay is enabled
 // again the new visit must start at the next broker, not wrap back.
 func TestInproxyProxyReplayJumpSkipsExhaustedBroker(t *testing.T) {
 	specs := parameters.InproxyBrokerSpecsValue{
@@ -5416,8 +5416,8 @@ func TestInproxyBrokerDiverseReplay(t *testing.T) {
 			for _, release := range releases {
 				release()
 			}
-			// Abandoning all attempts does not restart replay
-			// allowances.
+			// Abandoning all attempts does not clear
+			// replayedByProvider.
 			for i := 0; i < 6; i++ {
 				var release func()
 				c := getGateTestClient(t, m, &release)
@@ -5537,15 +5537,15 @@ func TestInproxyBrokerReplayCursorAndNoMatch(t *testing.T) {
 
 // TestInproxyBrokerNoMatchExactRouteReplay verifies that after common client
 // NoMatch failover the next route is chosen by broker order, and that replay
-// is still used at that exact broker when its stored provider's allowance is
-// unconsumed: the search does not jump to a different broker for replay,
+// is still used at that exact broker when its stored provider is not yet
+// marked replayed: the search does not jump to a different broker for replay,
 // but it does not forgo an eligible replay at the ordered broker either.
 func TestInproxyBrokerNoMatchExactRouteReplay(t *testing.T) {
 	// Three single-provider brokers, A, B and A. A seed is chosen so the
 	// broker order is A, B, A: the first search replays ordered[0]; after
 	// failover a correct order-first search stops at ordered[1] and
 	// replays B there, while a replay-first search would skip to the A
-	// record at ordered[2] only if it ignored the consumed A allowance.
+	// record at ordered[2] only if it ignored A's replayedByProvider mark.
 	specs := parameters.InproxyBrokerSpecsValue{newProviderTestBroker(t, "A"), newProviderTestBroker(t, "B"), newProviderTestBroker(t, "A")}
 	m := newProviderTestManager(t, 1, specs...)
 	if err := setGateTestParameters(m.config, "no-match", map[string]interface{}{
@@ -5599,13 +5599,13 @@ func TestInproxyBrokerNoMatchExactRouteReplay(t *testing.T) {
 		t.Fatal("post-NoMatch selection did not replay the eligible record at the ordered broker")
 	}
 	if !m.selector.replayedByProvider["B"] || m.selector.preferBrokerOrder {
-		t.Fatal("exact-route replay did not consume the allowance or clear order-first")
+		t.Fatal("exact-route replay did not mark B replayed or clear order-first")
 	}
 }
 
 // TestInproxyBrokerIdleExpiryPreservesReplay verifies that idle expiry of the
 // shared client neither deletes the stored replay record nor leaves the
-// provider's replay allowance consumed: the next search replays the same
+// provider marked replayed: the next search replays the same
 // broker and provider, and a transport failure of that replayed client then
 // deletes the record. One broker and one provider make the replayed route
 // unambiguous.
@@ -5634,9 +5634,9 @@ func TestInproxyBrokerIdleExpiryPreservesReplay(t *testing.T) {
 		t.Fatal("success did not store a replay record")
 	}
 	if !m.selector.replayedByProvider["A"] {
-		// The allowance is consumed only when a replay is selected; a fresh
-		// dial leaves it clear. Consume it explicitly so the test checks
-		// that expiry refreshes it, as it would after a replayed search.
+		// A provider is marked replayed only when a replay is selected; a
+		// fresh dial leaves it unmarked. Mark it explicitly so the test
+		// checks that expiry clears it, as it would after a replayed search.
 		m.selector.replayedByProvider = map[string]bool{"A": true}
 	}
 	release()
@@ -5648,7 +5648,7 @@ func TestInproxyBrokerIdleExpiryPreservesReplay(t *testing.T) {
 		t.Fatal("idle expiry did not close the shared client")
 	}
 	if len(m.selector.replayedByProvider) != 0 {
-		t.Fatal("idle expiry did not refresh the replay allowance")
+		t.Fatal("idle expiry did not clear replayedByProvider")
 	}
 	if loadBrokerReplayTestParameters(t, spec) == nil {
 		t.Fatal("idle expiry deleted the replay record")
@@ -5660,7 +5660,7 @@ func TestInproxyBrokerIdleExpiryPreservesReplay(t *testing.T) {
 		t.Fatal("search after idle expiry did not replay the stored route")
 	}
 	if !m.selector.replayedByProvider["A"] {
-		t.Fatal("replay after idle expiry did not consume the allowance")
+		t.Fatal("replay after idle expiry did not mark A replayed")
 	}
 	// The replayed client owns the record: its transport failure deletes it.
 	second.BrokerClientRoundTripperFailed(second.roundTripper, testRoundTripFailure)
@@ -6076,8 +6076,8 @@ func TestInproxyBrokerRepeatedFailureSingleDecision(t *testing.T) {
 }
 
 // TestInproxyBrokerSelectionResetBoundaries verifies which selector state
-// survives each boundary: shared failure and idle expiry refresh replay
-// allowances while keeping the seed and cursors and avoiding a surviving
+// survives each boundary: shared failure and idle expiry clear
+// replayedByProvider while keeping the seed and cursors and avoiding a surviving
 // client's provider; a delivered tactics callback and a network change close
 // live clients and clear cursors while retaining the seed; late responses
 // cannot restore closed clients; new specs replace provider eligibility.
@@ -6093,7 +6093,7 @@ func TestInproxyBrokerSelectionResetBoundaries(t *testing.T) {
 	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
 	releaseA()
 	if m.selector.seed != seed || m.selector.nextBrokerByProvider[a.frontingProviderID] != cursor || len(m.selector.replayedByProvider) != 0 {
-		t.Fatal("shared failure lost ordering or failed to refresh replay allowances")
+		t.Fatal("shared failure lost ordering or did not clear replayedByProvider")
 	}
 	c := getGateTestClient(t, m, &releaseC)
 	if c.frontingProviderID == b.frontingProviderID {
@@ -6963,12 +6963,11 @@ func TestInproxyBrokerPersonalNoMatchPromotionRace(t *testing.T) {
 	}
 }
 
-// TestInproxyBrokerNoMatchPreservesReplayBudget verifies that NoMatch
-// failover retains the consumed replay allowance and common broker cursor,
-// so the next selection at the next broker does not replay the same
-// provider, and that personal failover advances to the next rendezvous
-// broker.
-func TestInproxyBrokerNoMatchPreservesReplayBudget(t *testing.T) {
+// TestInproxyBrokerNoMatchPreservesReplayed verifies that NoMatch failover
+// keeps replayedByProvider and the common broker cursor, so the next
+// selection at the next broker does not replay the same provider, and that
+// personal failover advances to the next rendezvous broker.
+func TestInproxyBrokerNoMatchPreservesReplayed(t *testing.T) {
 	for _, personal := range []bool{false, true} {
 		name := "common"
 		if personal {
@@ -6977,8 +6976,8 @@ func TestInproxyBrokerNoMatchPreservesReplayBudget(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// Both brokers offer only provider A with valid
 			// records, so the selection after NoMatch must pick A
-			// again and the only thing preventing a replay is the
-			// consumed per-search allowance.
+			// again and the only thing preventing a replay is A's
+			// replayedByProvider mark from this search.
 			specs := parameters.InproxyBrokerSpecsValue{newProviderTestBroker(t, "A"), newProviderTestBroker(t, "A")}
 			m := newProviderTestManager(t, 1, specs...)
 			if personal {
@@ -7011,15 +7010,15 @@ func TestInproxyBrokerNoMatchPreservesReplayBudget(t *testing.T) {
 			m.mutex.Unlock()
 			c.BrokerClientResponseReceived(c.roundTripper, true)
 			m.mutex.Lock()
-			allowanceConsumed := m.selector.replayedByProvider["A"]
+			replayed := m.selector.replayedByProvider["A"]
 			cursorRetained := personal || m.selector.nextBroker == cursor
 			m.mutex.Unlock()
-			if !allowanceConsumed || !cursorRetained {
-				t.Fatal("NoMatch reset replay allowance or broker cursor")
+			if !replayed || !cursorRetained {
+				t.Fatal("NoMatch cleared replayedByProvider or reset the broker cursor")
 			}
 			next := getGateTestClient(t, m)
 			if next.brokerDialParams.isReplay {
-				t.Fatal("NoMatch replenished the consumed A replay allowance")
+				t.Fatal("NoMatch allowed A to be replayed again")
 			}
 			if next.brokerPublicKey == c.brokerPublicKey {
 				t.Fatal("NoMatch failover did not move to the next broker")
