@@ -199,9 +199,6 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		instance.mutex.Lock()
 		dialParams := *instance.brokerDialParams
 		instance.mutex.Unlock()
-		// A reused client is the shared client by definition; a new
-		// client is never shared at acquisition, so isReuse also says
-		// whether the acquisition got the shared client.
 		dialParams.isReuse = reused
 		dialParams.candidateNumber = instance.candidateNumber
 		dialParams.acquireDuration = time.Since(start)
@@ -229,7 +226,7 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 // responses from making it shared again; see clientResponseReceived. Existing
 // callers may continue using it until they release it. It closes when all
 // callers have released it. Replay deletion and TLS session cache removal are
-// handled by the caller. err describes the failure for notices.
+// handled by the caller.
 func (b *InproxyBrokerClientManager) brokerClientFailed(
 	instance *InproxyBrokerClientInstance, err error) {
 	b.mutex.Lock()
@@ -341,13 +338,7 @@ func (b *InproxyBrokerClientManager) tryGetClientBrokerClient(
 
 // takeBrokerClientCounts returns the number of broker clients created and
 // the peak number concurrently tracked since the previous call, and starts a
-// new window. The controller calls it at the end of each establishment,
-// alongside its own per-establishment counters. Reading and resetting under
-// one lock means a client created by a concurrent caller, such as the
-// untunneled DSL fetcher, is counted in exactly one window; the new window's
-// peak starts at the number of clients still tracked, so clients that
-// outlive the window are not forgotten. It is safe to call on a nil
-// receiver, returning zeros.
+// new window. It is safe to call on a nil receiver, returning zeros.
 func (b *InproxyBrokerClientManager) takeBrokerClientCounts() (created, peakConcurrent int) {
 	if b == nil {
 		return 0, 0
@@ -376,12 +367,12 @@ func (b *InproxyBrokerClientManager) brokerClientPrivateKey() (inproxy.SessionPr
 	return b.proxyKey, b.proxyKeyErr
 }
 
-// waitLocked returns the channel an acquisition waits on, creating it if no
-// acquisition has waited since it was last closed. The reason is logged
-// only when the channel is created, so a parked proxy worker, which has no
-// deadline of its own, is visible in the notices once per park event
-// rather than once per worker. The caller must hold b.mutex.
+// waitLocked returns the channel broker client acquisition waits on in the
+// event the max number of broker clients has been reached with no shared
+// client or the search space of the current selection is exhausted. The
+// caller must hold b.mutex.
 func (b *InproxyBrokerClientManager) waitLocked(reasonFormat string, args ...any) <-chan struct{} {
+	// Log once per stall rather than once per waiter.
 	if b.changed == nil {
 		b.changed = make(chan struct{})
 		NoticeInfo(
@@ -396,10 +387,6 @@ func (b *InproxyBrokerClientManager) signalClientChangedLocked() {
 	if b.changed != nil {
 		close(b.changed)
 	}
-	// The next channel is created by waitLocked for the first
-	// tryGetClientBrokerClient call that waits after this change, at the
-	// client limit or at provider exhaustion, so that call can be told
-	// apart from later waiters and log the wait once.
 	b.changed = nil
 }
 
@@ -743,8 +730,7 @@ func inproxyBrokerSupportsProvider(broker *parameters.InproxyBrokerSpec, provide
 //     rotating, so a client has an opportunity to find it.
 //   - A proxy that has advanced away from the first broker returns to it
 //     after InproxyProxyPersonalReturnHomePeriod, so clients, which start
-//     at the first broker, find it there once it is reachable again; see
-//     returnHome.
+//     at the first broker, find it more quickly; see returnHome.
 //
 // inproxyBrokerSelector is not safe for concurrent use.
 type inproxyBrokerSelector struct {
@@ -809,10 +795,8 @@ type inproxyBrokerSelector struct {
 	// Cleared after the next selection.
 	preferBrokerOrder bool
 
-	// The broker whose NoMatch response caused the pending common pairing
-	// failover. The next selection offers elsewhere when the selected
-	// provider has another broker, since supply is per broker, not per
-	// provider. Set with preferBrokerOrder and cleared with it.
+	// The broker whose NoMatch response caused the common pairing
+	// failover.
 	noMatchBroker *parameters.InproxyBrokerSpec
 
 	// Interval after which a personal pairing proxy away from the first
@@ -847,9 +831,7 @@ type inproxyBrokerSelectionState struct {
 	// selection are also marked as tried.
 	tried map[string]bool
 
-	// Why selection moved to this broker, appended to the first broker
-	// client's selected notice and then cleared, so later clients at the
-	// same selection do not repeat it. Empty for the initial selection.
+	// Why selection moved to this broker. Empty for the initial selection.
 	reason string
 }
 
@@ -868,7 +850,6 @@ func (s *inproxyBrokerSelector) reset() {
 	s.nextBrokerByProvider, s.replayedByProvider = nil, nil
 	s.preferBrokerOrder, s.noMatchBroker = false, nil
 	s.currentBrokerSelection = &inproxyBrokerSelectionState{}
-	// returnHomePeriod is re-read by initialize with the broker list.
 	s.returnHomePeriod, s.awayFromHomeSince = 0, time.Time{}
 }
 
@@ -1374,11 +1355,7 @@ type InproxyBrokerClientInstance struct {
 	lastStoreReplay time.Time
 	lastSuccess     time.Time
 	failed          bool
-	// loggedRetry is set once a failure ridden out by the common pairing
-	// proxy retry window has been logged, and cleared by the next success,
-	// so a fast-failing transport logs once per window rather than once
-	// per announce.
-	loggedRetry bool
+	loggedRetry     bool
 }
 
 // inproxyBrokerClientSelection contains the broker and dial parameters for a
@@ -2125,10 +2102,10 @@ func (b *InproxyBrokerClientInstance) DSLRequestTimeout() time.Duration {
 // validate it against their own broker spec, so when their specs for a
 // broker differ, each lookup discards the other's record and the next
 // success replaces it. Concurrent broker clients for the same broker may
-// also overwrite each other. Every stored record succeeded, and selection
-// covers other providers without replay, so overwrites are accepted. A
-// failure deletes the record only if it is still the one this broker client
-// loaded or stored; see replayRecordHash.
+// also overwrite each other. Overwrites are accepted: a record is written
+// only after a successful round trip, so whichever record remains holds
+// parameters that worked. A failure deletes the record only if it is still
+// the one this broker client loaded or stored; see replayRecordHash.
 type InproxyBrokerDialParameters struct {
 	brokerSpec *parameters.InproxyBrokerSpec `json:"-"`
 	isReplay   bool                          `json:"-"`
@@ -2139,12 +2116,11 @@ type InproxyBrokerDialParameters struct {
 	// candidateNumber and acquireDuration are set on the copy returned by
 	// GetBrokerClient and reported as metrics; see GetMetrics.
 	// candidateNumber is the creation ordinal of the broker client within
-	// its InproxyBrokerClientManager's counting window: the client broker
-	// client manager's window is reset by the controller after each
-	// establishment, while the proxy broker client manager's counts for
-	// its lifetime. A shared client reused in a later window keeps the
-	// ordinal of the window it was created in. acquireDuration is the time
-	// the caller waited in GetBrokerClient.
+	// its InproxyBrokerClientManager's counting window; see
+	// takeBrokerClientCounts, which restarts the window. A shared client
+	// reused in a later window keeps the ordinal of the window it was
+	// created in. acquireDuration is the time the caller waited in
+	// GetBrokerClient.
 	candidateNumber int           `json:"-"`
 	acquireDuration time.Duration `json:"-"`
 	// replayRecordHash is the SHA-256 of the stored record bytes this
@@ -2492,8 +2468,7 @@ type InproxyBrokerRoundTripper struct {
 	failureThreshold time.Duration
 
 	// transportEstablished, when set, is invoked once after the initial
-	// DialMeek succeeds, before any request is sent. It is set by
-	// InproxyBrokerClientInstance when transport sharing is enabled.
+	// DialMeek succeeds, before any request is sent.
 	transportEstablished func()
 }
 

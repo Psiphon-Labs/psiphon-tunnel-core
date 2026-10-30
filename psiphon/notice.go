@@ -703,9 +703,6 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			for name, value := range metrics {
 				args = append(args, name, value)
 			}
-			// Diagnostics only: correlates this dial with the broker client
-			// lifecycle notices. Not part of GetInproxyMetrics, which is
-			// also sent to the server.
 			if dialParams.inproxyBrokerDialParameters != nil {
 				args = append(args,
 					"inproxy_broker_client_id",

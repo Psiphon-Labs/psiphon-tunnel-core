@@ -338,12 +338,10 @@ func (b *BrokerClient) roundTrip(
 		failed := std_errors.As(err, &failedError)
 
 		if failed {
-			// Let the coordinator handle replay and broker client reuse. It
-			// need not interrupt other callers using this RoundTripper.
-			//
 			// The session will be closed, if necessary, by InitiatorSessions.
-			// It's possible that the session remains valid and only the
-			// RoundTripper transport layer needs to be reset.
+			// An established session stays valid for callers still using
+			// this BrokerClient, but is not carried over: a broker client
+			// acquired after this failure performs its own Noise handshake.
 			b.coordinator.BrokerClientRoundTripperFailed(roundTripper, failedError)
 		}
 
