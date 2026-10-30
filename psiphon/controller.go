@@ -330,11 +330,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 	//
 	// Using shared broker connections minimizes the overhead of establishing
 	// broker connections at the start of an in-proxy dial or operation.
-	// The manager used for client dials and untunneled DSL closes its shared
-	// broker client after a configured idle timeout, which can be disabled.
-	// The manager used for proxy operations does not expire its shared broker
-	// client when idle. Failures and resets may end sharing in either manager,
-	// and controller shutdown closes all broker clients.
+	// The broker client manager used for client dials and untunneled DSL
+	// closes its shared broker client after a configured idle timeout, which
+	// can be disabled. The broker client manager used for proxy operations
+	// does not expire its shared broker client when idle. Failures and resets
+	// may end sharing in either broker client manager, and controller
+	// shutdown closes all broker clients.
 	//
 	// No network operations are performed by NewInproxyBrokerClientManager or
 	// NewInproxyNATStateManager; each manager operates on demand, when
