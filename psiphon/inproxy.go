@@ -1107,12 +1107,13 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 }
 
 // selectAcrossBrokers selects a broker and fronting provider for common
-// pairing clients by traversing each provider's broker order independently.
-// Replay may jump ahead; otherwise the least occupied provider is selected
-// next. It returns the selected broker spec, the provider ID and, when
-// eligible, the replay dial parameters loaded for that broker and provider,
-// or nil for a fresh dial. It advances the provider's broker cursor before
-// returning.
+// pairing clients. The selector stores a separate starting position in the
+// shuffled broker list for each provider. It first looks for reusable saved
+// dial parameters unless no-match failover skips that search. Otherwise, it
+// chooses the provider with the fewest tracked broker clients and searches
+// from the position stored for that provider for a broker that supports it.
+// It returns the broker spec, provider ID and any saved dial parameters to
+// reuse, or nil for fresh parameters.
 func (s *inproxyBrokerSelector) selectAcrossBrokers(
 	clientsByProvider map[string]int,
 	load func(*parameters.InproxyBrokerSpec) *InproxyBrokerDialParameters,
@@ -1123,6 +1124,9 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 	if len(s.providers) == 0 {
 		return nil, "", nil, errors.TraceNew("no broker fronting providers")
 	}
+	// Start the broker search at the position stored for this provider. If
+	// none is stored, start after the last broker chosen for any provider,
+	// or at the beginning if no broker has been chosen.
 	cursor := func(provider string) int {
 		if next, ok := s.nextBrokerByProvider[provider]; ok {
 			return next
@@ -1131,6 +1135,11 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 	}
 	provider, index := "", -1
 	var replay *InproxyBrokerDialParameters
+	// First look for saved dial parameters we can reuse. Check providers
+	// starting at s.nextProvider; for each eligible provider, search forward
+	// from the position stored for it, wrapping at the end of the broker list.
+	// Take the first matching record. No-match failover skips this search
+	// so a saved record cannot pull us ahead of the next supporting broker.
 	if !s.preferBrokerOrder {
 		for i := 0; i < len(s.providers) && index < 0; i++ {
 			id := s.providers[(s.nextProvider+i)%len(s.providers)]
@@ -1149,7 +1158,12 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 			}
 		}
 	}
+	// No broker was chosen from saved dial parameters, either because none
+	// were eligible or because no-match failover skipped that search.
 	if index < 0 {
+		// Choose the provider with the fewest tracked broker clients across
+		// all brokers. If counts are equal, take the first provider found
+		// when scanning from s.nextProvider and wrapping around the list.
 		minCount := 0
 		for i := range s.providers {
 			id := s.providers[(s.nextProvider+i)%len(s.providers)]
@@ -1157,9 +1171,10 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 				provider, minCount = id, clientsByProvider[id]
 			}
 		}
-		// Take the provider's next broker in order, passing over the
-		// broker that just returned NoMatch unless it is the only one
-		// that supports the provider.
+		// From the position stored for this provider, take the first broker
+		// that supports it, wrapping at the end of the list. Skip the broker
+		// that triggered no-match failover if another supports this provider;
+		// keep it as a fallback if there is no alternative.
 		fallback := -1
 		for i := range specs {
 			k := (cursor(provider) + i) % len(specs)
@@ -1181,12 +1196,18 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 		if index < 0 {
 			return nil, "", nil, errors.TraceNew("no broker for selected fronting provider")
 		}
+		// The broker and provider are now chosen. Reuse their saved dial
+		// parameters if allowed, even when no-match failover skipped the
+		// search above.
 		if canReplay(provider) {
 			if params := load(specs[index]); params != nil && params.FrontedHTTPDialParameters.FrontingProviderID == provider {
 				replay = params
 			}
 		}
 	}
+	// Store the position after the chosen broker for the next search using
+	// this provider, and as the starting point for providers not yet selected.
+	// Leave the positions stored for other providers unchanged.
 	if s.nextBrokerByProvider == nil {
 		s.nextBrokerByProvider = make(map[string]int)
 	}
@@ -1209,16 +1230,16 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 
 	visit := s.currentBrokerSelection
 	if visit.spec == nil {
-		// Common proxies may start at a broker with replay. Personal
-		// pairing must retain its rendezvous order. A visit that follows
-		// an exhaustion advance (index > 0, since common proxies start at
-		// 0 and never return there) does not scan back to the broker it
-		// just left, whose providers all failed; a replay record there
-		// would otherwise pull the proxy straight back when that
-		// provider was not yet marked in replayedByProvider, because
-		// the coin flip chose fresh parameters or another live client
-		// occupied it.
+		// We have not chosen a broker yet. A common proxy can skip ahead to
+		// one with usable saved dial parameters. Personal clients and proxies
+		// follow their shared broker order instead. Once chosen, keep this
+		// broker while trying its providers.
 		if !s.personal && replayEnabled {
+			// Search forward from visit.index, wrapping at the end of the
+			// list. After leaving a broker, stop before reaching it again:
+			// saved parameters should not send us back after trying all its
+			// providers. On the first search, or with only one broker,
+			// consider every broker.
 			scan := len(s.brokers)
 			if visit.index > 0 && scan > 1 {
 				scan--
@@ -1239,6 +1260,7 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 	}
 	providerIndex := -1
 	var replay *InproxyBrokerDialParameters
+	// First look for saved dial parameters we can reuse at this broker.
 	if !s.preferBrokerOrder {
 		for i := range s.providers {
 			candidate := (s.nextProvider + i) % len(s.providers)
@@ -1252,7 +1274,13 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 			}
 		}
 	}
+	// No provider was chosen from saved dial parameters, either because none
+	// were eligible or because no-match failover skipped that search.
 	if providerIndex < 0 {
+		// Of the providers not yet tried at this broker, choose the one
+		// with the fewest tracked broker clients, including those at other
+		// brokers. If counts are equal, take the first provider found when
+		// scanning from s.nextProvider and wrapping around the list.
 		for i := range s.providers {
 			candidate := (s.nextProvider + i) % len(s.providers)
 			id := s.providers[candidate]
@@ -1266,6 +1294,10 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 		if providerIndex < 0 {
 			return nil, "", nil, errors.TraceNew("no untried broker fronting provider")
 		}
+		// Now that we have chosen the broker and provider, reuse their saved
+		// dial parameters if allowed. This is still useful after no-match
+		// failover: saved parameters did not influence our choice, but can
+		// help us connect.
 		id := s.providers[providerIndex]
 		if canReplay(id) {
 			if params := load(visit.spec); params != nil && params.FrontedHTTPDialParameters.FrontingProviderID == id {
@@ -1286,17 +1318,8 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 // associated, underlying broker dial parameters. InproxyBrokerClientInstance
 // implements broker client dial replay.
 type InproxyBrokerClientInstance struct {
-	// The fields above mutex are set before the broker client is returned by
-	// GetBrokerClient and are read without InproxyBrokerClientInstance.mutex.
-	// candidateNumber is assigned by InproxyBrokerClientManager, under its
-	// mutex, when it registers the broker client; the rest are set at
-	// construction.
-	frontingProviderID string
-	// brokerClientID is a random identifier for diagnostics.
-	brokerClientID string
-	// candidateNumber is the creation ordinal within the
-	// InproxyBrokerClientManager counting window; see
-	// InproxyBrokerDialParameters.candidateNumber.
+	frontingProviderID            string
+	brokerClientID                string
 	candidateNumber               int
 	brokerSelection               *inproxyBrokerSelectionState
 	config                        *Config
@@ -1413,7 +1436,6 @@ func newInproxyBrokerClientInstance(
 	// so that round trip failure notices can report it.
 	brokerDialParams.brokerClientID = prng.HexString(4)
 
-	// The broker ID is the broker's session public key in Curve25519 form.
 	brokerID, err := brokerPublicKey.ToCurve25519()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -2091,14 +2113,12 @@ type InproxyBrokerDialParameters struct {
 	// brokerClientID identifies the InproxyBrokerClientInstance that
 	// supplied this copy; see GetBrokerClient. Only used for diagnostics.
 	brokerClientID string `json:"-"`
-	// candidateNumber and acquireDuration are set on the copy returned by
-	// GetBrokerClient and reported as metrics; see GetMetrics.
 	// candidateNumber is the creation ordinal of the broker client within
 	// its InproxyBrokerClientManager's count, which restarts at each
 	// takeBrokerClientCounts call. A shared client reused after a restart
-	// keeps the ordinal it was created with. acquireDuration is the time
-	// the caller waited in GetBrokerClient.
-	candidateNumber int           `json:"-"`
+	// keeps the ordinal it was created with.
+	candidateNumber int `json:"-"`
+	// acquireDuration is the time the caller waited in GetBrokerClient.
 	acquireDuration time.Duration `json:"-"`
 	// replayRecordHash is the SHA-256 of the stored record bytes this
 	// broker client loaded or stored, used to check for changes before
