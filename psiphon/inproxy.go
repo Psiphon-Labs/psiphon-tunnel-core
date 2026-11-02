@@ -542,9 +542,9 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 // client is shared and instance belongs to the current broker selection,
 // so other callers reuse the transport before the first broker response.
 // Failed clients and clients from earlier selections are not shared, as in
-// clientResponseReceived. A later ordinary decoded response on a client
-// shared here finds it already shared and changes nothing; a retryable
-// NoMatch still applies the failover policy and may close it.
+// clientResponseReceived. A later decoded response that is not a retryable
+// no match leaves the existing shared client unchanged. A retryable no match
+// still applies the failover policy and may close it.
 func (b *InproxyBrokerClientManager) clientTransportEstablished(
 	instance *InproxyBrokerClientInstance) {
 	b.mutex.Lock()
@@ -1049,9 +1049,9 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 				"advanced after %d providers tried", len(visit.tried)))
 		}
 	}
-	counts := make(map[string]int)
+	clientsByProvider := make(map[string]int)
 	for _, c := range live {
-		counts[c.frontingProviderID]++
+		clientsByProvider[c.frontingProviderID]++
 	}
 	ttl := p.Duration(parameters.InproxyReplayBrokerDialParametersTTL)
 	replayEnabled := ttl > 0 && !config.DisableReplay && p.WeightedCoinFlip(parameters.InproxyReplayBrokerDialParametersProbability)
@@ -1068,16 +1068,16 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 		return params
 	}
 	canReplay := func(provider string) bool {
-		return replayEnabled && counts[provider] == 0 && !s.replayedByProvider[provider] && (!s.exhaustBrokerProviders || !s.currentBrokerSelection.tried[provider])
+		return replayEnabled && clientsByProvider[provider] == 0 && !s.replayedByProvider[provider] && (!s.exhaustBrokerProviders || !s.currentBrokerSelection.tried[provider])
 	}
 	var spec *parameters.InproxyBrokerSpec
 	var provider string
 	var replay *InproxyBrokerDialParameters
 	var err error
 	if s.exhaustBrokerProviders {
-		spec, provider, replay, err = s.selectAtCurrentBroker(counts, load, canReplay, replayEnabled)
+		spec, provider, replay, err = s.selectAtCurrentBroker(clientsByProvider, load, canReplay, replayEnabled)
 	} else {
-		spec, provider, replay, err = s.selectAcrossBrokers(counts, load, canReplay)
+		spec, provider, replay, err = s.selectAcrossBrokers(clientsByProvider, load, canReplay)
 	}
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1114,7 +1114,7 @@ func (s *inproxyBrokerSelector) selectClient(config *Config, p parameters.Parame
 // or nil for a fresh dial. It advances the provider's broker cursor before
 // returning.
 func (s *inproxyBrokerSelector) selectAcrossBrokers(
-	counts map[string]int,
+	clientsByProvider map[string]int,
 	load func(*parameters.InproxyBrokerSpec) *InproxyBrokerDialParameters,
 	canReplay func(string) bool) (*parameters.InproxyBrokerSpec, string, *InproxyBrokerDialParameters, error) {
 
@@ -1153,8 +1153,8 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 		minCount := 0
 		for i := range s.providers {
 			id := s.providers[(s.nextProvider+i)%len(s.providers)]
-			if i == 0 || counts[id] < minCount {
-				provider, minCount = id, counts[id]
+			if i == 0 || clientsByProvider[id] < minCount {
+				provider, minCount = id, clientsByProvider[id]
 			}
 		}
 		// Take the provider's next broker in order, passing over the
@@ -1202,7 +1202,7 @@ func (s *inproxyBrokerSelector) selectAcrossBrokers(
 // broker and provider, or nil for a fresh dial. It marks the provider as
 // tried before returning.
 func (s *inproxyBrokerSelector) selectAtCurrentBroker(
-	counts map[string]int,
+	clientsByProvider map[string]int,
 	load func(*parameters.InproxyBrokerSpec) *InproxyBrokerDialParameters,
 	canReplay func(string) bool,
 	replayEnabled bool) (*parameters.InproxyBrokerSpec, string, *InproxyBrokerDialParameters, error) {
@@ -1259,7 +1259,7 @@ func (s *inproxyBrokerSelector) selectAtCurrentBroker(
 			if visit.tried[id] {
 				continue
 			}
-			if providerIndex < 0 || counts[id] < counts[s.providers[providerIndex]] {
+			if providerIndex < 0 || clientsByProvider[id] < clientsByProvider[s.providers[providerIndex]] {
 				providerIndex = candidate
 			}
 		}
