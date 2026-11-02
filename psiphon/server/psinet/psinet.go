@@ -98,6 +98,7 @@ func NewDatabase(filename string) (*Database, error) {
 	database := &Database{}
 
 	database.ReloadableFile = common.NewReloadableFile(
+		"psinet-database",
 		filename,
 		true,
 		func(fileContent []byte, fileModTime time.Time) error {

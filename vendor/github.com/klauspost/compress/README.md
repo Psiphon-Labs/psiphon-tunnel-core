@@ -6,8 +6,10 @@ This package provides various compression algorithms.
 * [S2](https://github.com/klauspost/compress/tree/master/s2#s2-compression) is a high performance replacement for Snappy.
 * Optimized [deflate](https://godoc.org/github.com/klauspost/compress/flate) packages which can be used as a dropin replacement for [gzip](https://godoc.org/github.com/klauspost/compress/gzip), [zip](https://godoc.org/github.com/klauspost/compress/zip) and [zlib](https://godoc.org/github.com/klauspost/compress/zlib).
 * [snappy](https://github.com/klauspost/compress/tree/master/snappy) is a drop-in replacement for `github.com/golang/snappy` offering better compression and concurrent streams.
+* [lzw](https://github.com/klauspost/compress/tree/master/lzw) is a drop-in replacement for `compress/lzw` with 1.4-4x faster decompression and 1.1-2.7x faster compression, depending on the data.
 * [huff0](https://github.com/klauspost/compress/tree/master/huff0) and [FSE](https://github.com/klauspost/compress/tree/master/fse) implementations for raw entropy encoding.
-* [gzhttp](https://github.com/klauspost/compress/tree/master/gzhttp) Provides client and server wrappers for handling gzipped requests efficiently.
+* [Xpress](https://github.com/klauspost/compress/tree/master/xpress) decompression of the Microsoft XPRESS (MS-XCA) plain LZ77 and LZ77+Huffman formats (the LZ77+Huffman variant is the one used in WIM images and Windows Compact OS / WOF data).
+* [gzhttp](https://github.com/klauspost/compress/tree/master/gzhttp) Provides client and server wrappers for handling gzipped/zstd HTTP requests efficiently.
 * [pgzip](https://github.com/klauspost/pgzip) is a separate package that provides a very fast parallel gzip implementation.
 
 [![Go Reference](https://pkg.go.dev/badge/klauspost/compress.svg)](https://pkg.go.dev/github.com/klauspost/compress?tab=subdirectories)
@@ -27,6 +29,89 @@ Use the links above for more information on each.
 
 # changelog
 
+* Sep 25th, 2026 [1.20.1](https://github.com/klauspost/compress/releases/tag/v1.20.1)
+	* zstd: Apply reset options to reused frame decoders by @pellared in https://github.com/klauspost/compress/pull/1226
+	* flate: Report unexpected EOF for truncated Huffman extra bits by @rupayon123 in https://github.com/klauspost/compress/pull/1229
+	* flate: Avoid FMA in EstimatedBits for portable rounding by @malt3 in https://github.com/klauspost/compress/pull/1224
+	* gzhttp: Preserve caller request headers in Transport by @jakezwang in https://github.com/klauspost/compress/pull/1225
+	* gzhttp: Only decompress a request when gzip is the outermost coding by @youdie006 in https://github.com/klauspost/compress/pull/1223
+	* zstd/huff0: Optimizations by @lizthegrey in https://github.com/klauspost/compress/pull/1203 https://github.com/klauspost/compress/pull/1205 https://github.com/klauspost/compress/pull/1207 https://github.com/klauspost/compress/pull/1204 https://github.com/klauspost/compress/pull/1208 https://github.com/klauspost/compress/pull/1211 https://github.com/klauspost/compress/pull/1209 https://github.com/klauspost/compress/pull/1210
+	* flate: Speed improvements by @alex in https://github.com/klauspost/compress/pull/1220 https://github.com/klauspost/compress/pull/1218 https://github.com/klauspost/compress/pull/1216 https://github.com/klauspost/compress/pull/1215 https://github.com/klauspost/compress/pull/1214 https://github.com/klauspost/compress/pull/1217
+
+* Sep 2nd, 2026 [1.20.0](https://github.com/klauspost/compress/releases/tag/v1.20.0)
+	* lzw: Add lzw reader/writer in https://github.com/klauspost/compress/pull/1189
+	* xpress: Add Microsoft XPRESS (MS-XCA) decompression by @MP-GOWTHAM in https://github.com/klauspost/compress/pull/1195
+	* s2: arm64 assembly encoders by @lizthegrey in https://github.com/klauspost/compress/pull/1187
+	* zstd, huff0: Improved arm64 assembly by @lizthegrey in https://github.com/klauspost/compress/pull/1175 https://github.com/klauspost/compress/pull/1199 https://github.com/klauspost/compress/pull/1197
+	* flate: Writer L7-9 with dictionary can emit the dictionary to stream in https://github.com/klauspost/compress/pull/1201
+	* gzhttp: Limit jitter hash to jitterBuffer bytes by @VedantMadane in https://github.com/klauspost/compress/pull/1192
+	* s2: Clamp the Go EncodeBetter skip to match the assembly by @lizthegrey in https://github.com/klauspost/compress/pull/1190
+	* xxhash: Bound input of non-preemptive assembly by @AskAlexSharov in https://github.com/klauspost/compress/pull/1196
+
+* Aug 6th, 2026 [1.19.2](https://github.com/klauspost/compress/releases/tag/v1.19.2)
+	* huff0: Add arm64 assembly for Decompress4X/1X by @lizthegrey in https://github.com/klauspost/compress/pull/1172
+	* zstd: Re-enable unsafe decodeSync memory copies by @lizthegrey in https://github.com/klauspost/compress/pull/1171
+	* zstd: Fix arm64 asm frame offsets placing locals on the saved LR slot by @lizthegrey in https://github.com/klauspost/compress/pull/1176
+	* zstd: Avoid racing MaxDecodedSize write on shared dict litEnc by @zanarellidev in https://github.com/klauspost/compress/pull/1182
+	* zstd: Keep BuildDict recent-offsets positive and loadable by @zanarellidev in https://github.com/klauspost/compress/pull/1184
+	* zstd: Handle zero-literal BuildDict corpus by @cyphercodes in https://github.com/klauspost/compress/pull/1178
+	* zstd: Don't clear the registered dictionary when decoding past the window by @sueun-dev in https://github.com/klauspost/compress/pull/1177
+
+* Jul 20th, 2026 [1.19.1](https://github.com/klauspost/compress/releases/tag/v1.19.1)
+	* zstd: Validate SnappyConverter literal copies in https://github.com/klauspost/compress/pull/1170
+	* flate: Use `Peek` instead of `ReadByte` for the `bufio.Reader` decode path by @joechenrh in https://github.com/klauspost/compress/pull/1169
+	* zstd: Bump avo pin, regenerate arm64 asm by @lizthegrey in https://github.com/klauspost/compress/pull/1167
+
+* Jul 1st, 2026 [1.19.0](https://github.com/klauspost/compress/releases/tag/v1.19.0)
+	* zstd: Add true concurrent stream encoding in https://github.com/klauspost/compress/pull/1136
+	* zstd: arm64 decoder asm by @lizthegrey in https://github.com/klauspost/compress/pull/1160
+	* flate: Add inflate checkpoints in https://github.com/klauspost/compress/pull/1154
+	* zstd: avoid unused BuildDict encoder allocation by @snissn in https://github.com/klauspost/compress/pull/1147
+	* snappy/s2: Limit length of varint in `decodedLen` by @eustas in https://github.com/klauspost/compress/pull/1148
+	* gzhttp: match qvalue parameter case-insensitively (RFC 7231) by @z9z in https://github.com/klauspost/compress/pull/1149
+	* zip: add NameDecoder callback for legacy encoding rewrite by @SAY-5 in https://github.com/klauspost/compress/pull/1150
+	* huff0: Allow building tables from histogram in https://github.com/klauspost/compress/pull/1155
+	* huff0: Allow building table from oversized histogram in https://github.com/klauspost/compress/pull/1156
+	* s2sx: Clean symlink targets in https://github.com/klauspost/compress/pull/1163
+
+<details>
+	<summary>See changes to v1.18.x</summary>
+
+* Jun 30th, 2026 [1.18.7](https://github.com/klauspost/compress/releases/tag/v1.18.7)
+	* s2: Fix `NewDict` out-of-bounds read. Security release without other changes.
+
+* Apr 30th, 2026 [1.18.6](https://github.com/klauspost/compress/releases/tag/v1.18.6)
+	* s2: Fix amd64 stack frame corruption in https://github.com/klauspost/compress/pull/1145
+	* gzhttp: Canonicalize ETag header by @justinmayhew in https://github.com/klauspost/compress/pull/1139
+	* Pool hash tables in Go encode paths to reduce allocations by @huynhanx03 in https://github.com/klauspost/compress/pull/1143
+
+* Mar 20th, 2026 [1.18.5](https://github.com/klauspost/compress/releases/tag/v1.18.5)
+	* zstd: Fix crash when changing encoder dictionary with same ID in https://github.com/klauspost/compress/pull/1135
+	* zstd: Default to full zero frames in https://github.com/klauspost/compress/pull/1134
+	* flate: Clean up histogram order in https://github.com/klauspost/compress/pull/1133
+
+* Feb 9th, 2026 [1.18.4](https://github.com/klauspost/compress/releases/tag/v1.18.4)
+	* gzhttp: Add zstandard to server handler wrapper https://github.com/klauspost/compress/pull/1121
+	* zstd: Add ResetWithOptions to encoder/decoder https://github.com/klauspost/compress/pull/1122
+	* gzhttp: preserve qvalue when extra parameters follow in Accept-Encoding by @analytically in https://github.com/klauspost/compress/pull/1116
+
+* Jan 16th, 2026 [1.18.3](https://github.com/klauspost/compress/releases/tag/v1.18.3)
+	* Downstream CVE-2025-61728. See [golang/go#77102](https://github.com/golang/go/issues/77102).
+
+* Dec 1st, 2025 - [1.18.2](https://github.com/klauspost/compress/releases/tag/v1.18.2)
+	* flate: Fix invalid encoding on level 9 with single value input in https://github.com/klauspost/compress/pull/1115
+	* flate: reduce stateless allocations by @RXamzin in https://github.com/klauspost/compress/pull/1106
+
+* Oct 20, 2025 - [1.18.1](https://github.com/klauspost/compress/releases/tag/v1.18.1) - RETRACTED
+  * zstd: Add simple zstd EncodeTo/DecodeTo functions  https://github.com/klauspost/compress/pull/1079
+  * zstd: Fix incorrect buffer size in dictionary encodes https://github.com/klauspost/compress/pull/1059
+  * s2: check for cap, not len of buffer in EncodeBetter/Best by @vdarulis in https://github.com/klauspost/compress/pull/1080
+  * zlib: Avoiding extra allocation in zlib.reader.Reset by @travelpolicy in https://github.com/klauspost/compress/pull/1086
+  * gzhttp: remove redundant err check in zstdReader by @ryanfowler in https://github.com/klauspost/compress/pull/1090
+  * flate: Faster load+store https://github.com/klauspost/compress/pull/1104
+  * flate: Simplify matchlen https://github.com/klauspost/compress/pull/1101
+  * flate: Use exact sizes for huffman tables https://github.com/klauspost/compress/pull/1103
+
 * Feb 19th, 2025 - [1.18.0](https://github.com/klauspost/compress/releases/tag/v1.18.0)
   * Add unsafe little endian loaders https://github.com/klauspost/compress/pull/1036
   * fix: check `r.err != nil` but return a nil value error `err` by @alingse in https://github.com/klauspost/compress/pull/1028
@@ -35,6 +120,11 @@ Use the links above for more information on each.
   * s2: Improve small block compression speed w/o asm https://github.com/klauspost/compress/pull/1048
   * flate: Fix matchlen L5+L6 https://github.com/klauspost/compress/pull/1049
   * flate: Cleanup & reduce casts https://github.com/klauspost/compress/pull/1050
+
+</details>
+
+<details>
+	<summary>See changes to v1.17.x</summary>
 
 * Oct 11th, 2024 - [1.17.11](https://github.com/klauspost/compress/releases/tag/v1.17.11)
   * zstd: Fix extra CRC written with multiple Close calls https://github.com/klauspost/compress/pull/1017
@@ -102,7 +192,8 @@ https://github.com/klauspost/compress/pull/919 https://github.com/klauspost/comp
 	* s2: Do 2 overlapping match checks https://github.com/klauspost/compress/pull/839
 	* flate: Add amd64 assembly matchlen https://github.com/klauspost/compress/pull/837
 	* gzip: Copy bufio.Reader on Reset by @thatguystone in https://github.com/klauspost/compress/pull/860
-
+   
+</details>
 <details>
 	<summary>See changes to v1.16.x</summary>
 
@@ -589,7 +680,7 @@ While the release has been extensively tested, it is recommended to testing when
 
 # deflate usage
 
-The packages are drop-in replacements for standard libraries. Simply replace the import path to use them:
+The packages are drop-in replacements for standard library [deflate](https://godoc.org/github.com/klauspost/compress/flate), [gzip](https://godoc.org/github.com/klauspost/compress/gzip), [zip](https://godoc.org/github.com/klauspost/compress/zip), and [zlib](https://godoc.org/github.com/klauspost/compress/zlib). Simply replace the import path to use them:
 
 Typical speed is about 2x of the standard library packages.
 
@@ -600,17 +691,15 @@ Typical speed is about 2x of the standard library packages.
 | `archive/zip`    | `github.com/klauspost/compress/zip`   | [zip](https://pkg.go.dev/github.com/klauspost/compress/zip?tab=doc)     |
 | `compress/flate` | `github.com/klauspost/compress/flate` | [flate](https://pkg.go.dev/github.com/klauspost/compress/flate?tab=doc) |
 
-* Optimized [deflate](https://godoc.org/github.com/klauspost/compress/flate) packages which can be used as a dropin replacement for [gzip](https://godoc.org/github.com/klauspost/compress/gzip), [zip](https://godoc.org/github.com/klauspost/compress/zip) and [zlib](https://godoc.org/github.com/klauspost/compress/zlib).
+You may also be interested in [pgzip](https://github.com/klauspost/pgzip), which is a drop-in replacement for gzip, which support multithreaded compression on big files and the optimized [crc32](https://github.com/klauspost/crc32) package used by these packages.
 
-You may also be interested in [pgzip](https://github.com/klauspost/pgzip), which is a drop in replacement for gzip, which support multithreaded compression on big files and the optimized [crc32](https://github.com/klauspost/crc32) package used by these packages.
-
-The packages contains the same as the standard library, so you can use the godoc for that: [gzip](http://golang.org/pkg/compress/gzip/), [zip](http://golang.org/pkg/archive/zip/),  [zlib](http://golang.org/pkg/compress/zlib/), [flate](http://golang.org/pkg/compress/flate/).
+The packages implement the same API as the standard library, so you can use the original godoc documentation: [gzip](http://golang.org/pkg/compress/gzip/), [zip](http://golang.org/pkg/archive/zip/), [zlib](http://golang.org/pkg/compress/zlib/), [flate](http://golang.org/pkg/compress/flate/).
 
 Currently there is only minor speedup on decompression (mostly CRC32 calculation).
 
 Memory usage is typically 1MB for a Writer. stdlib is in the same range. 
 If you expect to have a lot of concurrently allocated Writers consider using 
-the stateless compress described below.
+the stateless compression described below.
 
 For compression performance, see: [this spreadsheet](https://docs.google.com/spreadsheets/d/1nuNE2nPfuINCZJRMt6wFWhKpToF95I47XjSsc-1rbPQ/edit?usp=sharing).
 
@@ -669,3 +758,8 @@ Here are other packages of good quality and pure Go (no cgo wrappers or autoconv
 # license
 
 This code is licensed under the same conditions as the original Go code. See LICENSE file.
+
+
+
+
+

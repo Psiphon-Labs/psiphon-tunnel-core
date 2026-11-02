@@ -43,26 +43,22 @@ type Reloader interface {
 	// when reloading fails the Reloader should revert to its previous in-memory
 	// state.
 	//
-	// Reload returns per-file results containing hashes and all errors; use
-	// ReloadResults.Err to check for failure. Post actions run in order after
-	// a successful reload, outside data locks; their failures do not revert
-	// loaded state or clear Reloaded. Reload must not be called concurrently.
+	// Reload returns per-file results containing names, paths, hashes, and all
+	// errors; use ReloadResults.Err to check for failure. Post actions run in
+	// order after a successful reload, outside data locks; their failures do not
+	// revert loaded state or clear Reloaded. Reload must not be called concurrently.
+	//
+	// Reload returns an empty result list when no reloadable file is configured.
 	Reload(postActions ...func() error) ReloadResults
-
-	// WillReload indicates if the data object is capable of reloading.
-	WillReload() bool
-
-	// ReloadLogDescription returns a description to be used for logging
-	// events related to the Reloader.
-	ReloadLogDescription() string
 }
 
 // ReloadResult describes one file observed during a reload attempt.
 type ReloadResult struct {
-	Description string
-	Reloaded    bool
-	HashSHA256  string
-	Errors      []error
+	Name       string
+	FilePath   string
+	Reloaded   bool
+	HashSHA256 string
+	Errors     []error
 }
 
 // ReloadResults is the set of per-file results from one Reload call.
@@ -102,14 +98,16 @@ func (results ReloadResults) Reloaded() bool {
 // a reload fails.
 type ReloadableFile struct {
 	sync.RWMutex
-	filename        string
+	reloadName      string
+	filePath        string
 	loadFileContent bool
 	hasLoaded       bool
 	fileHash        [sha256.Size]byte
 	reloadAction    func([]byte, time.Time) error
 }
 
-// NewReloadableFile initializes a new ReloadableFile.
+// NewReloadableFile initializes a new ReloadableFile. reloadName is the short
+// name used in reload results and related logs.
 //
 // When loadFileContent is true, the file content is loaded and passed to
 // reloadAction; otherwise, reloadAction receives a nil argument and is
@@ -119,21 +117,17 @@ type ReloadableFile struct {
 // The returned ReloadableFile contains a sync.RWMutex and must not be copied
 // after first use.
 func NewReloadableFile(
-	filename string,
+	reloadName string,
+	filePath string,
 	loadFileContent bool,
 	reloadAction func([]byte, time.Time) error) ReloadableFile {
 
 	return ReloadableFile{
-		filename:        filename,
+		reloadName:      reloadName,
+		filePath:        filePath,
 		loadFileContent: loadFileContent,
 		reloadAction:    reloadAction,
 	}
-}
-
-// WillReload indicates whether the ReloadableFile is capable
-// of reloading.
-func (reloadable *ReloadableFile) WillReload() bool {
-	return reloadable.filename != ""
 }
 
 // Reload checks if the underlying file has changed and, when changed, invokes
@@ -153,11 +147,14 @@ func (reloadable *ReloadableFile) WillReload() bool {
 // Reload must not be called from multiple concurrent goroutines.
 func (reloadable *ReloadableFile) Reload(postActions ...func() error) ReloadResults {
 
-	if !reloadable.WillReload() {
+	if reloadable.filePath == "" {
 		return nil
 	}
 
-	result := ReloadResult{Description: reloadable.ReloadLogDescription()}
+	result := ReloadResult{
+		Name:     reloadable.reloadName,
+		FilePath: reloadable.filePath,
+	}
 	err := reloadable.reload(&result)
 	if err != nil {
 		result.Errors = append(result.Errors, err)
@@ -178,20 +175,20 @@ func (reloadable *ReloadableFile) reload(result *ReloadResult) error {
 	// Check whether the file has changed _before_ blocking readers
 
 	reloadable.RLock()
-	filename := reloadable.filename
+	filePath := reloadable.filePath
 	hasLoaded := reloadable.hasLoaded
 	previousFileHash := reloadable.fileHash
 	reloadable.RUnlock()
 
 	// Record the file modification time _before_ loading, as reload actions will
 	// assume that the content is at least as fresh as the modification time.
-	fileInfo, err := os.Stat(filename)
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	fileModTime := fileInfo.ModTime()
 
-	file, err := os.Open(filename)
+	file, err := os.Open(filePath)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -247,8 +244,4 @@ func (reloadable *ReloadableFile) reload(result *ReloadResult) error {
 	result.Reloaded = true
 
 	return nil
-}
-
-func (reloadable *ReloadableFile) ReloadLogDescription() string {
-	return reloadable.filename
 }

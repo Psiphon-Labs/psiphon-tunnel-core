@@ -23,10 +23,11 @@ const (
 
 type ConfigReload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Description   *string                `protobuf:"bytes,100,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	FilePath      *string                `protobuf:"bytes,100,opt,name=file_path,json=filePath,proto3,oneof" json:"file_path,omitempty"`
 	Reloaded      *bool                  `protobuf:"varint,101,opt,name=reloaded,proto3,oneof" json:"reloaded,omitempty"`
 	Errors        []string               `protobuf:"bytes,102,rep,name=errors,proto3" json:"errors,omitempty"`
 	HashSha256    *string                `protobuf:"bytes,103,opt,name=hash_sha256,json=hashSha256,proto3,oneof" json:"hash_sha256,omitempty"`
+	Name          *string                `protobuf:"bytes,104,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -61,9 +62,9 @@ func (*ConfigReload) Descriptor() ([]byte, []int) {
 	return file_ca_psiphon_psiphond_config_reload_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ConfigReload) GetDescription() string {
-	if x != nil && x.Description != nil {
-		return *x.Description
+func (x *ConfigReload) GetFilePath() string {
+	if x != nil && x.FilePath != nil {
+		return *x.FilePath
 	}
 	return ""
 }
@@ -89,20 +90,30 @@ func (x *ConfigReload) GetHashSha256() string {
 	return ""
 }
 
+func (x *ConfigReload) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_config_reload_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_config_reload_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/config_reload.proto\x12\x13ca.psiphon.psiphond\"\xc1\x01\n" +
-	"\fConfigReload\x12%\n" +
-	"\vdescription\x18d \x01(\tH\x00R\vdescription\x88\x01\x01\x12\x1f\n" +
+	"'ca.psiphon.psiphond/config_reload.proto\x12\x13ca.psiphon.psiphond\"\xdc\x01\n" +
+	"\fConfigReload\x12 \n" +
+	"\tfile_path\x18d \x01(\tH\x00R\bfilePath\x88\x01\x01\x12\x1f\n" +
 	"\breloaded\x18e \x01(\bH\x01R\breloaded\x88\x01\x01\x12\x16\n" +
 	"\x06errors\x18f \x03(\tR\x06errors\x12$\n" +
 	"\vhash_sha256\x18g \x01(\tH\x02R\n" +
-	"hashSha256\x88\x01\x01B\x0e\n" +
-	"\f_descriptionB\v\n" +
+	"hashSha256\x88\x01\x01\x12\x17\n" +
+	"\x04name\x18h \x01(\tH\x03R\x04name\x88\x01\x01B\f\n" +
+	"\n" +
+	"_file_pathB\v\n" +
 	"\t_reloadedB\x0e\n" +
-	"\f_hash_sha256BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\f_hash_sha256B\a\n" +
+	"\x05_nameBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_config_reload_proto_rawDescOnce sync.Once

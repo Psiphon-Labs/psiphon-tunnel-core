@@ -7,8 +7,9 @@ option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/
 message ConfigReload {
     // Fields 1-99 are reserved for field groupings.
 
-    optional string description = 100;
+    optional string file_path = 100;
     optional bool reloaded = 101;
     repeated string errors = 102;
     optional string hash_sha256 = 103;
+    optional string name = 104;
 }

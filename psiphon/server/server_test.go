@@ -1707,6 +1707,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				runConfig.doProxyProtocolHeader)
 		}
 
+		expectedReloadNames := map[string]string{
+			trafficRulesFilename:      "traffic-rules-config",
+			oslConfigFilename:         "osl-config",
+			psinetFilename:            "psinet-database",
+			tacticsConfigFilename:     "tactics-config",
+			blocklistFilename:         "blocklist",
+			geoIPCityDatabaseFilename: "geoip2-city-database",
+			geoIPISPDatabaseFilename:  "geoip2-isp-database",
+			relayFilenames[0]:         "dsl-ca-certificates",
+			relayFilenames[1]:         "dsl-host-certificate",
+			relayFilenames[2]:         "dsl-host-key",
+		}
+
 		reload := func(changed []string, tlsError bool) {
 			t.Helper()
 			expectedHashes := make(map[string]string)
@@ -1730,9 +1743,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			for range reloadFilenames {
 				select {
 				case fields := <-configReloadLog:
-					filename, _ := fields["description"].(string)
+					filename, _ := fields["file_path"].(string)
 					hash, ok := expectedHashes[filename]
-					if !ok || fields["hash_sha256"] != hash || fields["reloaded"] != slices.Contains(changed, filename) {
+					if !ok || fields["name"] != expectedReloadNames[filename] ||
+						fields["hash_sha256"] != hash || fields["reloaded"] != slices.Contains(changed, filename) {
 						t.Fatalf("unexpected config_reload: %+v", fields)
 					}
 					reloadErrors, ok := fields["errors"].([]interface{})

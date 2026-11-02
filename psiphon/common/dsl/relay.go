@@ -120,9 +120,12 @@ func NewRelay(config *RelayConfig) (*Relay, error) {
 	relay := &Relay{
 		config: config,
 
-		caCertificatesFile:  common.NewReloadableFile(config.CACertificatesFilename, false, nil),
-		hostCertificateFile: common.NewReloadableFile(config.HostCertificateFilename, false, nil),
-		hostKeyFile:         common.NewReloadableFile(config.HostKeyFilename, false, nil),
+		caCertificatesFile: common.NewReloadableFile(
+			"dsl-ca-certificates", config.CACertificatesFilename, false, nil),
+		hostCertificateFile: common.NewReloadableFile(
+			"dsl-host-certificate", config.HostCertificateFilename, false, nil),
+		hostKeyFile: common.NewReloadableFile(
+			"dsl-host-key", config.HostKeyFilename, false, nil),
 
 		tlsSessionCache: tls.NewLRUClientSessionCache(0),
 	}
@@ -279,16 +282,6 @@ func (r *Relay) reloadTLS() error {
 	}
 
 	return nil
-}
-
-// WillReload implements the common.Reloader interface.
-func (r *Relay) WillReload() bool {
-	return true
-}
-
-// ReloadLogDescription implements the common.Reloader interface.
-func (r *Relay) ReloadLogDescription() string {
-	return "DSL Relay TLS configuration"
 }
 
 // SetRequestParameters updates the HTTP request parameters used for upstream
