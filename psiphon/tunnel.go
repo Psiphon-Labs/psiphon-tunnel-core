@@ -223,13 +223,13 @@ func (tunnel *Tunnel) Activate(
 	// being closed under this tunnel is not attributed to the server entry.
 	// Here that can only surface through the broker/server relay, whose
 	// error is consumed by the relay handler below rather than returned, so
-	// the handler records it in relayClosedErr; the handler goroutine is
+	// the handler records it in brokerClientClosedErr; the handler goroutine is
 	// joined before this function returns.
 	activationSucceeded := false
 	baseCtx := ctx
-	var relayClosedErr error
+	var brokerClientClosedErr error
 	defer func() {
-		if !activationSucceeded && relayClosedErr == nil &&
+		if !activationSucceeded && brokerClientClosedErr == nil &&
 			isServerEntryFailure(baseCtx, retErr) {
 			tunnel.dialParams.Failed(tunnel.config, retErr)
 			if tunnel.extraFailureAction != nil {
@@ -319,7 +319,7 @@ func (tunnel *Tunnel) Activate(
 							if err != nil {
 								var closedErr *inproxyBrokerClientClosedError
 								if std_errors.As(err, &closedErr) {
-									relayClosedErr = err
+									brokerClientClosedErr = err
 								}
 								NoticeWarning(
 									"relay inproxy broker packets failed: %v",
