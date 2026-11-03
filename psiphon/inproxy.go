@@ -432,9 +432,6 @@ func (b *InproxyBrokerClientManager) startSharedIdleTimerLocked(instance *Inprox
 		b.expireSharedClientLocked(instance, timer)
 	})
 	b.sharedIdleTimer = timer
-	NoticeInfo(
-		"inproxy: broker client %s idle timer armed: %s",
-		instance.brokerClientID, timeout)
 }
 
 // expireSharedClientLocked is the idle timer callback. It closes instance
@@ -519,9 +516,6 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 			b.closeClientLocked(instance, "no match failover")
 			return
 		}
-		NoticeInfo(
-			"inproxy: broker client %s no match: retained",
-			instance.brokerClientID)
 	}
 	if b.sharedClient != nil {
 		// Keep the existing shared client. Both clients may still be in use.
@@ -532,7 +526,6 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 		b.startSharedIdleTimerLocked(instance)
 	}
 	b.signalClientChangedLocked()
-	NoticeInfo("inproxy: broker client %s shared", instance.brokerClientID)
 }
 
 // clientTransportEstablished is called when instance's TLS transport is
@@ -557,7 +550,6 @@ func (b *InproxyBrokerClientManager) clientTransportEstablished(
 		b.startSharedIdleTimerLocked(instance)
 	}
 	b.signalClientChangedLocked()
-	NoticeInfo("inproxy: broker client %s shared transport", instance.brokerClientID)
 }
 
 // closeAllClientsLocked closes every tracked client, even those still held
@@ -1877,9 +1869,6 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 			// Continue without persisting replay changes.
 		} else {
 			b.lastStoreReplay = now
-			NoticeInfo(
-				"inproxy: broker client %s stored replay for provider %s",
-				b.brokerClientID, b.frontingProviderID)
 		}
 	}
 
@@ -1975,24 +1964,14 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(
 
 	// Delete stored replay dial parameters unless selected for retention.
 
-	if b.replayEnabled {
-		if prng.FlipWeightedCoin(b.replayRetainFailedProbability) {
-			NoticeInfo(
-				"inproxy: broker client %s retained replay for provider %s",
-				b.brokerClientID, b.frontingProviderID)
-		} else {
-			// Delete only the record this broker client loaded or
-			// stored; another may have stored different parameters
-			// under the same key.
-			deleted, err := deleteInproxyBrokerReplayParameters(b.networkID, b.brokerDialParams)
-			if err != nil {
-				NoticeWarning("DeleteBrokerDialParameters failed: %v", errors.Trace(err))
-				// Continue without resetting replay.
-			} else {
-				NoticeInfo(
-					"inproxy: broker client %s deleted replay for provider %s: %t",
-					b.brokerClientID, b.frontingProviderID, deleted)
-			}
+	if b.replayEnabled && !prng.FlipWeightedCoin(b.replayRetainFailedProbability) {
+		// Delete only the record this broker client loaded or
+		// stored; another may have stored different parameters
+		// under the same key.
+		_, err := deleteInproxyBrokerReplayParameters(b.networkID, b.brokerDialParams)
+		if err != nil {
+			NoticeWarning("DeleteBrokerDialParameters failed: %v", errors.Trace(err))
+			// Continue without resetting replay.
 		}
 	}
 
