@@ -888,18 +888,17 @@ func TestInproxyBrokerClientRetainedCompetitor(t *testing.T) {
 				m.closeClientBrokerClients()
 			case "promote-after-failure":
 				winner.BrokerClientRoundTripperFailed(winner.roundTripper, testRoundTripFailure)
+				if m.sharedClient != competitor || getGateTestClient(t, m) != competitor {
+					t.Fatal("proven competitor was not immediately reused at the client cap")
+				}
+				if winner.roundTripper.runCtx.Err() != nil || len(m.clients) != 2 {
+					t.Fatal("promotion interrupted the failed client's remaining leases")
+				}
 				releaseWinner()
 				releaseShared()
-				other := getGateTestClient(t, m)
-				waitCtx, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
-				defer stop()
-				if _, _, _, err := m.GetBrokerClient(waitCtx, "TEST"); !stderrors.Is(err, context.DeadlineExceeded) {
-					t.Fatalf("retained competitor did not count toward cap: %v", err)
-				}
-				competitor.brokerResponseSucceededForTest(competitor.roundTripper)
 				cancel()
 				if getGateTestClient(t, m) != competitor || competitor.roundTripper.runCtx.Err() != nil ||
-					other.roundTripper.runCtx.Err() != nil {
+					winner.roundTripper.runCtx.Err() == nil {
 					t.Fatal("remaining competitor could not become shared independently of its attempt")
 				}
 				return
@@ -921,6 +920,185 @@ func TestInproxyBrokerClientRetainedCompetitor(t *testing.T) {
 				}
 			} else if winner.roundTripper.runCtx.Err() == nil {
 				t.Fatal("reset did not close shared client")
+			}
+		})
+	}
+}
+
+// TestInproxyBrokerFailurePromotionEligibility checks response-based promotion
+// excludes clients without an eligible response or no longer eligible for use.
+func TestInproxyBrokerFailurePromotionEligibility(t *testing.T) {
+	for _, state := range []string{"unproven", "round-trip-only", "failed", "released", "no-match"} {
+		t.Run(state, func(t *testing.T) {
+			m := newGateTestManager(t)
+			a := getGateTestClient(t, m)
+			var releaseB func()
+			b := getGateTestClient(t, m, &releaseB)
+			a.BrokerClientResponseReceived(a.roundTripper, false)
+			switch state {
+			case "round-trip-only":
+				b.BrokerClientRoundTripperSucceeded(b.roundTripper)
+			case "failed":
+				b.BrokerClientResponseReceived(b.roundTripper, false)
+				m.brokerClientFailed(b, testRoundTripFailure)
+				b.BrokerClientResponseReceived(b.roundTripper, false)
+			case "released":
+				b.BrokerClientResponseReceived(b.roundTripper, false)
+				releaseB()
+			case "no-match":
+				b.BrokerClientResponseReceived(b.roundTripper, false)
+				b.BrokerClientResponseReceived(b.roundTripper, true)
+			}
+			m.brokerClientFailed(a, testRoundTripFailure)
+			if m.sharedClient != nil {
+				t.Fatal("ineligible competitor was promoted")
+			}
+			if state == "released" || state == "no-match" {
+				if m.clients[b] != nil || b.roundTripper.runCtx.Err() == nil {
+					t.Fatal("closed competitor was retained")
+				}
+			} else if m.clients[b] == nil || b.roundTripper.runCtx.Err() != nil {
+				t.Fatal("failure interrupted a retained competitor")
+			}
+		})
+	}
+}
+
+// TestInproxyBrokerFailurePromotionStaleVisit excludes a proven competitor
+// after returning to the same broker with a different selection identity.
+func TestInproxyBrokerFailurePromotionStaleVisit(t *testing.T) {
+	m := newPersonalRaceTestManager(t, 3, 1, newProviderTestBroker(t, "A", "B"))
+	a, b := getGateTestClient(t, m), getGateTestClient(t, m)
+	a.BrokerClientResponseReceived(a.roundTripper, false)
+	b.BrokerClientResponseReceived(b.roundTripper, false)
+	a.BrokerClientResponseReceived(a.roundTripper, true)
+	if m.sharedClient != nil {
+		t.Fatal("NoMatch promoted a competitor")
+	}
+	c := getGateTestClient(t, m)
+	if c.brokerSelection == b.brokerSelection || c.BrokerPublicKey() != b.BrokerPublicKey() {
+		t.Fatal("fixture did not revisit the same broker")
+	}
+	c.BrokerClientResponseReceived(c.roundTripper, false)
+	m.brokerClientFailed(c, testRoundTripFailure)
+	if m.sharedClient != nil || m.clients[b] == nil || b.roundTripper.runCtx.Err() != nil {
+		t.Fatal("stale proven competitor was promoted or closed")
+	}
+}
+
+// TestInproxyBrokerFailurePromotionMultiple checks successive promotion and
+// cleanup without requiring a particular choice among eligible clients.
+func TestInproxyBrokerFailurePromotionMultiple(t *testing.T) {
+	m := newProxyRaceTestManager(t, 3, newProviderTestBroker(t, "A", "B", "C"))
+	a, b, c := getGateTestClient(t, m), getGateTestClient(t, m), getGateTestClient(t, m)
+	for _, instance := range []*InproxyBrokerClientInstance{a, b, c} {
+		instance.BrokerClientResponseReceived(instance.roundTripper, false)
+	}
+	visit := m.selector.currentBrokerSelection
+	m.brokerClientFailed(a, testRoundTripFailure)
+	first := m.sharedClient
+	if first != b && first != c {
+		t.Fatal("failure did not promote an eligible competitor")
+	}
+	if getGateTestClient(t, m) != first || m.selector.currentBrokerSelection != visit || len(m.clients) != 3 {
+		t.Fatal("promotion changed the visit or failed to reuse at capacity")
+	}
+	m.brokerClientFailed(first, testRoundTripFailure)
+	last := b
+	if first == b {
+		last = c
+	}
+	if m.sharedClient != last || getGateTestClient(t, m) != last {
+		t.Fatal("second failure did not promote the remaining eligible client")
+	}
+	m.brokerClientFailed(a, testRoundTripFailure)
+	a.BrokerClientResponseReceived(a.roundTripper, false)
+	if m.sharedClient != last {
+		t.Fatal("late failed-client callbacks changed the replacement")
+	}
+}
+
+// TestInproxyBrokerFailurePromotionReleaseRace exercises both lock orderings:
+// release closes an unshared competitor, or promotion retains it as shared.
+func TestInproxyBrokerFailurePromotionReleaseRace(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		m := newGateTestManager(t)
+		a := getGateTestClient(t, m)
+		var releaseB func()
+		b := getGateTestClient(t, m, &releaseB)
+		a.BrokerClientResponseReceived(a.roundTripper, false)
+		b.BrokerClientResponseReceived(b.roundTripper, false)
+		start := make(chan struct{})
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			<-start
+			releaseB()
+		}()
+		go func() {
+			defer workers.Done()
+			<-start
+			m.brokerClientFailed(a, testRoundTripFailure)
+		}()
+		close(start)
+		workers.Wait()
+		m.mutex.Lock()
+		if m.sharedClient == b {
+			if entry := m.clients[b]; entry == nil || entry.refs != 0 || m.sharedIdleTimer == nil || b.roundTripper.runCtx.Err() != nil {
+				t.Error("promoted competitor did not enter its shared idle period")
+			}
+		} else if m.sharedClient != nil || m.clients[b] != nil || b.roundTripper.runCtx.Err() == nil {
+			t.Error("released competitor was retained or incorrectly promoted")
+		}
+		m.mutex.Unlock()
+		m.closeClientBrokerClients()
+	}
+}
+
+// TestInproxyBrokerIdleWinnerPromotionBoundary distinguishes a transport
+// failure with no remaining leases from idle expiry and manager reset.
+func TestInproxyBrokerIdleWinnerPromotionBoundary(t *testing.T) {
+	for _, event := range []string{"failure", "idle", "reset"} {
+		t.Run(event, func(t *testing.T) {
+			m := newGateTestManager(t)
+			var releaseA func()
+			a := getGateTestClient(t, m, &releaseA)
+			b := getGateTestClient(t, m)
+			a.BrokerClientResponseReceived(a.roundTripper, false)
+			b.BrokerClientResponseReceived(b.roundTripper, false)
+			releaseA()
+			m.mutex.Lock()
+			oldTimer := m.sharedIdleTimer
+			changed := m.waitLocked("test shared-client transition")
+			m.mutex.Unlock()
+			switch event {
+			case "failure":
+				m.brokerClientFailed(a, testRoundTripFailure)
+			case "idle":
+				expireSharedClientForTest(m, a)
+			case "reset":
+				if err := m.NetworkChanged(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case <-changed:
+			default:
+				t.Fatal("shared-client transition did not signal acquisitions")
+			}
+			m.mutex.Lock()
+			m.expireSharedClientLocked(a, oldTimer)
+			m.mutex.Unlock()
+			if m.clients[a] != nil || a.roundTripper.runCtx.Err() == nil {
+				t.Fatal("zero-lease winner was not closed")
+			}
+			if event == "failure" {
+				if m.sharedClient != b || m.sharedIdleTimer != nil || getGateTestClient(t, m) != b {
+					t.Fatal("failure did not retain the active replacement")
+				}
+			} else if m.sharedClient != nil {
+				t.Fatal("idle expiry or reset promoted a competitor")
 			}
 		})
 	}
@@ -2992,8 +3170,8 @@ func TestInproxyBrokerAcquisitionCancellation(t *testing.T) {
 
 // TestInproxyBrokerLeaseLifetime verifies lease accounting across one
 // client's lifetime: the acquisition context does not own the transport,
-// promotion does not close competitors, a failed shared client is not
-// replaced by a competitor's earlier success, release is idempotent, shared
+// promotion does not close competitors, a failed shared client is immediately
+// replaced by a proven competitor, release is idempotent, shared
 // reuse adds leases rather than clients, and late releases and responses
 // after a reset resurrect nothing.
 func TestInproxyBrokerLeaseLifetime(t *testing.T) {
@@ -3013,11 +3191,13 @@ func TestInproxyBrokerLeaseLifetime(t *testing.T) {
 		t.Fatal("cancellation/promotion interrupted an independent lease")
 	}
 	a.BrokerClientRoundTripperFailed(a.roundTripper, testRoundTripFailure)
-	releaseA()
-	if m.sharedClient != nil {
-		t.Fatal("historical success promoted automatically")
+	if m.sharedClient != b || m.clients[b].refs != 1 || a.roundTripper.runCtx.Err() != nil {
+		t.Fatal("failure did not promote the competitor while preserving leases")
 	}
-	b.brokerResponseSucceededForTest(b.roundTripper)
+	releaseA()
+	if m.sharedClient != b || m.clients[a] != nil || a.roundTripper.runCtx.Err() == nil {
+		t.Fatal("failed client release disturbed the replacement or leaked transport")
+	}
 	release()
 	release()
 	if m.sharedClient != b || m.clients[b].refs != 0 || b.roundTripper.runCtx.Err() != nil {
@@ -4177,6 +4357,9 @@ func TestInproxyProxyDecodedAnnouncePolicy(t *testing.T) {
 			if (err != nil) != tc.malformed || (m.sharedClient == c) != tc.shared || !c.HasSuccess() {
 				t.Fatalf("unexpected outcome: %v", err)
 			}
+			if entry := m.clients[c]; entry == nil || entry.succeeded != tc.shared {
+				t.Fatal("decoded announce recorded incorrect failure-promotion eligibility")
+			}
 			release()
 			release()
 			if tc.shared && getGateTestClient(t, m) != c {
@@ -4596,6 +4779,11 @@ func TestInproxyBrokerDecodedResponsePolicy(t *testing.T) {
 			}
 			if (m.sharedClient == c) != tc.shared || (c.roundTripper.runCtx.Err() != nil) != tc.closed {
 				t.Fatalf("unexpected sharing/close state: shared=%v closed=%v", m.sharedClient == c, c.roundTripper.runCtx.Err())
+			}
+			if !tc.closed {
+				if entry := m.clients[c]; entry == nil || entry.succeeded != tc.shared {
+					t.Fatal("decoded response recorded incorrect failure-promotion eligibility")
+				}
 			}
 			release()
 			if (len(m.clients) == 1) != tc.shared {
@@ -5100,6 +5288,66 @@ func TestInproxyBrokerShareOnTransport(t *testing.T) {
 			t.Fatal("awaiting caller shared the client")
 		}
 	})
+}
+
+// TestInproxyBrokerFailurePromotionSharingPolicy checks that transport success
+// qualifies a replacement only when transport sharing is enabled.
+func TestInproxyBrokerFailurePromotionSharingPolicy(t *testing.T) {
+	for _, proxy := range []bool{false, true} {
+		for _, transport := range []bool{false, true} {
+			t.Run(fmt.Sprintf("proxy=%t/transport=%t", proxy, transport), func(t *testing.T) {
+				m := newGateTestManager(t)
+				m.isProxy = proxy
+				probability := 0.0
+				if transport {
+					probability = 1.0
+				}
+				if err := setGateTestParameters(m.config, "sharing-policy", map[string]interface{}{
+					parameters.InproxyBrokerSpecs: parameters.InproxyBrokerSpecsValue{
+						newProviderTestBroker(t, "A", "B"),
+					},
+					parameters.InproxyProxyMaxBrokerClients:                       2,
+					parameters.InproxyClientShareBrokerClientTransportProbability: probability,
+					parameters.InproxyProxyShareBrokerClientTransportProbability:  probability,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				a, b := getGateTestClient(t, m), getGateTestClient(t, m)
+				if transport {
+					if a.roundTripper.transportEstablished == nil || b.roundTripper.transportEstablished == nil {
+						t.Fatal("transport sharing callbacks not wired")
+					}
+					a.roundTripper.transportEstablished()
+					b.roundTripper.transportEstablished()
+				} else {
+					if b.roundTripper.transportEstablished != nil {
+						t.Fatal("response sharing wired a transport callback")
+					}
+					a.BrokerClientResponseReceived(a.roundTripper, false)
+				}
+				if m.sharedClient != a || m.clients[b].succeeded != transport {
+					t.Fatal("competitor eligibility did not follow sharing policy")
+				}
+				m.brokerClientFailed(a, testRoundTripFailure)
+				if !transport {
+					if m.sharedClient != nil {
+						t.Fatal("response sharing promoted before a response")
+					}
+					b.BrokerClientResponseReceived(b.roundTripper, false)
+				}
+				if m.sharedClient != b || getGateTestClient(t, m) != b || len(m.clients) != 2 {
+					t.Fatal("eligible replacement was not reused")
+				}
+				m.brokerClientFailed(b, testRoundTripFailure)
+				if transport {
+					b.roundTripper.transportEstablished()
+				}
+				if m.sharedClient != nil {
+					t.Fatal("late transport callback resurrected a failed client")
+				}
+			})
+		}
+	}
 }
 
 // TestInproxyBrokerShareOnTransportProbability verifies that the

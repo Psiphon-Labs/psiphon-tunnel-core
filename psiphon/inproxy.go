@@ -56,8 +56,9 @@ import (
 // broker response is returned by subsequent GetBrokerClient calls and
 // remains connected to the broker, to minimize transport round trips for
 // subsequent requests. Other broker clients are not closed until released
-// by all callers. For in-proxy clients, a shared broker client with no
-// callers is closed after InproxyClientBrokerClientIdleTimeout.
+// by all callers and may replace a failed shared client if they have proven
+// successful. For in-proxy clients, a shared broker client with no callers is
+// closed after InproxyClientBrokerClientIdleTimeout.
 // GetBrokerClient documents acquisition, sharing, and closure.
 //
 // Each InproxyBrokerClientInstance binds one broker client to one broker,
@@ -225,7 +226,8 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 // responses from making it shared again; see clientResponseReceived. Existing
 // callers may continue using it until they release it. It closes when all
 // callers have released it. Replay deletion and TLS session cache removal are
-// handled by the caller.
+// handled by the caller. If it was shared, an eligible client that has proven
+// successful becomes shared, when available.
 func (b *InproxyBrokerClientManager) brokerClientFailed(
 	instance *InproxyBrokerClientInstance, err error) {
 	b.mutex.Lock()
@@ -246,6 +248,14 @@ func (b *InproxyBrokerClientManager) brokerClientFailed(
 		b.stopSharedIdleTimerLocked()
 		b.sharedClient = nil
 		b.selector.sharedLost()
+		for candidate, candidateEntry := range b.clients {
+			if candidateEntry.failed || !candidateEntry.succeeded ||
+				!b.selector.matchesCurrentBrokerSelection(candidate) {
+				continue
+			}
+			b.sharedClient = candidate
+			break
+		}
 		if entry.refs > 0 {
 			b.signalClientChangedLocked()
 		}
@@ -396,6 +406,9 @@ type inproxyBrokerClientEntry struct {
 	// Set by brokerClientFailed. clientResponseReceived cannot make this client
 	// shared again, even after a successful response.
 	failed bool
+	// Set after an eligible response or, when transport sharing is enabled,
+	// successful transport establishment.
+	succeeded bool
 }
 
 func (b *InproxyBrokerClientManager) stopSharedIdleTimerLocked() {
@@ -517,8 +530,8 @@ func (b *InproxyBrokerClientManager) clientResponseReceived(
 			return
 		}
 	}
+	b.clients[instance].succeeded = true
 	if b.sharedClient != nil {
-		// Keep the existing shared client. Both clients may still be in use.
 		return
 	}
 	b.sharedClient = instance
@@ -541,8 +554,12 @@ func (b *InproxyBrokerClientManager) clientTransportEstablished(
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	entry := b.clients[instance]
-	if entry == nil || entry.failed || b.sharedClient != nil ||
+	if entry == nil || entry.failed ||
 		!b.selector.matchesCurrentBrokerSelection(instance) {
+		return
+	}
+	entry.succeeded = true
+	if b.sharedClient != nil {
 		return
 	}
 	b.sharedClient = instance
