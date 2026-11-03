@@ -27,7 +27,7 @@ import (
 
 // TestProtobufInproxyBrokerSelectionFields verifies that the in-proxy
 // broker client selection metrics (which concurrent broker client a tunnel
-// used, whether it replayed, and the acquisition wait) reach their protobuf
+// used and whether it replayed) reach their protobuf
 // messages, for the client's handshake fields, the proxy's announce fields
 // relayed to the server under the inproxy_proxy_ prefix, and the broker's
 // own request log. Population is by reflection over the generated struct's
@@ -47,12 +47,10 @@ func TestProtobufInproxyBrokerSelectionFields(t *testing.T) {
 		"inproxy_broker_is_replay":                      true,
 		"inproxy_broker_is_reuse":                       true,
 		"inproxy_broker_candidate_number":               3,
-		"inproxy_broker_acquire_wait_ms":                1250,
 		"inproxy_proxy_inproxy_broker_is_replay":        true,
 		"inproxy_proxy_inproxy_broker_candidate_number": 7,
 	})
-	if dialParams.GetInproxyBrokerCandidateNumber() != 3 ||
-		dialParams.GetInproxyBrokerAcquireWaitMs() != 1250 {
+	if dialParams.GetInproxyBrokerCandidateNumber() != 3 {
 		t.Fatalf("InproxyDialParams dropped broker selection fields: %+v", dialParams)
 	}
 	if !dialParams.GetInproxyProxyInproxyBrokerIsReplay() ||

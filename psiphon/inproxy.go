@@ -172,7 +172,6 @@ func (b *InproxyBrokerClientManager) NetworkChanged() error {
 // updates and shutdown may close broker clients while they are in use.
 func (b *InproxyBrokerClientManager) GetBrokerClient(
 	ctx context.Context, networkID string) (*inproxy.BrokerClient, *InproxyBrokerDialParameters, func(), error) {
-	start := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, errors.Trace(err)
@@ -202,7 +201,6 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		instance.mutex.Unlock()
 		dialParams.isReuse = reused
 		dialParams.candidateNumber = instance.candidateNumber
-		dialParams.acquireDuration = time.Since(start)
 		release := sync.OnceFunc(func() {
 			b.mutex.Lock()
 			defer b.mutex.Unlock()
@@ -2118,8 +2116,6 @@ type InproxyBrokerDialParameters struct {
 	// takeBrokerClientCounts call. A shared client reused after a restart
 	// keeps the ordinal it was created with.
 	candidateNumber int `json:"-"`
-	// acquireDuration is the time the caller waited in GetBrokerClient.
-	acquireDuration time.Duration `json:"-"`
 	// replayRecordHash is the SHA-256 of the stored record bytes this
 	// broker client loaded or stored, used to check for changes before
 	// deleting replay parameters.
@@ -2413,15 +2409,12 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	logFields["inproxy_broker_is_reuse"] = isReuse
 
 	// Broker client selection diagnostics. Handshake metrics reach the
-	// server only for the winning tunnel; these fields identify which
-	// of the concurrent broker clients it won on and what acquiring it
-	// cost. candidate_number is an ordinal, not bounded by
+	// server only for the winning tunnel; this field identifies which
+	// broker client it used. candidate_number is an ordinal, not bounded by
 	// InproxyClientMaxBrokerClients or InproxyProxyMaxBrokerClients, since
 	// broker clients close and new ones are created within an establishment;
 	// see InproxyBrokerDialParameters for when the count restarts.
 	logFields["inproxy_broker_candidate_number"] = strconv.Itoa(brokerDialParams.candidateNumber)
-	logFields["inproxy_broker_acquire_wait_ms"] = strconv.FormatInt(
-		brokerDialParams.acquireDuration.Milliseconds(), 10)
 
 	// TODO: include tlsConn.GetMetrics tls_did_resume/tls_sent_ticket.
 	// Requires a reference to the InproxyBrokerRoundTripper.

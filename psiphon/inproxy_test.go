@@ -2828,16 +2828,12 @@ func TestInproxyMetricsBeforeBrokerAcquisition(t *testing.T) {
 }
 
 // TestInproxyBrokerRacingMetrics verifies the handshake and broker-request
-// metrics that identify which broker client a tunnel used and what its
-// acquisition cost: candidate numbers are creation ordinals within the
-// broker client manager's counting window and continue past M, a new
-// client reports no reuse and no wait, a reused client reports reuse with
-// the winner's ordinal, an acquisition parked at the limit reports its
-// wait, every candidate's broker requests carry its replay flag and
-// ordinal, and that
-// takeBrokerClientCounts reports the window's creations and peak, restarts
-// the ordinal, and seeds the next window's peak with the clients still
-// tracked.
+// metrics that identify which broker client a tunnel used. Candidate numbers
+// are creation ordinals within the manager's counting window and continue
+// past M. A new client reports no reuse; a reused client reports reuse with
+// the winner's ordinal. Every candidate's broker requests carry its replay
+// flag and ordinal. takeBrokerClientCounts reports creations and peak,
+// restarts the ordinal, and seeds the next peak with clients still tracked.
 func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	m := newGateTestManager(t)
 	var releaseA, releaseB func()
@@ -2864,7 +2860,7 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 		}
 	}
 	// A third acquisition parks at M=2 until b is shared, then reuses b
-	// and reports the wait, b's ordinal and shared status.
+	// and reports b's ordinal and reuse status.
 	parent, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ctx := &inproxyGateWaitContext{Context: parent, waiting: make(chan struct{})}
@@ -2883,7 +2879,6 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	case <-parent.Done():
 		t.Fatal("acquisition did not wait at the limit")
 	}
-	time.Sleep(10 * time.Millisecond)
 	b.brokerResponseSucceededForTest(b.roundTripper)
 	var waited result
 	select {
@@ -2895,9 +2890,6 @@ func TestInproxyBrokerRacingMetrics(t *testing.T) {
 	if waited.instance != b || fields["inproxy_broker_is_reuse"] != "1" ||
 		fields["inproxy_broker_candidate_number"] != "2" {
 		t.Fatalf("reused client metrics: %v", fields)
-	}
-	if waitMs, err := strconv.Atoi(fields["inproxy_broker_acquire_wait_ms"].(string)); err != nil || waitMs < 10 {
-		t.Fatalf("parked acquisition wait not reported: %v", fields["inproxy_broker_acquire_wait_ms"])
 	}
 	// A fresh candidate after the first two close continues the ordinal
 	// past M and reports no reuse.

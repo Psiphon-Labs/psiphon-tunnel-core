@@ -3817,7 +3817,6 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_broker_is_replay",
 			"inproxy_broker_is_reuse",
 			"inproxy_broker_candidate_number",
-			"inproxy_broker_acquire_wait_ms",
 			"inproxy_broker_transport",
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
@@ -3836,6 +3835,10 @@ func checkExpectedServerTunnelLogFields(
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
 			}
+		}
+
+		if _, ok := fields["inproxy_broker_acquire_wait_ms"]; ok {
+			return fmt.Errorf("unexpected broker acquisition wait metric")
 		}
 
 		if fields["inproxy_broker_id"].(string) != inproxyTestConfig.brokerSessionPublicKeyCurve25519 {
