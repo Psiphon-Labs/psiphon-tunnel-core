@@ -572,6 +572,7 @@ func logServerLoad(
 
 	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
 	serverLoad.Add(support.TunnelServer.GetInproxyBrokerMetrics())
+	serverLoad.Add(support.TunnelServer.GetQUICMetrics())
 
 	upstreamStats, protocolStats, regionStats :=
 		support.TunnelServer.GetLoadStats()

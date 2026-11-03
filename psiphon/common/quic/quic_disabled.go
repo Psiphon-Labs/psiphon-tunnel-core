@@ -42,10 +42,20 @@ func GQUICEnabled() bool {
 	return false
 }
 
+// Listener is a stub for the server QUIC listener; Listen never returns one.
+type Listener struct {
+	net.Listener
+}
+
+func (listener *Listener) GetQUICCounterMetrics() common.LogFields {
+	return nil
+}
+
 func Listen(
 	_ common.Logger,
 	_ func(string, error, common.LogFields),
 	_ string,
+	_ bool,
 	_ int,
 	_ string,
 	_ bool) (net.Listener, error) {
