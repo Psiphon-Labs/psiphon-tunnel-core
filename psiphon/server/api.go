@@ -1359,6 +1359,16 @@ func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogField
 }
 
 func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+	// Broker replay and candidate metrics belong in broker request logs,
+	// not in each tunnel's copy of the proxy metrics. Build the field list
+	// once without modifying the request specs used by the broker.
+	reportParams := make([]requestParamSpec, 0, len(inproxyBrokerRequestParams))
+	for _, spec := range inproxyBrokerRequestParams {
+		if spec.name == "inproxy_broker_is_replay" || spec.name == "inproxy_broker_candidate_number" {
+			continue
+		}
+		reportParams = append(reportParams, spec)
+	}
 
 	return func(prefix string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
 
@@ -1369,7 +1379,7 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 			GeoIPData{}, // Proxy GeoIP data is added in sshClient.logTunnel
 			nil,
 			params,
-			inproxyBrokerRequestParams)
+			reportParams)
 
 		return common.LogFields(logFields)
 	}

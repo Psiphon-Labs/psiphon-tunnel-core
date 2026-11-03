@@ -3802,12 +3802,6 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_proxy_is_priority",
 			"inproxy_proxy_webrtc_dtls_fingerprint",
 
-			// The proxy's broker request fields, relayed by the broker
-			// in its server report and prefixed like the other proxy
-			// metrics.
-			"inproxy_proxy_inproxy_broker_is_replay",
-			"inproxy_proxy_inproxy_broker_candidate_number",
-
 			// These ProxyMetrics fields are not populated in this test:
 			// "inproxy_proxy_client_build_rev",
 			// "inproxy_proxy_port_mapping_types",
@@ -3837,8 +3831,14 @@ func checkExpectedServerTunnelLogFields(
 			}
 		}
 
-		if _, ok := fields["inproxy_broker_acquire_wait_ms"]; ok {
-			return fmt.Errorf("unexpected broker acquisition wait metric")
+		for _, name := range []string{
+			"inproxy_broker_acquire_wait_ms",
+			"inproxy_proxy_inproxy_broker_is_replay",
+			"inproxy_proxy_inproxy_broker_candidate_number",
+		} {
+			if _, ok := fields[name]; ok {
+				return fmt.Errorf("unexpected tunnel metric %s", name)
+			}
 		}
 
 		if fields["inproxy_broker_id"].(string) != inproxyTestConfig.brokerSessionPublicKeyCurve25519 {

@@ -598,7 +598,7 @@ func newSSHServer(
 			ServerRootObfuscationSecret: inproxyObfuscationSecret,
 			BrokerRoundTripperMaker:     makeRoundTripper,
 			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(),
-			ProxyMetricsFormatter:       getInproxyBrokerAPIParameterLogFieldFormatter(),
+			ProxyMetricsFormatter:       getInproxyBrokerServerReportParameterLogFieldFormatter(),
 
 			// Prefix for proxy metrics log fields in server_tunnel
 			ProxyMetricsPrefix: "inproxy_proxy_",
