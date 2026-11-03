@@ -23,9 +23,11 @@
 package quic
 
 import (
+	"context"
 	"crypto/sha256"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -37,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	ietf_quic "github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go/logging"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/net/ipv4"
 )
@@ -66,13 +69,16 @@ const (
 
 	OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT = NONCE_SIZE + 1
 
-	// MIN_INITIAL_PACKET_SIZE is the minimum UDP packet payload size for
-	// Initial packets, an anti-amplification measure (see RFC 9000, section
-	// 14.1). To accomodate obfuscation prefix messages within the same
-	// Initial UDP packet, quic-go's enforcement of this size requirement is
-	// disabled and the enforcment is done by ObfuscatedPacketConn.
+	// MIN_FIRST_PACKET_SIZE is checked before any peer state is allocated,
+	// ensuring small packets can't result in allocation. Currently the
+	// smallest legitimate first packet is a 1024 byte gQUIC CHLO. IETF
+	// Initial packets are larger, at least 1171 bytes with the in-proxy
+	// media stream adjustment, and quic-go enforces their minimum size, but
+	// only after peer state allocation. The MIN_FIRST_PACKET_SIZE check
+	// assumes a flow's first packet from an address is an Initial;
+	// connection migration would break that assumption.
 
-	MIN_INITIAL_PACKET_SIZE = 1200
+	MIN_FIRST_PACKET_SIZE = 1024
 
 	MAX_PADDING_SIZE       = 255
 	MAX_GQUIC_PADDING_SIZE = 64
@@ -85,6 +91,40 @@ const (
 	RANDOM_STREAM_LIMIT = 1<<38 - 64
 
 	CONCURRENT_WRITER_LIMIT = 5000
+
+	MAX_PEERS            = 1000000
+	MAX_REAP_PEERS       = 100000
+	PENDING_PEER_TIMEOUT = 10 * time.Second
+
+	// UNESTABLISHED_PEER_TIMEOUT exceeds quic-go's absolute handshake
+	// timeout, 2x HandshakeIdleTimeout, so a peer state entry doesn't become
+	// stale before its QUIC handshake completes or times out; see
+	// the "unknown peer" comment in writePacket.
+
+	UNESTABLISHED_PEER_TIMEOUT = 2*SERVER_HANDSHAKE_TIMEOUT + 10*time.Second
+
+	SOURCE_ADDRESS_VALIDATION_TRIGGER_CONCURRENT_HANDSHAKES = 1000
+
+	// MAX_CONCURRENT_HANDSHAKES bounds quic-go connection allocations,
+	// roughly 100 KB each.
+
+	MAX_CONCURRENT_HANDSHAKES = 10000
+
+	// MAX_CONCURRENT_HANDSHAKES_PER_IP accommodate many clients behind one
+	// NAT or proxy. Enforced only for address validated handshakes; see
+	// handshakeStarted.
+
+	MAX_CONCURRENT_HANDSHAKES_PER_IP = 100
+)
+
+// quic_test overrides the peer mode limits.
+var (
+	maxPeers                                           = MAX_PEERS
+	pendingPeerTimeout                                 = PENDING_PEER_TIMEOUT
+	unestablishedPeerTimeout                           = UNESTABLISHED_PEER_TIMEOUT
+	sourceAddressValidationTriggerConcurrentHandshakes = SOURCE_ADDRESS_VALIDATION_TRIGGER_CONCURRENT_HANDSHAKES
+	maxConcurrentHandshakes                            = MAX_CONCURRENT_HANDSHAKES
+	maxConcurrentHandshakesPerIP                       = MAX_CONCURRENT_HANDSHAKES_PER_IP
 )
 
 // ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
@@ -107,28 +147,93 @@ type ObfuscatedPacketConn struct {
 	isServer                   bool
 	isIETFClient               bool
 	isDecoyClient              bool
+	enableGQUIC                bool
 	isClosed                   int32
 	runWaitGroup               *sync.WaitGroup
 	stopBroadcast              chan struct{}
 	obfuscationKey             [32]byte
-	peerModesMutex             sync.Mutex
-	peerModes                  map[string]*peerMode
 	noncePRNG                  *prng.PRNG
 	paddingPRNG                *prng.PRNG
 	nonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 	decoyPacketCount           int32
 	decoyBuffer                []byte
 	concurrentWriters          int32
+
+	peerModesMutex           sync.Mutex
+	peers                    [peerStateCount]map[netip.AddrPort]*peerMode
+	concurrentHandshakesByIP map[netip.Addr]int
+
+	concurrentHandshakeCount     atomic.Int32
+	sourceAddressValidationCount atomic.Int64
+	droppedFlowCount             atomic.Int64
+	evictedFlowCount             atomic.Int64
+	limitedFlowCount             atomic.Int64
 }
 
+// peerMode records the obfuscation mode of a peer flow, keyed by peer
+// address. Each peer is in exactly one of the peerState maps.
+//
+//   - A new flow starts in the pending state. It moves to unestablished when
+//     quic-go allows a connection for it, which follows anti-probing, and
+//     moves to established when its handshake completes; see
+//     handshakeStarted. It returns to pending when its last connection
+//     closes, so closed peers are evictable; see updatePeerState.
+//
+//   - An IETF peer that remains pending has no quic-go connection
+//     allocated: it sent an invalid packet, failed anti-probing, or received
+//     only a stateless reply such as a Retry. A connection, when there is
+//     one, is allocated almost immediately, so PENDING_PEER_TIMEOUT is very
+//     conservative, and reaping a pending peer loses nothing, as its next
+//     packet is an Initial.
+//
+//   - Each state has its own map and expiry, so the frequent reaping of
+//     short-lived states never scans the large established map. A reap
+//     examines at most MAX_REAP_PEERS live entries, to limit how long a
+//     flooded pending map holds peerModesMutex.
+//
+//   - Peers are capped at MAX_PEERS in total across all maps. At capacity, a
+//     new flow evicts a random pending peer, or is dropped if there isn't
+//     any.
+//
+//   - New peers must validate their source address via QUIC Retry when there
+//     are excessive concurrent QUIC handshakes in flight; see
+//     verifySourceAddress.
+//
+//   - Limitations: legacy gQUIC has no equivalent to
+//     GetConfigForClient/handshakeStarted. A gQUIC peer remains pending,
+//     with the larger unestablished timeout, until its connection is
+//     accepted, so its handshake is evictable at capacity; see peerAccepted.
+//     With no close callback, an accepted gQUIC peer stays established until
+//     its idle timeout, so closed gQUIC peers are not evictable, and gQUIC
+//     handshakes bypass the handshake limits.
 type peerMode struct {
-	isObfuscated   bool
-	isIETF         bool
-	lastPacketTime time.Time
+	isObfuscated         bool
+	isIETF               bool
+	lastPacketTime       time.Time
+	concurrentHandshakes int
+	connections          int
 }
 
-func (p *peerMode) isStale() bool {
-	return time.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
+type peerState int
+
+const (
+	peerPending peerState = iota
+	peerUnestablished
+	peerEstablished
+	peerStateCount
+)
+
+func (p *peerMode) isStale(now time.Time, state peerState) bool {
+	var timeout time.Duration
+	switch {
+	case state == peerEstablished:
+		timeout = serverIdleTimeout
+	case state == peerUnestablished || !p.isIETF:
+		timeout = unestablishedPeerTimeout
+	default:
+		timeout = pendingPeerTimeout
+	}
+	return now.Sub(p.lastPacketTime) >= timeout
 }
 
 func NewClientObfuscatedPacketConn(
@@ -147,6 +252,7 @@ func NewClientObfuscatedPacketConn(
 		false,
 		isIETFClient,
 		isDecoyClient,
+		false,
 		obfuscationKey,
 		paddingSeed,
 		obfuscationNonceTransformerParameters)
@@ -157,6 +263,7 @@ func NewServerObfuscatedPacketConn(
 	packetConn net.PacketConn,
 	isIETFClient bool,
 	isDecoyClient bool,
+	enableGQUIC bool,
 	obfuscationKey string,
 	paddingSeed *prng.Seed) (*ObfuscatedPacketConn, error) {
 
@@ -166,6 +273,7 @@ func NewServerObfuscatedPacketConn(
 		true,
 		isIETFClient,
 		isDecoyClient,
+		enableGQUIC,
 		obfuscationKey,
 		paddingSeed,
 		nil)
@@ -179,6 +287,7 @@ func newObfuscatedPacketConn(
 	isServer bool,
 	isIETFClient bool,
 	isDecoyClient bool,
+	enableGQUIC bool,
 	obfuscationKey string,
 	paddingSeed *prng.Seed,
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
@@ -203,7 +312,7 @@ func newObfuscatedPacketConn(
 		isServer:                   isServer,
 		isIETFClient:               isIETFClient,
 		isDecoyClient:              isDecoyClient,
-		peerModes:                  make(map[string]*peerMode),
+		enableGQUIC:                enableGQUIC,
 		noncePRNG:                  prng.NewPRNGWithSeed(nonceSeed),
 		paddingPRNG:                prng.NewPRNGWithSeed(paddingSeed),
 		nonceTransformerParameters: obfuscationNonceTransformerParameters,
@@ -225,6 +334,10 @@ func newObfuscatedPacketConn(
 
 	if isServer {
 
+		for state := range conn.peers {
+			conn.peers[state] = make(map[netip.AddrPort]*peerMode)
+		}
+		conn.concurrentHandshakesByIP = make(map[netip.Addr]int)
 		conn.runWaitGroup = new(sync.WaitGroup)
 		conn.stopBroadcast = make(chan struct{})
 
@@ -234,18 +347,20 @@ func newObfuscatedPacketConn(
 		go func() {
 			defer conn.runWaitGroup.Done()
 
-			ticker := time.NewTicker(SERVER_IDLE_TIMEOUT / 2)
-			defer ticker.Stop()
+			pendingTicker := time.NewTicker(pendingPeerTimeout / 2)
+			defer pendingTicker.Stop()
+			unestablishedTicker := time.NewTicker(unestablishedPeerTimeout / 2)
+			defer unestablishedTicker.Stop()
+			establishedTicker := time.NewTicker(serverIdleTimeout / 2)
+			defer establishedTicker.Stop()
 			for {
 				select {
-				case <-ticker.C:
-					conn.peerModesMutex.Lock()
-					for address, mode := range conn.peerModes {
-						if mode.isStale() {
-							delete(conn.peerModes, address)
-						}
-					}
-					conn.peerModesMutex.Unlock()
+				case <-pendingTicker.C:
+					conn.reapPeers(peerPending)
+				case <-unestablishedTicker.C:
+					conn.reapPeers(peerUnestablished)
+				case <-establishedTicker.C:
+					conn.reapPeers(peerEstablished)
 				case <-conn.stopBroadcast:
 					return
 				}
@@ -327,14 +442,22 @@ func (conn *ObfuscatedPacketConn) ReadBatch(ms []ipv4.Message, _ int) (int, erro
 	if len(ms) < 1 || len(ms[0].Buffers[0]) < 1 {
 		return 0, errors.TraceNew("unexpected message buffer size")
 	}
-	var err error
-	ms[0].N, ms[0].NN, ms[0].Flags, ms[0].Addr, _, err =
-		conn.readPacketWithType(ms[0].Buffers[0], ms[0].OOB)
-	if err != nil {
+	for {
+		var err error
+		ms[0].N, ms[0].NN, ms[0].Flags, ms[0].Addr, _, err =
+			conn.readPacketWithType(ms[0].Buffers[0], ms[0].OOB)
+		if err == nil {
+			return 1, nil
+		}
+		// Skip over dropped packets here: quic-go's oobConn.ReadPacket does
+		// not reset its batch state on error, so returning 0 would serve
+		// stale messages on subsequent reads.
+		if _, ok := err.(*temporaryNetError); ok {
+			continue
+		}
 		// Do not wrap any I/O err returned by conn.PacketConn
 		return 0, err
 	}
-	return 1, nil
 }
 
 // SetReadBuffer and SetWriteBuffer are used by quic-go to optimize socket
@@ -397,6 +520,270 @@ func (conn *ObfuscatedPacketConn) GetMetrics() common.LogFields {
 	}
 
 	return logFields
+}
+
+func peerAddress(addr *net.UDPAddr) netip.AddrPort {
+	addrPort := addr.AddrPort()
+	return netip.AddrPortFrom(addrPort.Addr().Unmap(), addrPort.Port())
+}
+
+// lookupPeer returns the peer mode, its state, and whether it was found.
+// The caller must hold peerModesMutex.
+func (conn *ObfuscatedPacketConn) lookupPeer(
+	address netip.AddrPort) (*peerMode, peerState, bool) {
+
+	// The most common case is a lookup for an established peer flow, so
+	// check in reverse state order.
+	for state := peerStateCount - 1; state >= peerPending; state-- {
+		if mode, ok := conn.peers[state][address]; ok {
+			return mode, state, true
+		}
+	}
+	return nil, 0, false
+}
+
+// evictPeer evicts a random pending peer, returning false when there is
+// none. The caller must hold peerModesMutex.
+func (conn *ObfuscatedPacketConn) evictPeer() bool {
+	// Random eviction, via map iteration order, is reasonable for pending
+	// peers: a legitimate peer gets a response, and so promoted, within
+	// milliseconds.
+	for address := range conn.peers[peerPending] {
+		delete(conn.peers[peerPending], address)
+		conn.evictedFlowCount.Add(1)
+		return true
+	}
+	return false
+}
+
+func (conn *ObfuscatedPacketConn) reapPeers(state peerState) {
+
+	// TODO: Go maps retain their allocated memory after entries are deleted,
+	// so a flood leaves each map at its peak memory footprint, about 100 MB
+	// at current MAX_PEERS. To reclaim memory, periodically replace a map
+	// with a fresh one, copying over unexpired entries, instead of deleting
+	// in place.
+
+	now := time.Now()
+	conn.peerModesMutex.Lock()
+	scanned := 0
+	for address, mode := range conn.peers[state] {
+		if mode.isStale(now, state) {
+			delete(conn.peers[state], address)
+		}
+		// Map iteration starts at a random entry; subsequent calls won't start
+		// over from the same spot.
+		scanned++
+		if scanned >= MAX_REAP_PEERS {
+			break
+		}
+	}
+	conn.peerModesMutex.Unlock()
+}
+
+// handshakeStarted implements quic-go Config.GetConfigForClient. quic-go
+// invokes it once per new connection, after anti-probing, token validation,
+// and any Retry, and before allocating the connection; returning an error
+// fails the connection. handshakeStarted counts total QUIC handshakes in
+// flight, and, for address validated Initials, per source IP; and promotes
+// the peer.
+//
+// Limitation: any quic-go path that drops the connection after this call
+// without running its close path would permanently leak a count. Known
+// paths, none expected in practice:
+//   - A server-selected connection ID collision in quic-go's AddWithConnID.
+//     The quic-go fork then blocks waiting on a connection goroutine that
+//     never started, and no close is signaled. The collision window is a
+//     single synchronous call on the server goroutine.
+//   - A connection ID generation error. The random source it uses does not
+//     fail in current Go.
+//   - The connection's run loop failing to start its TLS handshake. On the
+//     server, starting the handshake can't fail before any client data is
+//     processed.
+func (conn *ObfuscatedPacketConn) handshakeStarted(
+	config *ietf_quic.Config,
+	info *ietf_quic.ClientHelloInfo) (*ietf_quic.Config, error) {
+
+	udpAddr, ok := info.RemoteAddr.(*net.UDPAddr)
+	if !ok {
+		return nil, errors.TraceNew("unexpected remote address type")
+	}
+	address := peerAddress(udpAddr)
+	ip := common.GetRateLimitAddr(address.Addr())
+
+	// TODO: avoid allocating errors etc. when in a limited state.
+
+	conn.peerModesMutex.Lock()
+	defer conn.peerModesMutex.Unlock()
+
+	// The pending peer entry may have been evicted or reaped after the Initial
+	// was read. With no entry to promote, the connection would fail on its
+	// first write, so fail it before incrementing any counts.
+	mode, state, ok := conn.lookupPeer(address)
+	if !ok {
+		return nil, errors.TraceNew("unknown peer")
+	}
+
+	if int(conn.concurrentHandshakeCount.Load()) >= maxConcurrentHandshakes {
+		conn.limitedFlowCount.Add(1)
+		return nil, errors.TraceNew("too many concurrent handshakes")
+	}
+
+	// The per-IP limit applies only to source address verified Initials: a
+	// spoofed source IP must not consume another IP's limit. The source
+	// address validation trigger itself bounds concurrent handshakes in
+	// general.
+	if info.AddrVerified {
+		if conn.concurrentHandshakesByIP[ip] >= maxConcurrentHandshakesPerIP {
+			conn.limitedFlowCount.Add(1)
+			return nil, errors.TraceNew("handshake limit exceeded")
+		}
+		conn.concurrentHandshakesByIP[ip]++
+	}
+	conn.concurrentHandshakeCount.Add(1)
+	mode.concurrentHandshakes++
+	conn.updatePeerState(address, mode, state)
+
+	connConfig := *config
+	connConfig.Tracer = func(
+		context.Context, logging.Perspective, ietf_quic.ConnectionID) *logging.ConnectionTracer {
+		return conn.newConnectionTracer(address, mode, info.AddrVerified)
+	}
+	return &connConfig, nil
+}
+
+// newConnectionTracer signals handshake completion and connection close.
+// All callbacks run on the connection's goroutine.
+func (conn *ObfuscatedPacketConn) newConnectionTracer(
+	address netip.AddrPort, mode *peerMode, validated bool) *logging.ConnectionTracer {
+
+	// A reference to the peer state entry at newConnectionTracer time is
+	// retained and peer state is modified only while that entry is current,
+	// as a reaped, evicted, or reset peer entry may be replaced.
+
+	// quic-go calls ChoseALPN on handshake completion, and ClosedConnection
+	// on close; a close before completion is a failed handshake.
+	completed := false
+	return &logging.ConnectionTracer{
+		ChoseALPN: func(string) {
+			completed = true
+			conn.handshakeFinished(address, mode, validated, true)
+		},
+		ClosedConnection: func(error) {
+			if completed {
+				conn.connectionClosed(address, mode)
+			} else {
+				conn.handshakeFinished(address, mode, validated, false)
+			}
+		},
+	}
+}
+
+// peerAccepted establishes a gQUIC peer on accept; see peerMode.
+func (conn *ObfuscatedPacketConn) peerAccepted(addr net.Addr) {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok {
+		return
+	}
+	address := peerAddress(udpAddr)
+	conn.peerModesMutex.Lock()
+	defer conn.peerModesMutex.Unlock()
+	mode, state, ok := conn.lookupPeer(address)
+	if ok && !mode.isIETF {
+		mode.connections++
+		conn.updatePeerState(address, mode, state)
+	}
+}
+
+func (conn *ObfuscatedPacketConn) handshakeFinished(
+	address netip.AddrPort, mode *peerMode, validated, completed bool) {
+
+	conn.concurrentHandshakeCount.Add(-1)
+	ip := common.GetRateLimitAddr(address.Addr())
+	conn.peerModesMutex.Lock()
+	defer conn.peerModesMutex.Unlock()
+	if validated {
+		conn.concurrentHandshakesByIP[ip]--
+		if conn.concurrentHandshakesByIP[ip] <= 0 {
+			delete(conn.concurrentHandshakesByIP, ip)
+		}
+	}
+
+	current, state, ok := conn.lookupPeer(address)
+	if !ok || current != mode {
+		return
+	}
+	mode.concurrentHandshakes--
+	if completed {
+		mode.connections++
+	}
+	conn.updatePeerState(address, mode, state)
+}
+
+func (conn *ObfuscatedPacketConn) connectionClosed(
+	address netip.AddrPort, mode *peerMode) {
+
+	conn.peerModesMutex.Lock()
+	defer conn.peerModesMutex.Unlock()
+	current, state, ok := conn.lookupPeer(address)
+	if !ok || current != mode {
+		return
+	}
+	mode.connections--
+	conn.updatePeerState(address, mode, state)
+}
+
+// updatePeerState moves the peer to appropriate state: established while a
+// handshaked connection is live, unestablished while a handshake is in
+// flight, and otherwise pending, where it is evictable. The caller must hold
+// peerModesMutex.
+func (conn *ObfuscatedPacketConn) updatePeerState(
+	address netip.AddrPort, mode *peerMode, currentState peerState) {
+
+	targetState := peerPending
+	if mode.connections > 0 {
+		targetState = peerEstablished
+	} else if mode.concurrentHandshakes > 0 {
+		targetState = peerUnestablished
+	}
+	if targetState != currentState {
+		delete(conn.peers[currentState], address)
+		conn.peers[targetState][address] = mode
+	}
+}
+
+// verifySourceAddress implements quic-go Transport.VerifySourceAddress, and
+// indicates if a new peer is required to perform source address validation
+// via a Retry packet.
+//
+// verifySourceAddress returns true when there is an excessive number of
+// concurrent handshakes and is intended to limit internal quic-go connection
+// allocations, particularly due to Initial packets from spoofed source
+// addresses, which are not subject to MAX_CONCURRENT_HANDSHAKES_PER_IP.
+//
+// quic-go invokes this callback only after the anti-probing check, so a
+// prober without the obfuscation key cannot trigger source address
+// validation.
+//
+// sourceAddressValidationCount counts validations required, not Retry
+// packets sent; quic-go drops the Retry when its send queue is full.
+func (conn *ObfuscatedPacketConn) verifySourceAddress(_ net.Addr) bool {
+	if int(conn.concurrentHandshakeCount.Load()) < sourceAddressValidationTriggerConcurrentHandshakes {
+		return false
+	}
+	conn.sourceAddressValidationCount.Add(1)
+	return true
+}
+
+// counterMetrics resets the counters it returns. Limited flows are those
+// refused at MAX_CONCURRENT_HANDSHAKES or MAX_CONCURRENT_HANDSHAKES_PER_IP.
+func (conn *ObfuscatedPacketConn) counterMetrics() common.LogFields {
+	return common.LogFields{
+		"quic_dropped_flow_count":              conn.droppedFlowCount.Swap(0),
+		"quic_evicted_flow_count":              conn.evictedFlowCount.Swap(0),
+		"quic_source_address_validation_count": conn.sourceAddressValidationCount.Swap(0),
+		"quic_limited_flow_count":              conn.limitedFlowCount.Swap(0),
+	}
 }
 
 func (conn *ObfuscatedPacketConn) readPacketWithType(
@@ -492,9 +879,9 @@ func (conn *ObfuscatedPacketConn) readPacket(
 
 	isObfuscated := true
 	isIETF := true
-	var address string
+	var address netip.AddrPort
 	var firstFlowPacket bool
-	var lastPacketTime time.Time
+	var now time.Time
 
 	if n > 0 {
 
@@ -514,12 +901,8 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			// are behind NAT. If a packet appears to be QUIC, this will reset
 			// any existing peer "mode" to plain. The obfuscator checks that
 			// its obfuscated packets don't pass the QUIC DPI test.
-			//
-			// TODO: delete peerMode when a packet is a client connection
-			// termination QUIC packet? Will reclaim peerMode memory faster
-			// than relying on reaper.
 
-			lastPacketTime = time.Now()
+			now = time.Now()
 
 			// isIETF is not meaningful if not the first packet in a flow and is not
 			// meaningful when first packet is obfuscated. To correctly indicate isIETF
@@ -527,6 +910,12 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			// deobfuscating the packet.
 			var isQUIC bool
 			isQUIC, isIETF = isQUICClientHello(p[:n])
+
+			// When gQUIC is not enabled, force IETF processing; valid gQUIC
+			// packets do not get legacy gQUIC peer state tracking treatment.
+			if isQUIC && !conn.enableGQUIC {
+				isIETF = true
+			}
 
 			isObfuscated = !isQUIC
 
@@ -542,23 +931,11 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			}
 
 			conn.peerModesMutex.Lock()
-			address = addr.String()
-			mode, ok := conn.peerModes[address]
-			if !ok {
-				// This is a new flow.
-
-				// See concurrent writer limit comment in writePacket.
-				concurrentWriters := atomic.LoadInt32(&conn.concurrentWriters)
-				if concurrentWriters > CONCURRENT_WRITER_LIMIT {
-					conn.peerModesMutex.Unlock()
-					return 0, 0, 0, nil, true, newTemporaryNetError(errors.TraceNew("too many concurrent writers"))
-				}
-
-				mode = &peerMode{isObfuscated: isObfuscated, isIETF: isIETF}
-				conn.peerModes[address] = mode
-				firstFlowPacket = true
-			} else if mode.isStale() ||
-				(isQUIC && (mode.isObfuscated || (mode.isIETF != isIETF))) {
+			address = peerAddress(addr)
+			mode, state, ok := conn.lookupPeer(address)
+			if ok && (mode.isStale(now, state) ||
+				(isQUIC && n >= MIN_FIRST_PACKET_SIZE &&
+					(mode.isObfuscated || (mode.isIETF != isIETF)))) {
 				// The address for this flow has been seen before, but either (1) it's
 				// stale and not yet reaped; or (2) the client has redialed and switched
 				// from obfuscated to non-obfuscated; or (3) the client has redialed and
@@ -570,13 +947,48 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				// and handled like new flows and the QUIC session will fail. These cases
 				// include the client immediately redialing and switching from
 				// non-obfuscated to obfuscated or switching obfuscated gQUIC<-->IETF.
-				mode.isObfuscated = isObfuscated
-				mode.isIETF = isIETF
+				// A forged plain QUIC packet from an obfuscated peer's address
+				// also resets the peer, breaking its connection; an off-path
+				// attacker needs the client's source port.
+				//
+				// The new flow is unproven, so the peer state returns to pending
+				// with a new entry; callbacks of any earlier handshake will no
+				// longer match it.
+				delete(conn.peers[state], address)
+				ok = false
+			}
+			if !ok {
+				// This is a new flow.
+
+				if n < MIN_FIRST_PACKET_SIZE {
+					conn.peerModesMutex.Unlock()
+					return 0, 0, 0, nil, true, newTemporaryNetError(errors.TraceNew("short first packet"))
+				}
+
+				// See concurrent writer limit comment in writePacket.
+				concurrentWriters := atomic.LoadInt32(&conn.concurrentWriters)
+				if concurrentWriters > CONCURRENT_WRITER_LIMIT {
+					conn.peerModesMutex.Unlock()
+					return 0, 0, 0, nil, true, newTemporaryNetError(errors.TraceNew("too many concurrent writers"))
+				}
+
+				peerCount := 0
+				for _, peers := range conn.peers {
+					peerCount += len(peers)
+				}
+				if peerCount >= maxPeers && !conn.evictPeer() {
+					conn.peerModesMutex.Unlock()
+					conn.droppedFlowCount.Add(1)
+					return 0, 0, 0, nil, true, newTemporaryNetError(errors.TraceNew("too many peers"))
+				}
+
+				mode = &peerMode{isObfuscated: isObfuscated, isIETF: isIETF}
+				conn.peers[peerPending][address] = mode
 				firstFlowPacket = true
 			} else {
 				isObfuscated = mode.isObfuscated
 			}
-			mode.lastPacketTime = lastPacketTime
+			mode.lastPacketTime = now
 
 			isIETF = mode.isIETF
 			conn.peerModesMutex.Unlock()
@@ -632,18 +1044,18 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				// consistent with this constraint. This will be resolved by
 				// disabling gQUIC or once gQUIC is ultimatel retired.
 
-				if !isIETF && !isGQUICClientHello(p[0:n]) {
+				if !conn.enableGQUIC || (!isIETF && !isGQUICClientHello(p[0:n])) {
 					isIETF = true
 				}
 
 				conn.peerModesMutex.Lock()
-				mode, ok := conn.peerModes[address]
+				mode, _, ok := conn.lookupPeer(address)
 
 				// There's a possible race condition between the two instances of locking
 				// peerModesMutex: the client might redial in the meantime. Check that the
 				// mode state is unchanged from when the lock was last held.
 				if !ok || !mode.isObfuscated || mode.isIETF ||
-					mode.lastPacketTime != lastPacketTime {
+					mode.lastPacketTime != now {
 					conn.peerModesMutex.Unlock()
 					return n, oobn, flags, addr, true, newTemporaryNetError(
 						errors.Tracef("unexpected peer mode"))
@@ -652,20 +1064,6 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				mode.isIETF = isIETF
 
 				conn.peerModesMutex.Unlock()
-
-				// Enforce the MIN_INITIAL_PACKET_SIZE size requirement for new flows.
-				//
-				// Limitations:
-				//
-				// - The Initial packet may be sent more than once, but we
-				//   only check the very first packet.
-				// - For session resumption, the first packet may be a
-				//   Handshake packet, not an Initial packet, and can be smaller.
-
-				if isIETF && n < MIN_INITIAL_PACKET_SIZE {
-					return n, oobn, flags, addr, true, newTemporaryNetError(errors.Tracef(
-						"unexpected first QUIC packet length: %d", n))
-				}
 			}
 		}
 	}
@@ -734,13 +1132,32 @@ func (conn *ObfuscatedPacketConn) writePacket(
 		}
 
 		conn.peerModesMutex.Lock()
-		address := addr.String()
-		mode, ok := conn.peerModes[address]
+		address := peerAddress(addr)
+		mode, _, ok := conn.lookupPeer(address)
 		if ok {
 			isObfuscated = mode.isObfuscated
 			isIETF = mode.isIETF
 		}
 		conn.peerModesMutex.Unlock()
+
+		if !ok {
+
+			// Every server write follows a read that created or refreshed the
+			// peerMode entry, so in this missing peer entry case an entry was
+			// reaped or evicted.
+			//
+			// Guessing the peer mode risks sending obfuscated packets to a
+			// plain QUIC peer; the error closes the quic-go connection instead.
+			//
+			// One case here is a handshake retransmit or keep alive sent just
+			// before quic-go's absolute handshake timeout, after the reaper
+			// removed the peer entry. UNESTABLISHED_PEER_TIMEOUT exceeds that
+			// timeout to avoid this. An established peer entry may be reaped up to
+			// a keep alive period before quic-go's idle timeout; a PTO probe
+			// in that window fails, which is accepted: both close silently.
+
+			return 0, 0, newTemporaryNetError(errors.TraceNew("unknown peer"))
+		}
 
 	} else {
 
@@ -918,13 +1335,13 @@ func getMaxPaddingSize(isIETF bool, packetSize int) int {
 func (conn *ObfuscatedPacketConn) serverMaxPacketSizeAdjustment(
 	addr net.Addr) int {
 
-	if !conn.isServer {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !conn.isServer || !ok {
 		return 0
 	}
 
 	conn.peerModesMutex.Lock()
-	address := addr.String()
-	mode, ok := conn.peerModes[address]
+	mode, _, ok := conn.lookupPeer(peerAddress(udpAddr))
 	isObfuscated := ok && mode.isObfuscated
 	conn.peerModesMutex.Unlock()
 

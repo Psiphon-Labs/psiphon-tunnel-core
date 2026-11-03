@@ -229,6 +229,8 @@ func (server *TunnelServer) Run() error {
 				return errors.Trace(err)
 			}
 
+			server.sshServer.registerQUICListener(listener.(*quic.Listener))
+
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
 			listener, err = refraction.Listen(localAddress)
@@ -388,6 +390,25 @@ func (server *TunnelServer) GetInproxyBrokerMetrics() LogFields {
 	return LogFields(metrics.GetLogFields())
 }
 
+// GetQUICMetrics returns QUIC counter metrics, summed over all QUIC
+// listeners, since the last call.
+func (server *TunnelServer) GetQUICMetrics() LogFields {
+	server.sshServer.quicListenersMutex.Lock()
+	defer server.sshServer.quicListenersMutex.Unlock()
+
+	if len(server.sshServer.quicListeners) == 0 {
+		return nil
+	}
+	metrics := LogFields{}
+	for _, listener := range server.sshServer.quicListeners {
+		for name, value := range listener.GetQUICCounterMetrics() {
+			count, _ := metrics[name].(int64)
+			metrics[name] = count + value.(int64)
+		}
+	}
+	return metrics
+}
+
 // GetEstablishedClientCount returns the number of currently established
 // clients.
 func (server *TunnelServer) GetEstablishedClientCount() int {
@@ -467,8 +488,10 @@ type sshServer struct {
 	authorizationSessionIDsMutex sync.Mutex
 	authorizationSessionIDs      map[string]string
 
-	meekServersMutex sync.Mutex
-	meekServers      []*MeekServer
+	meekServersMutex   sync.Mutex
+	meekServers        []*MeekServer
+	quicListenersMutex sync.Mutex
+	quicListeners      []*quic.Listener
 }
 
 func newSSHServer(
@@ -955,6 +978,15 @@ func (sshServer *sshServer) registerMeekServer(meekServer *MeekServer) {
 	defer sshServer.meekServersMutex.Unlock()
 
 	sshServer.meekServers = append(sshServer.meekServers, meekServer)
+}
+
+// registerQUICListener registers a quic.Listener instance to report load
+// metrics.
+func (sshServer *sshServer) registerQUICListener(listener *quic.Listener) {
+	sshServer.quicListenersMutex.Lock()
+	defer sshServer.quicListenersMutex.Unlock()
+
+	sshServer.quicListeners = append(sshServer.quicListeners, listener)
 }
 
 // reloadMeekServerTactics signals each registered MeekServer instance that

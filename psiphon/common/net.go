@@ -401,6 +401,14 @@ func GetRateLimitIP(strIP string) string {
 	return IP.Mask(net.CIDRMask(56, 128)).String()
 }
 
+// GetRateLimitAddr is allocation-free GetRateLimitIP using netip.Addr.
+func GetRateLimitAddr(addr netip.Addr) netip.Addr {
+	if !addr.Is6() || addr.Is4In6() {
+		return addr
+	}
+	return netip.PrefixFrom(addr, 56).Masked().Addr()
+}
+
 // WriteTimeoutUDPConn sets write deadlines before each UDP packet write.
 //
 // Generally, a UDP packet write doesn't block. However, Go's
