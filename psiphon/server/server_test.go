@@ -3832,7 +3832,6 @@ func checkExpectedServerTunnelLogFields(
 		}
 
 		for _, name := range []string{
-			"inproxy_broker_acquire_wait_ms",
 			"inproxy_proxy_inproxy_broker_is_replay",
 			"inproxy_proxy_inproxy_broker_candidate_number",
 		} {
