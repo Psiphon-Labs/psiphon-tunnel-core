@@ -33,6 +33,19 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+// runUntunneledDSLFetcher runs DSL fetches relayed through an in-proxy
+// broker, acquiring a broker client from brokerClientManager for each
+// request and releasing it on return. It shares brokerClientManager with
+// in-proxy tunnel dials, so at the broker client limit both wait on the
+// same unproven client until it is shared, by default at its first
+// decoded response.
+//
+// Limitation: dsl.Fetcher.Run requires a single concurrent run, but
+// nothing prevents this fetcher and the tunneled fetcher from overlapping
+// when a tunnel connects during an untunneled run. The overlap is
+// tolerated: stores are idempotent and the next run corrects any OSL
+// state the two runs clobber. See the OSL state comment in
+// dsl.Fetcher.loadOSLStates.
 func runUntunneledDSLFetcher(
 	ctx context.Context,
 	config *Config,
@@ -57,14 +70,20 @@ fetcherLoop:
 
 			networkID := config.GetNetworkID()
 
-			brokerClient, _, err := brokerClientManager.GetBrokerClient(networkID)
-			if err != nil {
-				return errors.Trace(err)
-			}
-
 			roundTripper := func(
 				ctx context.Context,
 				requestPayload []byte) ([]byte, error) {
+
+				// Acquire per attempt, not once per fetch, so a retry reuses
+				// the shared client if one exists. Otherwise, including after
+				// the shared client fails or expires, a new broker client is
+				// created, which may use a different broker, fronting provider
+				// or dial parameters.
+				brokerClient, _, release, err := brokerClientManager.GetBrokerClient(ctx, networkID)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				defer release()
 
 				response, err := brokerClient.ClientDSL(
 					ctx,
@@ -86,7 +105,7 @@ fetcherLoop:
 			// TODO: add a failed_dsl_request log, similar to failed_tunnel,
 			// to record and report failures?
 
-			err = doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
+			err := doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
 			if err != nil {
 				return errors.Trace(err)
 			}

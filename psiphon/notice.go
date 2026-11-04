@@ -703,6 +703,11 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			for name, value := range metrics {
 				args = append(args, name, value)
 			}
+			if dialParams.inproxyBrokerDialParameters != nil {
+				args = append(args,
+					"inproxy_broker_client_id",
+					dialParams.inproxyBrokerDialParameters.brokerClientID)
+			}
 		}
 
 		if dialParams.ShadowsocksPrefixSpec != nil {

@@ -877,7 +877,12 @@ func init() {
 		{185, "light_proxy_dial_canceled", intConverter},
 		{186, "light_proxy_client_events", nil},
 
-		// Next key value = 187
+		// Specs: server.inproxyDialParams,
+		// server.inproxyBrokerRequestParams
+
+		{187, "inproxy_broker_candidate_number", intConverter},
+
+		// Next key value = 188
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

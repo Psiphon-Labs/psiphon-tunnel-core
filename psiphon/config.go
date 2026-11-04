@@ -1369,6 +1369,12 @@ type Config struct {
 	InproxyClientNoMatchFailoverPersonalProbability         *float64                                         `json:",omitempty"`
 	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string                                `json:",omitempty"`
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int                                             `json:",omitempty"`
+	InproxyClientMaxBrokerClients                           *int                                             `json:",omitempty"`
+	InproxyProxyMaxBrokerClients                            *int                                             `json:",omitempty"`
+	InproxyClientBrokerClientIdleTimeoutSeconds             *int                                             `json:",omitempty"`
+	InproxyClientShareBrokerClientTransportProbability      *float64                                         `json:",omitempty"`
+	InproxyProxyShareBrokerClientTransportProbability       *float64                                         `json:",omitempty"`
+	InproxyProxyPersonalReturnHomePeriodSeconds             *int                                             `json:",omitempty"`
 	InproxyProxyIncompatibleNetworkTypes                    []string                                         `json:",omitempty"`
 	InproxyClientIncompatibleNetworkTypes                   []string                                         `json:",omitempty"`
 	InproxyReplayRetainFailedProbability                    *float64                                         `json:",omitempty"`
@@ -3654,6 +3660,30 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyOnBrokerClientFailedRetryPeriod] = fmt.Sprintf("%dms", *config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds)
+	}
+
+	if config.InproxyClientMaxBrokerClients != nil {
+		applyParameters[parameters.InproxyClientMaxBrokerClients] = *config.InproxyClientMaxBrokerClients
+	}
+
+	if config.InproxyProxyMaxBrokerClients != nil {
+		applyParameters[parameters.InproxyProxyMaxBrokerClients] = *config.InproxyProxyMaxBrokerClients
+	}
+
+	if config.InproxyClientBrokerClientIdleTimeoutSeconds != nil {
+		applyParameters[parameters.InproxyClientBrokerClientIdleTimeout] = fmt.Sprintf("%ds", *config.InproxyClientBrokerClientIdleTimeoutSeconds)
+	}
+
+	if config.InproxyClientShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyClientShareBrokerClientTransportProbability] = *config.InproxyClientShareBrokerClientTransportProbability
+	}
+
+	if config.InproxyProxyShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyProxyShareBrokerClientTransportProbability] = *config.InproxyProxyShareBrokerClientTransportProbability
+	}
+
+	if config.InproxyProxyPersonalReturnHomePeriodSeconds != nil {
+		applyParameters[parameters.InproxyProxyPersonalReturnHomePeriod] = fmt.Sprintf("%ds", *config.InproxyProxyPersonalReturnHomePeriodSeconds)
 	}
 
 	if len(config.InproxyProxyIncompatibleNetworkTypes) > 0 {

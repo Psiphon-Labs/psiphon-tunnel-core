@@ -102,4 +102,5 @@ message InproxyDialParams {
     optional string inproxy_client_ice_asn = 95;
     optional string inproxy_proxy_ice_region = 96;
     optional string inproxy_proxy_ice_asn = 97;
+    optional int64 inproxy_broker_candidate_number = 98;
 }

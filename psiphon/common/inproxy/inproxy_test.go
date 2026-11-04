@@ -111,7 +111,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	roundTripperSucceededCount := int32(0)
 	roundTripperSucceded := func(RoundTripper) { atomic.AddInt32(&roundTripperSucceededCount, 1) }
 	roundTripperFailedCount := int32(0)
-	roundTripperFailed := func(RoundTripper) { atomic.AddInt32(&roundTripperFailedCount, 1) }
+	roundTripperFailed := func(RoundTripper, error) { atomic.AddInt32(&roundTripperFailedCount, 1) }
 	noMatch := func(RoundTripper) {}
 
 	// Per-region activity tracking for testing the region activity feature.
@@ -537,12 +537,6 @@ func runTestInproxy(doMustUpgrade bool) error {
 				brokerListener.Addr().String(), "proxy"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
 			brokerClientRoundTripperFailed:    roundTripperFailed,
-
-			// Minimize the delay before proxies reannounce after dial
-			// failures, which may occur.
-			announceDelay:           0,
-			announceMaxBackoffDelay: 0,
-			announceDelayJitter:     0.0,
 		}
 
 		webRTCCoordinator := &testWebRTCDialCoordinator{
@@ -590,8 +584,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 				return currentNetworkCtx
 			},
 
-			GetBrokerClient: func() (*BrokerClient, error) {
-				return brokerClient, nil
+			GetBrokerClient: func(context.Context) (*BrokerClient, func(), error) {
+				return brokerClient, func() {}, nil
 			},
 
 			GetBaseAPIParameters: func(bool) (common.APIParameters, string, error) {
@@ -1444,4 +1438,234 @@ func (q *quicEchoServer) Run() {
 			}
 		}(conn)
 	}
+}
+
+// proxyAcquisitionTestRoundTripper is a RoundTripper over a real
+// ResponderSessions that records announce delays and dispatches decrypted
+// payloads to a test handler.
+type proxyAcquisitionTestRoundTripper struct {
+	sessions *ResponderSessions
+	handle   func([]byte) ([]byte, error)
+	delays   []time.Duration
+}
+
+func (r *proxyAcquisitionTestRoundTripper) RoundTrip(ctx context.Context, delay, _ time.Duration, packet []byte) ([]byte, error) {
+	if delay > 0 {
+		r.delays = append(r.delays, delay)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.sessions.HandlePacket(packet, func(_ ID, payload []byte) ([]byte, error) { return r.handle(payload) })
+}
+func (*proxyAcquisitionTestRoundTripper) Close() error { return nil }
+
+// TestProxyWorkerBrokerAcquisition verifies that one proxy announcement
+// worker acquires exactly one broker client and releases it on every exit:
+// a shared precheck, a NoMatch announcement, a local error before any request,
+// a malformed response, and a matched announcement whose answer is sent. In
+// the answer case the lease is held through the announce and answer round
+// trips and released after the answer response, before any data relay. It
+// checks that supervisor timing lookups do not acquire a client and that
+// switching to another candidate at the same broker keeps the announcement
+// pacing.
+func TestProxyWorkerBrokerAcquisition(t *testing.T) {
+	for _, mode := range []string{"precheck", "no-match", "local-error", "malformed", "answer"} {
+		t.Run(mode, func(t *testing.T) {
+			key, err := GenerateSessionPrivateKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicKey, err := key.GetPublicKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret, err := GenerateRootObfuscationSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessions, err := NewResponderSessions(key, secret, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requests, responses, acquired, released := 0, 0, 0, 0
+			// releasedAtAnswer records the lease state observed by the
+			// broker when the answer request arrives.
+			releasedAtAnswer := -1
+			rt := &proxyAcquisitionTestRoundTripper{sessions: sessions, handle: func(payload []byte) ([]byte, error) {
+				requests++
+				if mode == "answer" && requests == 2 {
+					if _, err := UnmarshalProxyAnswerRequest(payload); err != nil {
+						return nil, err
+					}
+					releasedAtAnswer = released
+					// NoAwaitingClient ends the worker after the
+					// answer without a data relay.
+					return MarshalProxyAnswerResponse(&ProxyAnswerResponse{NoAwaitingClient: true})
+				}
+				request, err := UnmarshalProxyAnnounceRequest(payload)
+				if err != nil {
+					return nil, err
+				}
+				if request.PreCheckTactics != (mode == "precheck") {
+					t.Error("unexpected request type")
+				}
+				if mode == "malformed" {
+					return []byte("invalid response"), nil
+				}
+				if mode == "answer" {
+					// A match with an unusable offer SDP: the proxy's
+					// local WebRTC setup fails and it reports the error
+					// in its answer, which still requires the lease.
+					id, err := MakeID()
+					if err != nil {
+						return nil, err
+					}
+					return MarshalProxyAnnounceResponse(&ProxyAnnounceResponse{
+						ConnectionID:            id,
+						SelectedProtocolVersion: ProtocolVersion1,
+						ClientOfferSDP:          WebRTCSessionDescription{Type: 1, SDP: "invalid"},
+					})
+				}
+				return MarshalProxyAnnounceResponse(&ProxyAnnounceResponse{NoMatch: true})
+			}}
+			coordinator := &testBrokerDialCoordinator{
+				networkID: "TEST", brokerPublicKey: publicKey, brokerRootObfuscationSecret: secret,
+				brokerClientRoundTripper:          rt,
+				brokerClientRoundTripperSucceeded: func(RoundTripper) {},
+				brokerClientRoundTripperFailed:    func(RoundTripper, error) {},
+				brokerClientResponseReceived: func(_ RoundTripper, noMatch bool) {
+					if noMatch {
+						t.Error("unexpected outcome")
+					}
+					responses++
+				},
+			}
+			client, err := NewBrokerClient(coordinator)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := NewProxy(&ProxyConfig{
+				Logger: testutils.NewTestLoggerWithComponent("acquisition"), MaxCommonClients: 1,
+				GetBrokerClient: func(context.Context) (*BrokerClient, func(), error) {
+					acquired++
+					return client, sync.OnceFunc(func() { released++ }), nil
+				},
+				MakeWebRTCDialCoordinator: func() (WebRTCDialCoordinator, error) { return &testWebRTCDialCoordinator{networkID: "TEST"}, nil },
+				GetAnnounceDelayParameters: func() (time.Duration, time.Duration, float64) {
+					return time.Hour, 0, 0.001
+				},
+				GetBaseAPIParameters: func(bool) (common.APIParameters, string, error) {
+					if mode == "local-error" {
+						return nil, "", fmt.Errorf("local metrics error")
+					}
+					return common.APIParameters{}, "TEST", nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.networkDiscoveryRunOnce, p.networkDiscoveryNetworkID = true, "TEST"
+			// Supervisor timing must neither acquire nor block on a
+			// broker.
+			delay, _, _ := p.getAnnounceDelayParameters()
+			if acquired != 0 {
+				t.Fatal("timing lookup acquired a candidate")
+			}
+			if delay != time.Hour {
+				t.Fatal("timing lookup did not use configured parameters")
+			}
+			tacticsMode := proxyTacticsModeNone
+			if mode == "precheck" {
+				tacticsMode = proxyTacticsModePreCheck
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err = p.proxyOneClient(ctx, tacticsMode, nil, false)
+			if (err == nil) != (mode == "precheck") || acquired != 1 || released != 1 {
+				t.Fatalf("incorrect ownership: acquired=%d released=%d err=%v", acquired, released, err)
+			}
+			if mode == "answer" && releasedAtAnswer != 0 {
+				t.Fatalf("lease released before the answer request: released=%d", releasedAtAnswer)
+			}
+			wantRequests := 1
+			if mode == "local-error" {
+				wantRequests = 0
+			}
+			if mode == "answer" {
+				wantRequests = 2
+			}
+			wantResponses := 0
+			if mode == "no-match" || mode == "precheck" {
+				wantResponses = 1
+			}
+			if mode == "answer" {
+				// The announce match is a decoded response; ProxyAnswer
+				// does not notify the coordinator.
+				wantResponses = 1
+			}
+			if requests != wantRequests || responses != wantResponses {
+				t.Fatal("duplicated announcements or incorrect promotion milestone")
+			}
+			if mode == "no-match" {
+				// Another CDN client at the same broker must
+				// not reset pacing.
+				client, err = NewBrokerClient(coordinator)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = p.proxyOneClient(ctx, proxyTacticsModeNone, nil, false)
+				if len(rt.delays) == 0 || acquired != 2 || released != 2 {
+					t.Fatal("candidate change bypassed pacing or lease release")
+				}
+			}
+		})
+	}
+}
+
+// TestProxyRaceUsesCapacityBackedWorkers verifies that only announcement
+// workers backed by proxy capacity acquire broker clients: with two common
+// and one personal slot, exactly three acquisitions start and reconciling
+// again creates no extra worker for a broker race.
+func TestProxyRaceUsesCapacityBackedWorkers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, 10)
+	p, err := NewProxy(&ProxyConfig{
+		Logger: testutils.NewTestLoggerWithComponent("capacity"), MaxCommonClients: 2, MaxPersonalClients: 1,
+		MakeWebRTCDialCoordinator: func() (WebRTCDialCoordinator, error) { return &testWebRTCDialCoordinator{networkID: "TEST"}, nil },
+		GetBrokerClient: func(ctx context.Context) (*BrokerClient, func(), error) {
+			started <- struct{}{}
+			<-ctx.Done()
+			return nil, nil, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.networkDiscoveryRunOnce, p.networkDiscoveryNetworkID = true, "TEST"
+	p.reconcile(ctx, p.getProxyLimits())
+	p.reconcile(ctx, p.getProxyLimits())
+	for i := 0; i < 3; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			cancel()
+			p.proxySupervisorWaitGroup.Wait()
+			t.Fatal("missing capacity-backed worker")
+		}
+	}
+	p.proxySupervisorMutex.Lock()
+	commonCount, personalCount := p.proxySupervisorCommonState.announcing, p.proxySupervisorPersonalState.announcing
+	p.proxySupervisorMutex.Unlock()
+	if commonCount != 2 || personalCount != 1 {
+		t.Fatal("broker acquisition increased announcement capacity")
+	}
+	select {
+	case <-started:
+		t.Fatal("extra announcement worker created for broker race")
+	default:
+	}
+	cancel()
+	p.proxySupervisorWaitGroup.Wait()
 }

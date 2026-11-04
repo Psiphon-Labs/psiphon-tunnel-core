@@ -68,9 +68,10 @@ type Proxy struct {
 	networkDiscoveryRunOnce   bool
 	networkDiscoveryNetworkID string
 
-	nextAnnounceMutex        sync.Mutex
-	nextAnnounceBrokerClient *BrokerClient
-	nextAnnounceNotBefore    time.Time
+	nextAnnounceMutex     sync.Mutex
+	nextAnnounceBrokerKey SessionPublicKey
+	nextAnnounceNetworkID string
+	nextAnnounceNotBefore time.Time
 
 	proxySupervisorTacticsWorker bool
 	proxySupervisorMutex         sync.Mutex
@@ -126,7 +127,9 @@ type ProxyConfig struct {
 	// announce many proxy instances. The BrokerClient should be implemented
 	// using multiplexing over a shared network connection -- for example,
 	// HTTP/2 --  and a shared broker session for optimal performance.
-	GetBrokerClient func() (*BrokerClient, error)
+	// The input ctx bounds acquisition. The caller must invoke release when
+	// the broker client is no longer required.
+	GetBrokerClient func(context.Context) (brokerClient *BrokerClient, release func(), err error)
 
 	// GetBaseAPIParameters returns Psiphon API parameters to be sent to and
 	// logged by the broker. Expected parameters include client/proxy
@@ -144,6 +147,16 @@ type ProxyConfig struct {
 	// MakeWebRTCDialCoordinator is invoked for each proxy/client connection,
 	// and the provider can select new parameters per connection as reqired.
 	MakeWebRTCDialCoordinator func() (WebRTCDialCoordinator, error)
+
+	// GetAnnounceDelayParameters returns the current announce delay, max
+	// backoff delay, and delay jitter used to stagger announce requests and
+	// to delay worker launches after failures. A zero value results in the
+	// default value being used instead; when GetAnnounceDelayParameters is
+	// nil, all defaults are used.
+	GetAnnounceDelayParameters func() (
+		announceDelay time.Duration,
+		announceMaxBackoffDelay time.Duration,
+		announceDelayJitter float64)
 
 	// ExcludeInterfaceName specifies the network interface to omit from
 	// proxy WebRTC ICE interface enumeration.
@@ -1115,23 +1128,22 @@ func (p *Proxy) getLimits(isPersonal bool) (
 	return maxCommonClients, maxPersonalClients, rateLimits
 }
 
-// getAnnounceDelayParameters is a helper that fetches the proxy announcement
-// delay parameters from the current broker client.
+// getAnnounceDelayParameters is a helper that returns the proxy announcement
+// delay parameters from ProxyConfig.GetAnnounceDelayParameters, substituting
+// package defaults for zero values or when no callback is configured.
 //
-// getAnnounceDelayParameters is used to configure a delay when
-// proxyOneClient fails. As having no broker clients is a possible
-// proxyOneClient failure case, GetBrokerClient errors are ignored here and
-// defaults used in that case.
+// getAnnounceDelayParameters is used both to stagger announce requests in
+// proxyOneClient and to configure the supervisor's delay when
+// proxyOneClient fails.
 func (p *Proxy) getAnnounceDelayParameters() (time.Duration, time.Duration, float64) {
-	brokerClient, err := p.config.GetBrokerClient()
-	if err != nil {
-		return proxyAnnounceDelay, proxyAnnounceMaxBackoffDelay, proxyAnnounceDelayJitter
+	var delay, maxBackoffDelay time.Duration
+	var jitter float64
+	if p.config.GetAnnounceDelayParameters != nil {
+		delay, maxBackoffDelay, jitter = p.config.GetAnnounceDelayParameters()
 	}
-	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
-	return common.ValueOrDefault(brokerCoordinator.AnnounceDelay(), proxyAnnounceDelay),
-		common.ValueOrDefault(brokerCoordinator.AnnounceMaxBackoffDelay(), proxyAnnounceMaxBackoffDelay),
-		common.ValueOrDefault(brokerCoordinator.AnnounceDelayJitter(), proxyAnnounceDelayJitter)
-
+	return common.ValueOrDefault(delay, proxyAnnounceDelay),
+		common.ValueOrDefault(maxBackoffDelay, proxyAnnounceMaxBackoffDelay),
+		common.ValueOrDefault(jitter, proxyAnnounceDelayJitter)
 }
 
 // resetNetworkDiscovery resets the network discovery state, which will force
@@ -1265,10 +1277,11 @@ func (p *Proxy) proxyOneClient(
 	// proxy should be able to send keep alives to extend the port mapping
 	// lifetime.
 
-	brokerClient, err := p.config.GetBrokerClient()
+	brokerClient, releaseBrokerClient, err := p.config.GetBrokerClient(ctx)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
+	defer releaseBrokerClient()
 
 	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
 
@@ -1312,17 +1325,20 @@ func (p *Proxy) proxyOneClient(
 
 	requestDelay := time.Duration(0)
 	announceDelay, _, announceDelayJitter := p.getAnnounceDelayParameters()
+	key, networkID := brokerCoordinator.BrokerPublicKey(), brokerCoordinator.NetworkID()
 	p.nextAnnounceMutex.Lock()
 	nextDelay := prng.JitterDuration(announceDelay, announceDelayJitter)
-	if p.nextAnnounceBrokerClient != brokerClient {
-		// Reset the delay when the broker client changes.
+	if p.nextAnnounceBrokerKey != key || p.nextAnnounceNetworkID != networkID {
+		// Reset the delay when the broker or network changes, so that broker
+		// clients using different fronting providers for the same broker
+		// share one schedule.
 		p.nextAnnounceNotBefore = time.Time{}
-		p.nextAnnounceBrokerClient = brokerClient
+		p.nextAnnounceBrokerKey, p.nextAnnounceNetworkID = key, networkID
 	}
 	if p.nextAnnounceNotBefore.IsZero() {
 		p.nextAnnounceNotBefore = time.Now().Add(nextDelay)
 		// No delay for the very first announce request, so leave
-		// announceRequestDelay set to 0.
+		// requestDelay set to 0.
 	} else {
 		requestDelay = time.Until(p.nextAnnounceNotBefore)
 		if requestDelay < 0 {
@@ -1362,8 +1378,9 @@ func (p *Proxy) proxyOneClient(
 		})
 	if p.logAnnounce(isPersonal) {
 		p.config.Logger.WithTraceFields(common.LogFields{
-			"delay":       requestDelay.String(),
-			"elapsedTime": time.Since(announceStartTime).String(),
+			"brokerClientID": brokerCoordinator.BrokerClientID(),
+			"delay":          requestDelay.String(),
+			"elapsedTime":    time.Since(announceStartTime).String(),
 		}).Info("announcement request")
 	}
 
@@ -1587,6 +1604,11 @@ func (p *Proxy) proxyOneClient(
 		return backOff, errors.Trace(err)
 	}
 
+	// The broker is no longer needed once the answer is sent. Release now so
+	// an unshared broker client isn't retained, or counted against the broker
+	// client limit, for the lifetime of the relay.
+	releaseBrokerClient()
+
 	// Now that an answer is sent, stop if WebRTC initialization failed.
 
 	if webRTCErr != nil {
@@ -1804,7 +1826,8 @@ func (p *Proxy) proxyOneClient(
 	waitGroup.Wait()
 
 	p.config.Logger.WithTraceFields(common.LogFields{
-		"connectionID": announceResponse.ConnectionID,
+		"brokerClientID": brokerCoordinator.BrokerClientID(),
+		"connectionID":   announceResponse.ConnectionID,
 	}).Info("connection closed")
 
 	// Don't apply a back-off delay to the next announcement since this

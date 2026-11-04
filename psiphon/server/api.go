@@ -1329,7 +1329,9 @@ var inproxyBrokerRequestParams = append(
 	append(
 		[]requestParamSpec{
 			{"session_id", isHexDigits, 0},
-			{"fronting_provider_id", isAnyString, requestParamOptional}},
+			{"fronting_provider_id", isAnyString, requestParamOptional},
+			{"inproxy_broker_is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+			{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 		tacticsParams...),
 	baseParams...)
 
@@ -1357,6 +1359,16 @@ func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogField
 }
 
 func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+	// Broker replay and candidate metrics belong in broker request logs,
+	// not in each tunnel's copy of the proxy metrics. Build the field list
+	// once without modifying the request specs used by the broker.
+	reportParams := make([]requestParamSpec, 0, len(inproxyBrokerRequestParams))
+	for _, spec := range inproxyBrokerRequestParams {
+		if spec.name == "inproxy_broker_is_replay" || spec.name == "inproxy_broker_candidate_number" {
+			continue
+		}
+		reportParams = append(reportParams, spec)
+	}
 
 	return func(prefix string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
 
@@ -1367,7 +1379,7 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 			GeoIPData{}, // Proxy GeoIP data is added in sshClient.logTunnel
 			nil,
 			params,
-			inproxyBrokerRequestParams)
+			reportParams)
 
 		return common.LogFields(logFields)
 	}
@@ -1634,6 +1646,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_connection_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_is_reuse", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_use_media_streams", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
