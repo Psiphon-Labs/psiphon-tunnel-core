@@ -698,6 +698,44 @@ func TestLivenessTest(t *testing.T) {
 		})
 }
 
+func TestHandshakeExtendsInactivityTimeout(t *testing.T) {
+	serverConn, peerConn := net.Pipe()
+	defer serverConn.Close()
+	defer peerConn.Close()
+
+	const initialTimeout = 100 * time.Millisecond
+	activityConn, err := common.NewActivityMonitoredConn(
+		serverConn, initialTimeout, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	support := &SupportServices{
+		Config:          &Config{},
+		TrafficRulesSet: &TrafficRulesSet{},
+		TacticsServer:   &tactics.Server{},
+	}
+	support.ServerTacticsParametersCache = NewServerTacticsParametersCache(support)
+	client := &sshClient{
+		sshServer:    &sshServer{support: support},
+		activityConn: activityConn,
+	}
+
+	_, err = client.setHandshakeState(handshakeState{completed: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(2 * initialTimeout)
+	go peerConn.Write([]byte{1})
+
+	var buffer [1]byte
+	_, err = activityConn.Read(buffer[:])
+	if err != nil {
+		t.Fatalf("read after initial timeout failed: %v", err)
+	}
+}
+
 func TestPruneServerEntries(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
