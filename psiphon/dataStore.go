@@ -73,6 +73,12 @@ var (
 
 	datastoreServerEntryFetchGCThreshold = 10
 
+	// datastoreServerEntryStoreBatchSize is the number of server entries
+	// stored per transaction by StreamingStoreServerEntries when the datastore
+	// is empty. Each commit waits on durable flushes of the datastore file,
+	// which take tens of milliseconds on some devices.
+	datastoreServerEntryStoreBatchSize = 10
+
 	datastoreReferenceCountMutex  sync.RWMutex
 	datastoreReferenceCount       int64
 	datastoreMutex                sync.RWMutex
@@ -294,6 +300,21 @@ func storeServerEntry(
 	replaceIfExists bool,
 	additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error) error {
 
+	return errors.Trace(
+		storeServerEntries(
+			[]protocol.ServerEntryFields{serverEntryFields},
+			replaceIfExists,
+			additionalUpdates))
+}
+
+// storeServerEntries stores the server entries in a single transaction, each
+// with the semantics of storeServerEntry. When any entry fails, none of the
+// entries are stored.
+func storeServerEntries(
+	entries []protocol.ServerEntryFields,
+	replaceIfExists bool,
+	additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error) error {
+
 	// TODO: call serverEntryFields.VerifySignature. At this time, we do not do
 	// this as not all server entries have an individual signature field. All
 	// StoreServerEntry callers either call VerifySignature or obtain server
@@ -302,9 +323,11 @@ func storeServerEntry(
 
 	// Server entries should already be validated before this point,
 	// so instead of skipping we fail with an error.
-	err := protocol.ValidateServerEntryFields(serverEntryFields)
-	if err != nil {
-		return errors.Tracef("invalid server entry: %s", err)
+	for _, serverEntryFields := range entries {
+		err := protocol.ValidateServerEntryFields(serverEntryFields)
+		if err != nil {
+			return errors.Tracef("invalid server entry: %s", err)
+		}
 	}
 
 	// BoltDB implementation note:
@@ -315,7 +338,10 @@ func storeServerEntry(
 	// values (e.g., many servers support all protocols), performance
 	// is expected to be acceptable.
 
-	err = datastoreUpdate(func(tx *datastoreTx) error {
+	updatedDiagnosticIDs := make([]string, 0, len(entries))
+
+	storeEntry := func(
+		tx *datastoreTx, serverEntryFields protocol.ServerEntryFields) error {
 
 		serverEntries := tx.bucket(datastoreServerEntriesBucket)
 		serverEntryKeys := tx.bucket(datastoreServerEntryKeysBucket)
@@ -411,12 +437,28 @@ func storeServerEntry(
 			}
 		}
 
-		NoticeInfo("updated server %s", serverEntryFields.GetDiagnosticID())
+		updatedDiagnosticIDs = append(
+			updatedDiagnosticIDs, serverEntryFields.GetDiagnosticID())
 
+		return nil
+	}
+
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+		for _, serverEntryFields := range entries {
+			err := storeEntry(tx, serverEntryFields)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	// Report updates only after the transaction commits.
+	for _, diagnosticID := range updatedDiagnosticIDs {
+		NoticeInfo("updated server %s", diagnosticID)
 	}
 
 	return nil
@@ -439,10 +481,14 @@ func StoreServerEntries(
 	return nil
 }
 
-// StreamingStoreServerEntries stores a list of server entries. There is an
-// independent transaction for each entry insert/update.
+// StreamingStoreServerEntries stores a list of server entries. When the
+// datastore is empty, as when an import blocks starting tunnel establishment,
+// server entries are stored in batches. Otherwise, there is an independent
+// transaction for each entry insert/update, so that other datastore writes
+// can run between entries.
 // StreamingStoreServerEntries stops early and returns an error if ctx becomes
-// done; any server entries stored up to that point are retained.
+// done or the list can't be decoded; any server entries read up to that point
+// are stored and retained.
 func StreamingStoreServerEntries(
 	ctx context.Context,
 	config *Config,
@@ -454,28 +500,60 @@ func StreamingStoreServerEntries(
 	// so this isn't true constant-memory streaming (it depends on garbage
 	// collection).
 
+	batchSize := 1
+	if !HasServerEntries() {
+		batchSize = datastoreServerEntryStoreBatchSize
+	}
+	batch := make([]protocol.ServerEntryFields, 0, batchSize)
+
+	storeBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		err := storeServerEntries(batch, replaceIfExists, nil)
+		// Release the stored entries so that they can be garbage collected.
+		clear(batch)
+		batch = batch[:0]
+		return err
+	}
+
+	// When the list stops early, store the pending server entries, which have
+	// already been read, and return the error that stopped the list.
+	storeBatchBeforeReturn := func(err error) error {
+		storeErr := storeBatch()
+		if storeErr != nil {
+			NoticeWarning(
+				"StreamingStoreServerEntries: failed to store pending server entries: %v",
+				errors.Trace(storeErr))
+		}
+		return errors.Trace(err)
+	}
+
 	n := 0
 	for {
 
 		select {
 		case <-ctx.Done():
-			return errors.Trace(ctx.Err())
+			return storeBatchBeforeReturn(ctx.Err())
 		default:
 		}
 
 		serverEntry, err := serverEntries.Next()
 		if err != nil {
-			return errors.Trace(err)
+			return storeBatchBeforeReturn(err)
 		}
 
 		if serverEntry == nil {
 			// No more server entries
-			return nil
+			return errors.Trace(storeBatch())
 		}
 
-		err = StoreServerEntry(serverEntry, replaceIfExists)
-		if err != nil {
-			return errors.Trace(err)
+		batch = append(batch, serverEntry)
+		if len(batch) == batchSize {
+			err = storeBatch()
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		n += 1

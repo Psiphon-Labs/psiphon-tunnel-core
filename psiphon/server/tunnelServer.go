@@ -63,9 +63,22 @@ import (
 )
 
 const (
+
+	// SSH_CONNECTION_PRE_API_READ_DEADLINE is a shorter inactivity timeout
+	// for client tunnels that haven't fully established. It's intended to
+	// more aggressively prune resources for tunnels that stall early. The
+	// pre-API phase can include liveness test traffic, where upstream bytes
+	// are activity, and silent periods, including client hold-off (determined
+	// by HoldOff parameters), client-side waits for other tunnels to finish
+	// activation (potentially spanning multiple network latency
+	// scaled [Inproxy]PsiphonAPIRequestTimeout periods), and in-proxy broker
+	// relay round trip waits. Currently, clients do not send periodic SSH
+	// keep alives until activation completes.
+
 	SSH_AUTH_LOG_PERIOD                   = 30 * time.Minute
 	SSH_HANDSHAKE_TIMEOUT                 = 30 * time.Second
 	SSH_BEGIN_HANDSHAKE_TIMEOUT           = 1 * time.Second
+	SSH_CONNECTION_PRE_API_READ_DEADLINE  = 2 * time.Minute
 	SSH_CONNECTION_READ_DEADLINE          = 5 * time.Minute
 	SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE = 8192
 	SSH_TCP_PORT_FORWARD_QUEUE_SIZE       = 1024
@@ -229,6 +242,8 @@ func (server *TunnelServer) Run() error {
 				return errors.Trace(err)
 			}
 
+			server.sshServer.registerQUICListener(listener.(*quic.Listener))
+
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
 			listener, err = refraction.Listen(localAddress)
@@ -388,6 +403,25 @@ func (server *TunnelServer) GetInproxyBrokerMetrics() LogFields {
 	return LogFields(metrics.GetLogFields())
 }
 
+// GetQUICMetrics returns QUIC counter metrics, summed over all QUIC
+// listeners, since the last call.
+func (server *TunnelServer) GetQUICMetrics() LogFields {
+	server.sshServer.quicListenersMutex.Lock()
+	defer server.sshServer.quicListenersMutex.Unlock()
+
+	if len(server.sshServer.quicListeners) == 0 {
+		return nil
+	}
+	metrics := LogFields{}
+	for _, listener := range server.sshServer.quicListeners {
+		for name, value := range listener.GetQUICCounterMetrics() {
+			count, _ := metrics[name].(int64)
+			metrics[name] = count + value.(int64)
+		}
+	}
+	return metrics
+}
+
 // GetEstablishedClientCount returns the number of currently established
 // clients.
 func (server *TunnelServer) GetEstablishedClientCount() int {
@@ -467,8 +501,10 @@ type sshServer struct {
 	authorizationSessionIDsMutex sync.Mutex
 	authorizationSessionIDs      map[string]string
 
-	meekServersMutex sync.Mutex
-	meekServers      []*MeekServer
+	meekServersMutex   sync.Mutex
+	meekServers        []*MeekServer
+	quicListenersMutex sync.Mutex
+	quicListeners      []*quic.Listener
 }
 
 func newSSHServer(
@@ -955,6 +991,15 @@ func (sshServer *sshServer) registerMeekServer(meekServer *MeekServer) {
 	defer sshServer.meekServersMutex.Unlock()
 
 	sshServer.meekServers = append(sshServer.meekServers, meekServer)
+}
+
+// registerQUICListener registers a quic.Listener instance to report load
+// metrics.
+func (sshServer *sshServer) registerQUICListener(listener *quic.Listener) {
+	sshServer.quicListenersMutex.Lock()
+	defer sshServer.quicListenersMutex.Unlock()
+
+	sshServer.quicListeners = append(sshServer.quicListeners, listener)
 }
 
 // reloadMeekServerTactics signals each registered MeekServer instance that
@@ -2077,6 +2122,7 @@ type sshClient struct {
 	isInproxyTunnelProtocol              bool
 	additionalTransportData              *additionalTransportData
 	sshConn                              ssh.Conn
+	activityConn                         *common.ActivityMonitoredConn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
 	replayedServerPacketManipulation     bool
@@ -2537,10 +2583,10 @@ func (sshClient *sshClient) run(
 
 	// Wrap the base client connection with an ActivityMonitoredConn which will
 	// terminate the connection if no data is received before the deadline. This
-	// timeout is in effect for the entire duration of the SSH connection. Clients
-	// must actively use the connection or send SSH keep alive requests to keep
-	// the connection active. Writes are not considered reliable activity indicators
-	// due to buffering.
+	// timeout is shorter until the API handshake succeeds. Clients must actively
+	// use the connection or send SSH keep alive requests to keep the connection
+	// active. Writes are not considered reliable activity indicators due to
+	// buffering.
 
 	// getTunnelActivityUpdaters wires up updaters that act on tunnel duration
 	// and bytes transferred, including the in-proxy proxy quality tracker.
@@ -2550,9 +2596,14 @@ func (sshClient *sshClient) run(
 	// Limitation: wrapping at this point omits some obfuscation layer bytes,
 	// including MEEK and QUIC.
 
+	// Transport wrappers may restrict supported deadlines. For example,
+	// meek's SetDeadline requires a deadline beyond its configured session
+	// staleness (45 seconds by default). Keep the inactivity timeout
+	// compatible with these transport constraints.
+
 	activityConn, err := common.NewActivityMonitoredConn(
 		conn,
-		SSH_CONNECTION_READ_DEADLINE,
+		SSH_CONNECTION_PRE_API_READ_DEADLINE,
 		false,
 		nil,
 		sshClient.getTunnelActivityUpdaters()...)
@@ -2580,6 +2631,7 @@ func (sshClient *sshClient) run(
 
 	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.peerGeoIPData)
 	if err != nil {
+		conn.Close()
 		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
 			"ServerTacticsParametersCache.Get failed")
 		return
@@ -2900,6 +2952,7 @@ func (sshClient *sshClient) run(
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn
+	sshClient.activityConn = activityConn
 	sshClient.throttledConn = throttledConn
 	sshClient.Unlock()
 
@@ -4541,6 +4594,12 @@ func (sshClient *sshClient) setHandshakeState(
 			})
 
 		sshClient.Unlock()
+	}
+
+	// All checks have passed. Extend the inactivity timeout.
+	err := sshClient.activityConn.SetInactivityTimeout(SSH_CONNECTION_READ_DEADLINE)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	upstreamBytesPerSecond, downstreamBytesPerSecond := sshClient.setTrafficRules()

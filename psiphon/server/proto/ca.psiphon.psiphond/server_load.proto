@@ -83,4 +83,8 @@ message ServerLoad {
     optional int64 inproxy_matcher_offers_visited = 150;
     optional int64 inproxy_matcher_offers_without_eligible_queue = 151;
     optional int64 inproxy_matcher_announcements_examined = 152;
+    optional int64 quic_dropped_flow_count = 153;
+    optional int64 quic_source_address_validation_count = 154;
+    optional int64 quic_evicted_flow_count = 155;
+    optional int64 quic_limited_flow_count = 156;
 }

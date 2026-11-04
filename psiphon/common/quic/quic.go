@@ -204,7 +204,7 @@ func Listen(
 	// timely shutdown.
 
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
-		udpConn, false, false, obfuscationKey, seed)
+		udpConn, false, false, enableGQUIC, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
@@ -285,7 +285,8 @@ func Listen(
 			return nil, errors.Trace(err)
 		}
 
-		tr := newIETFTransport(obfuscatedOOBPacketConn)
+		tr := newIETFTransport(
+			obfuscatedOOBPacketConn, obfuscatedPacketConn.verifySourceAddress)
 
 		listener, err := tr.Listen(tlsConfig, ietfQUICConfig)
 		if err != nil {
@@ -345,6 +346,11 @@ func (listener *Listener) Accept() (net.Conn, error) {
 func (listener *Listener) Close() error {
 	_ = listener.packetConn.Close()
 	return listener.quicListener.Close()
+}
+
+// GetQUICCounterMetrics resets the counters it returns.
+func (listener *Listener) GetQUICCounterMetrics() common.LogFields {
+	return listener.packetConn.counterMetrics()
 }
 
 func makeServerIETFConfig(
@@ -407,12 +413,25 @@ func makeServerIETFConfig(
 		DisablePathMTUDiscovery:       disablePathMTUDiscovery,
 	}
 
+	ietfQUICConfig.GetConfigForClient = func(
+		info *ietf_quic.ClientHelloInfo) (*ietf_quic.Config, error) {
+		return conn.handshakeStarted(ietfQUICConfig, info)
+	}
+
 	return tlsConfig, ietfQUICConfig, nil
 }
 
-func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
+func newIETFTransport(
+	conn net.PacketConn,
+	verifySourceAddress func(net.Addr) bool) *ietf_quic.Transport {
+
 	return &ietf_quic.Transport{
 		Conn: conn,
+
+		// Source address validation is required only under load burst
+		// conditions, and isn't triggered until after anti-probing checks.
+		// See ObfuscatedPacketConn.verifySourceAddress.
+		VerifySourceAddress: verifySourceAddress,
 
 		// The quic-go server may respond with a version negotiation packet
 		// before reaching the Initial packet processing with its
@@ -1495,7 +1514,8 @@ func newMuxListener(
 		return nil, errors.Trace(err)
 	}
 
-	tr := newIETFTransport(listener.ietfQUICConn)
+	tr := newIETFTransport(
+		listener.ietfQUICConn, listener.conn.verifySourceAddress)
 	il, err := tr.Listen(tlsConfig, ietfQUICConfig)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1603,6 +1623,9 @@ func (listener *muxListener) relayAcceptedConnections(l quicListener) {
 			default:
 			}
 			continue
+		}
+		if l == listener.gQUICListener {
+			listener.conn.peerAccepted(connection.RemoteAddr())
 		}
 		select {
 		case listener.acceptedConnections <- connection:

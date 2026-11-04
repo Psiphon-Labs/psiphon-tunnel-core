@@ -695,10 +695,10 @@ func (s *baseServer) verifyClientHelloRandom(p receivedPacket, hdr *wire.Header)
 		if !s.config.VerifyClientHelloRandom(p.remoteAddr, random) {
 			return fmt.Errorf("verifyClientHelloRandom: VerifyClientHelloRandom failed")
 		}
-		break
+		return nil
 	}
 
-	return nil
+	return errors.New("verifyClientHelloRandom: missing CRYPTO frame")
 }
 
 // validateToken returns false if:
@@ -934,6 +934,9 @@ func (s *baseServer) handleNewConn(conn quicConn) {
 }
 
 func (s *baseServer) sendRetry(p rejectedPacket) {
+	// [Psiphon]
+	// Release the incoming packet buffer, as maybeSendInvalidToken does.
+	defer p.buffer.Release()
 	if err := s.sendRetryPacket(p); err != nil {
 		s.logger.Debugf("Error sending Retry packet: %s", err)
 	}

@@ -50,6 +50,7 @@ func TestReloader(t *testing.T) {
 	}
 
 	file.ReloadableFile = NewReloadableFile(
+		"test-config",
 		filename,
 		true,
 		func(fileContent []byte, _ time.Time) error {
@@ -76,6 +77,10 @@ func TestReloader(t *testing.T) {
 
 	if !bytes.Equal(file.contents, initialContents) {
 		t.Fatalf("Unexpected contents")
+	}
+
+	if len(results) != 1 || results[0].Name != "test-config" || results[0].FilePath != filename {
+		t.Fatalf("unexpected reload identity: %+v", results)
 	}
 
 	// Test: reload unchanged file
@@ -172,7 +177,8 @@ func TestReloader(t *testing.T) {
 	}
 	results = file.Reload()
 	err = results.Err()
-	if err == nil || len(results) != 1 || results[0].HashSHA256 != "" || len(results[0].Errors) != 1 {
+	if err == nil || len(results) != 1 || results[0].HashSHA256 != "" || len(results[0].Errors) != 1 ||
+		results[0].Name != "test-config" || results[0].FilePath != filename {
 		t.Fatalf("unexpected missing file result: %+v, %v", results, err)
 	}
 }

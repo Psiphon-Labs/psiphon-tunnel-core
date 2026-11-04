@@ -2836,7 +2836,8 @@ func prepareSDPAddresses(
 // filterSDPAddresses checks that the SDP does not contain an empty list of
 // candidates, bogon candidates, or candidates outside of the country and ASN
 // for the specified expectedGeoIPData. Invalid candidates are stripped and a
-// filtered SDP is returned.
+// filtered SDP is returned. When errorOnNoCandidates is true and no candidates
+// remain, metrics are returned with an error and a nil SDP.
 func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
@@ -3187,15 +3188,6 @@ func processSDPAddresses(
 		mediaDescription.Attributes = attributes
 	}
 
-	if errorOnNoCandidates && candidateCount == 0 {
-		return nil, nil, errors.TraceNew("no candidates")
-	}
-
-	encodedSDP, err = sessionDescription.Marshal()
-	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
-
 	metrics := &webRTCSDPMetrics{
 		iceCandidateCount:      candidateCount,
 		iceRegion:              iceRegion,
@@ -3211,6 +3203,15 @@ func processSDPAddresses(
 	for reason, count := range filteredCandidateReasons {
 		metrics.filteredICECandidates = append(metrics.filteredICECandidates,
 			fmt.Sprintf("%s: %d", reason, count))
+	}
+
+	if errorOnNoCandidates && candidateCount == 0 {
+		return nil, metrics, errors.TraceNew("no candidates")
+	}
+
+	encodedSDP, err = sessionDescription.Marshal()
+	if err != nil {
+		return nil, nil, errors.Trace(err)
 	}
 
 	return encodedSDP, metrics, nil
