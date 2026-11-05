@@ -32,11 +32,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-const (
-	clientOfferRetryDelay  = 1 * time.Second
-	clientOfferRetryJitter = 0.3
-)
-
 // ClientConn is a network connection to an in-proxy, which is relayed to a
 // Psiphon server destination. Psiphon clients use a ClientConn in place of a
 // physical TCP or UDP socket connection, passing the ClientConn into tunnel
@@ -124,6 +119,11 @@ type ClientConfig struct {
 // specified destination. DialClient first contacts the broker and initiates
 // an in-proxy pairing. config.BrokerClient may be shared by multiple dials,
 // and may have a preexisting connection and session with the broker.
+//
+// DialClient sends at most one client offer to the broker and does not
+// retry. Any failure, including no match, is returned to the caller, which
+// may dial again, subject to its own rate limiting and broker client
+// selection.
 func DialClient(
 	ctx context.Context,
 	config *ClientConfig) (retConn *ClientConn, retErr error) {
@@ -166,10 +166,6 @@ func DialClient(
 	//
 	// - The STUN state used for NAT discovery could be reused for the WebRTC
 	//   dial.
-	//
-	// - A subsequent WebRTC offer setup could be run concurrent with the
-	//   client offer request, in case that request or WebRTC connections
-	//   fails, so that the offer is immediately ready for a retry.
 
 	if config.WebRTCDialCoordinator.DiscoverNAT() {
 
@@ -199,72 +195,19 @@ func DialClient(
 		metrics["inproxy_dial_nat_discovery_duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
 		config.Logger.WithTraceFields(
 			common.LogFields{"duration": duration.String()}).Info("NAT discovery complete")
-		startTime = time.Now()
 	}
 
-	var result *clientWebRTCDialResult
-	var lastErr error
+	// A broker transport failure invokes the BrokerDialCoordinator
+	// BrokerClientRoundTripperFailed callback, and the Psiphon client can
+	// select another broker client on a subsequent dial. Similarly, when
+	// STUN servers fail, WebRTCDialCoordinator STUNServerAddressFailed is
+	// invoked, giving the Psiphon client an opportunity to select new STUN
+	// server parameters -- although, in this failure case, the WebRTC
+	// connection attempt can succeed with other ICE candidates or no ICE
+	// candidates.
 
-	for attempt := 0; ; attempt += 1 {
-
-		previousAttemptsDuration := time.Since(startTime)
-
-		// Repeatedly try to establish in-proxy/WebRTC connection until the
-		// dial context is canceled or times out.
-		//
-		// A broker transport failure invokes the BrokerDialCoordinator
-		// BrokerClientRoundTripperFailed callback. The Psiphon client can
-		// select another broker client on a subsequent dial; retries within
-		// this loop retain config.BrokerClient. Similarly, when STUN servers
-		// fail, WebRTCDialCoordinator STUNServerAddressFailed will be
-		// invoked, giving the Psiphon client an opportunity to select new
-		// STUN server parameter -- although, in this failure case, the
-		// WebRTC connection attempt can succeed with other ICE candidates or
-		// no ICE candidates.
-
-		err := ctx.Err()
-		if err != nil {
-			if lastErr != nil {
-				err = fmt.Errorf(
-					"%w, attempts: %d, lastErr: %w", err, attempt, lastErr)
-			}
-			return nil, errors.Trace(err)
-		}
-
-		var retry bool
-		result, retry, err = dialClientWebRTCConn(ctx, config)
-		if err == nil {
-
-			if attempt > 0 {
-				// Record the time elapsed in previous attempts.
-				metrics["inproxy_dial_failed_attempts_duration"] =
-					fmt.Sprintf("%d", previousAttemptsDuration/time.Millisecond)
-				config.Logger.WithTraceFields(
-					common.LogFields{
-						"duration": previousAttemptsDuration.String()}).Info("previous failed attempts")
-			}
-
-			break
-		}
-
-		lastErr = err
-
-		if retry {
-			config.Logger.WithTraceFields(common.LogFields{"error": err}).Warning("dial failed")
-
-			// This delay is intended avoid overloading the broker with
-			// repeated requests. A jitter is applied to mitigate a traffic
-			// fingerprint.
-
-			brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
-			common.SleepWithJitter(
-				ctx,
-				common.ValueOrDefault(brokerCoordinator.OfferRetryDelay(), clientOfferRetryDelay),
-				common.ValueOrDefault(brokerCoordinator.OfferRetryJitter(), clientOfferRetryJitter))
-
-			continue
-		}
-
+	result, err := dialClientWebRTCConn(ctx, config)
+	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -348,7 +291,7 @@ type clientWebRTCDialResult struct {
 
 func dialClientWebRTCConn(
 	ctx context.Context,
-	config *ClientConfig) (retResult *clientWebRTCDialResult, retRetry bool, retErr error) {
+	config *ClientConfig) (retResult *clientWebRTCDialResult, retErr error) {
 
 	startTime := time.Now()
 	metrics := common.LogFields{}
@@ -358,7 +301,7 @@ func dialClientWebRTCConn(
 	commonCompartmentIDs := brokerCoordinator.CommonCompartmentIDs()
 
 	if len(personalCompartmentIDs) == 0 && len(commonCompartmentIDs) == 0 {
-		return nil, false, errors.TraceNew("no compartment IDs")
+		return nil, errors.TraceNew("no compartment IDs")
 	}
 
 	// In personal pairing mode, RFC 1918/4193 private IP addresses are
@@ -385,7 +328,7 @@ func dialClientWebRTCConn(
 		},
 		hasPersonalCompartmentIDs)
 	if err != nil {
-		return nil, true, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	defer func() {
 		// Cleanup on early return
@@ -408,7 +351,7 @@ func dialClientWebRTCConn(
 
 	packedParams, err := protocol.EncodePackedAPIParameters(apiParams)
 	if err != nil {
-		return nil, false, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	// Here, WebRTCDialCoordinator.NATType may be populated from discovery, or
@@ -447,7 +390,7 @@ func dialClientWebRTCConn(
 		},
 		hasPersonalCompartmentIDs)
 	if err != nil {
-		return nil, false, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	duration = time.Since(startTime)
@@ -457,15 +400,15 @@ func dialClientWebRTCConn(
 	startTime = time.Now()
 
 	// MustUpgrade has precedence over other cases to ensure the callback is
-	// invoked. No retry when rate/entry limited or must upgrade; do retry on
-	// no-match, as a match may soon appear.
+	// invoked. Limited has precedence over NoMatch, matching the
+	// retryableNoMatch signal derived in BrokerClient.ClientOffer.
 
 	if offerResponse.MustUpgrade {
 
 		if config.MustUpgrade != nil {
 			config.MustUpgrade()
 		}
-		return nil, false, errors.TraceNew("must upgrade")
+		return nil, errors.TraceNew("must upgrade")
 
 	} else if offerResponse.Limited {
 
@@ -476,18 +419,18 @@ func dialClientWebRTCConn(
 		// having existing clients abort the in-proxy dial without discarding
 		// the broker client.
 
-		return nil, false, errors.TraceNew("limited")
+		return nil, errors.TraceNew("limited")
 
 	} else if offerResponse.NoMatch {
 
-		return nil, true, errors.TraceNew("no match")
+		return nil, errors.TraceNew("no match")
 	}
 
 	if offerResponse.SelectedProtocolVersion < ProtocolVersion1 ||
 		(useMediaStreams &&
 			offerResponse.SelectedProtocolVersion < ProtocolVersion2) ||
 		offerResponse.SelectedProtocolVersion > LatestProtocolVersion {
-		return nil, false, errors.Tracef(
+		return nil, errors.Tracef(
 			"Unsupported protocol version: %d",
 			offerResponse.SelectedProtocolVersion)
 	}
@@ -497,7 +440,7 @@ func dialClientWebRTCConn(
 	err = webRTCConn.SetRemoteSDP(
 		offerResponse.ProxyAnswerSDP, hasPersonalCompartmentIDs)
 	if err != nil {
-		return nil, true, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	awaitReadyToProxyCtx, awaitReadyToProxyCancelFunc := context.WithTimeout(
@@ -508,7 +451,7 @@ func dialClientWebRTCConn(
 
 	err = webRTCConn.AwaitReadyToProxy(awaitReadyToProxyCtx, offerResponse.ConnectionID)
 	if err != nil {
-		return nil, true, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	duration = time.Since(startTime)
@@ -521,7 +464,7 @@ func dialClientWebRTCConn(
 		connectionID: offerResponse.ConnectionID,
 		relayPacket:  offerResponse.RelayPacketToServer,
 		metrics:      metrics,
-	}, false, nil
+	}, nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.

@@ -1641,6 +1641,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_remote_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"inproxy_webrtc_remote_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_nat_discovery_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	// TODO: deprecated, remove once no longer sent by older clients.
 	{"inproxy_dial_failed_attempts_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_ice_gathering_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},

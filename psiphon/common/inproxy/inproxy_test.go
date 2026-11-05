@@ -710,24 +710,37 @@ func runTestInproxy(doMustUpgrade bool) error {
 			dialCtx, cancelDial := context.WithTimeout(testCtx, 60*time.Second)
 			defer cancelDial()
 
-			conn, err := DialClient(
-				dialCtx,
-				&ClientConfig{
-					Logger:                       testutils.NewTestLoggerWithComponent(name),
-					BaseAPIParameters:            baseAPIParameters,
-					BrokerClient:                 brokerClient,
-					WebRTCDialCoordinator:        webRTCCoordinator,
-					ReliableTransport:            isTCP,
-					DialNetworkProtocol:          networkProtocol,
-					DialAddress:                  addr,
-					PackedDestinationServerEntry: packedDestinationServerEntry,
-					MustUpgrade: func() {
-						close(receivedClientMustUpgrade)
-						cancelDial()
-					},
-				})
-			if err != nil {
-				return errors.Trace(err)
+			clientConfig := &ClientConfig{
+				Logger:                       testutils.NewTestLoggerWithComponent(name),
+				BaseAPIParameters:            baseAPIParameters,
+				BrokerClient:                 brokerClient,
+				WebRTCDialCoordinator:        webRTCCoordinator,
+				ReliableTransport:            isTCP,
+				DialNetworkProtocol:          networkProtocol,
+				DialAddress:                  addr,
+				PackedDestinationServerEntry: packedDestinationServerEntry,
+				MustUpgrade: func() {
+					close(receivedClientMustUpgrade)
+					cancelDial()
+				},
+			}
+
+			// DialClient sends a single offer. Clients may start before all
+			// proxies announce, or while proxies are busy, so redial until
+			// the dial context ends, as Psiphon tunnel establishment does.
+			var conn *ClientConn
+			for {
+				var err error
+				conn, err = DialClient(dialCtx, clientConfig)
+				if err == nil {
+					break
+				}
+				if doMustUpgrade || dialCtx.Err() != nil {
+					return errors.Trace(err)
+				}
+				fmt.Printf("[%s][%s] dial failed, redialing: %v\n",
+					time.Now().UTC().Format(time.RFC3339), name, err)
+				common.SleepWithJitter(dialCtx, 100*time.Millisecond, 0.5)
 			}
 
 			var relayConn net.Conn

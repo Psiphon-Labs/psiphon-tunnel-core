@@ -238,8 +238,6 @@ type BrokerDialCoordinator interface {
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration
 	OfferRequestPersonalTimeout() time.Duration
-	OfferRetryDelay() time.Duration
-	OfferRetryJitter() float64
 	RelayedPacketRequestTimeout() time.Duration
 	DSLRequestTimeout() time.Duration
 }

@@ -1347,8 +1347,6 @@ type InproxyBrokerClientInstance struct {
 	answerRequestTimeout          time.Duration
 	offerRequestTimeout           time.Duration
 	offerRequestPersonalTimeout   time.Duration
-	offerRetryDelay               time.Duration
-	offerRetryJitter              float64
 	relayedPacketRequestTimeout   time.Duration
 	dslRequestTimeout             time.Duration
 	replayRetainFailedProbability float64
@@ -1496,8 +1494,6 @@ func newInproxyBrokerClientInstance(
 		answerRequestTimeout:          p.Duration(parameters.InproxyProxyAnswerRequestTimeout),
 		offerRequestTimeout:           p.Duration(parameters.InproxyClientOfferRequestTimeout),
 		offerRequestPersonalTimeout:   p.Duration(parameters.InproxyClientOfferRequestPersonalTimeout),
-		offerRetryDelay:               p.Duration(parameters.InproxyClientOfferRetryDelay),
-		offerRetryJitter:              p.Float(parameters.InproxyClientOfferRetryJitter),
 		relayedPacketRequestTimeout:   p.Duration(parameters.InproxyClientRelayedPacketRequestTimeout),
 		dslRequestTimeout:             p.Duration(parameters.InproxyClientDSLRequestTimeout),
 		replayRetainFailedProbability: p.Float(parameters.InproxyReplayBrokerRetainFailedProbability),
@@ -2058,16 +2054,6 @@ func (b *InproxyBrokerClientInstance) OfferRequestTimeout() time.Duration {
 // Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) OfferRequestPersonalTimeout() time.Duration {
 	return b.offerRequestPersonalTimeout
-}
-
-// Implements the inproxy.BrokerDialCoordinator interface.
-func (b *InproxyBrokerClientInstance) OfferRetryDelay() time.Duration {
-	return b.offerRetryDelay
-}
-
-// Implements the inproxy.BrokerDialCoordinator interface.
-func (b *InproxyBrokerClientInstance) OfferRetryJitter() float64 {
-	return b.offerRetryJitter
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.

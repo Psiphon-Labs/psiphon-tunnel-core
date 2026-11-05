@@ -1324,8 +1324,6 @@ type Config struct {
 	InproxyProxyAnswerRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int                                             `json:",omitempty"`
-	InproxyClientOfferRetryDelayMilliseconds                *int                                             `json:",omitempty"`
-	InproxyClientOfferRetryJitter                           *float64                                         `json:",omitempty"`
 	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int                                             `json:",omitempty"`
 	InproxyDTLSRandomizationProbability                     *float64                                         `json:",omitempty"`
 	InproxyWebRTCMediaStreamsProbability                    *float64                                         `json:",omitempty"`
@@ -3480,14 +3478,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyClientOfferRequestPersonalTimeoutMilliseconds != nil {
 		applyParameters[parameters.InproxyClientOfferRequestPersonalTimeout] = fmt.Sprintf("%dms", *config.InproxyClientOfferRequestPersonalTimeoutMilliseconds)
-	}
-
-	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
-		applyParameters[parameters.InproxyClientOfferRetryDelay] = fmt.Sprintf("%dms", *config.InproxyClientOfferRetryDelayMilliseconds)
-	}
-
-	if config.InproxyClientOfferRetryJitter != nil {
-		applyParameters[parameters.InproxyClientOfferRetryJitter] = *config.InproxyClientOfferRetryJitter
 	}
 
 	if config.InproxyClientRelayedPacketRequestTimeoutMilliseconds != nil {

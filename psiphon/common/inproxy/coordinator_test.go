@@ -51,8 +51,6 @@ type testBrokerDialCoordinator struct {
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
 	offerRequestPersonalTimeout       time.Duration
-	offerRetryDelay                   time.Duration
-	offerRetryJitter                  float64
 	relayedPacketRequestTimeout       time.Duration
 	dslRequestTimeout                 time.Duration
 }
@@ -173,18 +171,6 @@ func (t *testBrokerDialCoordinator) OfferRequestPersonalTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.offerRequestPersonalTimeout
-}
-
-func (t *testBrokerDialCoordinator) OfferRetryDelay() time.Duration {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.offerRetryDelay
-}
-
-func (t *testBrokerDialCoordinator) OfferRetryJitter() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.offerRetryJitter
 }
 
 func (t *testBrokerDialCoordinator) RelayedPacketRequestTimeout() time.Duration {
