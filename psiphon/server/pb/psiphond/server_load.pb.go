@@ -237,6 +237,10 @@ type ServerLoad struct {
 	InproxyMatcherOffersVisited              *int64                 `protobuf:"varint,150,opt,name=inproxy_matcher_offers_visited,json=inproxyMatcherOffersVisited,proto3,oneof" json:"inproxy_matcher_offers_visited,omitempty"`
 	InproxyMatcherOffersWithoutEligibleQueue *int64                 `protobuf:"varint,151,opt,name=inproxy_matcher_offers_without_eligible_queue,json=inproxyMatcherOffersWithoutEligibleQueue,proto3,oneof" json:"inproxy_matcher_offers_without_eligible_queue,omitempty"`
 	InproxyMatcherAnnouncementsExamined      *int64                 `protobuf:"varint,152,opt,name=inproxy_matcher_announcements_examined,json=inproxyMatcherAnnouncementsExamined,proto3,oneof" json:"inproxy_matcher_announcements_examined,omitempty"`
+	QuicDroppedFlowCount                     *int64                 `protobuf:"varint,153,opt,name=quic_dropped_flow_count,json=quicDroppedFlowCount,proto3,oneof" json:"quic_dropped_flow_count,omitempty"`
+	QuicSourceAddressValidationCount         *int64                 `protobuf:"varint,154,opt,name=quic_source_address_validation_count,json=quicSourceAddressValidationCount,proto3,oneof" json:"quic_source_address_validation_count,omitempty"`
+	QuicEvictedFlowCount                     *int64                 `protobuf:"varint,155,opt,name=quic_evicted_flow_count,json=quicEvictedFlowCount,proto3,oneof" json:"quic_evicted_flow_count,omitempty"`
+	QuicLimitedFlowCount                     *int64                 `protobuf:"varint,156,opt,name=quic_limited_flow_count,json=quicLimitedFlowCount,proto3,oneof" json:"quic_limited_flow_count,omitempty"`
 	unknownFields                            protoimpl.UnknownFields
 	sizeCache                                protoimpl.SizeCache
 }
@@ -642,6 +646,34 @@ func (x *ServerLoad) GetInproxyMatcherAnnouncementsExamined() int64 {
 	return 0
 }
 
+func (x *ServerLoad) GetQuicDroppedFlowCount() int64 {
+	if x != nil && x.QuicDroppedFlowCount != nil {
+		return *x.QuicDroppedFlowCount
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetQuicSourceAddressValidationCount() int64 {
+	if x != nil && x.QuicSourceAddressValidationCount != nil {
+		return *x.QuicSourceAddressValidationCount
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetQuicEvictedFlowCount() int64 {
+	if x != nil && x.QuicEvictedFlowCount != nil {
+		return *x.QuicEvictedFlowCount
+	}
+	return 0
+}
+
+func (x *ServerLoad) GetQuicLimitedFlowCount() int64 {
+	if x != nil && x.QuicLimitedFlowCount != nil {
+		return *x.QuicLimitedFlowCount
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_server_load_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
@@ -672,7 +704,7 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\r_dns_durationB\x13\n" +
 	"\x11_dns_failed_countB\x16\n" +
 	"\x14_dns_failed_durationB\x13\n" +
-	"\x11_server_entry_tag\"\xe7(\n" +
+	"\x11_server_entry_tag\"\xf1+\n" +
 	"\n" +
 	"ServerLoad\x12$\n" +
 	"\vcpu_percent\x18d \x01(\x01H\x00R\n" +
@@ -731,7 +763,11 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"$inproxy_matcher_pass_duration_max_us\x18\x95\x01 \x01(\x03H1R\x1finproxyMatcherPassDurationMaxUs\x88\x01\x01\x12I\n" +
 	"\x1einproxy_matcher_offers_visited\x18\x96\x01 \x01(\x03H2R\x1binproxyMatcherOffersVisited\x88\x01\x01\x12e\n" +
 	"-inproxy_matcher_offers_without_eligible_queue\x18\x97\x01 \x01(\x03H3R(inproxyMatcherOffersWithoutEligibleQueue\x88\x01\x01\x12Y\n" +
-	"&inproxy_matcher_announcements_examined\x18\x98\x01 \x01(\x03H4R#inproxyMatcherAnnouncementsExamined\x88\x01\x01B\x0e\n" +
+	"&inproxy_matcher_announcements_examined\x18\x98\x01 \x01(\x03H4R#inproxyMatcherAnnouncementsExamined\x88\x01\x01\x12;\n" +
+	"\x17quic_dropped_flow_count\x18\x99\x01 \x01(\x03H5R\x14quicDroppedFlowCount\x88\x01\x01\x12T\n" +
+	"$quic_source_address_validation_count\x18\x9a\x01 \x01(\x03H6R quicSourceAddressValidationCount\x88\x01\x01\x12;\n" +
+	"\x17quic_evicted_flow_count\x18\x9b\x01 \x01(\x03H7R\x14quicEvictedFlowCount\x88\x01\x01\x12;\n" +
+	"\x17quic_limited_flow_count\x18\x9c\x01 \x01(\x03H8R\x14quicLimitedFlowCount\x88\x01\x01B\x0e\n" +
 	"\f_cpu_percentB\r\n" +
 	"\v_heap_allocB\f\n" +
 	"\n" +
@@ -786,7 +822,11 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"%_inproxy_matcher_pass_duration_max_usB!\n" +
 	"\x1f_inproxy_matcher_offers_visitedB0\n" +
 	"._inproxy_matcher_offers_without_eligible_queueB)\n" +
-	"'_inproxy_matcher_announcements_examinedBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"'_inproxy_matcher_announcements_examinedB\x1a\n" +
+	"\x18_quic_dropped_flow_countB'\n" +
+	"%_quic_source_address_validation_countB\x1a\n" +
+	"\x18_quic_evicted_flow_countB\x1a\n" +
+	"\x18_quic_limited_flow_countBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_load_proto_rawDescOnce sync.Once

@@ -20,7 +20,9 @@
 package common
 
 import (
-	"hash/crc64"
+	"crypto/sha256"
+	"encoding/hex"
+	std_errors "errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -36,18 +38,50 @@ import (
 // copy.
 type Reloader interface {
 
-	// Reload reloads the data object. Reload returns a flag indicating if the
-	// reloadable target has changed and reloaded or remains unchanged. By
-	// convention, when reloading fails the Reloader should revert to its previous
-	// in-memory state.
-	Reload() (bool, error)
+	// Reload reloads the data object. Each result includes a flag indicating if
+	// the reloadable target was reloaded or remains unchanged. By convention,
+	// when reloading fails the Reloader should revert to its previous in-memory
+	// state.
+	//
+	// Reload returns per-file results containing names, paths, hashes, and all
+	// errors; use ReloadResults.Err to check for failure. Post actions run in
+	// order after a successful reload, outside data locks; their failures do not
+	// revert loaded state or clear Reloaded. Reload must not be called concurrently.
+	//
+	// Reload returns an empty result list when no reloadable file is configured.
+	Reload(postActions ...func() error) ReloadResults
+}
 
-	// WillReload indicates if the data object is capable of reloading.
-	WillReload() bool
+// ReloadResult describes one file observed during a reload attempt.
+type ReloadResult struct {
+	Name       string
+	FilePath   string
+	Reloaded   bool
+	HashSHA256 string
+	Errors     []error
+}
 
-	// ReloadLogDescription returns a description to be used for logging
-	// events related to the Reloader.
-	ReloadLogDescription() string
+// ReloadResults is the set of per-file results from one Reload call.
+type ReloadResults []ReloadResult
+
+// Err returns all per-file load and post-action errors joined, or nil when
+// there are no errors.
+func (results ReloadResults) Err() error {
+	var errs []error
+	for _, result := range results {
+		errs = append(errs, result.Errors...)
+	}
+	return std_errors.Join(errs...)
+}
+
+// Reloaded indicates whether any result reloaded.
+func (results ReloadResults) Reloaded() bool {
+	for _, result := range results {
+		if result.Reloaded {
+			return true
+		}
+	}
+	return false
 }
 
 // ReloadableFile is a file-backed Reloader. This type is intended to be embedded
@@ -64,14 +98,16 @@ type Reloader interface {
 // a reload fails.
 type ReloadableFile struct {
 	sync.RWMutex
-	filename        string
+	reloadName      string
+	filePath        string
 	loadFileContent bool
 	hasLoaded       bool
-	checksum        uint64
+	fileHash        [sha256.Size]byte
 	reloadAction    func([]byte, time.Time) error
 }
 
-// NewReloadableFile initializes a new ReloadableFile.
+// NewReloadableFile initializes a new ReloadableFile. reloadName is the short
+// name used in reload results and related logs.
 //
 // When loadFileContent is true, the file content is loaded and passed to
 // reloadAction; otherwise, reloadAction receives a nil argument and is
@@ -81,24 +117,18 @@ type ReloadableFile struct {
 // The returned ReloadableFile contains a sync.RWMutex and must not be copied
 // after first use.
 func NewReloadableFile(
-	filename string,
+	reloadName string,
+	filePath string,
 	loadFileContent bool,
 	reloadAction func([]byte, time.Time) error) ReloadableFile {
 
 	return ReloadableFile{
-		filename:        filename,
+		reloadName:      reloadName,
+		filePath:        filePath,
 		loadFileContent: loadFileContent,
 		reloadAction:    reloadAction,
 	}
 }
-
-// WillReload indicates whether the ReloadableFile is capable
-// of reloading.
-func (reloadable *ReloadableFile) WillReload() bool {
-	return reloadable.filename != ""
-}
-
-var crc64table = crc64.MakeTable(crc64.ISO)
 
 // Reload checks if the underlying file has changed and, when changed, invokes
 // the reloadAction callback which should reload the in-memory data structures.
@@ -107,7 +137,7 @@ var crc64table = crc64.MakeTable(crc64.ISO)
 // with proceeding with reload, so care is taken to not invoke the reload action
 // unless the contents have changed.
 //
-// The file content is loaded and a checksum is taken to determine whether it
+// The file content is loaded and a hash is taken to determine whether it
 // has changed. Neither file size (may not change when content changes) nor
 // modified date (may change when identical file is repaved) is a sufficient
 // indicator.
@@ -115,60 +145,82 @@ var crc64table = crc64.MakeTable(crc64.ISO)
 // All data structure readers should be blocked by the ReloadableFile mutex.
 //
 // Reload must not be called from multiple concurrent goroutines.
-func (reloadable *ReloadableFile) Reload() (bool, error) {
+func (reloadable *ReloadableFile) Reload(postActions ...func() error) ReloadResults {
 
-	if !reloadable.WillReload() {
-		return false, nil
+	if reloadable.filePath == "" {
+		return nil
 	}
+
+	result := ReloadResult{
+		Name:     reloadable.reloadName,
+		FilePath: reloadable.filePath,
+	}
+	err := reloadable.reload(&result)
+	if err != nil {
+		result.Errors = append(result.Errors, err)
+	} else if result.Reloaded {
+		for _, action := range postActions {
+			err := action()
+			if err != nil {
+				result.Errors = append(result.Errors, err)
+			}
+		}
+	}
+
+	return ReloadResults{result}
+}
+
+func (reloadable *ReloadableFile) reload(result *ReloadResult) error {
 
 	// Check whether the file has changed _before_ blocking readers
 
 	reloadable.RLock()
-	filename := reloadable.filename
+	filePath := reloadable.filePath
 	hasLoaded := reloadable.hasLoaded
-	previousChecksum := reloadable.checksum
+	previousFileHash := reloadable.fileHash
 	reloadable.RUnlock()
 
 	// Record the file modification time _before_ loading, as reload actions will
 	// assume that the content is at least as fresh as the modification time.
-	fileInfo, err := os.Stat(filename)
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return false, errors.Trace(err)
+		return errors.Trace(err)
 	}
 	fileModTime := fileInfo.ModTime()
 
-	file, err := os.Open(filename)
+	file, err := os.Open(filePath)
 	if err != nil {
-		return false, errors.Trace(err)
+		return errors.Trace(err)
 	}
 	defer file.Close()
 
-	hash := crc64.New(crc64table)
+	hash := sha256.New()
 
 	_, err = io.Copy(hash, file)
 	if err != nil {
-		return false, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
-	checksum := hash.Sum64()
+	fileHash := [sha256.Size]byte(hash.Sum(nil))
+	result.HashSHA256 = hex.EncodeToString(fileHash[:])
 
-	if hasLoaded && checksum == previousChecksum {
-		return false, nil
+	if hasLoaded && fileHash == previousFileHash {
+		return nil
 	}
 
 	// It's possible for the file content to revert to its previous value
-	// between the checksum operation and subsequent content load. We accept
+	// between the hashing operation and subsequent content load. We accept
 	// the false positive in this unlikely case.
 
 	var content []byte
 	if reloadable.loadFileContent {
 		_, err = file.Seek(0, 0)
 		if err != nil {
-			return false, errors.Trace(err)
+			return errors.Trace(err)
 		}
 		content, err = ioutil.ReadAll(file)
 		if err != nil {
-			return false, errors.Trace(err)
+			return errors.Trace(err)
 		}
 	}
 
@@ -183,16 +235,13 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	if reloadable.reloadAction != nil {
 		err := reloadable.reloadAction(content, fileModTime)
 		if err != nil {
-			return false, errors.Trace(err)
+			return errors.Trace(err)
 		}
 	}
 
 	reloadable.hasLoaded = true
-	reloadable.checksum = checksum
+	reloadable.fileHash = fileHash
+	result.Reloaded = true
 
-	return true, nil
-}
-
-func (reloadable *ReloadableFile) ReloadLogDescription() string {
-	return reloadable.filename
+	return nil
 }

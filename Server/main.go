@@ -81,7 +81,9 @@ func main() {
 	flag.Var(
 		&generateProtocolPorts,
 		"protocol",
-		"generate with `protocol:port`; flag may be repeated to enable multiple protocols")
+		"generate with `protocol:port`; flag may be repeated to enable multiple protocols\n"+
+			"not all tunnel protocols are supported; use psiphon/server.GenerateConfig\n"+
+			"directly for more advanced configurations")
 
 	flag.IntVar(
 		&generateWebServerPort,

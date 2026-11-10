@@ -90,7 +90,7 @@ const (
 	MEEK_MIN_SESSION_ID_LENGTH                       = 8
 	MEEK_MAX_SESSION_ID_LENGTH                       = 20
 	MEEK_DEFAULT_TURN_AROUND_TIMEOUT                 = 10 * time.Millisecond
-	MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT        = 100 * time.Millisecond
+	MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT        = 500 * time.Millisecond
 	MEEK_DEFAULT_SKIP_EXTENDED_TURN_AROUND_THRESHOLD = 8192
 	MEEK_DEFAULT_MAX_SESSION_STALENESS               = 45 * time.Second
 	MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT              = 45 * time.Second
@@ -2817,8 +2817,7 @@ func (conn *meekConn) pumpWrites(
 				return n, nil
 			}
 
-			totalElapsedTime := time.Since(startTime) / time.Millisecond
-			if totalElapsedTime >= conn.meekServer.extendedTurnAroundTimeout {
+			if time.Since(startTime) >= conn.meekServer.extendedTurnAroundTimeout {
 				return n, nil
 			}
 			timeout.Reset(conn.meekServer.turnAroundTimeout)

@@ -50,7 +50,7 @@ const (
 	defaultPreHeaderDeadlineMin     = 30 * time.Second
 	defaultPreHeaderDeadlineMax     = 120 * time.Second
 	preHeaderDeadlineStep           = 10 * time.Second
-	defaultInactivityTimeout        = 5 * time.Minute // Matches server.SSH_CONNECTION_READ_DEADLINE
+	defaultInactivityTimeout        = 5 * time.Minute // Matches server.SSH_CONNECTION_READ_DEADLINE, the longer, post API handshake server inactivity timeout.
 	defaultUpstreamDialTimeout      = 5 * time.Second
 	defaultRelayBufferSize          = 8192
 	rateLimiterReapHistoryFrequency = 300 * time.Second

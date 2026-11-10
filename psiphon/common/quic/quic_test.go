@@ -24,9 +24,13 @@ package quic
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -34,10 +38,14 @@ import (
 	"time"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
+	ietf_quic "github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go/logging"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -50,19 +58,24 @@ func TestQUIC(t *testing.T) {
 			}
 			runQUIC(t, quicVersion, GQUICEnabled(),
 				false,
-				false, // obfuscated PSK not supproted in gQUIC
-			)
+				false, // obfuscated PSK not supported in gQUIC
+				false)
 		})
 
 		for _, useObfuscatedPSK := range []bool{false, true} {
 			if isIETF(quicVersion) {
 				t.Run(fmt.Sprintf("%s (invoke anti-probing)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
-					runQUIC(t, quicVersion, GQUICEnabled(), true, useObfuscatedPSK)
+					runQUIC(t, quicVersion, GQUICEnabled(), true, useObfuscatedPSK, false)
 				})
 			}
 			if isIETF(quicVersion) {
 				t.Run(fmt.Sprintf("%s (disable gQUIC)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
-					runQUIC(t, quicVersion, false, false, useObfuscatedPSK)
+					runQUIC(t, quicVersion, false, false, useObfuscatedPSK, false)
+				})
+			}
+			if isIETF(quicVersion) {
+				t.Run(fmt.Sprintf("%s (require source address validation)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
+					runQUIC(t, quicVersion, GQUICEnabled(), false, useObfuscatedPSK, true)
 				})
 			}
 		}
@@ -74,7 +87,8 @@ func runQUIC(
 	quicVersion string,
 	enableGQUIC bool,
 	invokeAntiProbing bool,
-	useObfuscatedPSK bool) {
+	useObfuscatedPSK bool,
+	requireSourceAddressValidation bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -93,6 +107,20 @@ func runQUIC(
 	// network conditions, we should not expect to regularly receive client
 	// connection termination packets.
 	serverIdleTimeout = 1 * time.Second
+
+	// Shorten peer mode lifetimes so the peer maps drain within the test.
+	// With requireSourceAddressValidation, every Initial requires it.
+	pendingPeerTimeout = 1 * time.Second
+	unestablishedPeerTimeout = 1 * time.Second
+	if requireSourceAddressValidation {
+		sourceAddressValidationTriggerConcurrentHandshakes = 0
+	}
+	defer func() {
+		serverIdleTimeout = SERVER_IDLE_TIMEOUT
+		pendingPeerTimeout = PENDING_PEER_TIMEOUT
+		unestablishedPeerTimeout = UNESTABLISHED_PEER_TIMEOUT
+		sourceAddressValidationTriggerConcurrentHandshakes = SOURCE_ADDRESS_VALIDATION_TRIGGER_CONCURRENT_HANDSHAKES
+	}()
 
 	irregularTunnelLogger := func(_ string, err error, _ common.LogFields) {
 		if !invokeAntiProbing {
@@ -289,6 +317,30 @@ func runQUIC(
 	}()
 
 	<-testCtx.Done()
+
+	// Peers lacking the obfuscation key are never promoted from pending.
+	if invokeAntiProbing {
+		_, responded, _, _ := getPeerCounts(listener)
+		if responded != 0 {
+			t.Errorf("unexpected responded peers: %d", responded)
+		}
+	}
+
+	metrics := listener.(*Listener).GetQUICCounterMetrics()
+	droppedFlows := metrics["quic_dropped_flow_count"].(int64)
+	evictedFlows := metrics["quic_evicted_flow_count"].(int64)
+	if droppedFlows != 0 || evictedFlows != 0 {
+		t.Errorf("unexpected dropped flows: %d, evicted flows: %d", droppedFlows, evictedFlows)
+	}
+	if requireSourceAddressValidation && metrics["quic_source_address_validation_count"].(int64) == 0 {
+		t.Errorf("unexpected no source address validations")
+	}
+
+	// Both peer maps drain once connections close.
+	if !waitForPeerCounts(listener, 0, 0, 0, 0) {
+		t.Errorf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
 	listener.Close()
 
 	err = testGroup.Wait()
@@ -359,6 +411,38 @@ func runQUIC(
 			t.Fatalf("unexpected dangling goroutines")
 		}
 	}
+}
+
+// getPeerCounts returns the pending, responded, and unestablished peer
+// counts, and the handshakes in flight, which must return to 0 whenever
+// connections close.
+func getPeerCounts(listener net.Listener) (int, int, int, int) {
+	conn := listener.(*Listener).packetConn.ObfuscatedPacketConn
+	conn.peerModesMutex.Lock()
+	defer conn.peerModesMutex.Unlock()
+	unestablished := len(conn.peers[peerUnestablished])
+	responded := unestablished + len(conn.peers[peerEstablished])
+	return len(conn.peers[peerPending]), responded, unestablished,
+		int(conn.concurrentHandshakeCount.Load())
+}
+
+func peerCountsString(listener net.Listener) string {
+	pending, responded, unestablished, handshakes := getPeerCounts(listener)
+	return fmt.Sprintf("%d pending, %d responded, %d unestablished, %d handshakes",
+		pending, responded, unestablished, handshakes)
+}
+
+func waitForPeerCounts(
+	listener net.Listener, pending, responded, unestablished, handshakes int) bool {
+
+	for i := 0; i < 100; i++ {
+		p, r, u, h := getPeerCounts(listener)
+		if p == pending && r == responded && u == unestablished && h == handshakes {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
 
 type countReadsConn struct {
@@ -476,4 +560,557 @@ func getFunctionName(pc uintptr) string {
 		funcName = funcName[index+1:]
 	}
 	return funcName
+}
+
+func TestQUICPeerLimits(t *testing.T) {
+
+	var quicVersion string
+	for v := range supportedVersionNumbers {
+		if isIETF(v) {
+			quicVersion = v
+			break
+		}
+	}
+
+	maxPeers = 2
+	pendingPeerTimeout = 3 * time.Second
+	unestablishedPeerTimeout = 1 * time.Second
+	sourceAddressValidationTriggerConcurrentHandshakes = 1
+	maxConcurrentHandshakesPerIP = 1
+	maxConcurrentHandshakes = 2
+	defer func() {
+		maxPeers = MAX_PEERS
+		pendingPeerTimeout = PENDING_PEER_TIMEOUT
+		unestablishedPeerTimeout = UNESTABLISHED_PEER_TIMEOUT
+		sourceAddressValidationTriggerConcurrentHandshakes = SOURCE_ADDRESS_VALIDATION_TRIGGER_CONCURRENT_HANDSHAKES
+		maxConcurrentHandshakesPerIP = MAX_CONCURRENT_HANDSHAKES_PER_IP
+		maxConcurrentHandshakes = MAX_CONCURRENT_HANDSHAKES
+	}()
+
+	obfuscationKey := prng.HexString(32)
+
+	listener, err := Listen(
+		nil,
+		func(string, error, common.LogFields) {},
+		"127.0.0.1:0",
+		false,
+		0,
+		obfuscationKey,
+		false)
+	if err != nil {
+		t.Fatalf("Listen failed: %s", err)
+	}
+	defer listener.Close()
+
+	serverAddress := listener.Addr().String()
+
+	remoteAddr, err := net.ResolveUDPAddr("udp", serverAddress)
+	if err != nil {
+		t.Fatalf("ResolveUDPAddr failed: %s", err)
+	}
+
+	dial := func(timeout time.Duration, localAddress string) (net.Conn, error) {
+
+		ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
+		defer cancelFunc()
+
+		packetConn, err := net.ListenPacket("udp4", localAddress)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		obfuscationPaddingSeed, err := prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		var clientHelloSeed *prng.Seed
+		if isClientHelloRandomized(quicVersion) {
+			clientHelloSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		quicSNIAddress, _, err := net.SplitHostPort(serverAddress)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return Dial(
+			ctx,
+			packetConn,
+			remoteAddr,
+			quicSNIAddress,
+			quicVersion,
+			clientHelloSeed,
+			obfuscationKey,
+			obfuscationPaddingSeed,
+			nil,
+			false,
+			0,
+			true,
+			false,
+			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "localhost"))
+	}
+
+	obfuscatedConn := listener.(*Listener).packetConn.ObfuscatedPacketConn
+
+	flood := func(packetSize int) {
+		for i := 0; i < 2*maxPeers; i++ {
+			packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("ListenPacket failed: %s", err)
+			}
+			_, err = packetConn.WriteTo(prng.Bytes(packetSize), remoteAddr)
+			packetConn.Close()
+			if err != nil {
+				t.Fatalf("WriteTo failed: %s", err)
+			}
+		}
+	}
+
+	// Below MIN_FIRST_PACKET_SIZE, no peer state is allocated.
+
+	flood(1)
+	time.Sleep(100 * time.Millisecond)
+
+	if pending, responded, _, _ := getPeerCounts(listener); pending != 0 || responded != 0 {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	// Full-size keyless packets reach anti-probing but get no response:
+	// pending peers are evicted beyond maxPeers, none is promoted, and
+	// source address validation is never required.
+
+	flood(MAX_PRE_DISCOVERY_PACKET_SIZE)
+
+	if !waitForPeerCounts(listener, maxPeers, 0, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	metrics := listener.(*Listener).GetQUICCounterMetrics()
+	droppedFlows := metrics["quic_dropped_flow_count"].(int64)
+	evictedFlows := metrics["quic_evicted_flow_count"].(int64)
+	validations := metrics["quic_source_address_validation_count"].(int64)
+	if droppedFlows != 0 || evictedFlows == 0 || validations != 0 {
+		t.Fatalf("unexpected peer metrics: %d dropped, %d evicted, %d validations",
+			droppedFlows, evictedFlows, validations)
+	}
+
+	// A write to a pending peer, such as a Retry, does not change its
+	// state; only a quic-go connection allocation does.
+
+	packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("ListenPacket failed: %s", err)
+	}
+	defer packetConn.Close()
+	_, err = packetConn.WriteTo(prng.Bytes(MAX_PRE_DISCOVERY_PACKET_SIZE), remoteAddr)
+	if err != nil {
+		t.Fatalf("WriteTo failed: %s", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	_, err = obfuscatedConn.WriteTo([]byte{0}, packetConn.LocalAddr())
+	if err != nil {
+		t.Fatalf("WriteTo failed: %s", err)
+	}
+
+	obfuscatedConn.peerModesMutex.Lock()
+	_, isPending := obfuscatedConn.peers[peerPending][peerAddress(
+		packetConn.LocalAddr().(*net.UDPAddr))]
+	obfuscatedConn.peerModesMutex.Unlock()
+	if !isPending {
+		t.Fatalf("pending peer promoted by write")
+	}
+
+	// Handshakes are simulated through the admission and tracer callbacks.
+	// A handshake that ends without completing returns its peer to pending.
+
+	pendingAddress := peerAddress(packetConn.LocalAddr().(*net.UDPAddr))
+	stateOf := func() peerState {
+		obfuscatedConn.peerModesMutex.Lock()
+		defer obfuscatedConn.peerModesMutex.Unlock()
+		_, state, _ := obfuscatedConn.lookupPeer(pendingAddress)
+		return state
+	}
+
+	startHandshake := func(validated bool) (*logging.ConnectionTracer, error) {
+		connConfig, err := obfuscatedConn.handshakeStarted(
+			&ietf_quic.Config{},
+			&ietf_quic.ClientHelloInfo{RemoteAddr: packetConn.LocalAddr(), AddrVerified: validated})
+		if err != nil {
+			return nil, err
+		}
+		return connConfig.Tracer(
+			context.Background(), logging.PerspectiveServer, ietf_quic.ConnectionID{}), nil
+	}
+
+	tracer, err := startHandshake(false)
+	if err != nil {
+		t.Fatalf("handshakeStarted failed: %s", err)
+	}
+	if stateOf() != peerUnestablished {
+		t.Fatalf("unexpected peer state after handshake start: %d", stateOf())
+	}
+	tracer.ClosedConnection(nil)
+	if stateOf() != peerPending {
+		t.Fatalf("unexpected peer state after handshake close: %d", stateOf())
+	}
+
+	// A completed handshake establishes the peer, and the close of its last
+	// connection returns the peer to pending at once. An overlapping
+	// handshake keeps the peer unestablished through that close.
+
+	tracer1, err := startHandshake(false)
+	if err != nil {
+		t.Fatalf("handshakeStarted failed: %s", err)
+	}
+	tracer1.ChoseALPN("")
+	if stateOf() != peerEstablished {
+		t.Fatalf("unexpected peer state after handshake completion: %d", stateOf())
+	}
+	tracer2, err := startHandshake(false)
+	if err != nil {
+		t.Fatalf("handshakeStarted failed: %s", err)
+	}
+	tracer1.ClosedConnection(nil)
+	if stateOf() != peerUnestablished {
+		t.Fatalf("unexpected peer state after overlapped close: %d", stateOf())
+	}
+	tracer2.ChoseALPN("")
+	if stateOf() != peerEstablished {
+		t.Fatalf("unexpected peer state after second completion: %d", stateOf())
+	}
+	tracer2.ClosedConnection(nil)
+	if stateOf() != peerPending {
+		t.Fatalf("unexpected peer state after last close: %d", stateOf())
+	}
+
+	// Each refused admission counts once as a limited flow.
+
+	localIP := netip.MustParseAddr("127.0.0.1")
+
+	listener.(*Listener).GetQUICCounterMetrics()
+	obfuscatedConn.concurrentHandshakeCount.Add(2)
+	if _, err := startHandshake(false); err == nil {
+		t.Fatalf("unexpected admission at concurrent handshake limit")
+	}
+	obfuscatedConn.concurrentHandshakeCount.Add(-2)
+	obfuscatedConn.peerModesMutex.Lock()
+	obfuscatedConn.concurrentHandshakesByIP[localIP] = 1
+	obfuscatedConn.peerModesMutex.Unlock()
+	if _, err := startHandshake(true); err == nil {
+		t.Fatalf("unexpected admission at per-IP handshake limit")
+	}
+	obfuscatedConn.peerModesMutex.Lock()
+	delete(obfuscatedConn.concurrentHandshakesByIP, localIP)
+	obfuscatedConn.peerModesMutex.Unlock()
+	if limitedFlows := listener.(*Listener).GetQUICCounterMetrics()["quic_limited_flow_count"].(int64); limitedFlows != 2 {
+		t.Fatalf("unexpected limited flows: %d", limitedFlows)
+	}
+
+	// At the per-IP limit, a validated Initial is refused before quic-go
+	// allocates, and the dial fails. The in-flight handshakes are
+	// simulated; the global one forces the Retry that validates the dial.
+
+	obfuscatedConn.concurrentHandshakeCount.Add(1)
+	obfuscatedConn.peerModesMutex.Lock()
+	obfuscatedConn.concurrentHandshakesByIP[localIP] = 1
+	obfuscatedConn.peerModesMutex.Unlock()
+
+	_, err = dial(1*time.Second, "127.0.0.1:0")
+	if err == nil {
+		t.Fatalf("unexpected dial success at handshake limit")
+	}
+
+	obfuscatedConn.concurrentHandshakeCount.Add(-1)
+	obfuscatedConn.peerModesMutex.Lock()
+	delete(obfuscatedConn.concurrentHandshakesByIP, localIP)
+	obfuscatedConn.peerModesMutex.Unlock()
+
+	// At the concurrent handshake limit, any Initial is refused.
+
+	obfuscatedConn.concurrentHandshakeCount.Add(2)
+
+	_, err = dial(1*time.Second, "127.0.0.1:0")
+	if err == nil {
+		t.Fatalf("unexpected dial success at concurrent handshake limit")
+	}
+
+	obfuscatedConn.concurrentHandshakeCount.Add(-2)
+
+	if !waitForPeerCounts(listener, maxPeers, 0, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	// A new flow at capacity evicts a pending peer; it is promoted, and
+	// established once its handshake completes.
+
+	conn1, err := dial(2*time.Second, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("dial failed: %s", err)
+	}
+
+	metrics = listener.(*Listener).GetQUICCounterMetrics()
+	droppedFlows = metrics["quic_dropped_flow_count"].(int64)
+	evictedFlows = metrics["quic_evicted_flow_count"].(int64)
+	if droppedFlows != 0 || evictedFlows == 0 {
+		t.Fatalf("unexpected peer metrics: %d dropped, %d evicted", droppedFlows, evictedFlows)
+	}
+
+	if !waitForPeerCounts(listener, 0, 1, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	// With the handshake trigger reached, the next new flow must validate
+	// its source address; the client handles the Retry. A handshake in
+	// flight is simulated, as a real one completes within the dial.
+
+	obfuscatedConn.concurrentHandshakeCount.Add(1)
+
+	conn2, err := dial(2*time.Second, "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("dial failed: %s", err)
+	}
+
+	obfuscatedConn.concurrentHandshakeCount.Add(-1)
+
+	if listener.(*Listener).GetQUICCounterMetrics()["quic_source_address_validation_count"].(int64) == 0 {
+		t.Fatalf("unexpected no source address validations")
+	}
+
+	if !waitForPeerCounts(listener, 0, 2, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	// With only responded peers at capacity, new flows are dropped.
+
+	flood(MAX_PRE_DISCOVERY_PACKET_SIZE)
+	time.Sleep(100 * time.Millisecond)
+
+	metrics = listener.(*Listener).GetQUICCounterMetrics()
+	droppedFlows = metrics["quic_dropped_flow_count"].(int64)
+	evictedFlows = metrics["quic_evicted_flow_count"].(int64)
+	if droppedFlows == 0 || evictedFlows != 0 {
+		t.Fatalf("unexpected peer metrics: %d dropped, %d evicted", droppedFlows, evictedFlows)
+	}
+
+	if pending, responded, _, _ := getPeerCounts(listener); pending != 0 || responded != 2 {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	serverConn1, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("Accept failed: %s", err)
+	}
+	serverConn2, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("Accept failed: %s", err)
+	}
+
+	localAddress := conn1.LocalAddr().String()
+
+	// Both maps drain after close.
+
+	conn1.Close()
+	conn2.Close()
+	serverConn1.Close()
+	serverConn2.Close()
+
+	if !waitForPeerCounts(listener, 0, 0, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	// A redial from the same address, after its peer was reaped, is a new
+	// flow.
+
+	conn, err := dial(2*time.Second, localAddress)
+	if err != nil {
+		t.Fatalf("dial failed: %s", err)
+	}
+
+	serverConn, err := listener.Accept()
+	if err != nil {
+		t.Fatalf("Accept failed: %s", err)
+	}
+
+	if !waitForPeerCounts(listener, 0, 1, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+
+	conn.Close()
+	serverConn.Close()
+
+	if !waitForPeerCounts(listener, 0, 0, 0, 0) {
+		t.Fatalf("unexpected peer counts: %s", peerCountsString(listener))
+	}
+}
+
+func TestQUICInitialWithoutClientHello(t *testing.T) {
+
+	obfuscationKey := prng.HexString(32)
+
+	listener, err := Listen(
+		nil,
+		func(string, error, common.LogFields) {},
+		"127.0.0.1:0",
+		false,
+		0,
+		obfuscationKey,
+		false)
+	if err != nil {
+		t.Fatalf("Listen failed: %s", err)
+	}
+	defer listener.Close()
+
+	remoteAddr, err := net.ResolveUDPAddr("udp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("ResolveUDPAddr failed: %s", err)
+	}
+
+	obfuscatedConn := listener.(*Listener).packetConn.ObfuscatedPacketConn
+
+	// send writes one Initial packet and reports whether the server
+	// responded and how many handshakes the peer has in flight.
+
+	send := func(fill func(payload []byte)) (bool, int) {
+
+		packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("ListenPacket failed: %s", err)
+		}
+		defer packetConn.Close()
+
+		_, err = packetConn.WriteTo(makeInitialPacket(t, fill), remoteAddr)
+		if err != nil {
+			t.Fatalf("WriteTo failed: %s", err)
+		}
+
+		packetConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, _, err = packetConn.ReadFrom(make([]byte, MAX_PACKET_SIZE))
+		responded := err == nil
+
+		obfuscatedConn.peerModesMutex.Lock()
+		mode, _, ok := obfuscatedConn.lookupPeer(
+			peerAddress(packetConn.LocalAddr().(*net.UDPAddr)))
+		var handshakes int
+		if ok {
+			handshakes = mode.concurrentHandshakes
+		}
+		obfuscatedConn.peerModesMutex.Unlock()
+		if !ok {
+			t.Fatalf("missing peer")
+		}
+
+		return responded, handshakes
+	}
+
+	responded, handshakes := send(func(payload []byte) {
+		for i := range payload {
+			payload[i] = 0x01 // PING
+		}
+	})
+	if responded || handshakes != 0 {
+		t.Fatalf("unexpected response to Initial without CRYPTO frame")
+	}
+
+	random, err := obfuscator.MakeTLSPassthroughMessage(true, obfuscationKey)
+	if err != nil {
+		t.Fatalf("MakeTLSPassthroughMessage failed: %s", err)
+	}
+	clientHello := append(
+		[]byte{0x01, 0, 0, byte(2 + len(random)), 0x03, 0x03}, random...)
+
+	responded, _ = send(func(payload []byte) {
+		n := copy(payload, []byte{0x06, 0x00, byte(len(clientHello))}) // CRYPTO
+		copy(payload[n:], clientHello)
+	})
+	if !responded {
+		t.Fatalf("unexpected no response to Initial with CRYPTO frame")
+	}
+}
+
+// makeInitialPacket returns a minimum size QUIC v1 Initial packet for a
+// random connection ID, encrypted and header protected with the Initial
+// keys of RFC 9001 section 5.2. fill writes the frames; unwritten bytes
+// are PADDING.
+func makeInitialPacket(t *testing.T, fill func(payload []byte)) []byte {
+
+	// RFC 9000 section 14.1
+	const minInitialPacketSize = 1200
+
+	const packetNumberLen = 1
+	const tagLen = 16
+
+	expandLabel := func(secret []byte, label string, length int) []byte {
+		info := []byte{byte(length >> 8), byte(length), byte(6 + len(label))}
+		info = append(info, "tls13 "...)
+		info = append(info, label...)
+		info = append(info, 0)
+		out := make([]byte, length)
+		_, err := io.ReadFull(hkdf.Expand(sha256.New, secret, info), out)
+		if err != nil {
+			t.Fatalf("hkdf.Expand failed: %s", err)
+		}
+		return out
+	}
+
+	initialSalt := []byte{
+		0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17,
+		0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad, 0xcc, 0xbb, 0x7f, 0x0a}
+
+	destConnID := prng.Bytes(8)
+	srcConnID := prng.Bytes(8)
+
+	clientSecret := expandLabel(
+		hkdf.Extract(sha256.New, destConnID, initialSalt), "client in", 32)
+	key := expandLabel(clientSecret, "quic key", 16)
+	iv := expandLabel(clientSecret, "quic iv", 12)
+	headerProtectionKey := expandLabel(clientSecret, "quic hp", 16)
+
+	// Long header, fixed bit, Initial, 1 byte packet number.
+	header := []byte{0xc0 | (packetNumberLen - 1), 0, 0, 0, 1}
+	header = append(header, byte(len(destConnID)))
+	header = append(header, destConnID...)
+	header = append(header, byte(len(srcConnID)))
+	header = append(header, srcConnID...)
+	header = append(header, 0) // token length
+
+	payload := make([]byte, minInitialPacketSize-len(header)-2-packetNumberLen-tagLen)
+	fill(payload)
+
+	length := packetNumberLen + len(payload) + tagLen
+	header = append(header, 0x40|byte(length>>8), byte(length))
+	packetNumberOffset := len(header)
+	header = append(header, 0) // packet number 0
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatalf("aes.NewCipher failed: %s", err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatalf("cipher.NewGCM failed: %s", err)
+	}
+
+	// With packet number 0, the nonce is the IV.
+	packet := aead.Seal(append([]byte(nil), header...), iv, payload, header)
+
+	block, err = aes.NewCipher(headerProtectionKey)
+	if err != nil {
+		t.Fatalf("aes.NewCipher failed: %s", err)
+	}
+	var mask [16]byte
+	block.Encrypt(mask[:], packet[packetNumberOffset+4:packetNumberOffset+4+16])
+	packet[0] ^= mask[0] & 0x0f
+	packet[packetNumberOffset] ^= mask[1]
+
+	if len(packet) != minInitialPacketSize {
+		t.Fatalf("unexpected packet size: %d", len(packet))
+	}
+
+	return packet
 }

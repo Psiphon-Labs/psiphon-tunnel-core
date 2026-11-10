@@ -98,7 +98,7 @@ func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 			expectNoServerEntries: true,
 			protocol:              "",
 			disableEstablishing:   true,
-			disruptNetwork:        true,
+			disruptNetwork:        disruptorMaxConnectionBytesUpgradeDownload,
 		})
 }
 
@@ -118,7 +118,7 @@ func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 			expectNoServerEntries: true,
 			protocol:              "",
 			clientIsLatestVersion: true,
-			disruptNetwork:        true,
+			disruptNetwork:        disruptorMaxConnectionBytesRemoteServerList,
 		})
 }
 
@@ -400,7 +400,7 @@ type controllerRunConfig struct {
 	disableEstablishing      bool
 	tunnelPoolSize           int
 	useUpstreamProxy         bool
-	disruptNetwork           bool
+	disruptNetwork           int64
 	transformHostNames       bool
 	useFragmentor            bool
 	useLegacyAPIEncoding     bool
@@ -524,10 +524,13 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	config.TunnelPoolSize = runConfig.tunnelPoolSize
 
-	if runConfig.useUpstreamProxy && runConfig.disruptNetwork {
+	disruptorMaxConnectionBytes.Store(runConfig.disruptNetwork)
+	disruptNetwork := runConfig.disruptNetwork > 0
+
+	if runConfig.useUpstreamProxy && disruptNetwork {
 		t.Fatalf("cannot use multiple upstream proxies")
 	}
-	if runConfig.disruptNetwork {
+	if disruptNetwork {
 		config.UpstreamProxyURL = disruptorProxyURL
 	} else if runConfig.useUpstreamProxy {
 		config.UpstreamProxyURL = upstreamProxyURL
@@ -756,7 +759,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				t.Fatalf("expected remote server list downloaded")
 			}
 
-			if runConfig.disruptNetwork {
+			if disruptNetwork {
 				count := atomic.LoadInt32(&remoteServerListDownloadedBytesCount)
 				if count <= 1 {
 					t.Fatalf("unexpected remote server list download progress: %d", count)
@@ -769,7 +772,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		// Allow for known race condition described in NewHttpProxy():
 		time.Sleep(1 * time.Second)
 
-		if !runConfig.disruptNetwork {
+		if !disruptNetwork {
 			fetchAndVerifyWebsite(t, httpProxyPort)
 
 			if runConfig.checkBytesTransferred {
@@ -823,7 +826,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 			// Test: with disruptNetwork, must be multiple download progress notices
 
-			if runConfig.disruptNetwork {
+			if disruptNetwork {
 				count := atomic.LoadInt32(&clientUpgradeDownloadedBytesCount)
 				if count <= 1 {
 					t.Fatalf("unexpected upgrade download progress: %d", count)
@@ -1029,8 +1032,11 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 
 const disruptorProxyAddress = "127.0.0.1:2160"
 const disruptorProxyURL = "socks4a://" + disruptorProxyAddress
-const disruptorMaxConnectionBytes = 150000
+const disruptorMaxConnectionBytesUpgradeDownload = 5000000
+const disruptorMaxConnectionBytesRemoteServerList = 150000
 const disruptorMaxConnectionTime = 10 * time.Second
+
+var disruptorMaxConnectionBytes atomic.Int64
 
 func initDisruptor() {
 
@@ -1076,11 +1082,11 @@ func initDisruptor() {
 				waitGroup.Add(1)
 				go func() {
 					defer waitGroup.Done()
-					io.CopyN(localConn, remoteConn, disruptorMaxConnectionBytes)
+					io.CopyN(localConn, remoteConn, disruptorMaxConnectionBytes.Load())
 					localConn.Close()
 					remoteConn.Close()
 				}()
-				io.CopyN(remoteConn, localConn, disruptorMaxConnectionBytes)
+				io.CopyN(remoteConn, localConn, disruptorMaxConnectionBytes.Load())
 				localConn.Close()
 				remoteConn.Close()
 				waitGroup.Wait()

@@ -160,6 +160,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 
 	// Create and populate the specific metric message.
 	switch eventName {
+	case "config_reload":
+		msg := &pb.ConfigReload{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_ConfigReload{ConfigReload: msg}
 	case "server_tunnel":
 		msg := &pb.ServerTunnel{}
 		protobufPopulateMessage(logFields, msg, eventName)

@@ -73,6 +73,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 	blocklist := &Blocklist{}
 
 	blocklist.ReloadableFile = common.NewReloadableFile(
+		"blocklist",
 		filename,
 		false,
 		func(_ []byte, _ time.Time) error {
@@ -88,7 +89,7 @@ func NewBlocklist(filename string) (*Blocklist, error) {
 			return nil
 		})
 
-	_, err := blocklist.Reload()
+	err := blocklist.Reload().Err()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

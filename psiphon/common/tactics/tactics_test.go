@@ -577,12 +577,13 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
 
-	reloaded, err := server.Reload()
+	results := server.Reload()
+	err = results.Err()
 	if err != nil {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
-	if !reloaded {
+	if !results.Reloaded() {
 		t.Fatalf("Server config failed to reload")
 	}
 
@@ -844,12 +845,13 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("WriteFile failed: %s", err)
 	}
 
-	reloaded, err = server.Reload()
+	results = server.Reload()
+	err = results.Err()
 	if err != nil {
 		t.Fatalf("Reload failed: %s", err)
 	}
 
-	if !reloaded {
+	if !results.Reloaded() {
 		t.Fatalf("Server config failed to reload")
 	}
 
@@ -942,12 +944,13 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 			t.Fatalf("WriteFile failed: %s", err)
 		}
 
-		reloaded, err := server.Reload()
+		results := server.Reload()
+		err = results.Err()
 		if err != nil {
 			t.Fatalf("Reload failed: %s", err)
 		}
 
-		if !reloaded {
+		if !results.Reloaded() {
 			t.Fatalf("Server config failed to reload")
 		}
 	}

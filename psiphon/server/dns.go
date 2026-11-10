@@ -72,6 +72,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 	dns.lastReloadTime.Store(int64(monotime.Now()))
 
 	dns.ReloadableFile = common.NewReloadableFile(
+		"dns-config",
 		DNS_SYSTEM_CONFIG_FILENAME,
 		true,
 		func(fileContent []byte, _ time.Time) error {
@@ -92,7 +93,7 @@ func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 			return nil
 		})
 
-	_, err := dns.Reload()
+	err := dns.Reload().Err()
 	if err != nil {
 		if defaultResolver == "" {
 			return nil, errors.Trace(err)
@@ -155,7 +156,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 			// want to retry after another DNS_SYSTEM_CONFIG_RELOAD_PERIOD.
 			dns.lastReloadTime.Store(int64(monotime.Now()))
 
-			_, err := dns.Reload()
+			err := dns.Reload().Err()
 			if err != nil {
 				log.WithTraceFields(
 					LogFields{"err": err}).Info(

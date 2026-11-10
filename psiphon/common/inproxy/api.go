@@ -936,7 +936,8 @@ func (params *TrafficShapingParameters) Validate() error {
 
 // ValidateAndGetLogFields validates the ProxyAnswerRequest and returns
 // common.LogFields for logging. A nil filteredSDP is returned when
-// ProxyAnswerRequest.AnswerError is set.
+// ProxyAnswerRequest.AnswerError is set. SDP filtering metrics and log fields
+// may be returned with an error.
 func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
@@ -944,9 +945,19 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	geoIPData common.GeoIPData,
 	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, *webRTCSDPMetrics, common.LogFields, error) {
 
+	// The proxy's self-reported ICECandidateTypes are used instead of the
+	// candidate types that can be derived from the SDP, since port mapping
+	// types are edited into the SDP in a way that makes them
+	// indistinguishable from host candidate types.
+
+	if !request.ICECandidateTypes.IsValid() {
+		return nil, nil, nil, errors.Tracef(
+			"invalid ICE candidate types: %v", request.ICECandidateTypes)
+	}
+
 	var filteredSDP []byte
 	var sdpMetrics *webRTCSDPMetrics
-	var err error
+	var requestErr error
 
 	if request.AnswerError == "" {
 
@@ -969,7 +980,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 
 		// Proxy answer SDP candidate addresses must match the country and ASN of
 		// the proxy. Don't facilitate connections to arbitrary destinations.
-		filteredSDP, sdpMetrics, err = filterSDPAddresses(
+		filteredSDP, sdpMetrics, requestErr = filterSDPAddresses(
 			[]byte(request.ProxyAnswerSDP.SDP),
 			errorOnNoCandidates,
 			lookupGeoIP,
@@ -977,19 +988,10 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 			geoIPData,
 			allowPrivateIPAddressCandidates,
 			filterPrivateIPAddressCandidates)
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
-		}
-	}
 
-	// The proxy's self-reported ICECandidateTypes are used instead of the
-	// candidate types that can be derived from the SDP, since port mapping
-	// types are edited into the SDP in a way that makes them
-	// indistinguishable from host candidate types.
-
-	if !request.ICECandidateTypes.IsValid() {
-		return nil, nil, nil, errors.Tracef(
-			"invalid ICE candidate types: %v", request.ICECandidateTypes)
+		// Since errorOnNoCandidates is on, fall through and assemble
+		// logFields using sdpMetrics in order to log more information in
+		// the "no candidates" outcome.
 	}
 
 	logFields := formatter("", geoIPData, common.APIParameters{})
@@ -1012,7 +1014,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 		}
 	}
 
-	return filteredSDP, sdpMetrics, logFields, nil
+	return filteredSDP, sdpMetrics, logFields, errors.Trace(requestErr)
 }
 
 // ValidateAndGetLogFields validates the ClientRelayedPacketRequest and returns
