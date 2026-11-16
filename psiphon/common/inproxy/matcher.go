@@ -39,7 +39,7 @@ const (
 	matcherOfferQueueMaxSize        = 5000000
 	matcherPendingAnswersTTL        = 30 * time.Second
 	matcherPendingAnswersMaxSize    = 5000000
-	matcherMaxPreferredNATProbe     = 10
+	matcherMaxBetterMatchProbe      = 10
 	matcherMaxProbe                 = 100
 	matcherYieldCount               = 32
 
@@ -283,6 +283,7 @@ type MatchMetrics struct {
 	AnnouncementQueueSize  int
 	PendingAnswersSize     int
 	MatchDuration          time.Duration
+	MatchHasQuality        bool
 }
 
 // GetMetrics converts MatchMetrics to loggable fields.
@@ -303,6 +304,7 @@ func (metrics *MatchMetrics) GetMetrics() common.LogFields {
 		"announcement_queue_size":  metrics.AnnouncementQueueSize,
 		"pending_answers_size":     metrics.PendingAnswersSize,
 		"match_duration":           int64(metrics.MatchDuration / time.Microsecond),
+		"match_has_quality":        metrics.MatchHasQuality,
 	}
 }
 
@@ -888,7 +890,8 @@ func (m *Matcher) matchAllOffers() {
 			continue
 		}
 
-		announcementEntry, announcementMatchIndex := m.matchOffer(offerEntry, &passMetrics)
+		announcementEntry, announcementMatchIndex, matchHasQuality :=
+			m.matchOffer(offerEntry, &passMetrics)
 		if announcementEntry == nil {
 			continue
 		}
@@ -940,6 +943,7 @@ func (m *Matcher) matchAllOffers() {
 			AnnouncementQueueSize:  m.announcementQueue.getLen(),
 			PendingAnswersSize:     m.pendingAnswers.ItemCount(),
 			MatchDuration:          time.Since(startTime),
+			MatchHasQuality:        matchHasQuality,
 		}
 
 		offerEntry.matchMetrics.Store(matchMetrics)
@@ -979,7 +983,7 @@ func (m *Matcher) matchAllOffers() {
 }
 
 func (m *Matcher) matchOffer(
-	offerEntry *offerEntry, metrics *MatcherMetrics) (*announcementEntry, int) {
+	offerEntry *offerEntry, metrics *MatcherMetrics) (*announcementEntry, int, bool) {
 
 	// Assumes the caller has the queue mutexes locked.
 
@@ -1008,7 +1012,7 @@ func (m *Matcher) matchOffer(
 		compartmentIDs = offerProperties.CommonCompartmentIDs
 	}
 	if len(compartmentIDs) == 0 {
-		return nil, -1
+		return nil, -1, false
 	}
 
 	matchIterator := m.announcementQueue.startMatching(
@@ -1018,8 +1022,8 @@ func (m *Matcher) matchOffer(
 	}
 
 	// Use the NAT traversal type counters to check if there's any preferred
-	// NAT match for this offer in the announcement queue. When there is, we
-	// will search beyond the first announcement.
+	// NAT match for this offer in the announcement queue. For non-priority
+	// proxies, stop at the first match if no preferred NAT match exists.
 
 	unlimitedNATCount, partiallyLimitedNATCount, strictlyLimitedNATCount :=
 		matchIterator.getNATCounts()
@@ -1038,16 +1042,19 @@ func (m *Matcher) matchOffer(
 
 	var bestMatch *announcementEntry
 	bestMatchIndex := -1
+	firstMatchIndex := -1
 	bestMatchIsPriority := false
 	bestMatchNAT := false
+	bestMatchQuality := false
 
 	// matcherMaxProbe limits the linear search through the announcement queue
 	// to find a match. Currently, the queue implementation provides
 	// constant-time lookup for matching compartment IDs. Other matching
 	// aspects may require iterating over the queue items, including the
 	// strict same-country and ASN constraint and protocol version
-	// compatibility constraint. Best NAT match is not a strict constraint
-	// and uses a shorter search limit, matcherMaxPreferredNATProbe.
+	// compatibility constraint. Once a first match is found, use the shorter
+	// matcherMaxBetterMatchProbe limit, relative to that first match, to
+	// look for a better match: proxy quality or a preferred NAT match.
 
 	candidateIndex := -1
 	for candidateIndex <= matcherMaxProbe {
@@ -1060,15 +1067,25 @@ func (m *Matcher) matchOffer(
 
 		if !isPriority && bestMatchIsPriority {
 
-			// There is a priority match, but it wasn't bestMatchNAT and we
+			// There is a priority match, but it wasn't bestMatchQuality and we
 			// continued to iterate. Now that isPriority is false, we're past the
-			// end of the priority items, so stop looking for any best NAT match
+			// end of the priority items, so stop looking for any better match
 			// and return the previous priority match. When there are zero
 			// priority items to begin with, this case should not be hit.
 			break
 		}
 
 		candidateIndex += 1
+
+		// Stop when past the probe limit for a better match. This check
+		// precedes the following checks, which skip candidates, so that a
+		// run of skipped candidates doesn't extend the search up to
+		// matcherMaxProbe.
+
+		if bestMatch != nil &&
+			candidateIndex-firstMatchIndex > matcherMaxBetterMatchProbe {
+			break
+		}
 
 		// Skip and remove this announcement if its deadline has already
 		// passed. There is no signal to the awaiting Announce function, as
@@ -1129,7 +1146,8 @@ func (m *Matcher) matchOffer(
 
 		matchNAT := offerProperties.IsPreferredNATMatch(announcementProperties)
 
-		// Use proxy ASN quality as an alternative to preferred NAT matches.
+		// For priority proxies, prefer quality for the client's ASN over a
+		// preferred NAT match.
 		//
 		// The NAT matching logic depends on RFC5780 NAT discovery test
 		// results, which may not be entirely accurate, and may not be
@@ -1142,43 +1160,55 @@ func (m *Matcher) matchOffer(
 		// present, NAT compatibility is assumed, with the caveat that the
 		// client device and immediate router may not be the same.
 		//
+		// Check quality even when the NAT types are a preferred match.
+		//
 		// Limitations:
-		// - existsPreferredNATMatch doesn't reflect existence of matching
-		//   proxy ASN quality, so the NAT match probe can end prematurely.
-		// - IsPreferredNATMatch currently takes precedence over proxy ASN
-		//   quality.
+		// - Quality expiry is not specific to the client ASN: any quality
+		//   tunnel extends the TTL and resets the failed match count for the
+		//   proxy's whole entry, so a proxy may retain quality for an ASN
+		//   where it no longer works.
+		// - Proxies without quality for the client's ASN are passed over
+		//   when a nearby candidate has it, and so have less opportunity to
+		//   earn quality for that ASN.
 
-		if !matchNAT && isPriority {
-			matchNAT = m.config.ProxyQualityState.HasQuality(
+		matchQuality := false
+		if isPriority {
+			matchQuality = m.config.ProxyQualityState.HasQuality(
 				announcementEntry.announcement.ProxyID,
 				announcementEntry.announcement.Properties.GeoIPData.ASN,
 				offerProperties.GeoIPData.ASN)
 		}
 
-		// At this point, the candidate is a match. Determine if this is a new
-		// best match, either if there was no previous match, or this is a
-		// better NAT match.
+		// Prefer quality for the client's ASN, then a preferred NAT match.
+		// Keep the earlier candidate when the preference is the same.
 
-		if bestMatch == nil || (!bestMatchNAT && matchNAT) {
+		if bestMatch == nil ||
+			(!bestMatchQuality && matchQuality) ||
+			(!bestMatchQuality && !bestMatchNAT && matchNAT) {
 
+			if bestMatch == nil {
+				firstMatchIndex = candidateIndex
+			}
 			bestMatch = announcementEntry
 			bestMatchIndex = candidateIndex
 			bestMatchIsPriority = isPriority
 			bestMatchNAT = matchNAT
+			bestMatchQuality = matchQuality
 		}
 
-		// Stop as soon as we have the best possible match, or have reached
-		// the probe limit for preferred NAT matches.
+		// Stop when a priority proxy has quality for the client's ASN, or
+		// when the search limit is reached. For non-priority matches, also
+		// stop if the NAT match is preferred or no preferred NAT match exists.
 
-		if bestMatch != nil && (bestMatchNAT ||
-			!existsPreferredNATMatch ||
-			candidateIndex-bestMatchIndex >= matcherMaxPreferredNATProbe) {
+		if bestMatch != nil && (bestMatchQuality ||
+			(!bestMatchIsPriority && (bestMatchNAT || !existsPreferredNATMatch)) ||
+			candidateIndex-firstMatchIndex >= matcherMaxBetterMatchProbe) {
 
 			break
 		}
 	}
 
-	return bestMatch, bestMatchIndex
+	return bestMatch, bestMatchIndex, bestMatchQuality
 }
 
 // applyLoadLimit checks if the broker process is in the load limiting state
