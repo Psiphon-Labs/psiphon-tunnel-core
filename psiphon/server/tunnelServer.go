@@ -1133,6 +1133,9 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 		return false
 	}
 
+	// Now that the client is registered, remove its GeoIP cache entry expiry;
+	// cleanup will restore expiry before unregistering.
+	sshServer.setGeoIPSessionCache(client.sessionID, client.peerGeoIPData)
 	sshServer.clients[client.sessionID] = client
 
 	return true
@@ -3142,7 +3145,11 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	// Initially, in the case of in-proxy tunnel protocols, the GeoIP session
 	// cache entry will be the proxy's GeoIPData. This is updated to be the
 	// client's GeoIPData in setHandshakeState.
-	sshClient.sshServer.setGeoIPSessionCache(sessionID, sshClient.peerGeoIPData)
+	//
+	// The SSH handshake can still fail after authentication. Avoid leaving
+	// permanent entries or overwriting an established session's cache entry.
+	_ = sshClient.sshServer.geoIPSessionCache.Add(
+		sessionID, sshClient.peerGeoIPData, cache.DefaultExpiration)
 
 	return nil, nil
 }
@@ -3649,6 +3656,12 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		return
 	}
 
+	completed, _ := sshClient.getHandshaked()
+	if !completed {
+		sshClient.rejectNewChannel(newChannel, "packet tunnel not permitted before handshake")
+		return
+	}
+
 	// Accept this channel immediately. This channel will replace any
 	// previously existing packet tunnel channel for this client.
 
@@ -3760,13 +3773,17 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
 			net.JoinHostPort(directTcpipExtraData.HostToConnect, strconv.Itoa(int(directTcpipExtraData.PortToConnect)))
 
-	if isUdpgwChannel {
+	// Port forwards are not permitted before the handshake completes. This
+	// check is made before any port forward work, including, for TCP port
+	// forwards, the dial queue and hostname resolution, which precede the
+	// isPortForwardPermitted handshake check.
+	completed, _ := sshClient.getHandshaked()
+	if !completed {
+		sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+		return
+	}
 
-		completed, _ := sshClient.getHandshaked()
-		if !completed {
-			sshClient.rejectNewChannel(newChannel, "port forward not permitted")
-			return
-		}
+	if isUdpgwChannel {
 
 		// Dispatch immediately. handleUDPChannel runs the udpgw protocol in its
 		// own worker goroutine.
@@ -4257,9 +4274,12 @@ func (sshClient *sshClient) runAlertSender() {
 
 // enqueueAlertRequest enqueues an alert request to be sent to the client.
 // Only one request is sent per tunnel per protocol.AlertRequest value;
-// subsequent alerts with the same value are dropped. enqueueAlertRequest will
-// not block until the queue exceeds ALERT_REQUEST_QUEUE_BUFFER_SIZE.
+// subsequent alerts with the same value are dropped. Requests are also dropped
+// when the queue is full.
 func (sshClient *sshClient) enqueueAlertRequest(request protocol.AlertRequest) {
+	if !sshClient.supportsServerRequests {
+		return
+	}
 	sshClient.Lock()
 	if sshClient.sentAlertRequests[fmt.Sprintf("%+v", request)] {
 		sshClient.Unlock()
@@ -4269,6 +4289,9 @@ func (sshClient *sshClient) enqueueAlertRequest(request protocol.AlertRequest) {
 	select {
 	case <-sshClient.runCtx.Done():
 	case sshClient.sendAlertRequests <- request:
+	default:
+		// Blocking here can stall downstream delivery for all packet-tunnel
+		// clients; see Server.runDeviceDownstream in common/tun/tun.go.
 	}
 }
 
@@ -4375,7 +4398,8 @@ func (sshClient *sshClient) setHandshakeState(
 
 	// TODO: defer setting completed to true until all checks pass. Otherwise
 	// rejected handshakes are logged as completed and may permit port
-	// forwards before asynchronous shutdown.
+	// forwards before asynchronous shutdown. Port forwards may also be admitted
+	// under pre-handshake traffic rules.
 
 	sshClient.Lock()
 	completed := sshClient.handshakeState.completed
@@ -5084,7 +5108,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	remoteIP net.IP,
 	port int) bool {
 
-	// Disallow connection to bogons.
+	// Disallow connections to bogons and the server's configured public IP.
 	//
 	// As a security measure, this is a failsafe. The server should be run on a
 	// host with correctly configured firewall rules.
@@ -5092,7 +5116,9 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	// This check also avoids spurious disallowed traffic alerts for destinations
 	// that are impossible to reach.
 
-	if !sshClient.sshServer.support.Config.AllowBogons && common.IsBogon(remoteIP) {
+	if !sshClient.sshServer.support.Config.AllowBogons &&
+		(common.IsBogon(remoteIP) ||
+			remoteIP.Equal(net.ParseIP(sshClient.sshServer.support.Config.ServerIPAddress))) {
 		return false
 	}
 

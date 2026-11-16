@@ -215,64 +215,6 @@ func (c conditionallyEnabledComponents) InproxyEnabled() bool {
 	return inproxy.Enabled()
 }
 
-// FileMigration represents the action of moving a file, or directory, to a new
-// location.
-type FileMigration struct {
-
-	// Name is the name of the migration for logging because file paths are not
-	// logged as they may contain sensitive information.
-	Name string
-
-	// OldPath is the current location of the file.
-	OldPath string
-
-	// NewPath is the location that the file should be moved to.
-	NewPath string
-
-	// IsDir should be set to true if the file is a directory.
-	IsDir bool
-}
-
-// DoFileMigration performs the specified file move operation. An error will be
-// returned and the operation will not performed if: a file is expected, but a
-// directory is found; a directory is expected, but a file is found; or a file,
-// or directory, already exists at the target path of the move operation.
-// Note: an attempt is made to redact any file paths from the returned error.
-func DoFileMigration(migration FileMigration) error {
-
-	// Prefix string added to any errors for debug purposes.
-	errPrefix := ""
-	if len(migration.Name) > 0 {
-		errPrefix = fmt.Sprintf("(%s) ", migration.Name)
-	}
-
-	if !common.FileExists(migration.OldPath) {
-		return errors.TraceNew(errPrefix + "old path does not exist")
-	}
-	info, err := os.Stat(migration.OldPath)
-	if err != nil {
-		return errors.Tracef(errPrefix+"error getting file info: %s", common.RedactFilePathsError(err, migration.OldPath))
-	}
-	if info.IsDir() != migration.IsDir {
-		if migration.IsDir {
-			return errors.TraceNew(errPrefix + "expected directory but found file")
-		}
-
-		return errors.TraceNew(errPrefix + "expected but found directory")
-	}
-
-	if common.FileExists(migration.NewPath) {
-		return errors.TraceNew(errPrefix + "file already exists, will not overwrite")
-	}
-
-	err = os.Rename(migration.OldPath, migration.NewPath)
-	if err != nil {
-		return errors.Tracef(errPrefix+"renaming file failed with error %s", common.RedactFilePathsError(err, migration.OldPath, migration.NewPath))
-	}
-
-	return nil
-}
-
 // GetNetworkType returns a network type name, suitable for metrics, which is
 // derived from the network ID.
 func GetNetworkType(networkID string) string {

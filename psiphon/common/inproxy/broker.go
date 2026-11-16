@@ -2058,7 +2058,7 @@ func (b *Broker) validateDestination(
 
 	// For domain fronted cases, since we can't verify the Host header, access
 	// is strictly to limited to targeted clients. Clients should use tactics
-	// to avoid disallowed domain dial address cases, but here the broker
+	// to avoid disallowed fronted destinations, but here the broker
 	// enforces it.
 	//
 	// TODO: this issue could be further mitigated with a server
@@ -2067,7 +2067,8 @@ func (b *Broker) validateDestination(
 
 	// This assumes that any domain dial is for domain fronting.
 	isDomain := net.ParseIP(destHost) == nil
-	if isDomain && !b.config.AllowDomainFrontedDestinations(geoIPData) {
+	allowDomainFronted := b.config.AllowDomainFrontedDestinations(geoIPData)
+	if isDomain && !allowDomainFronted {
 		return nil, errors.TraceNew("domain fronted destinations disallowed")
 	}
 
@@ -2078,7 +2079,8 @@ func (b *Broker) validateDestination(
 	// any server entries lacking this capability, but here the broker
 	// enforces it.
 
-	if !serverEntry.IsValidInproxyDialAddress(networkProtocol.String(), destHost, destPortNum) {
+	if !serverEntry.IsValidInproxyDialAddress(
+		networkProtocol.String(), destHost, destPortNum, allowDomainFronted) {
 		return nil, errors.TraceNew("invalid destination address")
 	}
 

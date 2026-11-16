@@ -43,8 +43,15 @@ import (
 )
 
 const (
-	sessionsTTL     = 24 * time.Hour
-	sessionsMaxSize = 1000000
+	// Note that announcement scheduling can delay the final handshake message,
+	// which currently also includes the first application request, so this timeout
+	// cannot be short.
+	//
+	// TODO: reduce this timeout if session establishment is decoupled from
+	// the initial application round trip.
+	pendingSessionsTTL = time.Hour
+	sessionsTTL        = 24 * time.Hour
+	sessionsMaxSize    = 1000000
 
 	sessionObfuscationPaddingMinSize = 0
 	sessionObfuscationPaddingMaxSize = 256
@@ -864,7 +871,8 @@ func (r *InitiatorRoundTrip) Response() ([]byte, error) {
 // trips. The cache has a TTL and maximum size with LRU to cap overall memory
 // usage. A broker may receive requests from millions of clients and proxies
 // and so only more recent sessions will be retained. Servers will receive
-// requests from only a handful of brokers, and so the TTL is not applied.
+// requests from only a handful of brokers, and so the TTL is not applied to
+// established sessions.
 //
 // Multiple, concurrent sessions for a single initiator public key are
 // supported.
@@ -873,6 +881,7 @@ type ResponderSessions struct {
 	sendObfuscationSecret       ObfuscationSecret
 	receiveObfuscationSecret    ObfuscationSecret
 	applyTTL                    bool
+	retainEstablishedOnError    bool
 	obfuscationReplayHistory    *obfuscationReplayHistory
 	expectedInitiatorPublicKeys *sessionPublicKeyLookup
 
@@ -909,8 +918,8 @@ func NewResponderSessions(
 }
 
 // NewResponderSessionsForKnownInitiators creates a new ResponderSessions
-// which allows only allow-listed initiators to establish a session. No TTL
-// is applied to cached sessions.
+// which allows only allow-listed initiators to establish a session. Pending
+// handshakes expire; no TTL is applied to established cached sessions.
 //
 // The NewResponderSessionsForKnownInitiators configuration is for Psiphon
 // servers responding to brokers. Only a handful of brokers are expected to
@@ -931,6 +940,7 @@ func NewResponderSessionsForKnownInitiators(
 	}
 
 	s.applyTTL = false
+	s.retainEstablishedOnError = true
 
 	s.expectedInitiatorPublicKeys, err = newSessionPublicKeyLookup(initiatorPublicKeys)
 	if err != nil {
@@ -1095,23 +1105,19 @@ func (s *ResponderSessions) HandlePacket(
 	defer func() {
 		if retErr != nil && !retainSession {
 
-			// If an error is returned, the session has failed, so don't
-			// retain it in the cache as it could be more recently used than
-			// an older but still valid session.
-			//
-			// TODO: should we retain the session if it has completed the
-			// handshake? As with initiator error signals, and depending on
-			// the transport security level, a SessionPacket with a
-			// legitimate session ID but corrupt Noise payload could be
-			// forged, terminating a legitimate session.
-
-			s.removeSession(sessionID)
+			// Known-initiator responders retain established sessions to prevent
+			// eviction by forged relay packets. This may retain unusable sessions;
+			// rejected packets still refresh LRU recency. Other responders favor
+			// cleanup, accepting possible eviction by transport attackers.
+			s.removeFailedSession(sessionID, session)
 		}
 	}()
 
 	var requestPayload []byte
 
 	if session.isEstablished() {
+
+		retainSession = s.retainEstablishedOnError
 
 		// When the session is already established, decrypt the packet to get
 		// the request.
@@ -1169,9 +1175,8 @@ func (s *ResponderSessions) HandlePacket(
 				return nil, errors.TraceNew("unexpected handshake payload")
 			}
 
-			// The session TTL is not extended here. Initiators, including
-			// clients and proxies, are given sessionsTTL to complete the
-			// entire handshake.
+			// The session TTL is not extended here. All initiators are given
+			// pendingSessionsTTL to complete the entire handshake.
 
 			return outPacket, nil
 		}
@@ -1264,6 +1269,9 @@ func (s *ResponderSessions) touchSession(sessionID ID, session *session) {
 
 	TTL := lrucache.DefaultExpiration
 	if !s.applyTTL {
+		// TODO: track established sessions per known initiator and evict older
+		// sessions when a new session is established, while allowing in-flight
+		// requests to complete. These sessions have no TTL.
 		TTL = lrucache.NoExpiration
 	}
 	s.sessions.Set(string(sessionID[:]), session, TTL)
@@ -1318,14 +1326,11 @@ func (s *ResponderSessions) getSession(sessionID ID) (*session, error) {
 		return nil, errors.Trace(err)
 	}
 
-	TTL := lrucache.DefaultExpiration
-	if !s.applyTTL {
-		TTL = lrucache.NoExpiration
-	}
-
+	// When !s.applyTTL, touchSession removes the TTL only after the session
+	// is established.
 	s.mutex.Lock()
 	err = s.sessions.Add(
-		strSessionID, session, TTL)
+		strSessionID, session, pendingSessionsTTL)
 	s.mutex.Unlock()
 
 	if err != nil {
@@ -1335,13 +1340,26 @@ func (s *ResponderSessions) getSession(sessionID ID) (*session, error) {
 	return session, nil
 }
 
-// removeSession removes any existing session for the specified session ID.
-func (s *ResponderSessions) removeSession(sessionID ID) {
+// removeFailedSession removes the matching cached session unless the responder
+// retains established sessions on errors.
+func (s *ResponderSessions) removeFailedSession(sessionID ID, session *session) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.sessions.Delete(string(sessionID[:]))
+	if s.retainEstablishedOnError {
+		session.mutex.Lock()
+		defer session.mutex.Unlock()
+		if session.handshake == nil {
+			return
+		}
+	}
+
+	strSessionID := string(sessionID[:])
+	entry, ok := s.sessions.Get(strSessionID)
+	if ok && entry == session {
+		s.sessions.Delete(strSessionID)
+	}
 }
 
 // makeResetSessionToken creates a secure reset session token.
@@ -2193,10 +2211,12 @@ func unwrapSessionPacket(
 }
 
 // Create an error that includes the current handshake state.
+//
+// The caller must hold s.mutex. unexpectedStateError must not lock s.mutex
+// itself: the mutex is not reentrant, and the resulting self-deadlock would
+// leave the session locked and, in turn, block the ResponderSessions lock
+// held by callers that subsequently operate on this session.
 func (s *session) unexpectedStateError() error {
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
 
 	return errors.Tracef("unexpected state: %v", s.state)
 }

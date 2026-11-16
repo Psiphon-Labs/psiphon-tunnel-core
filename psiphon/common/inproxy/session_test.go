@@ -92,6 +92,8 @@ func runTestSessions() error {
 		requestDelay,
 		requestTimeout)
 
+	roundTripper.checkSessionExpiration = true
+
 	request := roundTripper.MakeRequest()
 
 	response, err := initiatorSessions.RoundTrip(
@@ -249,24 +251,48 @@ func runTestSessions() error {
 		requestDelay,
 		requestTimeout)
 
-	request = roundTripper.MakeRequest()
+	roundTripper.checkSessionExpiration = true
 
-	response, err = initiatorSessions.RoundTrip(
-		context.Background(),
-		roundTripper,
-		responderPublicKey,
-		responderRootObfuscationSecret,
-		waitToShareSession,
-		sessionHandshakeTimeout,
-		requestDelay,
-		requestTimeout,
-		request)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	// Reject forged packets without disrupting the next legitimate request.
+	for i := 0; i < 2; i++ {
+		request = roundTripper.MakeRequest()
 
-	if !bytes.Equal(response, roundTripper.ExpectedResponse(request)) {
-		return errors.TraceNew("unexpected response")
+		response, err = initiatorSessions.RoundTrip(
+			context.Background(),
+			roundTripper,
+			responderPublicKey,
+			responderRootObfuscationSecret,
+			waitToShareSession,
+			sessionHandshakeTimeout,
+			requestDelay,
+			requestTimeout,
+			request)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if !bytes.Equal(response, roundTripper.ExpectedResponse(request)) {
+			return errors.TraceNew("unexpected response")
+		}
+
+		for sessionID, item := range responderSessions.sessions.Items() {
+			cachedSession := item.Object.(*session)
+			packet, err := wrapSessionPacket(
+				responderSessions.receiveObfuscationSecret, true,
+				&SessionPacket{SessionID: cachedSession.sessionID, Payload: []byte{0}})
+			if err != nil {
+				return errors.Trace(err)
+			}
+			_, err = responderSessions.HandlePacket(packet, nil)
+			if err == nil {
+				return errors.TraceNew("unexpected forged packet success")
+			}
+
+			entry, ok := responderSessions.sessions.Get(sessionID)
+			if !ok || entry != cachedSession {
+				return errors.TraceNew("forged packet removed established session")
+			}
+		}
 	}
 
 	// Test: expected known initiator public key using SetKnownInitiatorPublicKeys
@@ -468,6 +494,7 @@ type testSessionRoundTripper struct {
 	expectedSessionHandshakeTimeout time.Duration
 	expectedRequestDelay            time.Duration
 	expectedRequestTimeout          time.Duration
+	checkSessionExpiration          bool
 }
 
 func newTestSessionRoundTripper(
@@ -551,6 +578,21 @@ func (t *testSessionRoundTripper) RoundTrip(
 			// Continue to relay packets
 		}
 	} else {
+
+		if t.checkSessionExpiration {
+			items := t.sessions.sessions.Items()
+			if len(items) != 1 {
+				return nil, errors.TraceNew("unexpected session cache state")
+			}
+			for _, item := range items {
+				if (item.Expiration == 0) != (isRequestRoundTrip && !t.sessions.applyTTL) {
+					return nil, errors.TraceNew("unexpected session expiration")
+				}
+				if !isRequestRoundTrip && item.Expiration > time.Now().Add(pendingSessionsTTL).UnixNano() {
+					return nil, errors.TraceNew("unexpected pending session expiration")
+				}
+			}
+		}
 
 		// Handshake round trips and request payload round trips should have the
 		// appropriate delays/timeouts.
@@ -792,4 +834,68 @@ func runTestNoise() error {
 	}
 
 	return nil
+}
+
+// TestSessionUnexpectedStateError checks that the unexpected state error
+// paths, which are reached while session.mutex is held, return an error
+// and don't self-deadlock on the session mutex. A hung session would also
+// block ResponderSessions, since touchSession and removeFailedSession lock
+// each session while holding the ResponderSessions lock.
+func TestSessionUnexpectedStateError(t *testing.T) {
+
+	testCases := []struct {
+		description string
+		call        func(s *session) error
+	}{
+		{
+			// A handshake packet arriving after the session is established,
+			// such as when two packets for one pending session are handled
+			// concurrently and the other packet completes the handshake.
+			"handshake packet after established",
+			func(s *session) error {
+				_, _, _, err := s.nextUnmarshaledHandshakePacket(nil)
+				return err
+			},
+		},
+		{
+			"send without cipher state",
+			func(s *session) error {
+				_, err := s.sendPacket(nil)
+				return err
+			},
+		},
+		{
+			"receive without cipher state",
+			func(s *session) error {
+				_, err := s.receiveUnmarshaledPacket(&SessionPacket{})
+				return err
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+
+			s := &session{state: sessionStateResponder_XK_established}
+
+			result := make(chan error, 1)
+			go func() {
+				result <- testCase.call(s)
+			}()
+
+			select {
+			case err := <-result:
+				if err == nil || !strings.Contains(err.Error(), "unexpected state") {
+					t.Fatalf("unexpected result: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("deadlock")
+			}
+
+			if !s.mutex.TryLock() {
+				t.Fatalf("session mutex not released")
+			}
+			s.mutex.Unlock()
+		})
+	}
 }

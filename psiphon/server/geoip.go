@@ -143,6 +143,15 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 					return errors.Trace(err)
 				}
 
+				// Fixed temporary file names are reused across restarts, so
+				// files left by an unclean shutdown don't accumulate. As the
+				// name is predictable and the directory may be shared, never
+				// open an existing file, which could be a planted symlink:
+				// remove it, then create with O_EXCL.
+				//
+				// Limitation: another local user can cause the create, and
+				// so the load, to fail by creating a file at this path.
+
 				tempFileSuffix := database.tempFileSuffix + 1
 
 				tempFilename := fmt.Sprintf(
@@ -150,7 +159,14 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 					filepath.Join(os.TempDir(), filepath.Base(database.filename)),
 					tempFileSuffix)
 
-				dst, err := os.Create(tempFilename)
+				err = os.Remove(tempFilename)
+				if err != nil && !os.IsNotExist(err) {
+					src.Close()
+					return errors.Trace(err)
+				}
+
+				dst, err := os.OpenFile(
+					tempFilename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 				if err != nil {
 					src.Close()
 					return errors.Trace(err)
@@ -187,6 +203,7 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 
 		err := database.Reload().Err()
 		if err != nil {
+			geoIP.Close()
 			return nil, errors.Trace(err)
 		}
 
@@ -194,6 +211,34 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 	}
 
 	return geoIP, nil
+}
+
+// Close releases the database mappings before removing their temporary files.
+// Callers must stop reloading before calling Close.
+func (geoIP *GeoIPService) Close() {
+	for _, database := range geoIP.databases {
+		if database == nil {
+			continue
+		}
+
+		database.ReloadableFile.Lock()
+		if database.maxMindReader != nil {
+			err := database.maxMindReader.Close()
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": err}).Warning("GeoIP database close failed")
+			}
+			database.maxMindReader = nil
+		}
+		if database.tempFilename != "" {
+			err := os.Remove(database.tempFilename)
+			if err != nil && !os.IsNotExist(err) {
+				log.WithTraceFields(LogFields{"error": err}).Warning("GeoIP temporary file removal failed")
+			} else {
+				database.tempFilename = ""
+			}
+		}
+		database.ReloadableFile.Unlock()
+	}
 }
 
 // Reload implements the common.Reloader interface.
@@ -275,7 +320,7 @@ func (geoIP *GeoIPService) lookupIP(IP net.IP, ISPOnly bool) GeoIPData {
 		var err error
 		// Don't lookup the City database when only ISP fields are required;
 		// skipping the City lookup is 5-10x faster.
-		if !ISPOnly || database.isISPType {
+		if database.maxMindReader != nil && (!ISPOnly || database.isISPType) {
 			err = database.maxMindReader.Lookup(IP, &geoIPFields)
 		}
 		database.ReloadableFile.RUnlock()

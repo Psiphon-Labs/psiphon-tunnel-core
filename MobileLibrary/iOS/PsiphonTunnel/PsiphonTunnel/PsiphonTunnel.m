@@ -785,68 +785,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     }
 
     //
-    // DataStoreDirectory
-    //
-
-    NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:&err];
-    if (err != nil) {
-        NSString *s = [NSString stringWithFormat:@"Unable to get Library URL: %@", [Redactor errorDescription:err]];
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:s}];
-        return nil;
-    }
-
-    // Some clients will have a data directory that they'd prefer the Psiphon
-    // library use, but if not we'll default to the user Library directory.
-    //
-    // Deprecated:
-    // Tunnel core now stores its files under a single data root directory, which can be configured.
-    // Setting the datastore directory allows tunnel core to migrate datastore files from the old
-    // directory structure to the new one; this can be done with either the deprecated config field
-    // "DataStoreDirectory" or the more explict new field "MigrateDataStoreDirectory".
-    NSURL *defaultDataStoreDirectoryURL = [libraryURL URLByAppendingPathComponent:@"datastore"
-                                                                      isDirectory:YES];
-    
-    if (defaultDataStoreDirectoryURL == nil) {
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultDataStoreDirectoryURL"}];
-        return nil;
-    }
-    
-    if (config[@"DataStoreDirectory"] == nil) {
-        config[@"MigrateDataStoreDirectory"] = defaultDataStoreDirectoryURL.path;
-    }
-    else {
-        logMessage(@"DataStoreDirectory overridden from default");
-    }
-
-    //
     // Remote Server List
     //
 
-    // Deprecated:
-    // Tunnel core now stores its files under a single data root directory, which can be configured.
-    // Setting the remote server list download filename allows tunnel core to migrate remote server
-    // list download files to the new directory structure under the data root directory; this can be
-    // done with either the deprecated config field "RemoteServerListDownloadFilename" or the more
-    // explict new field "MigrateRemoteServerListDownloadFilename".
-    NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
-    if (defaultRemoteServerListFilename == nil) {
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultRemoteServerListFilename"}];
-        return nil;
-    }
-    
-    if (config[@"RemoteServerListDownloadFilename"] == nil) {
-        config[@"MigrateRemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
-    }
-    else {
-        logMessage(@"RemoteServerListDownloadFilename overridden from default");
-    }
-    
     // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
     // are absent, we'll just leave them out, but we'll log about it.
     if ((config[@"RemoteServerListUrl"] == nil &&
@@ -860,26 +801,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Obfuscated Server List
     //
 
-    // Deprecated:
-    // Tunnel core now stores its files under a single data root directory, which can be configured.
-    // Setting the obfuscated server list download directory allows tunnel core to migrate
-    // obfuscated server list files from the old directory structure to the new one; this can be
-    // done with either the deprecated config field "ObfuscatedServerListDownloadDirectory" or the
-    // more explict new field "MigrateObfuscatedServerListDownloadDirectory".
-    NSURL *defaultOSLDirectoryURL = [libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES];
-    if (defaultOSLDirectoryURL == nil) {
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultOSLDirectory"}];
-        return nil;
-    }
-    if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
-        config[@"MigrateObfuscatedServerListDownloadDirectory"] = defaultOSLDirectoryURL.path;
-    }
-    else {
-        logMessage(@"ObfuscatedServerListDownloadDirectory overridden from default");
-    }
-    
     // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
     // we'll leave it out, but log the absence.
     if (config[@"ObfuscatedServerListRootURL"] == nil &&

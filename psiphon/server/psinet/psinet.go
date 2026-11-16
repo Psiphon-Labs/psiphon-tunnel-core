@@ -107,15 +107,9 @@ func NewDatabase(filename string) (*Database, error) {
 			if err != nil {
 				return errors.Trace(err)
 			}
-			// Note: an unmarshal directly into &database would fail
-			// to reset to zero value fields not present in the JSON.
-			database.Sponsors = newDatabase.Sponsors
-			database.Versions = newDatabase.Versions
-			database.DefaultSponsorID = newDatabase.DefaultSponsorID
-			database.DefaultAlertActionURLs = newDatabase.DefaultAlertActionURLs
-			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
-			database.DiscoveryServers = newDatabase.DiscoveryServers
-			database.fileModTime = fileModTime
+			if newDatabase == nil {
+				return errors.TraceNew("null database")
+			}
 
 			// Decode each encoded server entry for its IP address, which is used in
 			// the consistent.Member implementation in the discovery package.
@@ -124,7 +118,11 @@ func NewDatabase(filename string) (*Database, error) {
 			// a requirement of consistent hashing discovery; otherwise it will
 			// panic in the underlying Psiphon-Labs/consistent package.
 			serverIPToDiagnosticID := make(map[string]string)
-			for i, server := range database.DiscoveryServers {
+			for _, server := range newDatabase.DiscoveryServers {
+
+				if server == nil {
+					return errors.TraceNew("null discovery server")
+				}
 
 				serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
 				if err != nil {
@@ -140,8 +138,18 @@ func NewDatabase(filename string) (*Database, error) {
 					serverIPToDiagnosticID[serverEntry.IpAddress] = serverEntry.GetDiagnosticID()
 				}
 
-				database.DiscoveryServers[i].IPAddress = serverEntry.IpAddress
+				server.IPAddress = serverEntry.IpAddress
 			}
+
+			// Note: an unmarshal directly into &database would fail
+			// to reset to zero value fields not present in the JSON.
+			database.Sponsors = newDatabase.Sponsors
+			database.Versions = newDatabase.Versions
+			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+			database.DefaultAlertActionURLs = newDatabase.DefaultAlertActionURLs
+			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
+			database.DiscoveryServers = newDatabase.DiscoveryServers
+			database.fileModTime = fileModTime
 
 			return nil
 		})
@@ -375,8 +383,10 @@ func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
 	defer db.ReloadableFile.RUnlock()
 
 	// Default to "valid" if the valid list is unexpectedly empty or stale. This
-	// helps prevent premature client-side server-entry pruning when there is an
-	// issue with updating the database.
+	// avoids premature client-side server-entry pruning when there is an
+	// issue with updating the database. In the in-proxy broker use case, this
+	// avoids failed dials to potentially valid servers; the broker still requires
+	// a signed server entry in any case.
 
 	if len(db.ValidServerEntryTags) == 0 ||
 		db.fileModTime.Add(MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY).Before(time.Now()) {

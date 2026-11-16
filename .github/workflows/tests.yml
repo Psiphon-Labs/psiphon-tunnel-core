@@ -32,12 +32,12 @@ jobs:
     steps:
 
       - name: Clone repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 
       - name: Install Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4.3.0
         with:
           go-version: ${{ matrix.go }}
 
@@ -55,6 +55,35 @@ jobs:
           echo "GOPATH: $GOPATH"
           echo "Go version: `go version`"
 
+      # License check ignore cases:
+      #
+      # - github.com/Psiphon-Labs,github.com/Psiphon-Inc: Psiphon code with
+      #   GPL 3 license; any dependencies within (subtree or copy) must be
+      #   manually vetted
+      #
+      # - github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu:
+      #   ISC and MPL-2.0 respectively; allowed for server only (there is an
+      #   extra pass, without this exclusion, over the main client packages)
+      #
+      # - github.com/sergeyfrolov/bsbuffer: is LGPL-3.0, but may be excluded by
+      #   omitting the build tag PSIPHON_ENABLE_REFRACTION_NETWORKING.
+      #
+      # Deliberately run before paving CONTROLLER_TEST_CONFIG.
+      - name: Check licenses
+        if: ${{ matrix.test-type == 'code-vetting' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi
+
+      - name: Check known vulnerabilities
+        if: ${{ matrix.test-type == 'code-vetting' }}
+        # Failures are non-fatal due to false positives for unused code in dependencies.
+        continue-on-error: true
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING" ./...
+
       - name: Pave config files
         env:
           CONTROLLER_TEST_CONFIG: ${{ secrets.CONTROLLER_TEST_CONFIG }}
@@ -71,6 +100,7 @@ jobs:
           go test -v -race ./psiphon/common
           go test -v -race ./psiphon/common/accesscontrol
           go test -v -race ./psiphon/common/crypto/ssh
+          go test -v -race ./psiphon/common/deviceregion
           go test -v -race ./psiphon/common/dsl
           go test -v -race ./psiphon/common/fragmentor
           go test -v -race ./psiphon/common/inproxy
@@ -80,18 +110,23 @@ jobs:
           go test -v -race ./psiphon/common/obfuscator
           go test -v -race ./psiphon/common/osl
           sudo -E env "PATH=$PATH" go test -v -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
+          go test -v -race ./psiphon/common/portmapper
+          go test -v -race ./psiphon/common/portmapper/gateway
           go test -v -race ./psiphon/common/parameters
+          go test -v -race ./psiphon/common/prng
           go test -v -race ./psiphon/common/protocol
           go test -v -race ./psiphon/common/proxyheader
           go test -v -race ./psiphon/common/push
           go test -v -race ./psiphon/common/quic
           go test -v -race ./psiphon/common/resolver
+          go test -v -race ./psiphon/common/sss
           go test -v -race ./psiphon/common/tactics
           go test -v -race ./psiphon/common/tlsdialer
           go test -v -race ./psiphon/common/transforms
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          go test -v -race ./psiphon/server/discovery
           go test -v -race ./psiphon/server/psinet
           go test -v -timeout 30m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
@@ -107,6 +142,7 @@ jobs:
           go test -v -covermode=count -coverprofile=common.coverprofile ./psiphon/common
           go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./psiphon/common/accesscontrol
           go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
+          go test -v -covermode=count -coverprofile=deviceregion.coverprofile ./psiphon/common/deviceregion
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
           go test -v -covermode=count -coverprofile=dsl.coverprofile ./psiphon/common/dsl
           go test -v -covermode=count -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
@@ -116,18 +152,23 @@ jobs:
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator
           go test -v -covermode=count -coverprofile=osl.coverprofile ./psiphon/common/osl
           sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=packetman.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
+          go test -v -covermode=count -coverprofile=portmapper.coverprofile ./psiphon/common/portmapper
+          go test -v -covermode=count -coverprofile=gateway.coverprofile ./psiphon/common/portmapper/gateway
           go test -v -covermode=count -coverprofile=parameters.coverprofile ./psiphon/common/parameters
+          go test -v -covermode=count -coverprofile=prng.coverprofile ./psiphon/common/prng
           go test -v -covermode=count -coverprofile=protocol.coverprofile ./psiphon/common/protocol
           go test -v -covermode=count -coverprofile=proxyheader.coverprofile ./psiphon/common/proxyheader
           go test -v -covermode=count -coverprofile=push.coverprofile ./psiphon/common/push
           go test -v -covermode=count -coverprofile=quic.coverprofile ./psiphon/common/quic
           go test -v -covermode=count -coverprofile=resolver.coverprofile ./psiphon/common/resolver
+          go test -v -covermode=count -coverprofile=sss.coverprofile ./psiphon/common/sss
           go test -v -covermode=count -coverprofile=tactics.coverprofile ./psiphon/common/tactics
           go test -v -covermode=count -coverprofile=tlsdialer.coverprofile ./psiphon/common/tlsdialer
           go test -v -covermode=count -coverprofile=transforms.coverprofile ./psiphon/common/transforms
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          go test -v -covermode=count -coverprofile=discovery.coverprofile ./psiphon/server/discovery
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
           go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
@@ -186,23 +227,3 @@ jobs:
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
           go build -a -v
           ./ConsoleClient --version
-
-      # License check ignore cases:
-      #
-      # - github.com/Psiphon-Labs,github.com/Psiphon-Inc: Psiphon code with
-      #   GPL 3 license; any dependencies within (subtree or copy) must be
-      #   manually vetted
-      #
-      # - github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu:
-      #   ISC and MPL-2.0 respectively; allowed for server only (there is an
-      #   extra pass, without this exclusion, over the main client packages)
-      #
-      # - github.com/sergeyfrolov/bsbuffer: is LGPL-3.0, but may be excluded by
-      #   omitting the build tag PSIPHON_ENABLE_REFRACTION_NETWORKING.
-      #
-      - name: Check licenses
-        if: ${{ matrix.test-type == 'code-vetting' }}
-        run: |
-          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
-          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi

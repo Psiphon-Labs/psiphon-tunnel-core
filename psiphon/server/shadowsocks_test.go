@@ -253,6 +253,10 @@ func TestShadowsocksServer(t *testing.T) {
 	if numIrregularTunnels != 2 {
 		t.Fatal("expected 2 irregular tunnels")
 	}
+
+	if !listener.(*ShadowsocksListener).server.replayCache.Add("1", randomBytes[:key.SaltSize()]) {
+		t.Fatal("unauthenticated salt entered replay cache")
+	}
 }
 
 type writeRecorder struct {

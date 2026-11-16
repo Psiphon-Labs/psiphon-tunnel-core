@@ -822,8 +822,15 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 
 				if atomic.CompareAndSwapInt32(&conn.decoyPacketCount, count, count-1) {
 
+					// The decoy packet is obfuscated in WriteTo, which adds
+					// OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT bytes; limit the
+					// size so the obfuscated decoy packet doesn't exceed
+					// MAX_PRE_DISCOVERY_PACKET_SIZE.
+
 					packetSize := conn.paddingPRNG.Range(
-						1, MAX_PRE_DISCOVERY_PACKET_SIZE)
+						1,
+						MAX_PRE_DISCOVERY_PACKET_SIZE-
+							OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT)
 
 					// decoyBuffer is all zeros, so the QUIC Fixed Bit is zero.
 					// Ignore any errors when writing decoy packets.
@@ -898,8 +905,8 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			// It's possible for clients to redial QUIC connections,
 			// transitioning from obfuscated to plain, using the same source
 			// address (IP and port). This is more likely when many clients
-			// are behind NAT. If a packet appears to be QUIC, this will reset
-			// any existing peer "mode" to plain. The obfuscator checks that
+			// are behind NAT. If a packet appears to be QUIC, this can reset
+			// an existing peer "mode" to plain. The obfuscator checks that
 			// its obfuscated packets don't pass the QUIC DPI test.
 
 			now = time.Now()
@@ -933,9 +940,19 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			conn.peerModesMutex.Lock()
 			address = peerAddress(addr)
 			mode, state, ok := conn.lookupPeer(address)
-			if ok && (mode.isStale(now, state) ||
+			stale := ok && mode.isStale(now, state)
+			if ok && (stale ||
 				(isQUIC && n >= MIN_FIRST_PACKET_SIZE &&
 					(mode.isObfuscated || (mode.isIETF != isIETF)))) {
+				// Only protect established peers. Spoofed packets can populate earlier
+				// states and would otherwise pin the mode before a client connects.
+				// Redials using the same source IP:port and a different mode
+				// must wait for close or expiry. gQUIC has no close callback.
+				if !stale && state == peerEstablished {
+					conn.peerModesMutex.Unlock()
+					return 0, 0, 0, nil, true, newTemporaryNetError(
+						errors.TraceNew("unexpected peer mode change"))
+				}
 				// The address for this flow has been seen before, but either (1) it's
 				// stale and not yet reaped; or (2) the client has redialed and switched
 				// from obfuscated to non-obfuscated; or (3) the client has redialed and
@@ -947,9 +964,6 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				// and handled like new flows and the QUIC session will fail. These cases
 				// include the client immediately redialing and switching from
 				// non-obfuscated to obfuscated or switching obfuscated gQUIC<-->IETF.
-				// A forged plain QUIC packet from an obfuscated peer's address
-				// also resets the peer, breaking its connection; an off-path
-				// attacker needs the client's source port.
 				//
 				// The new flow is unproven, so the peer state returns to pending
 				// with a new entry; callbacks of any earlier handshake will no
@@ -1304,10 +1318,21 @@ func getMaxPaddingSize(isIETF bool, packetSize int) int {
 		// (quic-go may increase the maximum packet size via MTU discovery).
 		// Do not pad beyond that initial maximum size. As a result, padding
 		// is only added for smaller packets.
-		// OBFUSCATED_PACKET_SIZE_ADJUSTMENT is already factored in via
-		// Client/ServerInitalPacketPaddingAdjustment.
+		//
+		// The obfuscated packet size is the input packet size plus the
+		// padding plus OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT, for the nonce
+		// and padding length. Client/ServerMaxPacketSizeAdjustment reduces
+		// the size of the packets produced by quic-go by that amount, but
+		// that only makes room for the nonce and padding length; the
+		// adjustment must also be deducted here or else the obfuscated
+		// packet could exceed the initial maximum size by up to
+		// OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT bytes.
+		//
+		// As a result, quic-go packets at the adjusted pre-MTU discovery
+		// maximum size are not padded and produce obfuscated packets of
+		// exactly the initial maximum size.
 
-		maxPadding = maxPacketSize - packetSize
+		maxPadding = maxPacketSize - OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT - packetSize
 		if maxPadding < 0 {
 			maxPadding = 0
 		}

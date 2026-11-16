@@ -33,6 +33,12 @@ import (
 
 func TestSeed(t *testing.T) {
 
+	// Checks that random output is not all zeros, or that the outputs of
+	// differently seeded PRNGs are not identical, are skipped for short
+	// reads, where these are likely random outcomes; e.g., 1 in 256 for a 1
+	// byte read.
+	minCheckSize := 16
+
 	seed, err := NewSeed()
 	if err != nil {
 		t.Fatalf("NewSeed failed: %s", err)
@@ -50,7 +56,7 @@ func TestSeed(t *testing.T) {
 		prng2.Read(bytes2)
 
 		zeroes := make([]byte, i)
-		if bytes.Equal(zeroes, bytes1) {
+		if i >= minCheckSize && bytes.Equal(zeroes, bytes1) {
 			t.Fatalf("unexpected zero bytes")
 		}
 
@@ -82,11 +88,11 @@ func TestSeed(t *testing.T) {
 		bytes4 := make([]byte, i)
 		prng4.Read(bytes4)
 
-		if bytes.Equal(bytes1, bytes3) {
+		if i >= minCheckSize && bytes.Equal(bytes1, bytes3) {
 			t.Fatalf("unexpected identical bytes")
 		}
 
-		if bytes.Equal(bytes3, bytes4) {
+		if i >= minCheckSize && bytes.Equal(bytes3, bytes4) {
 			t.Fatalf("unexpected identical bytes")
 		}
 	}

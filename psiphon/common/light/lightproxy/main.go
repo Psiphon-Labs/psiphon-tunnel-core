@@ -600,9 +600,9 @@ func (r *proxyEventReceiver) Activity(stats *light.ActivityStats) {
 func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 	const connectionFormat = `[Connection] proxyID: %s, ` +
 		`proxyConnectionNum: %d, sponsorID: %s, platform: %s, ` +
-		`buildRev: %s, deviceRegion: %s, sessionID: %s, ` +
+		`buildRev: %s, deviceRegion: %q, sessionID: %s, ` +
 		`tracker: %d, networkType: %s, clientConnectionNum: %d, ` +
-		`destination: %s, tlsProfile: %s, sni: %s, ` +
+		`destination: %q, tlsProfile: %s, sni: %q, ` +
 		`tlsClientHelloFragmented: %t, tlsClientHelloPadding: %d, ` +
 		`tlsDidResume: %t, ` +
 		`clientTCPDuration: %s, clientTLSDuration: %s, ` +
@@ -610,7 +610,7 @@ func (r *proxyEventReceiver) Connection(stats *light.ConnectionStats) {
 		`completedUpstreamDNS: %s, completedUpstreamTCP: %s, upstreamDNSCached: %v, ` +
 		`proxyProtocolHeaderAdded: %t, proxyProtocolHeaderReplaced: %t, ` +
 		`bytesRead: %d, bytesWritten: %d, ` +
-		`failure: %s` + "\n"
+		`failure: %q` + "\n"
 
 	r.logf(
 		connectionFormat,
@@ -662,7 +662,9 @@ func (r *proxyEventReceiver) InfoLog(_ string, message string) {
 }
 
 func (r *proxyEventReceiver) WarningLog(_ string, message string) {
-	r.logf("[WarningLog] %s\n", message)
+	// Warning messages include connection failure errors, which may include
+	// client-supplied values; escape to prevent forged log lines.
+	r.logf("[WarningLog] %q\n", message)
 }
 
 func (r *proxyEventReceiver) ErrorLog(_ string, message string) {

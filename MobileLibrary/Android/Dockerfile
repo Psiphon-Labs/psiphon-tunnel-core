@@ -2,7 +2,7 @@
 #
 # See README.md for usage instructions.
 
-FROM --platform=linux/amd64 ubuntu:18.04
+FROM --platform=linux/amd64 ubuntu:18.04@sha256:152dc042452c496007f07ca9127571cb9c29697f42acbfad72324b2bb2e43c98
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,8 +24,10 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 
 # Install Go.
 ENV GOVERSION=go1.26.10 GOROOT=/usr/local/go GOPATH=/go PATH=$PATH:/usr/local/go/bin:/go/bin CGO_ENABLED=1
+ENV GOSHA256=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
 
-RUN curl -L https://go.dev/dl/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+RUN curl -fL https://go.dev/dl/$GOVERSION.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+  && echo "$GOSHA256  /tmp/go.tar.gz" | sha256sum -c - \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
   && rm /tmp/go.tar.gz \
   && echo $GOVERSION > $GOROOT/VERSION
@@ -35,7 +37,9 @@ ENV ANDROID_PLATFORM_VERSION=30 ANDROID_NDK_VERSION=23.1.7779620
 ENV ANDROID_SDK_ROOT=/android-sdk-root-linux
 ENV ANDROID_HOME=$ANDROID_SDK_ROOT
 ENV ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION
-RUN curl -L https://dl.google.com/android/repository/commandlinetools-linux-8092744_latest.zip -o /tmp/commandlinetools-linux.zip \
+ENV ANDROID_COMMAND_LINE_TOOLS_SHA256=d71f75333d79c9c6ef5c39d3456c6c58c613de30e6a751ea0dbd433e8f8b9cbf
+RUN curl -fL https://dl.google.com/android/repository/commandlinetools-linux-8092744_latest.zip -o /tmp/commandlinetools-linux.zip \
+  && echo "$ANDROID_COMMAND_LINE_TOOLS_SHA256  /tmp/commandlinetools-linux.zip" | sha256sum -c - \
   && mkdir -p $ANDROID_SDK_ROOT \
   && cd $ANDROID_SDK_ROOT \
   && mkdir cmdline-tools \

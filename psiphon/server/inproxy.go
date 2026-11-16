@@ -277,6 +277,12 @@ func (r *InproxyProxyQualityBrokerRoundTripper) RoundTrip(
 		return nil, errors.TraceNew("roundTripDelay unsupported")
 	}
 
+	if roundTripTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, roundTripTimeout)
+		defer cancel()
+	}
+
 	request, err := http.NewRequestWithContext(
 		ctx, "POST", r.requestURL, bytes.NewReader(requestPayload))
 	if err != nil {
@@ -297,9 +303,15 @@ func (r *InproxyProxyQualityBrokerRoundTripper) RoundTrip(
 			"unexpected response status code %d", response.StatusCode)
 	}
 
-	responsePayload, err := io.ReadAll(response.Body)
+	// Sanity cap: acknowledgements and session handshake/reset packets are
+	// well below 1 KiB, including framing, encryption, and padding.
+	const maxResponseSize = 64 * 1024
+	responsePayload, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+	if len(responsePayload) > maxResponseSize {
+		return nil, errors.TraceNew("proxy quality response exceeds size limit")
 	}
 
 	return responsePayload, nil

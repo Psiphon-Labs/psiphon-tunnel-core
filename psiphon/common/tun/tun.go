@@ -146,6 +146,8 @@ const (
 	DEFAULT_IDLE_SESSION_EXPIRY_SECONDS  = 300
 	ORPHAN_METRICS_CHECKPOINTER_PERIOD   = 30 * time.Minute
 	FLOW_IDLE_EXPIRY                     = 60 * time.Second
+	MAX_TRACKED_FLOWS_PER_SESSION        = 4 * 1024
+	MAX_TRACKED_DNS_FLOWS_PER_SESSION    = 8 * 1024
 )
 
 // ServerConfig specifies the configuration of a packet tunnel server.
@@ -510,6 +512,12 @@ func (server *Server) ClientConnected(
 // are halted, but the client session is left intact to reserve the
 // assigned IP addresses and retain network state in case the client
 // soon reconnects.
+//
+// Limitation: retaining flows improves reconnect performance, but existing flows
+// are not rechecked against a new connection's traffic rules. As with traffic
+// rule reloads, updated port permissions apply only to new flows; and to
+// existing flows once their tracking is cleared, which happens when the
+// session reaches MAX_TRACKED_FLOWS_PER_SESSION.
 func (server *Server) ClientDisconnected(sessionID string) {
 
 	session := server.getSession(sessionID)
@@ -677,7 +685,8 @@ func (server *Server) runSessionReaper() {
 
 	// Periodically iterate over all sessions and discard expired
 	// sessions. This action, removing the index from server.indexToSession,
-	// releases the IP addresses assigned  to the session.
+	// releases the IP addresses assigned  to the session. Idle flows are also
+	// reaped here so cleanup does not depend on receiving new traffic.
 
 	// TODO: As-is, this will discard sessions for live SSH tunnels,
 	// as long as the SSH channel for such a session has been idle for
@@ -688,7 +697,7 @@ func (server *Server) runSessionReaper() {
 
 	idleExpiry := server.sessionIdleExpiry()
 
-	ticker := time.NewTicker(idleExpiry / 2)
+	ticker := time.NewTicker(min(idleExpiry/2, FLOW_IDLE_EXPIRY/2))
 	defer ticker.Stop()
 
 	for {
@@ -698,6 +707,8 @@ func (server *Server) runSessionReaper() {
 				session := value.(*session)
 				if session.expired(idleExpiry) {
 					server.removeSession(session)
+				} else {
+					session.reapFlows()
 				}
 				return true
 			})
@@ -1129,12 +1140,19 @@ type session struct {
 	assignedIPv6Address      net.IP
 	setOriginalIPv6Address   int32
 	originalIPv6Address      net.IP
-	flows                    sync.Map
 	workers                  *sync.WaitGroup
 	mutex                    sync.Mutex
 	channel                  *Channel
 	runContext               context.Context
 	stopRunning              context.CancelFunc
+
+	// sync.Map avoids RWMutex reader-counter contention on packet lookups.
+	// Only membership and count changes lock flowsMutex.
+	flows        sync.Map
+	dnsFlows     sync.Map
+	flowsMutex   sync.Mutex
+	flowCount    int
+	dnsFlowCount int
 }
 
 func (session *session) touch() {
@@ -1317,22 +1335,47 @@ func (flowState *flowState) expired(idleExpiry time.Duration) bool {
 		(now.Sub(monotime.Time(flowState.lastDownstreamPacketTime.Load())) > idleExpiry)
 }
 
-// isTrackingFlow checks if a flow is being tracked.
-func (session *session) isTrackingFlow(ID flowID) bool {
+// loadFlow looks up a tracked flow.
+//
+// Transparent DNS flows are consulted only for transparent DNS packets. A
+// transparent DNS flow is keyed by the actual resolver address, so a
+// non-transparent packet sent directly to that resolver address can have the
+// same flow ID. Such a packet must not match the transparent DNS flow, as
+// existing flows skip the traffic rules and destination checks, and the
+// domain check is applied only to transparent DNS packets.
+func (session *session) loadFlow(ID flowID, isDNS bool) (*flowState, bool) {
+
+	if isDNS {
+		f, ok := session.dnsFlows.Load(ID)
+		if ok {
+			return f.(*flowState), true
+		}
+	}
 
 	f, ok := session.flows.Load(ID)
-	if !ok {
-		return false
+	if ok {
+		return f.(*flowState), true
 	}
-	flowState := f.(*flowState)
+
+	return nil, false
+}
+
+// getFlow returns a tracked flow unless it has expired. isDNS indicates
+// whether the packet is a transparent DNS packet; see loadFlow.
+func (session *session) getFlow(ID flowID, isDNS bool) *flowState {
+
+	flowState, ok := session.loadFlow(ID, isDNS)
+	if !ok {
+		return nil
+	}
 
 	// Check if flow is expired but not yet reaped.
 	if flowState.expired(FLOW_IDLE_EXPIRY) {
 		session.deleteFlow(ID, flowState)
-		return false
+		return nil
 	}
 
-	return true
+	return flowState
 }
 
 // startTrackingFlow starts flow tracking for the flow identified
@@ -1367,15 +1410,9 @@ func (session *session) startTrackingFlow(
 	applicationData []byte,
 	isDNS bool) {
 
-	now := int64(monotime.Now())
+	session.reapFlows()
 
-	// Once every period, iterate over flows and reap expired entries.
-	reapIndex := now / int64(monotime.Time(FLOW_IDLE_EXPIRY/2))
-	previousReapIndex := session.lastFlowReapIndex.Load()
-	if reapIndex != previousReapIndex &&
-		session.lastFlowReapIndex.CompareAndSwap(previousReapIndex, reapIndex) {
-		session.reapFlows()
-	}
+	now := int64(monotime.Now())
 
 	var isTCP bool
 	var hostname string
@@ -1398,39 +1435,61 @@ func (session *session) startTrackingFlow(
 		}
 	}
 
-	flowState := &flowState{
+	state := &flowState{
 		isDNS:              isDNS,
 		activityUpdaters:   activityUpdaters,
 		dnsQualityReporter: session.getDNSQualityReporter(),
 	}
 
 	if direction == packetDirectionServerUpstream {
-		flowState.firstUpstreamPacketTime.Store(now)
-		flowState.lastUpstreamPacketTime.Store(now)
+		state.firstUpstreamPacketTime.Store(now)
+		state.lastUpstreamPacketTime.Store(now)
 	} else {
-		flowState.firstDownstreamPacketTime.Store(now)
-		flowState.lastDownstreamPacketTime.Store(now)
+		state.firstDownstreamPacketTime.Store(now)
+		state.lastDownstreamPacketTime.Store(now)
 	}
 
-	// LoadOrStore will retain any existing entry
-	session.flows.LoadOrStore(ID, flowState)
+	session.flowsMutex.Lock()
 
-	session.updateFlow(ID, direction, applicationData)
+	existingState, ok := session.loadFlow(ID, isDNS)
+	if ok {
+		state = existingState
+	} else if isDNS {
+		// Short-lived DNS metrics use a separate limit to preserve ordinary
+		// flow capacity. When full, keep forwarding without tracking new flows.
+		// Retain existing entries so pending DNS responses can still be recorded.
+		// DNS domain checks and packet byte accounting are independent of tracking.
+		if session.dnsFlowCount >= MAX_TRACKED_DNS_FLOWS_PER_SESSION {
+			session.metrics.skipDNSFlowTrackingCount.Add(1)
+			session.flowsMutex.Unlock()
+			return
+		}
+		session.dnsFlows.Store(ID, state)
+		session.dnsFlowCount++
+	} else {
+		if session.flowCount >= MAX_TRACKED_FLOWS_PER_SESSION {
+			// Clear all to make room without refusing flows or evicting a
+			// random entry for each new flow at capacity. The count includes
+			// expired flows that are not yet reaped. Live flows are tracked
+			// again, as new flows, as packets arrive: this is extra work,
+			// and permission checks are repeated, under the current traffic
+			// rules. Activity already reported is not lost.
+			session.flows.Clear()
+			session.flowCount = 0
+			session.metrics.clearFlowTrackingCount.Add(1)
+		}
+		session.flows.Store(ID, state)
+		session.flowCount++
+	}
+
+	session.flowsMutex.Unlock()
+
+	state.update(direction, applicationData)
 }
 
-func (session *session) updateFlow(
-	ID flowID,
+func (flowState *flowState) update(
 	direction packetDirection,
 	applicationData []byte) {
-
-	f, ok := session.flows.Load(ID)
-	if !ok {
-		return
-	}
-	flowState := f.(*flowState)
-
-	// Note: no expired check here, since caller is assumed to
-	// have just called isTrackingFlow.
 
 	now := int64(monotime.Now())
 	var upstreamBytes, downstreamBytes, durationNanoseconds int64
@@ -1452,8 +1511,20 @@ func (session *session) updateFlow(
 		// is intened to produce equivalent behaviour for port
 		// forward clients (tracked with ActivityUpdaters) and
 		// packet tunnel clients (tracked with FlowActivityUpdaters).
+		//
+		// lastDownstreamPacketTime is 0 until the first downstream packet
+		// for a flow started by an upstream packet. In that case, as with
+		// ActivityMonitoredConn, the duration is measured from the start of
+		// the flow; a 0 start time must not be used as the base, as that
+		// would report the raw monotonic clock value as the duration.
 
-		durationNanoseconds = now - flowState.lastDownstreamPacketTime.Swap(now)
+		lastDownstreamPacketTime := flowState.lastDownstreamPacketTime.Swap(now)
+		if lastDownstreamPacketTime == 0 {
+			lastDownstreamPacketTime = flowState.firstUpstreamPacketTime.Load()
+		}
+		if lastDownstreamPacketTime != 0 {
+			durationNanoseconds = now - lastDownstreamPacketTime
+		}
 	}
 
 	for _, updater := range flowState.activityUpdaters {
@@ -1465,6 +1536,27 @@ func (session *session) updateFlow(
 // flowState is passed in to avoid duplicating the lookup that all callers
 // have already performed.
 func (session *session) deleteFlow(ID flowID, flowState *flowState) {
+
+	// The flow may have been replaced since the caller looked it up.
+	// Delete only if the stored state still matches.
+	session.flowsMutex.Lock()
+	var deleted bool
+	if flowState.isDNS {
+		deleted = session.dnsFlows.CompareAndDelete(ID, flowState)
+		if deleted {
+			session.dnsFlowCount--
+		}
+	} else {
+		deleted = session.flows.CompareAndDelete(ID, flowState)
+		if deleted {
+			session.flowCount--
+		}
+	}
+	session.flowsMutex.Unlock()
+
+	if !deleted {
+		return
+	}
 
 	if flowState.isDNS {
 
@@ -1501,27 +1593,39 @@ func (session *session) deleteFlow(ID flowID, flowState *flowState) {
 			}
 		}
 	}
-
-	session.flows.Delete(ID)
 }
 
 // reapFlows removes expired idle flows.
 func (session *session) reapFlows() {
-	session.flows.Range(func(key, value interface{}) bool {
-		flowState := value.(*flowState)
-		if flowState.expired(FLOW_IDLE_EXPIRY) {
-			session.deleteFlow(key.(flowID), flowState)
-		}
-		return true
-	})
+	now := int64(monotime.Now())
+
+	// Once every period, iterate over flows and reap expired entries.
+	reapIndex := now / int64(monotime.Time(FLOW_IDLE_EXPIRY/2))
+	previousReapIndex := session.lastFlowReapIndex.Load()
+	if reapIndex == previousReapIndex ||
+		!session.lastFlowReapIndex.CompareAndSwap(previousReapIndex, reapIndex) {
+		return
+	}
+
+	for _, flows := range []*sync.Map{&session.flows, &session.dnsFlows} {
+		flows.Range(func(key, value interface{}) bool {
+			flowState := value.(*flowState)
+			if flowState.expired(FLOW_IDLE_EXPIRY) {
+				session.deleteFlow(key.(flowID), flowState)
+			}
+			return true
+		})
+	}
 }
 
 // deleteFlows deletes all flows.
 func (session *session) deleteFlows() {
-	session.flows.Range(func(key, value interface{}) bool {
-		session.deleteFlow(key.(flowID), value.(*flowState))
-		return true
-	})
+	for _, flows := range []*sync.Map{&session.flows, &session.dnsFlows} {
+		flows.Range(func(key, value interface{}) bool {
+			session.deleteFlow(key.(flowID), value.(*flowState))
+			return true
+		})
+	}
 }
 
 type packetMetrics struct {
@@ -1531,6 +1635,9 @@ type packetMetrics struct {
 	TCPIPv6                 relayedPacketMetrics
 	UDPIPv4                 relayedPacketMetrics
 	UDPIPv6                 relayedPacketMetrics
+
+	clearFlowTrackingCount   atomic.Int64
+	skipDNSFlowTrackingCount atomic.Int64
 }
 
 type relayedPacketMetrics struct {
@@ -1652,6 +1759,9 @@ func (metrics *packetMetrics) checkpoint(
 	}
 
 	if whichMetrics&packetMetricsRelayed != 0 {
+
+		logFields["clear_flow_tracking_count"] = metrics.clearFlowTrackingCount.Swap(0)
+		logFields["skip_dns_flow_tracking_count"] = metrics.skipDNSFlowTrackingCount.Swap(0)
 
 		var TCPApplicationBytesUp, TCPApplicationBytesDown,
 			UDPApplicationBytesUp, UDPApplicationBytesDown int64
@@ -2747,7 +2857,7 @@ func processPacket(
 	// TODO: verify this struct is stack allocated
 	var ID flowID
 
-	isTrackingFlow := false
+	var flowState *flowState
 
 	if doFlowTracking {
 
@@ -2780,14 +2890,14 @@ func processPacket(
 				protocol)
 		}
 
-		isTrackingFlow = session.isTrackingFlow(ID)
+		flowState = session.getFlow(ID, doTransparentDNS)
 	}
 
 	// Check packet source/destination is permitted; except for:
 	// - existing flows, which have already been checked
 	// - transparent DNS, which is always allowed
 
-	if !doTransparentDNS && !isTrackingFlow {
+	if !doTransparentDNS && flowState == nil {
 
 		// Enforce traffic rules (allowed TCP/UDP ports).
 
@@ -2899,10 +3009,10 @@ func processPacket(
 	// Start/update flow tracking, only once past all possible packet rejects
 
 	if doFlowTracking {
-		if !isTrackingFlow {
+		if flowState == nil {
 			session.startTrackingFlow(ID, direction, applicationData, doTransparentDNS)
 		} else {
-			session.updateFlow(ID, direction, applicationData)
+			flowState.update(direction, applicationData)
 		}
 	}
 

@@ -287,7 +287,7 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		// Limitation: there is a transient edge case where
 		// requestedMissingSignature and/or requestedMissingProviderID will be
 		// set for a discovery server entry that _is_ also discovered here.
-		if requestedMissingSignature || requestedMissingProviderID &&
+		if (requestedMissingSignature || requestedMissingProviderID) &&
 			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
 
 			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)
