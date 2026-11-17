@@ -95,6 +95,71 @@ func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+// defaultRoutes returns every IPv4 default route to a private gateway from
+// the routing table. With an empty ifaceName the system's primary (unscoped)
+// default routes come first, followed by interface-scoped ones: on macOS the
+// default route of each non-primary interface is scoped to it, and those are
+// exactly the other default routes a multi-homed host has. Routes are named
+// by the interface index of their routing entry.
+func defaultRoutes(ifaceName string) []defaultRoute {
+	rib, err := fetchRoutingTable()
+	if err != nil {
+		return nil
+	}
+	msgs, err := parseRoutingTable(rib)
+	if err != nil {
+		return nil
+	}
+
+	wantIndex := -1
+	if ifaceName != "" {
+		iface, err := net.InterfaceByName(ifaceName)
+		if err != nil {
+			return nil
+		}
+		wantIndex = iface.Index
+	}
+
+	var unscoped, scoped []defaultRoute
+	names := make(map[int]string)
+	for _, m := range msgs {
+		rm, ok := m.(*route.RouteMessage)
+		if !ok {
+			continue
+		}
+		if wantIndex >= 0 && rm.Index != wantIndex {
+			continue
+		}
+		if !isDefaultGateway(rm, true) {
+			continue
+		}
+		gwAddr, ok := rm.Addrs[unix.RTAX_GATEWAY].(*route.Inet4Addr)
+		if !ok {
+			continue
+		}
+		gw := netip.AddrFrom4(gwAddr.IP)
+		if !gw.IsPrivate() {
+			continue
+		}
+		name, ok := names[rm.Index]
+		if !ok {
+			iface, err := net.InterfaceByIndex(rm.Index)
+			if err != nil {
+				continue
+			}
+			name = iface.Name
+			names[rm.Index] = name
+		}
+		r := defaultRoute{ifaceName: name, gateway: gw}
+		if isDefaultGateway(rm, false) {
+			unscoped = append(unscoped, r)
+		} else {
+			scoped = append(scoped, r)
+		}
+	}
+	return append(unscoped, scoped...)
+}
+
 var (
 	v4default = [4]byte{0, 0, 0, 0}
 	v6default = [16]byte{}

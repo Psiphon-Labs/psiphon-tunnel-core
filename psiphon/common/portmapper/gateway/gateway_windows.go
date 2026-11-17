@@ -34,6 +34,7 @@ package gateway
 import (
 	"net"
 	"net/netip"
+	"sort"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -86,4 +87,87 @@ func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
 		return best, true
 	}
 	return netip.Addr{}, false
+}
+
+// defaultRoutes returns every IPv4 default route to a private gateway from
+// the forwarding table, ordered as the stack ranks routes: by route metric
+// plus interface metric, with equal-cost routes in table order. Routes are
+// named by the interface index of their forwarding entry. gatewayForInterface
+// above is deliberately not changed to use this ranking: it keeps the
+// default-route pick the in-proxy path has always made.
+func defaultRoutes(ifaceName string) []defaultRoute {
+	rows, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
+	if err != nil {
+		return nil
+	}
+	ifaces, err := winipcfg.GetIPInterfaceTable(windows.AF_INET)
+	if err != nil {
+		return nil
+	}
+	ifaceMetrics := make(map[uint32]uint32, len(ifaces))
+	for i := range ifaces {
+		ifaceMetrics[ifaces[i].InterfaceIndex] = ifaces[i].Metric
+	}
+	var routes []defaultRoute
+	names := make(map[uint32]string)
+	for _, r := range rankedDefaultRoutes(rows, ifaceMetrics) {
+		name, ok := names[r.ifIndex]
+		if !ok {
+			iface, err := net.InterfaceByIndex(int(r.ifIndex))
+			if err != nil {
+				continue
+			}
+			name = iface.Name
+			names[r.ifIndex] = name
+		}
+		if ifaceName != "" && name != ifaceName {
+			continue
+		}
+		routes = append(routes, defaultRoute{ifaceName: name, gateway: r.gateway})
+	}
+	return routes
+}
+
+// indexedRoute is a default route keyed by interface index, before the
+// index is resolved to a name.
+type indexedRoute struct {
+	ifIndex uint32
+	gateway netip.Addr
+}
+
+// rankedDefaultRoutes returns the distinct (interface, gateway) pairs that
+// hold an IPv4 default route to a private next hop, ordered by the lowest
+// total metric (route plus interface) of such a route for each pair. One
+// interface may route through several routers; each is kept.
+func rankedDefaultRoutes(
+	rows []winipcfg.MibIPforwardRow2, ifaceMetrics map[uint32]uint32) []indexedRoute {
+
+	v4unspec := netip.IPv4Unspecified()
+	var routes []indexedRoute
+	bestMetric := make(map[indexedRoute]uint64)
+	for i := range rows {
+		r := &rows[i]
+		if r.Loopback || r.DestinationPrefix.PrefixLength != 0 {
+			continue
+		}
+		if r.DestinationPrefix.Prefix().Addr().Unmap() != v4unspec {
+			continue
+		}
+		gw := r.NextHop.Addr().Unmap()
+		if !gw.IsValid() || !gw.Is4() || !gw.IsPrivate() {
+			continue
+		}
+		key := indexedRoute{ifIndex: r.InterfaceIndex, gateway: gw}
+		metric := uint64(r.Metric) + uint64(ifaceMetrics[r.InterfaceIndex])
+		if best, seen := bestMetric[key]; !seen {
+			routes = append(routes, key)
+			bestMetric[key] = metric
+		} else if metric < best {
+			bestMetric[key] = metric
+		}
+	}
+	sort.SliceStable(routes, func(i, j int) bool {
+		return bestMetric[routes[i]] < bestMetric[routes[j]]
+	})
+	return routes
 }

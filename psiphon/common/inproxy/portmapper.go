@@ -145,9 +145,8 @@ func (p *portMapper) respondingPortMappingTypes() PortMappingTypes {
 // close releases the port mapping
 func (p *portMapper) close() error {
 
-	// TODO: it's not clear whether a concurrent createOrGetMapping, in
-	// progress at the time of the Close call, will dispose of any created
-	// mapping if it completes after Close.
+	// A mapping create in progress at the time of the Close call releases
+	// any mapping it goes on to obtain, rather than publishing it.
 
 	err := p.client.Close()
 	p.portMappingLogger("closed")

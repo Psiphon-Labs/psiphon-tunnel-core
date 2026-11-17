@@ -632,7 +632,7 @@ func TestGetUPnPPortMapping(t *testing.T) {
 			}
 			t.Logf("gw=%v myIP=%v", gw, myIP)
 
-			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), prevPort)
+			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), prevPort, c.currentGeneration())
 			if !ok {
 				t.Fatal("could not get UPnP port mapping")
 			}
@@ -727,7 +727,7 @@ func TestGetUPnPPortMapping_LeaseDuration(t *testing.T) {
 			}
 			t.Logf("gw=%v myIP=%v", gw, myIP)
 
-			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0)
+			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 			if !ok {
 				t.Fatal("could not get UPnP port mapping")
 			}
@@ -771,7 +771,7 @@ func TestGetUPnPPortMapping_NoValidServices(t *testing.T) {
 	}
 
 	// This shouldn't panic
-	_, ok = c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0)
+	_, ok = c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 	if ok {
 		t.Fatal("did not expect to get UPnP port mapping")
 	}
@@ -812,7 +812,7 @@ func TestGetUPnPPortMapping_Legacy(t *testing.T) {
 		t.Fatalf("could not get gateway and self IP")
 	}
 
-	ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0)
+	ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 	if !ok {
 		t.Fatal("could not get UPnP port mapping")
 	}
@@ -846,7 +846,7 @@ func TestGetUPnPPortMappingNoResponses(t *testing.T) {
 		}}
 		c.mu.Unlock()
 
-		_, ok := c.getUPnPPortMapping(context.Background(), gw, netip.AddrPortFrom(myIP, 12345), 0)
+		_, ok := c.getUPnPPortMapping(context.Background(), gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 		if ok {
 			t.Errorf("expected no mapping when there are no responses")
 		}
@@ -971,7 +971,7 @@ func TestGetUPnPPortMapping_Invalid(t *testing.T) {
 				t.Fatalf("could not get gateway and self IP")
 			}
 
-			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0)
+			ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 			if ok {
 				t.Fatal("did not expect to get UPnP port mapping")
 			}

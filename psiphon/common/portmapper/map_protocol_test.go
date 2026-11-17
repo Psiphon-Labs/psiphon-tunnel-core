@@ -28,8 +28,10 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestMapProtocolHelpers verifies the per-protocol conversion helpers and the
@@ -235,7 +237,7 @@ func TestGetUPnPPortMappingTCP(t *testing.T) {
 		t.Fatalf("could not get gateway and self IP")
 	}
 
-	ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0)
+	ext, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration())
 	if !ok {
 		t.Fatal("could not get UPnP port mapping")
 	}
@@ -255,6 +257,143 @@ func TestGetUPnPPortMappingTCP(t *testing.T) {
 	}
 	if um.protocol != MapProtocolTCP {
 		t.Errorf("stored mapping protocol = %v, want TCP", um.protocol)
+	}
+}
+
+// TestInvalidateDuringUPnPMapping verifies that a mapping the gateway grants
+// after the client was closed, or after the mapping was invalidated by a
+// reconfiguration, is released rather than published or leaked.
+func TestInvalidateDuringUPnPMapping(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		invalidate func(c *Client)
+	}{
+		{"close", func(c *Client) { c.Close() }},
+		{"set local port", func(c *Client) { c.SetLocalPort(23456) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer igd.Close()
+			c := newTestClient(t, igd)
+			var deleted atomic.Bool
+			handlers := map[string]any{
+				"AddPortMapping": func([]byte) (int, string) {
+					// Invalidate after the router accepts the request,
+					// before the caller receives the successful response.
+					test.invalidate(c)
+					return http.StatusOK, testAddPortMappingResponse
+				},
+				"GetExternalIPAddress": testGetExternalIPAddressResponse,
+				"GetStatusInfo":        testGetStatusInfoResponse,
+				"DeletePortMapping": func([]byte) (int, string) {
+					deleted.Store(true)
+					return http.StatusOK, ""
+				},
+			}
+			igd.SetUPnPHandler(&upnpServer{t: t, Desc: testRootDesc,
+				Control: map[string]map[string]any{"/ctl/IPConn": handlers}})
+			ctx := context.Background()
+			mustProbeUPnP(t, ctx, c)
+			gw, local, _ := c.gatewayAndSelfIP()
+			c.SetLocalPort(12345)
+			if _, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(local, 12345), 0, c.currentGeneration()); ok {
+				t.Fatal("published an invalidated mapping")
+			}
+			if !deleted.Load() {
+				t.Fatal("invalidated mapping was not released")
+			}
+			c.mu.Lock()
+			mapping := c.mapping
+			c.mu.Unlock()
+			if mapping != nil {
+				t.Fatal("retained an invalidated mapping")
+			}
+		})
+	}
+}
+
+// TestInvalidateDuringPxPWaitBeforeUPnP verifies that an invalidation during
+// the NAT-PMP/PCP wait that precedes the UPnP fallback is honoured: the
+// mapping that UPnP then creates for the superseded local port is released,
+// not published. The generation must be the one captured when the local port
+// was read, not one re-read at the UPnP step.
+func TestInvalidateDuringPxPWaitBeforeUPnP(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+	c := newTestClient(t, igd)
+	var added, deleted atomic.Bool
+	handlers := map[string]any{
+		"AddPortMapping": func([]byte) (int, string) {
+			added.Store(true)
+			return http.StatusOK, testAddPortMappingResponse
+		},
+		"GetExternalIPAddress": testGetExternalIPAddressResponse,
+		"GetStatusInfo":        testGetStatusInfoResponse,
+		"DeletePortMapping": func([]byte) (int, string) {
+			deleted.Store(true)
+			return http.StatusOK, ""
+		},
+	}
+	igd.SetUPnPHandler(&upnpServer{t: t, Desc: testRootDesc,
+		Control: map[string]map[string]any{"/ctl/IPConn": handlers}})
+	ctx := context.Background()
+	mustProbeUPnP(t, ctx, c)
+	c.SetLocalPort(12345)
+
+	// The IGD answers no NAT-PMP/PCP request, so the create waits out
+	// portMapServiceTimeout before falling back to UPnP. Change the local
+	// port while that wait is pending.
+	var reconfigured sync.Once
+	igd.SetPxPHook(func() {
+		reconfigured.Do(func() { c.SetLocalPort(23456) })
+	})
+	// Age the probe past the recent-PMP/PCP window so the create sends the
+	// NAT-PMP/PCP requests instead of going straight to UPnP.
+	c.mu.Lock()
+	c.lastProbe = time.Time{}
+	c.mu.Unlock()
+
+	_, _, err = c.createOrGetMapping(ctx)
+	if !IsNoMappingError(err) {
+		t.Fatalf("createOrGetMapping returned %v, want no mapping", err)
+	}
+	if !added.Load() {
+		t.Fatal("test did not reach the UPnP fallback")
+	}
+	if !deleted.Load() {
+		t.Fatal("stale mapping was not released")
+	}
+	c.mu.Lock()
+	mapping := c.mapping
+	c.mu.Unlock()
+	if mapping != nil {
+		t.Fatal("published a mapping for a superseded local port")
+	}
+}
+
+// TestNoCreateAfterClose verifies that a closed client does not start a
+// mapping create.
+func TestNoCreateAfterClose(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+	c := newTestClient(t, igd)
+	c.Close()
+	if _, ok := c.GetCachedMappingOrStartCreatingOne(); ok {
+		t.Fatal("closed client returned a mapping")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runningCreate {
+		t.Fatal("closed client started a mapping create")
 	}
 }
 

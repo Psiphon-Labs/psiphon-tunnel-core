@@ -33,7 +33,7 @@
 //	https://github.com/tailscale/tailscale/blob/v1.98.5/net/netmon/interfaces_darwin.go
 //	https://github.com/tailscale/tailscale/blob/v1.98.5/net/netmon/interfaces_windows.go
 //
-// It differs from the upstream code in two ways:
+// It differs from the upstream code in these ways:
 //
 //   - It is self-contained: it depends only on the standard library and
 //     golang.org/x (for the per-OS routing-table reads), with none of
@@ -45,6 +45,9 @@
 //     interface, which is what split-interface configurations require: the
 //     port mapper must target the gateway on a specific (e.g. downstream/ICE)
 //     NIC rather than whichever interface holds the default route.
+//
+//   - Candidates enumerates every default-route gateway rather than picking
+//     one, for hosts with several default routes; see its documentation.
 //
 // The original Tailscale code is licensed as follows:
 //
@@ -78,6 +81,116 @@ func HomeRouterIP(ifaceName string) (gateway, myIP netip.Addr, ok bool) {
 		return netip.Addr{}, netip.Addr{}, false
 	}
 	return gw, myIP, true
+}
+
+// Candidate is one home-router path: an "up" interface with an IPv4 default
+// route whose next hop is a private address, that gateway, and this
+// machine's IPv4 address on that interface.
+type Candidate struct {
+	InterfaceName string
+	Gateway       netip.Addr
+	LocalIP       netip.Addr
+}
+
+// Candidates returns every home-router path, most preferred first, where
+// preference is the OS's own ranking of its default routes. A gateway that
+// HomeRouterIP finds is among the candidates' gateways; the candidates can
+// also include paths its lookup does not see.
+//
+// A host with several default routes may hold them at equal cost, in which
+// case the OS sends to different destinations through different gateways
+// (Windows hashes the destination across equal-cost routes), so no single
+// gateway is "the" default; and one interface may have default routes
+// through several routers. A caller that needs a port mapping can then try
+// each candidate's gateway in turn and keep the first that answers.
+//
+// A non-empty ifaceName restricts the result to that interface, as for
+// HomeRouterIP.
+func Candidates(ifaceName string) []Candidate {
+	return candidatesFromRoutes(defaultRoutes(ifaceName), interfaceAddrs)
+}
+
+// defaultRoute is one IPv4 default route, as read from the routing table by
+// the per-OS defaultRoutes: the interface its routing entry names, and its
+// gateway. candidatesFromRoutes drops the ones whose gateway is not private.
+type defaultRoute struct {
+	ifaceName string
+	gateway   netip.Addr
+}
+
+func (r defaultRoute) String() string {
+	return r.ifaceName + " via " + r.gateway.String()
+}
+
+// interfaceAddrs returns the addresses of the named interface if it is up.
+func interfaceAddrs(ifaceName string) ([]net.Addr, bool) {
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil || iface.Flags&net.FlagUp == 0 {
+		return nil, false
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil, false
+	}
+	return addrs, true
+}
+
+// candidatesFromRoutes pairs each route with this machine's IPv4 address on
+// the route's own interface: the one whose subnet contains the gateway, or
+// failing that the interface's first. The interface comes from the routing
+// entry, never from a subnet search across interfaces, which on a host with
+// overlapping subnets (an Ethernet and a Wi-Fi link to the same LAN) could
+// name an interface that holds no default route at all.
+func candidatesFromRoutes(
+	routes []defaultRoute, addrs func(ifaceName string) ([]net.Addr, bool)) []Candidate {
+
+	var candidates []Candidate
+	seen := make(map[defaultRoute]bool)
+	for _, r := range routes {
+		if seen[r] || !r.gateway.Is4() || !r.gateway.IsPrivate() {
+			continue
+		}
+		seen[r] = true
+		ifaceAddrs, ok := addrs(r.ifaceName)
+		if !ok {
+			continue
+		}
+		local, ok := localIPOnInterface(ifaceAddrs, r.gateway)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, Candidate{
+			InterfaceName: r.ifaceName, Gateway: r.gateway, LocalIP: local})
+	}
+	return candidates
+}
+
+// localIPOnInterface picks, from one interface's addresses, the IPv4 address
+// on the subnet that contains gw, or failing that the first IPv4 address.
+func localIPOnInterface(addrs []net.Addr, gw netip.Addr) (netip.Addr, bool) {
+	gwIP := net.IP(gw.AsSlice())
+	var fallback netip.Addr
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip, ok := netip.AddrFromSlice(ipNet.IP)
+		if !ok {
+			continue
+		}
+		ip = ip.Unmap()
+		if !ip.Is4() {
+			continue
+		}
+		if ipNet.Contains(gwIP) {
+			return ip, true
+		}
+		if !fallback.IsValid() {
+			fallback = ip
+		}
+	}
+	return fallback, fallback.IsValid()
 }
 
 // selfIP returns this machine's IPv4 address on the subnet that reaches gw.
