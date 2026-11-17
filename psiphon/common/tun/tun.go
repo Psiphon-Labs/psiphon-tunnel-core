@@ -98,6 +98,17 @@ The server multiplexes all client packets into a single tun device. When a
 packet is read, the destination address is used to map the packet back to the
 correct index, which maps back to the client.
 
+Some hosts route parts of 10.0.0.0/8 through other interfaces; the server
+excludes those parts from address assignment. See exclusions.go.
+
+TODO: a host subnet that contains the server tun device address 10.0.0.1,
+such as a provider's default gateway, can't be excluded; the server logs a
+warning. First try to move the host's private network outside 10.0.0.0/8
+with the provider. Where that isn't possible, should the IPv4 address space
+be configurable, for example to 240.0.0.0/8, which has the same number of
+addresses? The other private ranges are smaller, such as 172.16.0.0/12 with
+20 bits, and hosts commonly use them too.
+
 The server maintains client "sessions". A session maintains client IP
 address state and effectively holds the lease on assigned addresses. If a
 client is disconnected and quickly reconnects, it will resume its previous
@@ -247,6 +258,19 @@ type ServerConfig struct {
 	// AllowBogons disables bogon checks. This should be used only
 	// for testing.
 	AllowBogons bool
+
+	// ExcludedIPv4Subnets specifies subnets of the private IPv4
+	// address range from which client addresses are not assigned. On
+	// supported platforms, subnets routed through other host interfaces
+	// are discovered at startup and excluded automatically;
+	// ExcludedIPv4Subnets adds to those. Each subnet must pass
+	// ValidateExcludedIPv4Subnet. See exclusions.go.
+	ExcludedIPv4Subnets []*net.IPNet
+
+	// DisableHostSubnetDiscovery turns off the discovery of host subnets,
+	// so that only ExcludedIPv4Subnets are excluded. It's for hosts where
+	// discovery fails and stops the server from starting.
+	DisableHostSubnetDiscovery bool
 }
 
 // Server is a packet tunnel server. A packet tunnel server
@@ -265,6 +289,7 @@ type Server struct {
 	runContext          context.Context
 	stopRunning         context.CancelFunc
 	orphanMetrics       *packetMetrics
+	excludedIndexes     *excludedIndexes
 }
 
 // NewServer initializes a server.
@@ -272,6 +297,12 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 	device, err := NewServerDevice(config)
 	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	excludedIndexes, err := makeExcludedIndexes(config, device.Name())
+	if err != nil {
+		_ = device.Close()
 		return nil, errors.Trace(err)
 	}
 
@@ -285,6 +316,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		runContext:          runContext,
 		stopRunning:         stopRunning,
 		orphanMetrics:       new(packetMetrics),
+		excludedIndexes:     excludedIndexes,
 	}, nil
 }
 
@@ -995,12 +1027,11 @@ func (server *Server) allocateIndex(newSession *session) error {
 	// Search is a random index selection followed by a linear probe.
 	// TODO: is this the most effective (fast on average, simple) algorithm?
 
-	max := 0x00FFFFFF
+	excluded := server.excludedIndexes
 
-	randomInt := prng.Intn(max + 1)
-
-	index := int32(randomInt)
-	index &= int32(max)
+	// Start at a random index that may be assigned and isn't excluded; see
+	// excludedIndexes.randomIndex.
+	index := excluded.randomIndex()
 
 	idleExpiry := server.sessionIdleExpiry()
 
@@ -1020,8 +1051,16 @@ func (server *Server) allocateIndex(newSession *session) error {
 		if index <= 2 {
 			continue
 		}
-		if index == 0x00FFFFFF {
+		if index >= 0x00FFFFFF {
 			index = 0
+			continue
+		}
+
+		// Skip, in one step, any excluded range containing the index.
+		// Probing an excluded /16 one index at a time would use 65536
+		// tries. See exclusions.go.
+		if last, ok := excluded.lastExcluded(index); ok {
+			index = last
 			continue
 		}
 

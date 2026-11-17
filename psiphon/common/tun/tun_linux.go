@@ -207,6 +207,65 @@ func setSysctl(key, value string) error {
 	return nil
 }
 
+// getHostIPv4Subnets returns the IPv4 subnets the host reaches through
+// interfaces other than tunDeviceName, the packet tunnel server's own tun
+// device: destinations and gateways of routes in all routing tables, and the
+// subnets of interface addresses. See exclusions.go.
+func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
+
+	// Skip routes and addresses on tunDeviceName.
+	link, err := netlink.LinkByName(tunDeviceName)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	tunIndex := link.Attrs().Index
+
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Table: unix.RT_TABLE_UNSPEC},
+		netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	var subnets []*net.IPNet
+
+	hostAddress := func(IP net.IP) *net.IPNet {
+		return &net.IPNet{IP: IP, Mask: net.CIDRMask(32, 32)}
+	}
+
+	for _, route := range routes {
+		if route.LinkIndex == tunIndex {
+			continue
+		}
+		if route.Dst != nil {
+			subnets = append(subnets, route.Dst)
+		}
+		if route.Gw != nil {
+			subnets = append(subnets, hostAddress(route.Gw))
+		}
+		for _, nextHop := range route.MultiPath {
+			if nextHop.LinkIndex != tunIndex && nextHop.Gw != nil {
+				subnets = append(subnets, hostAddress(nextHop.Gw))
+			}
+		}
+	}
+
+	addrs, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	for _, addr := range addrs {
+		if addr.LinkIndex == tunIndex || addr.IPNet == nil {
+			continue
+		}
+		subnets = append(subnets, addr.IPNet)
+	}
+
+	return subnets, nil
+}
+
 func configureServerInterface(
 	config *ServerConfig,
 	tunDeviceName string) error {
