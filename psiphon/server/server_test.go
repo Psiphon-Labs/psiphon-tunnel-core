@@ -940,9 +940,11 @@ var (
 	testNetworkType                      = "WIFI"
 	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
 	testClientVersion                    = 1
-	testClientPlatform                   = "Android_10_com.test.app"
-	testRequiredClientFeature            = "required-client-feature"
+	testExpectedClientPlatform           = "Android_10_com.test.app" + strings.Repeat("x", 1000) + "*"
+	testClientPlatform                   = "Android_10_com.test.app" + strings.Repeat("x", 1000) + "é"
+	testRequiredClientFeature            = strings.Repeat("r", 1025)
 	testClientFeatures                   = []string{"feature 1", "feature 2", testRequiredClientFeature}
+	testExpectedClientFeatures           = []string{"feature 1", "feature 2", strings.Repeat("r", 1023) + "*"}
 	testDeviceRegion                     = "US"
 	testServerRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
@@ -3447,15 +3449,15 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected client_version '%s'", fields["client_version"])
 	}
 
-	if fields["client_platform"].(string) != testClientPlatform {
+	if fields["client_platform"].(string) != testExpectedClientPlatform {
 		return fmt.Errorf("unexpected client_platform '%s'", fields["client_platform"])
 	}
 
 	clientFeatures := fields["client_features"].([]interface{})
-	if len(clientFeatures) != len(testClientFeatures) {
+	if len(clientFeatures) != len(testExpectedClientFeatures) {
 		return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
 	}
-	for i, feature := range testClientFeatures {
+	for i, feature := range testExpectedClientFeatures {
 		if clientFeatures[i].(string) != feature {
 			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
 		}
@@ -3888,15 +3890,15 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected inproxy_proxy_client_version '%s'", fields["inproxy_proxy_client_version"])
 		}
 
-		if fields["inproxy_proxy_client_platform"].(string) != testClientPlatform {
+		if fields["inproxy_proxy_client_platform"].(string) != testExpectedClientPlatform {
 			return fmt.Errorf("unexpected inproxy_proxy_client_platform '%s'", fields["inproxy_proxy_client_platform"])
 		}
 
 		clientFeatures := fields["inproxy_proxy_client_features"].([]interface{})
-		if len(clientFeatures) != len(testClientFeatures) {
+		if len(clientFeatures) != len(testExpectedClientFeatures) {
 			return fmt.Errorf("unexpected inproxy_proxy_client_features '%s'", fields["inproxy_proxy_client_features"])
 		}
-		for i, feature := range testClientFeatures {
+		for i, feature := range testExpectedClientFeatures {
 			if clientFeatures[i].(string) != feature {
 				return fmt.Errorf("unexpected inproxy_proxy_client_features '%s'", fields["inproxy_proxy_client_features"])
 			}
@@ -5609,8 +5611,8 @@ func storePruneServerEntriesTest(
 		SponsorId:            "0000000000000000",
 		PropagationChannelId: "0000000000000000",
 
-		// DataRootDirectory must to be set to avoid a migration in the current
-		// working directory.
+		// DataRootDirectory must be set to avoid creating data files in the
+		// current working directory.
 		DataRootDirectory: testDataDirName,
 	}
 	err := clientConfig.Commit(false)
@@ -5703,8 +5705,8 @@ func checkPruneServerEntriesTest(
 		SponsorId:            "0",
 		PropagationChannelId: "0",
 
-		// DataRootDirectory must to be set to avoid a migration in the current
-		// working directory.
+		// DataRootDirectory must be set to avoid creating data files in the
+		// current working directory.
 		DataRootDirectory: testDataDirName,
 	}
 	err := clientConfig.Commit(false)

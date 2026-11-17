@@ -216,6 +216,7 @@ func NewAuthenticatedDataPackageReader(
 		var jsonData io.Reader
 		var jsonSigningPublicKey []byte
 		var jsonSignature []byte
+		seenKeys := make(map[string]bool, 3)
 
 		jsonReadBase64Value := func(value io.Reader) ([]byte, error) {
 			base64Value, err := ioutil.ReadAll(value)
@@ -230,6 +231,11 @@ func NewAuthenticatedDataPackageReader(
 		}
 
 		jsonHandler := func(key string, value io.Reader) (bool, error) {
+			if seenKeys[key] {
+				return false, errors.Tracef("duplicate key '%s'", key)
+			}
+			seenKeys[key] = true
+
 			switch key {
 
 			case "data":
@@ -283,7 +289,7 @@ func NewAuthenticatedDataPackageReader(
 
 		if pass == 0 {
 
-			if jsonSigningPublicKey == nil || jsonSignature == nil {
+			if !seenKeys["data"] || jsonSigningPublicKey == nil || jsonSignature == nil {
 				return nil, errors.TraceNew("missing expected field")
 			}
 

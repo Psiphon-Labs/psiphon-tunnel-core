@@ -102,6 +102,9 @@ func discoverNATMapping(
 		return NATMappingUnknown, errors.Trace(err)
 	}
 	response2Fields := parseSTUNMessage(response2)
+	if response2Fields.xorAddr == nil {
+		return NATMappingUnknown, errors.TraceNew("missing or invalid XOR-MAPPED-ADDRESS")
+	}
 	if response2Fields.xorAddr.String() == responseFields.xorAddr.String() {
 		return NATMappingEndpointIndependent, nil
 	}
@@ -113,6 +116,9 @@ func discoverNATMapping(
 		return NATMappingUnknown, errors.Trace(err)
 	}
 	response3Fields := parseSTUNMessage(response3)
+	if response3Fields.xorAddr == nil {
+		return NATMappingUnknown, errors.TraceNew("missing or invalid XOR-MAPPED-ADDRESS")
+	}
 	if response3Fields.xorAddr.String() == response2Fields.xorAddr.String() {
 		return NATMappingAddressDependent, nil
 	}

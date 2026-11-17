@@ -54,6 +54,7 @@ func (u *UpstreamProxyConfig) Dial(network, addr string) (net.Conn, error) {
 	return u.ForwardDialFunc(network, addr)
 }
 
+// Callers must apply timeouts to bound proxy authentication retries.
 func NewProxyDialFunc(config *UpstreamProxyConfig) DialFunc {
 	if config.ProxyURIString == "" {
 		return config.ForwardDialFunc

@@ -174,3 +174,79 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 	}
 
 }
+
+func TestGetMaxPaddingSize(t *testing.T) {
+
+	// IETF: the obfuscated packet, which is the input packet plus the nonce,
+	// padding length, and padding, must not exceed the pre-MTU discovery
+	// maximum packet size.
+
+	maxAdjustedPacketSize :=
+		MAX_PRE_DISCOVERY_PACKET_SIZE - OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
+
+	for packetSize := 0; packetSize <= MAX_PACKET_SIZE; packetSize++ {
+
+		maxPadding := getMaxPaddingSize(true, packetSize)
+
+		if maxPadding < 0 || maxPadding > MAX_PADDING_SIZE {
+			t.Fatalf("unexpected max padding %d for packet size %d",
+				maxPadding, packetSize)
+		}
+
+		if packetSize <= maxAdjustedPacketSize {
+
+			obfuscatedPacketSize :=
+				packetSize + OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT + maxPadding
+
+			if obfuscatedPacketSize > MAX_PRE_DISCOVERY_PACKET_SIZE {
+				t.Fatalf("unexpected obfuscated packet size %d for packet size %d",
+					obfuscatedPacketSize, packetSize)
+			}
+
+			// Padding should use all of the available space, up to
+			// MAX_PADDING_SIZE.
+			if maxPadding < MAX_PADDING_SIZE &&
+				obfuscatedPacketSize != MAX_PRE_DISCOVERY_PACKET_SIZE {
+				t.Fatalf("unexpected max padding %d for packet size %d",
+					maxPadding, packetSize)
+			}
+
+		} else if maxPadding != 0 {
+
+			// Larger, post-MTU discovery packets are not padded.
+			t.Fatalf("unexpected max padding %d for packet size %d",
+				maxPadding, packetSize)
+		}
+	}
+
+	testCases := []struct {
+		isIETF             bool
+		packetSize         int
+		expectedMaxPadding int
+	}{
+		{true, 1, 255},
+		{true, 1012, 255},
+		{true, 1013, 254},
+		{true, 1250, 17},
+		{true, 1266, 1},
+		{true, 1267, 0},
+		{true, 1280, 0},
+		{true, 1439, 0},
+
+		// Legacy gQUIC adds padding on top of its strict maximum packet size.
+		{false, 1, 64},
+		{false, 1280, 64},
+		{false, 1293, 64},
+		{false, 1294, 63},
+		{false, 1356, 1},
+		{false, 1357, 0},
+	}
+
+	for _, testCase := range testCases {
+		maxPadding := getMaxPaddingSize(testCase.isIETF, testCase.packetSize)
+		if maxPadding != testCase.expectedMaxPadding {
+			t.Fatalf("unexpected max padding %d for isIETF %v packet size %d",
+				maxPadding, testCase.isIETF, testCase.packetSize)
+		}
+	}
+}

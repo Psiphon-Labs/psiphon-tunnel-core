@@ -424,12 +424,6 @@ public class PsiphonTunnel {
         // stopSendFeedback() before the process exits. This ensures that any underlying resources
         // are cleaned up; failing to do so may result in data store corruption or other undefined
         // behavior.
-        //
-        // - PsiphonTunnel.startTunneling and startSendFeedback both make an attempt to migrate
-        // persistent files from legacy locations in a one-time operation. If these functions are
-        // called in parallel, then there is a chance that the migration attempts could execute at
-        // the same time and result in non-fatal errors in one, or both, of the migration
-        // operations.
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
                 String feedbackConfigJson, String diagnosticsJson, String uploadPath,
                 String clientPlatformPrefix, String clientPlatformSuffix) {
@@ -876,22 +870,6 @@ public class PsiphonTunnel {
             }
             json.put("DataRootDirectory", defaultDataRootDirectory(context));
         }
-
-        // Migrate datastore files from legacy directory.
-        if (!json.has("DataStoreDirectory")) {
-            json.put("MigrateDataStoreDirectory", context.getFilesDir());
-        }
-
-        // Migrate remote server list downloads from legacy location.
-        if (!json.has("RemoteServerListDownloadFilename")) {
-            File remoteServerListDownload = new File(context.getFilesDir(), "remote_server_list");
-            json.put("MigrateRemoteServerListDownloadFilename",
-                    remoteServerListDownload.getAbsolutePath());
-        }
-
-        // Migrate obfuscated server list download files from legacy directory.
-        File oslDownloadDir = new File(context.getFilesDir(), "osl");
-        json.put("MigrateObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
 
         // Continue to run indefinitely until connected
         if (!json.has("EstablishTunnelTimeoutSeconds")) {

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type testChecker struct {
@@ -205,6 +206,19 @@ func TestHandshakeBasic(t *testing.T) {
 	}
 	if i != N {
 		t.Errorf("received %d messages, want 10.", i)
+	}
+
+	// [Psiphon]
+	// The two requested rekeys used the allowance; a third must disconnect.
+	err = trS.conn.(*transport).Closer.(net.Conn).SetDeadline(time.Now().Add(5 * time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker.waitCall <- 1
+	trC.requestKeyExchange()
+	_, err = trS.readPacket()
+	if err == nil || err.Error() != "ssh: excessive rekeys" {
+		t.Fatalf("unexpected excessive rekey result: %v", err)
 	}
 
 	close(checker.called)

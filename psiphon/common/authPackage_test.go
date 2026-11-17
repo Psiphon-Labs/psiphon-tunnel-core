@@ -20,6 +20,7 @@
 package common
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -121,6 +122,29 @@ func TestAuthenticatedPackage(t *testing.T) {
 				expectedContent, content)
 		}
 	})
+
+	for _, field := range []string{"data", "signingPublicKeyDigest", "signature"} {
+		t.Run("streaming read package: duplicate "+field, func(t *testing.T) {
+			var duplicateJSON []byte
+			if field == "data" {
+				split := len(expectedContent) / 2
+				duplicateJSON = bytes.Replace(packageJSON, []byte(expectedContent),
+					[]byte(expectedContent[:split]+`","data":"`+expectedContent[split:]), 1)
+			} else {
+				duplicateJSON = bytes.Replace(packageJSON, []byte(`"`+field+`":`),
+					[]byte(`"`+field+`":"","`+field+`":`), 1)
+			}
+			duplicatePayload, err := Compress(CompressionZlib, duplicateJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = NewAuthenticatedDataPackageReader(
+				bytes.NewReader(duplicatePayload), signingPublicKey)
+			if err == nil {
+				t.Fatal("NewAuthenticatedDataPackageReader accepted duplicate field")
+			}
+		})
+	}
 
 	t.Run("read package: wrong signing key", func(t *testing.T) {
 		_, err = ReadAuthenticatedDataPackage(

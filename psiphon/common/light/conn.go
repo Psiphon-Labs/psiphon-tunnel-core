@@ -27,6 +27,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -35,6 +36,8 @@ import (
 
 const (
 	lightProtocolVersion          = byte(0x01)
+	maxDeviceRegionLength         = 16
+	maxLogStringLength            = 1024
 	stopPadding                   = uint16(0xffff)
 	paddingMinTargetSize          = 900
 	paddingMaxTargetSize          = 1400
@@ -90,17 +93,17 @@ func newLightHeader(
 	tcpDuration int64,
 	tlsDuration int64) (*lightHeader, error) {
 
-	if len(deviceRegion) > 2 {
-		// Truncate any unexpectedly long device region, which should be an ISO
-		// 3166-1 alpha-2 country code.
-		deviceRegion = deviceRegion[0:2]
-	}
+	// Truncate any unexpectedly long device region, which should be an ISO
+	// 3166-1 alpha-2 country code or a UN M49 three-digit region code. The
+	// limit is small since the header counts towards the initial padding
+	// target size, and an oversized header would disable that padding. The
+	// proxy applies its own, independent limit to logged values.
 
 	return &lightHeader{
 		SponsorID:          sponsorID,
 		ClientPlatform:     clientPlatform,
 		ClientBuildRev:     clientBuildRev,
-		DeviceRegion:       deviceRegion,
+		DeviceRegion:       common.TruncateUTF8String(deviceRegion, maxDeviceRegionLength),
 		SessionID:          sessionID,
 		ProxyEntryTracker:  proxyEntryTracker,
 		NetworkType:        networkType,

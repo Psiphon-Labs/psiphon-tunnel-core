@@ -190,7 +190,7 @@ func (conn *saltReader) init() error {
 
 	// Note: code adapted from https://github.com/Jigsaw-Code/outline-ss-server/blob/fa651d3e87cc0a94104babb3ae85253471a22ebc/service/tcp.go#L119.
 
-	salt, reader, err := readSalt(conn.Conn, conn.server.key.SaltSize())
+	salt, reader, err := readSalt(conn.Conn, conn.server.key)
 	if err != nil {
 		return errors.TraceMsg(err, "failed to read salt")
 	}
@@ -223,14 +223,24 @@ func (conn *saltReader) init() error {
 	return nil
 }
 
-func readSalt(conn net.Conn, saltSize int) ([]byte, io.Reader, error) {
+func readSalt(conn net.Conn, key *shadowsocks.EncryptionKey) ([]byte, io.Reader, error) {
 
-	salt := make([]byte, saltSize)
-	if n, err := io.ReadFull(conn, salt); err != nil {
+	saltSize := key.SaltSize()
+	prefix := make([]byte, saltSize+2+key.TagSize())
+	n, err := io.ReadFull(conn, prefix)
+	if err != nil {
 		return nil, nil, errors.Tracef("reading conn failed after %d bytes: %w", n, err)
 	}
 
-	return salt, io.MultiReader(bytes.NewReader(salt), conn), nil
+	// Authenticate the first length record before adding the salt to the
+	// replay cache. Keep the prefix intact for the Shadowsocks reader.
+	var length [2]byte
+	_, err = shadowsocks.Unpack(length[:], prefix, key)
+	if err != nil {
+		return nil, nil, errors.TraceMsg(err, "invalid first length record")
+	}
+
+	return prefix[:saltSize], io.MultiReader(bytes.NewReader(prefix), conn), nil
 }
 
 func drainConn(conn net.Conn) {

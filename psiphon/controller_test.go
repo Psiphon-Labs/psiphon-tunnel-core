@@ -440,6 +440,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	}
 
 	modifyConfig["EnableUpgradeDownload"] = true
+	// Required by the direct URL proxy case in fetchAndVerifyWebsite.
+	modifyConfig["EnableLocalHTTPProxyDirect"] = true
 	modifyConfig["EnableFeedbackUpload"] = false
 	if runConfig.checkBytesTransferred {
 		modifyConfig["EmitBytesTransferred"] = true

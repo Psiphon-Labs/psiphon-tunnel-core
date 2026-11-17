@@ -25,7 +25,6 @@ import (
 	std_errors "errors"
 	"fmt"
 	"net"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -242,11 +241,6 @@ func StartTunnel(
 	// Use params.DataRootDirectory to set related config values.
 	if params.DataRootDirectory != nil {
 		config.DataRootDirectory = *params.DataRootDirectory
-
-		// Migrate old fields
-		config.MigrateDataStoreDirectory = *params.DataRootDirectory
-		config.MigrateObfuscatedServerListDownloadDirectory = *params.DataRootDirectory
-		config.MigrateRemoteServerListDownloadFilename = filepath.Join(*params.DataRootDirectory, "server_list_compressed")
 	}
 
 	if params.NetworkID != nil {

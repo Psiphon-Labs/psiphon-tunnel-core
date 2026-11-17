@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -768,11 +769,14 @@ func MakeDownloadHTTPClient(
 	return httpClient, tunneled, getParams, nil
 }
 
+const maxResumeDownloadSize = 1 << 30
+
 // ResumeDownload is a reusable helper that downloads requestUrl via the
 // httpClient, storing the result in downloadFilename when the download is
 // complete. Intermediate, partial downloads state is stored in
 // downloadFilename.part and downloadFilename.part.etag.
 // Any existing downloadFilename file will be overwritten.
+// Downloads larger than 1 GiB, including partial data, are rejected.
 //
 // In the case where the remote object has changed while a partial download
 // is to be resumed, the partial state is reset and resumeDownload fails.
@@ -817,6 +821,11 @@ func ResumeDownload(
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return 0, "", errors.Trace(err)
+	}
+
+	if fileInfo.Size() > maxResumeDownloadSize {
+		resetPartialDownload()
+		return 0, "", errors.TraceNew("download exceeds maximum size")
 	}
 
 	// A partial download should have an ETag which is to be sent with the
@@ -924,17 +933,80 @@ func ResumeDownload(
 		return 0, responseETag, nil
 	}
 
+	if response.StatusCode == http.StatusOK && fileInfo.Size() > 0 {
+		resetPartialDownload()
+		return 0, "", errors.TraceNew("partial download range ignored")
+	}
+
+	if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+
+		// The Range request started at the end of the resource, so the
+		// partial download is already complete; this happens when a previous
+		// attempt was interrupted after the body was received and before the
+		// rename. The response body is an error message, not resource data,
+		// and must not be appended to the download.
+		//
+		// When the response reports the complete resource size and it doesn't
+		// match the partial download, the partial download is not a complete
+		// copy of the resource; discard it.
+		//
+		// A 416 response typically doesn't include an ETag, so the partial
+		// download ETag, which was sent as If-Match, is returned.
+
+		contentRange := response.Header.Get("Content-Range")
+		if strings.HasPrefix(contentRange, "bytes */") {
+			size, err := strconv.ParseInt(
+				strings.TrimPrefix(contentRange, "bytes */"), 10, 64)
+			if err == nil && size != fileInfo.Size() {
+				resetPartialDownload()
+				return 0, "", errors.TraceNew("partial download size mismatch")
+			}
+		}
+
+		if responseETag == "" && partialETag != nil {
+			responseETag = string(partialETag)
+		}
+
+		err = file.Close()
+		if err != nil {
+			return 0, "", errors.Trace(err)
+		}
+
+		// Remove if exists, to enable rename
+		os.Remove(downloadFilename)
+
+		err = os.Rename(partialFilename, downloadFilename)
+		if err != nil {
+			return 0, "", errors.Trace(err)
+		}
+
+		os.Remove(partialETagFilename)
+
+		return 0, responseETag, nil
+	}
+
+	remainingBytes := maxResumeDownloadSize - fileInfo.Size()
+	if response.ContentLength > remainingBytes {
+		resetPartialDownload()
+		return 0, "", errors.TraceNew("download exceeds maximum size")
+	}
+
 	// Not making failure to write ETag file fatal, in case the entire download
 	// succeeds in this one request.
 	_ = ioutil.WriteFile(partialETagFilename, []byte(responseETag), 0600)
 
 	// A partial download occurs when this copy is interrupted. The io.Copy
 	// will fail, leaving a partial download in place (.part and .part.etag).
-	n, err := io.Copy(NewSyncFileWriter(file), response.Body)
+	n, err := io.Copy(
+		NewSyncFileWriter(file), io.LimitReader(response.Body, remainingBytes+1))
 
 	// From this point, n bytes are indicated as downloaded, even if there is
 	// an error; the caller may use this to report partial download progress.
 
+	if n > remainingBytes {
+		resetPartialDownload()
+		return n, "", errors.TraceNew("download exceeds maximum size")
+	}
 	if err != nil {
 		return n, "", errors.Trace(err)
 	}

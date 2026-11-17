@@ -39,7 +39,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -921,11 +920,7 @@ func (controller *Controller) RecordClientEvent(event string) {
 			dropReason = "event length limit is zero"
 			return
 		}
-		end := lengthLimit - 1
-		for end > 0 && !utf8.RuneStart(event[end]) {
-			end--
-		}
-		event = event[:end] + "*"
+		event = common.TruncateUTF8String(event, lengthLimit)
 	}
 
 	// Apply a simple heuristic to attribute client events to the current
@@ -2055,14 +2050,14 @@ func (controller *Controller) Dial(
 func (controller *Controller) dial(
 	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, isLightProxy bool, err error) {
 
-	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
-
 	readInactiveThreshold := controller.config.GetLightProxyTunnelInactiveThreshold()
 
 	tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
 	if tunnel == nil {
 
-		if controller.config.EnableLightProxyFallback {
+		// TODO: make the excluded udpgw address configurable.
+		if controller.config.EnableLightProxyFallback &&
+			remoteAddr != protocol.DEFAULT_UDPGW_INTERCEPT_ADDRESS {
 
 			lightProxyClient := controller.config.GetLightProxyClient()
 			if lightProxyClient != nil {
