@@ -61,4 +61,5 @@ message InproxyBroker {
     optional string ice_region = 147;
     optional string ice_asn = 148;
     optional bool no_awaiting_client = 149;
+    optional bool match_has_quality = 150;
 }

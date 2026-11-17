@@ -74,6 +74,7 @@ type InproxyBroker struct {
 	IceRegion                     *string                `protobuf:"bytes,147,opt,name=ice_region,json=iceRegion,proto3,oneof" json:"ice_region,omitempty"`
 	IceAsn                        *string                `protobuf:"bytes,148,opt,name=ice_asn,json=iceAsn,proto3,oneof" json:"ice_asn,omitempty"`
 	NoAwaitingClient              *bool                  `protobuf:"varint,149,opt,name=no_awaiting_client,json=noAwaitingClient,proto3,oneof" json:"no_awaiting_client,omitempty"`
+	MatchHasQuality               *bool                  `protobuf:"varint,150,opt,name=match_has_quality,json=matchHasQuality,proto3,oneof" json:"match_has_quality,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -465,11 +466,18 @@ func (x *InproxyBroker) GetNoAwaitingClient() bool {
 	return false
 }
 
+func (x *InproxyBroker) GetMatchHasQuality() bool {
+	if x != nil && x.MatchHasQuality != nil {
+		return *x.MatchHasQuality
+	}
+	return false
+}
+
 var File_ca_psiphon_psiphond_inproxy_broker_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
-	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\x9d\x1c\n" +
+	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xe5\x1c\n" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
@@ -526,7 +534,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
 	"ice_region\x18\x93\x01 \x01(\tH,R\ticeRegion\x88\x01\x01\x12\x1d\n" +
 	"\aice_asn\x18\x94\x01 \x01(\tH-R\x06iceAsn\x88\x01\x01\x122\n" +
-	"\x12no_awaiting_client\x18\x95\x01 \x01(\bH.R\x10noAwaitingClient\x88\x01\x01B\x0e\n" +
+	"\x12no_awaiting_client\x18\x95\x01 \x01(\bH.R\x10noAwaitingClient\x88\x01\x01\x120\n" +
+	"\x11match_has_quality\x18\x96\x01 \x01(\bH/R\x0fmatchHasQuality\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x1b\n" +
 	"\x19_announcement_match_indexB\x1a\n" +
 	"\x18_announcement_queue_sizeB\x0f\n" +
@@ -577,7 +586,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\v_ice_regionB\n" +
 	"\n" +
 	"\b_ice_asnB\x15\n" +
-	"\x13_no_awaiting_clientBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x13_no_awaiting_clientB\x14\n" +
+	"\x12_match_has_qualityBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_broker_proto_rawDescOnce sync.Once

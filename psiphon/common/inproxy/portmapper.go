@@ -204,6 +204,8 @@ func probePortMapping(
 	client := portmapper.NewClient(portmapper.Config{
 		Logf: portMappingLogger,
 		GatewayLookupFunc: func() (gw, myIP netip.Addr, ok bool) {
+			// TODO: use gateway.Candidates. This will require support for
+			// multiple possible portmappings.
 			return gateway.HomeRouterIP(gatewayInterfaceName)
 		},
 		BindToDevice: coordinator.BindToDevice,
