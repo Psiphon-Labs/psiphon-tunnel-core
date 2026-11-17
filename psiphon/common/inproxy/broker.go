@@ -177,7 +177,8 @@ type BrokerConfig struct {
 	// AllowDomainFrontedDestinations is a callback which can indicate whether
 	// a client with the given GeoIP data is allowed to specify a proxied
 	// destination for a domain fronted protocol. When false, only direct
-	// address destinations are allowed.
+	// address destinations are allowed. If nil, domain fronted destinations
+	// are disallowed.
 	//
 	// While tactics may may be set to instruct clients to use only direct
 	// server tunnel protocols, with IP address destinations, this callback
@@ -2067,7 +2068,8 @@ func (b *Broker) validateDestination(
 
 	// This assumes that any domain dial is for domain fronting.
 	isDomain := net.ParseIP(destHost) == nil
-	allowDomainFronted := b.config.AllowDomainFrontedDestinations(geoIPData)
+	allowDomainFronted := b.config.AllowDomainFrontedDestinations != nil &&
+		b.config.AllowDomainFrontedDestinations(geoIPData)
 	if isDomain && !allowDomainFronted {
 		return nil, errors.TraceNew("domain fronted destinations disallowed")
 	}
