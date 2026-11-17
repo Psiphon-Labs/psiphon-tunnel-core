@@ -39,6 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"golang.org/x/time/rate"
 )
 
 func TestDialParametersAndReplay(t *testing.T) {
@@ -1359,6 +1360,182 @@ func TestCanDefer(t *testing.T) {
 	constraints.initialLimitTunnelProtocolsCandidateCount = 0
 	if constraints.canDefer(0, sshServerEntry, "SSH") {
 		t.Fatal("expected no deferral without initial limit")
+	}
+}
+
+// TestInproxyMustUpgradeProtocolSelection verifies that, after a broker
+// returns MustUpgrade, a common client stops selecting in-proxy tunnel
+// protocols without emitting InproxyMustUpgrade or shutting down; that
+// fallback consumes no in-proxy dial rate limiter token; the initial limit
+// phase cannot stall; new establishments prune mixed limits; that a client
+// limited to in-proxy tunnel protocols shuts down without the notice; and
+// that a proxy and a personal pairing client emit one notice and shut down.
+func TestInproxyMustUpgradeProtocolSelection(t *testing.T) {
+
+	var notices bytes.Buffer
+	err := SetNoticeWriter(&notices)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
+
+	inproxyOSSH := protocol.TunnelProtocolPlusInproxyWebRTC(protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH)
+
+	mixedServerEntry := makeMockServerEntries(protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, "", "", "", 1)[0]
+	mixedServerEntry.InproxyOSSHPort = 4000
+	mixedServerEntry.Capabilities = append(
+		mixedServerEntry.Capabilities, protocol.GetCapability(inproxyOSSH))
+
+	inproxyServerEntry := makeMockServerEntries(inproxyOSSH, "", "", "", 1)[0]
+	inproxyServerEntry.InproxyOSSHPort = 4000
+
+	// In-proxy tunnel protocols are selected only when enabled by a limit.
+	newConstraints := func(config *Config, signals *int) *protocolSelectionConstraints {
+		config.SetSignalComponentFailure(func() { *signals++ })
+		return &protocolSelectionConstraints{
+			config: config,
+			limitTunnelProtocols: protocol.TunnelProtocols{
+				protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, inproxyOSSH},
+		}
+	}
+
+	signals := 0
+	constraints := newConstraints(&Config{}, &signals)
+
+	preferInproxy := true
+	selected, _, ok := constraints.selectProtocol(0, false, preferInproxy, "", mixedServerEntry)
+	if !ok || selected != inproxyOSSH {
+		t.Fatalf("unexpected selection before MustUpgrade: %s", selected)
+	}
+
+	mustUpgradeNotices := func() int {
+		return bytes.Count(notices.Bytes(), []byte(`"InproxyMustUpgrade"`))
+	}
+
+	constraints.config.OnInproxyMustUpgrade()
+	constraints.config.OnInproxyMustUpgrade()
+	if mustUpgradeNotices() != 0 {
+		t.Fatal("common client emitted InproxyMustUpgrade")
+	}
+	if signals != 0 {
+		t.Fatal("common client shut down on MustUpgrade")
+	}
+
+	for i := 0; i < 100; i++ {
+		selected, _, ok = constraints.selectProtocol(0, false, preferInproxy, "", mixedServerEntry)
+		if !ok || selected != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+			t.Fatalf("unexpected selection after MustUpgrade: %s", selected)
+		}
+	}
+	_, _, ok = constraints.selectProtocol(0, false, preferInproxy, inproxyOSSH, inproxyServerEntry)
+	if ok {
+		t.Fatal("selected in-proxy only server entry after MustUpgrade")
+	}
+
+	// Falling back from in-proxy tunnel protocols consumes no in-proxy dial
+	// rate limiter token.
+	limiter := rate.NewLimiter(rate.Every(time.Hour), 1)
+	constraints.inproxyClientDialRateLimiter = limiter
+	for i := 0; i < 10; i++ {
+		selected, _, ok = constraints.selectProtocol(0, false, preferInproxy, inproxyOSSH, mixedServerEntry)
+		if !ok || selected != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+			t.Fatalf("unexpected rate limited selection after MustUpgrade: %s", selected)
+		}
+	}
+	if limiter.Tokens() < 1 {
+		t.Fatal("in-proxy dial rate limiter token consumed after MustUpgrade")
+	}
+	constraints.inproxyClientDialRateLimiter = nil
+
+	// In the initial limit phase of an establishment that started before
+	// MustUpgrade, in-proxy tunnel protocols are retained only when no other
+	// protocol remains for the candidate.
+	constraints.initialLimitTunnelProtocols = protocol.TunnelProtocols{inproxyOSSH}
+	constraints.initialLimitTunnelProtocolsCandidateCount = 10
+	selected, _, ok = constraints.selectProtocol(0, false, false, "", mixedServerEntry)
+	if !ok || selected != inproxyOSSH {
+		t.Fatalf("unexpected selection in initial limit phase: %s", selected)
+	}
+	selected, _, ok = constraints.selectProtocol(10, false, false, "", mixedServerEntry)
+	if !ok || selected != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+		t.Fatalf("unexpected selection after initial limit phase: %s", selected)
+	}
+
+	constraints.initialLimitTunnelProtocols = protocol.TunnelProtocols{
+		protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH, inproxyOSSH}
+	for i := 0; i < 100; i++ {
+		selected, _, ok = constraints.selectProtocol(0, false, false, "", mixedServerEntry)
+		if !ok || selected != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+			t.Fatalf("unexpected selection with mixed initial limit: %s", selected)
+		}
+	}
+	selected, _, ok = constraints.selectProtocol(0, false, false, "", inproxyServerEntry)
+	if !ok || selected != inproxyOSSH {
+		t.Fatalf("unexpected in-proxy only selection in initial limit phase: %s", selected)
+	}
+	_, _, ok = constraints.selectProtocol(10, false, false, "", inproxyServerEntry)
+	if ok {
+		t.Fatal("selected in-proxy only server entry after initial limit phase")
+	}
+	if signals != 0 {
+		t.Fatal("initial limit caused shut down")
+	}
+
+	// A new establishment removes in-proxy tunnel protocols from mixed
+	// limits, and skips the initial limit phase when none remain.
+	constraints.pruneInproxyLimitsAfterMustUpgrade()
+	osshOnly := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
+	if !reflect.DeepEqual(constraints.initialLimitTunnelProtocols, osshOnly) ||
+		constraints.initialLimitTunnelProtocolsCandidateCount != 10 ||
+		!reflect.DeepEqual(constraints.limitTunnelProtocols, osshOnly) {
+		t.Fatal("unexpected limits after pruning mixed limits")
+	}
+	constraints.initialLimitTunnelProtocols = protocol.TunnelProtocols{inproxyOSSH}
+	constraints.pruneInproxyLimitsAfterMustUpgrade()
+	if len(constraints.initialLimitTunnelProtocols) != 0 ||
+		constraints.initialLimitTunnelProtocolsCandidateCount != 0 ||
+		constraints.hasInitialProtocols() {
+		t.Fatal("unexpected initial limit after pruning in-proxy only limit")
+	}
+
+	// A client limited to in-proxy tunnel protocols retains the limit, and
+	// shuts down.
+	constraints.limitTunnelProtocols = protocol.TunnelProtocols{inproxyOSSH}
+	constraints.pruneInproxyLimitsAfterMustUpgrade()
+	if !reflect.DeepEqual(constraints.limitTunnelProtocols, protocol.TunnelProtocols{inproxyOSSH}) {
+		t.Fatal("pruned in-proxy only limit")
+	}
+	_, _, ok = constraints.selectProtocol(10, false, false, "", mixedServerEntry)
+	if ok || signals == 0 {
+		t.Fatal("client limited to in-proxy tunnel protocols did not shut down")
+	}
+	if mustUpgradeNotices() != 0 {
+		t.Fatal("client limited to in-proxy tunnel protocols emitted InproxyMustUpgrade")
+	}
+
+	// A proxy, or a personal pairing client, emits one InproxyMustUpgrade
+	// notice and shuts down on MustUpgrade.
+	for i, config := range []*Config{
+		{InproxyEnableProxy: true},
+		{InproxyClientPersonalCompartmentID: "personal"},
+	} {
+		configSignals := 0
+		configConstraints := newConstraints(config, &configSignals)
+		configConstraints.config.OnInproxyMustUpgrade()
+		configConstraints.config.OnInproxyMustUpgrade()
+		if configSignals != 2 || mustUpgradeNotices() != i+1 {
+			t.Fatal("proxy or personal pairing client did not notify and shut down on MustUpgrade")
+		}
+	}
+
+	// Constraints are unchanged before MustUpgrade.
+	beforeSignals := 0
+	before := newConstraints(&Config{}, &beforeSignals)
+	before.initialLimitTunnelProtocols = protocol.TunnelProtocols{inproxyOSSH}
+	before.initialLimitTunnelProtocolsCandidateCount = 10
+	before.pruneInproxyLimitsAfterMustUpgrade()
+	if !before.hasInitialProtocols() {
+		t.Fatal("initial limit pruned before MustUpgrade")
 	}
 }
 

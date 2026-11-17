@@ -2991,6 +2991,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 						t.Errorf("unexpected inproxy_broker.fronting_provider_id")
 					}
 				}
+
+				// Client and proxy broker requests report the
+				// broker client that sent them: whether it
+				// replayed dial parameters, and its creation
+				// ordinal in the broker client manager. The
+				// server's proxy quality report is not sent by
+				// a managed broker client.
+				if logChannel == inproxyProxyAnnounceLog ||
+					logChannel == inproxyClientOfferLog {
+					if _, ok := logFields["inproxy_broker_is_replay"].(bool); !ok {
+						t.Errorf("missing inproxy_broker.inproxy_broker_is_replay")
+					}
+					if logFields["inproxy_broker_candidate_number"] == nil {
+						t.Errorf("missing inproxy_broker.inproxy_broker_candidate_number")
+					}
+				}
 			default:
 				t.Fatalf("missing in-proxy broker log")
 			}
@@ -3834,6 +3850,7 @@ func checkExpectedServerTunnelLogFields(
 
 			"inproxy_broker_is_replay",
 			"inproxy_broker_is_reuse",
+			"inproxy_broker_candidate_number",
 			"inproxy_broker_transport",
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
@@ -3845,12 +3862,54 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_webrtc_decoy_messages_sent",
 			"inproxy_webrtc_decoy_messages_received",
 
+			"inproxy_dial_broker_client_acquire_duration",
 			"inproxy_dial_webrtc_ice_gathering_duration",
 			"inproxy_dial_broker_offer_duration",
 			"inproxy_dial_webrtc_connection_duration",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
+			}
+		}
+
+		// The winning tunnel's broker client has established its transport
+		// and session, so both are always reported, including when the
+		// broker client is reused and they were measured in an earlier dial;
+		// in the DSL test cases the DSL fetch creates the broker client
+		// before the tunnel dial. When the broker client is not reused, this
+		// dial's offer established both, so together they cannot exceed the
+		// offer duration; TestInproxyUnfrontedMeekHTTPS, which has no DSL
+		// fetch, covers that case.
+		isReuse, ok := fields["inproxy_broker_is_reuse"].(bool)
+		if !ok {
+			return fmt.Errorf("unexpected inproxy_broker_is_reuse '%v'", fields["inproxy_broker_is_reuse"])
+		}
+		establishmentDuration := 0.0
+		for _, name := range []string{
+			"inproxy_broker_transport_dial_duration",
+			"inproxy_broker_session_handshake_duration",
+		} {
+			duration, err := strconv.ParseFloat(fmt.Sprintf("%v", fields[name]), 64)
+			if fields[name] == nil || err != nil {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+			establishmentDuration += duration
+		}
+		if !isReuse {
+			offerDuration, err := strconv.ParseFloat(
+				fmt.Sprintf("%v", fields["inproxy_dial_broker_offer_duration"]), 64)
+			if err != nil || establishmentDuration > offerDuration {
+				return fmt.Errorf("broker client establishment %v exceeds offer duration '%v'",
+					establishmentDuration, fields["inproxy_dial_broker_offer_duration"])
+			}
+		}
+
+		for _, name := range []string{
+			"inproxy_proxy_inproxy_broker_is_replay",
+			"inproxy_proxy_inproxy_broker_candidate_number",
+		} {
+			if _, ok := fields[name]; ok {
+				return fmt.Errorf("unexpected tunnel metric %s", name)
 			}
 		}
 

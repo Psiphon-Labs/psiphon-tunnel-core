@@ -665,7 +665,9 @@ type Config struct {
 
 	// InproxyProxySessionPrivateKey specifies a long-term in-proxy proxy
 	// private key and corresponding, derived proxy ID to use. If blank, an
-	// ephemeral key will be generated.
+	// ephemeral key is generated and used for the lifetime of the
+	// controller, including across network changes and broker client
+	// resets, so that concurrent broker clients present one proxy ID.
 	InproxyProxySessionPrivateKey string `json:",omitempty"`
 
 	// InproxyProxySplitUpstreamInterfaceName specifies a network interface
@@ -1250,8 +1252,6 @@ type Config struct {
 	InproxyProxyAnswerRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
 	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int                                             `json:",omitempty"`
-	InproxyClientOfferRetryDelayMilliseconds                *int                                             `json:",omitempty"`
-	InproxyClientOfferRetryJitter                           *float64                                         `json:",omitempty"`
 	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int                                             `json:",omitempty"`
 	InproxyDTLSRandomizationProbability                     *float64                                         `json:",omitempty"`
 	InproxyWebRTCMediaStreamsProbability                    *float64                                         `json:",omitempty"`
@@ -1295,6 +1295,12 @@ type Config struct {
 	InproxyClientNoMatchFailoverPersonalProbability         *float64                                         `json:",omitempty"`
 	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string                                `json:",omitempty"`
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int                                             `json:",omitempty"`
+	InproxyClientMaxBrokerClients                           *int                                             `json:",omitempty"`
+	InproxyProxyMaxBrokerClients                            *int                                             `json:",omitempty"`
+	InproxyClientBrokerClientIdleTimeoutSeconds             *int                                             `json:",omitempty"`
+	InproxyClientShareBrokerClientTransportProbability      *float64                                         `json:",omitempty"`
+	InproxyProxyShareBrokerClientTransportProbability       *float64                                         `json:",omitempty"`
+	InproxyProxyPersonalReturnHomePeriodSeconds             *int                                             `json:",omitempty"`
 	InproxyProxyIncompatibleNetworkTypes                    []string                                         `json:",omitempty"`
 	InproxyClientIncompatibleNetworkTypes                   []string                                         `json:",omitempty"`
 	InproxyReplayRetainFailedProbability                    *float64                                         `json:",omitempty"`
@@ -1367,7 +1373,7 @@ type Config struct {
 
 	signalComponentFailure atomic.Value
 
-	inproxyMustUpgradePosted int32
+	inproxyMustUpgrade int32
 
 	serverEntryIterationMetricsUpdater atomic.Value
 
@@ -2315,17 +2321,35 @@ func (config *Config) IsInproxyProxyPersonalPairingMode() bool {
 // client in personal-pairing mode -- two states that require in-proxy
 // functionality -- onInproxyMustUpgrade initiates a shutdown after emitting
 // the InproxyMustUpgrade notice.
+//
+// Otherwise, the client logs a diagnostic warning, stops selecting in-proxy
+// tunnel protocols for the remainder of the controller run, and continues
+// with other tunnel protocols; see protocolSelectionConstraints.selectProtocol,
+// which instead shuts down when the protocol limits allow only in-proxy
+// tunnel protocols. The InproxyMustUpgrade notice indicates an impending
+// shutdown and is not emitted. A client limited to in-proxy tunnel protocols
+// also shuts down without it, as common pairing clients are not expected to
+// be limited that way.
 func (config *Config) OnInproxyMustUpgrade() {
-	// TODO: check if LimitTunnelProtocols is set to allow only INPROXY tunnel
-	// protocols; this is another case where in-proxy functionality is
-	// required.
+	first := atomic.CompareAndSwapInt32(&config.inproxyMustUpgrade, 0, 1)
 
 	if config.InproxyEnableProxy || config.IsInproxyClientPersonalPairingMode() {
-		if atomic.CompareAndSwapInt32(&config.inproxyMustUpgradePosted, 0, 1) {
+		if first {
 			NoticeInproxyMustUpgrade()
 		}
 		config.signalComponentFailure.Load().(func())()
+		return
 	}
+
+	if first {
+		NoticeWarning("in-proxy must upgrade: in-proxy tunnel protocols disabled")
+	}
+}
+
+// isInproxyMustUpgrade indicates whether an in-proxy broker has returned the
+// MustUpgrade response.
+func (config *Config) isInproxyMustUpgrade() bool {
+	return atomic.LoadInt32(&config.inproxyMustUpgrade) == 1
 }
 
 func (config *Config) SetServerEntryIterationMetricsUpdater(
@@ -3243,14 +3267,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyClientOfferRequestPersonalTimeout] = fmt.Sprintf("%dms", *config.InproxyClientOfferRequestPersonalTimeoutMilliseconds)
 	}
 
-	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
-		applyParameters[parameters.InproxyClientOfferRetryDelay] = fmt.Sprintf("%dms", *config.InproxyClientOfferRetryDelayMilliseconds)
-	}
-
-	if config.InproxyClientOfferRetryJitter != nil {
-		applyParameters[parameters.InproxyClientOfferRetryJitter] = *config.InproxyClientOfferRetryJitter
-	}
-
 	if config.InproxyClientRelayedPacketRequestTimeoutMilliseconds != nil {
 		applyParameters[parameters.InproxyClientRelayedPacketRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyClientRelayedPacketRequestTimeoutMilliseconds)
 	}
@@ -3421,6 +3437,30 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyOnBrokerClientFailedRetryPeriod] = fmt.Sprintf("%dms", *config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds)
+	}
+
+	if config.InproxyClientMaxBrokerClients != nil {
+		applyParameters[parameters.InproxyClientMaxBrokerClients] = *config.InproxyClientMaxBrokerClients
+	}
+
+	if config.InproxyProxyMaxBrokerClients != nil {
+		applyParameters[parameters.InproxyProxyMaxBrokerClients] = *config.InproxyProxyMaxBrokerClients
+	}
+
+	if config.InproxyClientBrokerClientIdleTimeoutSeconds != nil {
+		applyParameters[parameters.InproxyClientBrokerClientIdleTimeout] = fmt.Sprintf("%ds", *config.InproxyClientBrokerClientIdleTimeoutSeconds)
+	}
+
+	if config.InproxyClientShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyClientShareBrokerClientTransportProbability] = *config.InproxyClientShareBrokerClientTransportProbability
+	}
+
+	if config.InproxyProxyShareBrokerClientTransportProbability != nil {
+		applyParameters[parameters.InproxyProxyShareBrokerClientTransportProbability] = *config.InproxyProxyShareBrokerClientTransportProbability
+	}
+
+	if config.InproxyProxyPersonalReturnHomePeriodSeconds != nil {
+		applyParameters[parameters.InproxyProxyPersonalReturnHomePeriod] = fmt.Sprintf("%ds", *config.InproxyProxyPersonalReturnHomePeriodSeconds)
 	}
 
 	if len(config.InproxyProxyIncompatibleNetworkTypes) > 0 {
