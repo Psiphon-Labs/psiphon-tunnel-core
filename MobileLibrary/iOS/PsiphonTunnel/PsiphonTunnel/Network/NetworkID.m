@@ -124,7 +124,11 @@
             // CTCarrier.mobileCountryCode and CTCarrier.mobileCountryCode deprecated
             // without replacement in iOS 16.0 https://developer.apple.com/forums/thread/714876.
             CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
+            // subscriberCellularProvider is deprecated since iOS 12.0, but is still used before iOS 16.0.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
+#pragma clang diagnostic pop
             if (cellularProvider != nil) {
                 NSString *mcc = [cellularProvider mobileCountryCode];
                 NSString *mnc = [cellularProvider mobileNetworkCode];
@@ -187,12 +191,15 @@
 #if TARGET_OS_IPHONE
 + (NSArray<NSString *> *)currentNetworkInfoBSSIDs {
     NSMutableArray<NSString *> *bssids = [NSMutableArray array];
-    NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
-    for (NSString *networkInterfaceName in networkInterfaceNames) {
-        NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
-        id bssid = networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID];
-        if ([bssid isKindOfClass:[NSString class]] && [bssid length] > 0) {
-            [bssids addObject:bssid];
+    // CNCopyCurrentNetworkInfo is not available on Mac Catalyst before 14.0.
+    if (@available(macCatalyst 14.0, *)) {
+        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
+        for (NSString *networkInterfaceName in networkInterfaceNames) {
+            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
+            id bssid = networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID];
+            if ([bssid isKindOfClass:[NSString class]] && [bssid length] > 0) {
+                [bssids addObject:bssid];
+            }
         }
     }
     return bssids;

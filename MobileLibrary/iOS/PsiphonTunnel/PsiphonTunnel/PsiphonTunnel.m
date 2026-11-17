@@ -1755,7 +1755,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return YES;
     }
     strlcpy(addr.sun_path, cPath, sizeof(addr.sun_path));
-    addr.sun_len = SUN_LEN(&addr);
+    addr.sun_len = (unsigned char)SUN_LEN(&addr);
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -1875,12 +1875,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         CTTelephonyNetworkInfo *networkInfo = nil;
         CTCarrier *carrier = nil;
         NSString *carrierCountryCode = nil;
+        // subscriberCellularProvider is deprecated since iOS 12.0, but is still used before iOS 16.0.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         if ((networkInfo = [[CTTelephonyNetworkInfo alloc] init]) != nil &&
             (carrier = [networkInfo subscriberCellularProvider]) != nil &&
             (carrierCountryCode = [carrier isoCountryCode]) != nil &&
             carrierCountryCode.length > 0) {
             return [carrierCountryCode uppercaseString];
         }
+#pragma clang diagnostic pop
     }
 #endif
 
@@ -1924,7 +1928,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     *outError = nil;
 
-    const int sessionIDLen = 16;
+    enum { sessionIDLen = 16 };
     uint8_t sessionID[sessionIDLen];
     int result = SecRandomCopyBytes(kSecRandomDefault, sessionIDLen, sessionID);
     if (result != errSecSuccess) {
