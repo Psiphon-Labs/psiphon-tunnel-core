@@ -195,7 +195,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 
 	if (SCNetworkReachabilityGetFlags(_reachabilityRef, &flags))
 	{
-		return (flags & kSCNetworkReachabilityFlagsConnectionRequired);
+		return (flags & kSCNetworkReachabilityFlagsConnectionRequired) != 0;
 	}
 
     return NO;
@@ -224,7 +224,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 
 	if (SCNetworkReachabilityGetFlags(_reachabilityRef, &flags)) {
 #if TARGET_OS_IOS
-        BOOL isWWAN = flags & kSCNetworkReachabilityFlagsIsWWAN;
+        BOOL isWWAN = (flags & kSCNetworkReachabilityFlagsIsWWAN) != 0;
 #else
         BOOL isWWAN = FALSE;
 #endif
