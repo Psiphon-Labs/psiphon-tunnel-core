@@ -452,71 +452,70 @@ func TestExclusionsNewServerExcludedIndexes(t *testing.T) {
 	logger := testutils.NewTestLogger()
 
 	// A host subnet containing 10.0.0.1, which can't be configured, is
-	// logged as a warning, not an error, and is still excluded.
-	excluded, err := newServerExcludedIndexes(
+	// logged as a warning and is still excluded.
+	excluded := newServerExcludedIndexes(
 		logger,
 		mustParseSubnets(t, "10.20.0.0/16"),
 		mustParseSubnets(t, "10.0.0.0/24"),
 		true)
-	if err != nil {
-		t.Fatalf("newServerExcludedIndexes: %v", err)
-	}
 	if !excluded.contains(index("10.0.0.200")) || !excluded.contains(index("10.20.1.1")) {
-		t.Errorf("newServerExcludedIndexes: subnets not excluded")
+		t.Errorf("subnets not excluded")
 	}
 
-	// A host route equal to 10.0.0.0/8 is logged as a warning, not an
-	// error, and excludes nothing.
-	excluded, err = newServerExcludedIndexes(
+	// A host route equal to 10.0.0.0/8 is logged as a warning and excludes
+	// nothing.
+	excluded = newServerExcludedIndexes(
 		logger, nil, mustParseSubnets(t, "10.0.0.0/8"), true)
-	if err != nil {
-		t.Fatalf("newServerExcludedIndexes: %v", err)
-	}
 	if excluded.available() != allAssignable {
-		t.Errorf("newServerExcludedIndexes: available: got %d", excluded.available())
+		t.Errorf("10.0.0.0/8: available: got %d", excluded.available())
 	}
 
-	// Fewer than minAvailableAddresses is an error, whether the subnets
-	// are configured or discovered.
-	enough := []string{"10.0.0.0/9", "10.128.0.0/10", "10.192.0.0/11", "10.240.0.0/12"}
+	// Fewer than minAvailableAddresses, from configured or discovered
+	// subnets or both, is logged as a warning, and the subnets are still
+	// excluded.
 	tooFew := []string{"10.0.0.0/9", "10.128.0.0/10", "10.192.0.0/11", "10.224.0.0/12"}
-	if newExcludedIndexes(mustParseSubnets(t, enough...)).available() != minAvailableAddresses {
-		t.Fatalf("enough: not exactly minAvailableAddresses")
+	for _, testCase := range []struct {
+		name       string
+		configured []string
+		discovered []string
+	}{
+		{"configured", tooFew, nil},
+		{"discovered", nil, tooFew},
+		{"combined", tooFew[:1], tooFew[1:]},
+	} {
+		excluded = newServerExcludedIndexes(
+			logger,
+			mustParseSubnets(t, testCase.configured...),
+			mustParseSubnets(t, testCase.discovered...),
+			testCase.discovered != nil)
+		if excluded.available() != minAvailableAddresses-1 {
+			t.Errorf("%s: available: got %d", testCase.name, excluded.available())
+		}
 	}
-	if _, err := newServerExcludedIndexes(
-		logger, nil, mustParseSubnets(t, enough...), true); err != nil {
-		t.Errorf("newServerExcludedIndexes: enough: %v", err)
-	}
-	if _, err := newServerExcludedIndexes(
-		logger, nil, mustParseSubnets(t, tooFew...), true); err == nil {
-		t.Errorf("newServerExcludedIndexes: too few discovered: no error")
-	}
-	if _, err := newServerExcludedIndexes(
-		logger, mustParseSubnets(t, tooFew...), nil, false); err == nil {
-		t.Errorf("newServerExcludedIndexes: too few configured: no error")
-	}
-	if _, err := newServerExcludedIndexes(
-		logger, mustParseSubnets(t, "10.0.0.0/9"),
-		mustParseSubnets(t, "10.128.0.0/10", "10.192.0.0/11", "10.224.0.0/12"),
-		true); err == nil {
-		t.Errorf("newServerExcludedIndexes: too few combined: no error")
+
+	// With nothing left, the server still starts; allocateIndex fails each
+	// session. See TestExclusionsAllocateIndexFull.
+	excluded = newServerExcludedIndexes(
+		logger, nil, mustParseSubnets(t, "10.0.0.0/9", "10.128.0.0/9"), true)
+	if excluded.available() != 0 {
+		t.Errorf("nothing left: available: got %d", excluded.available())
 	}
 }
 
 func TestExclusionsMakeExcludedIndexes(t *testing.T) {
 
-	// On Linux, "lo" stands in for the tun device, so host subnet discovery
-	// runs too; the test host is not expected to have a subnet that
-	// contains 10.0.0.1, or to leave fewer than minAvailableAddresses.
-	makeWith := func(subnets ...string) (*excludedIndexes, error) {
+	// Discovery is off, so that this test doesn't read the host's routes;
+	// see exclusions_linux_test.go.
+	makeWith := func(subnets ...*net.IPNet) (*excludedIndexes, error) {
 		config := &ServerConfig{
-			Logger:              testutils.NewTestLogger(),
-			ExcludedIPv4Subnets: mustParseSubnets(t, subnets...),
+			Logger:                     testutils.NewTestLogger(),
+			ExcludedIPv4Subnets:        subnets,
+			DisableHostSubnetDiscovery: true,
 		}
-		return makeExcludedIndexes(config, "lo")
+		return makeExcludedIndexes(config, "tun-does-not-exist")
 	}
 
-	excluded, err := makeWith("10.20.0.0/16")
+	excluded, err := makeWith(mustParseSubnets(t, "10.20.0.0/16")...)
 	if err != nil {
 		t.Fatalf("makeExcludedIndexes: %v", err)
 	}
@@ -526,9 +525,12 @@ func TestExclusionsMakeExcludedIndexes(t *testing.T) {
 
 	// Configured subnets are validated.
 	for _, invalid := range []string{"10.0.0.0/24", "10.0.0.0/8", "192.168.1.0/24"} {
-		if _, err := makeWith(invalid); err == nil {
+		if _, err := makeWith(mustParseSubnets(t, invalid)...); err == nil {
 			t.Errorf("makeExcludedIndexes: %s: no error", invalid)
 		}
+	}
+	if _, err := makeWith(nil); err == nil {
+		t.Errorf("makeExcludedIndexes: nil subnet: no error")
 	}
 }
 
@@ -570,5 +572,8 @@ func TestExclusionsValidateExcludedIPv4Subnet(t *testing.T) {
 		if err := ValidateExcludedIPv4Subnet(mustParseSubnets(t, s)[0]); err == nil {
 			t.Errorf("%s: no error", s)
 		}
+	}
+	if err := ValidateExcludedIPv4Subnet(nil); err == nil {
+		t.Errorf("nil: no error")
 	}
 }

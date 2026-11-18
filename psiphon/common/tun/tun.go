@@ -264,13 +264,12 @@ type ServerConfig struct {
 	// supported platforms, subnets routed through other host interfaces
 	// are discovered at startup and excluded automatically;
 	// ExcludedIPv4Subnets adds to those. NewServer fails if a subnet
-	// doesn't pass ValidateExcludedIPv4Subnet, or if the excluded subnets
-	// leave too few client addresses. See exclusions.go.
+	// doesn't pass ValidateExcludedIPv4Subnet. See exclusions.go.
 	ExcludedIPv4Subnets []*net.IPNet
 
 	// DisableHostSubnetDiscovery turns off the discovery of host subnets,
 	// so that only ExcludedIPv4Subnets are excluded. It's for hosts where
-	// discovery fails and stops the server from starting.
+	// discovery fails, which stops NewServer, or excludes too much.
 	DisableHostSubnetDiscovery bool
 }
 
@@ -1030,8 +1029,8 @@ func (server *Server) allocateIndex(newSession *session) error {
 
 	excluded := server.excludedIndexes
 
-	// NewServer ensures at least minAvailableAddresses; this handles an
-	// excludedIndexes built without that check, such as in tests.
+	// With no assignable index, fail without searching. The server logged
+	// a warning at startup; see newServerExcludedIndexes.
 	if excluded.available() == 0 {
 		return errors.TraceNew("no assignable index")
 	}

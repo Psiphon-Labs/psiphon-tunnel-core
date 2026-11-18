@@ -42,11 +42,14 @@ import (
 // where supported, subnets discovered from the host's routes and interface
 // addresses. ServerConfig.DisableHostSubnetDiscovery turns discovery off.
 //
-// The server fails to start when the excluded subnets leave fewer than
-// minAvailableAddresses client addresses. A host route or address prefix
-// equal to privateSubnetIPv4 on another interface can't be excluded, since
-// excluding it would leave no addresses; the server logs a warning, as for
-// a host subnet containing the server tun device address.
+// Host configurations that exclusion can't work around are logged as
+// warnings, and the server keeps running, since stopping would take down
+// all of its protocols: a host route or address prefix equal to
+// privateSubnetIPv4 on another interface, which can't be excluded without
+// leaving no addresses; a host subnet containing the server tun device
+// address; and excluded subnets that leave fewer than minAvailableAddresses
+// client addresses. With no addresses left, each packet tunnel session
+// fails to start; other protocols are unaffected.
 //
 // Only IPv4 subnets are excluded. Client IPv6 addresses are in
 // privateSubnetIPv6, a randomly chosen unique local prefix that host
@@ -60,7 +63,8 @@ import (
 // ExcludedIPv4Subnets to exclude them regardless.
 
 // minAvailableAddresses is the number of assignable client addresses below
-// which the server fails to start. Each client session holds one address
+// which the excluded subnets are logged as a warning. Each client session
+// holds one address
 // until it has had no client attached for SessionIdleExpirySeconds, so a
 // server holds at most tens of thousands of addresses at once. Keeping that
 // a small share of the available addresses keeps allocateIndex searches
@@ -301,6 +305,9 @@ func (e *excludedIndexes) String() string {
 // more specific than, privateSubnetIPv4, and must not contain the server
 // tun device address.
 func ValidateExcludedIPv4Subnet(subnet *net.IPNet) error {
+	if subnet == nil {
+		return errors.TraceNew("missing subnet")
+	}
 	privatePrefixLength, _ := privateSubnetIPv4.Mask.Size()
 	prefixLength, bits := subnet.Mask.Size()
 	if subnet.IP.To4() == nil || bits != 32 {
@@ -345,24 +352,19 @@ func makeExcludedIndexes(
 		}
 	}
 
-	excluded, err := newServerExcludedIndexes(
-		config.Logger, config.ExcludedIPv4Subnets, hostSubnets, discovery)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return excluded, nil
+	return newServerExcludedIndexes(
+		config.Logger, config.ExcludedIPv4Subnets, hostSubnets, discovery), nil
 }
 
 // newServerExcludedIndexes returns the excluded indexes for the configured
-// and discovered host subnets, and logs them. It returns an error when
-// fewer than minAvailableAddresses client addresses remain, and logs a
-// warning for host configurations that it can't work around.
-// hostSubnetDiscovery is logged, and is whether discovery ran.
+// and discovered host subnets, and logs them, with a warning for host
+// configurations that it can't work around. hostSubnetDiscovery is logged,
+// and is whether discovery ran.
 func newServerExcludedIndexes(
 	logger common.Logger,
 	configuredSubnets []*net.IPNet,
 	hostSubnets []*net.IPNet,
-	hostSubnetDiscovery bool) (*excludedIndexes, error) {
+	hostSubnetDiscovery bool) *excludedIndexes {
 
 	subnets := append(
 		append([]*net.IPNet(nil), configuredSubnets...), hostSubnets...)
@@ -407,21 +409,22 @@ func newServerExcludedIndexes(
 			"packet tunnel server tun device address conflicts with host subnet")
 	}
 
+	// Few or no addresses left is logged as a warning, for the same reason:
+	// it affects only the packet tunnel. See minAvailableAddresses.
 	availableAddresses := excluded.available()
-	if availableAddresses < minAvailableAddresses {
-		return nil, errors.Tracef(
-			"excluded subnets leave %d client addresses, fewer than %d: %s",
-			availableAddresses, minAvailableAddresses, excluded)
-	}
-
-	logger.WithTraceFields(
+	trace := logger.WithTraceFields(
 		common.LogFields{
 			"excludedSubnets":     excluded.String(),
 			"availableAddresses":  availableAddresses,
 			"hostSubnetDiscovery": hostSubnetDiscovery,
-		}).Info("packet tunnel excluded subnets")
+		})
+	if availableAddresses < minAvailableAddresses {
+		trace.Warning("packet tunnel excluded subnets leave few client addresses")
+	} else {
+		trace.Info("packet tunnel excluded subnets")
+	}
 
-	return excluded, nil
+	return excluded
 }
 
 // containsPrivateSubnetIPv4 returns true if a subnet in subnets has the

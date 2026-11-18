@@ -433,11 +433,16 @@ type Config struct {
 	PacketTunnelSessionIdleExpirySeconds int `json:",omitempty"`
 
 	// PacketTunnelExcludedIPv4Subnets specifies
-	// tun.ServerConfig.ExcludedIPv4Subnets, in CIDR notation.
+	// tun.ServerConfig.ExcludedIPv4Subnets, in CIDR notation. LoadConfig
+	// fails if an entry is invalid. When the excluded subnets, configured
+	// and discovered, leave few client addresses, psiphond logs a warning
+	// and runs.
 	PacketTunnelExcludedIPv4Subnets []string `json:",omitempty"`
 
 	// PacketTunnelDisableHostSubnetDiscovery sets
-	// tun.ServerConfig.DisableHostSubnetDiscovery.
+	// tun.ServerConfig.DisableHostSubnetDiscovery. When host subnet
+	// discovery fails, psiphond doesn't start; set this to start without
+	// discovery.
 	PacketTunnelDisableHostSubnetDiscovery bool `json:",omitempty"`
 
 	// PacketTunnelSudoNetworkConfigCommands sets
