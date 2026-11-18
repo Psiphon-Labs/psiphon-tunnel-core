@@ -374,9 +374,9 @@ func newServerExcludedIndexes(
 	// address, ties with the tun device's own route. Which route the host
 	// uses then isn't determined by prefix length, and replies to all
 	// clients may leave through the other interface. Excluding it would
-	// leave no addresses, so the server logs a warning and continues, as
-	// for the server tun device address below. Configured subnets can't be
-	// equal to privateSubnetIPv4; see ValidateExcludedIPv4Subnet.
+	// leave no addresses, so log a warning and continue, as for the server
+	// tun device address below. Configured subnets can't be equal to
+	// privateSubnetIPv4; see ValidateExcludedIPv4Subnet.
 	if containsPrivateSubnetIPv4(hostSubnets) {
 		logger.WithTraceFields(
 			common.LogFields{"privateSubnet": privateSubnetIPv4.String()}).Warning(
@@ -387,11 +387,11 @@ func newServerExcludedIndexes(
 	// excluded. When a host subnet contains it, for example when it's the
 	// host's default gateway, the host treats 10.0.0.1 as its own address:
 	// packets addressed to it stay on the host instead of reaching that
-	// subnet. The server logs a warning and continues: a private network
-	// with its gateway at 10.0.0.1 is a common default with some providers,
-	// and stopping would take down all of the server's protocols. Avoid this
-	// host configuration, for example by using a private network outside of
-	// privateSubnetIPv4.
+	// subnet. Log a warning and continue: a private network with its
+	// gateway at 10.0.0.1 is a common default with some providers, and
+	// stopping would take down all of the server's protocols. Avoid this
+	// host configuration, for example by using a private network outside
+	// of privateSubnetIPv4.
 	//
 	// The transparent DNS address, 10.0.0.2, needs no such check: the server
 	// rewrites packets to and from it before they reach the host.
