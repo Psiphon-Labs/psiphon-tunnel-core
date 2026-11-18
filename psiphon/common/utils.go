@@ -34,6 +34,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -104,6 +105,22 @@ func GetStringSlice(value interface{}) ([]string, bool) {
 		strSlice[index] = str
 	}
 	return strSlice, true
+}
+
+// TruncateUTF8String limits a UTF-8 string to maxBytes, including a trailing "*"
+// when shortened. maxBytes must be non-negative.
+func TruncateUTF8String(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	if maxBytes == 0 {
+		return ""
+	}
+	maxBytes--
+	for maxBytes > 0 && !utf8.RuneStart(value[maxBytes]) {
+		maxBytes--
+	}
+	return value[:maxBytes] + "*"
 }
 
 // MakeSecureRandomBytes is a helper function that wraps

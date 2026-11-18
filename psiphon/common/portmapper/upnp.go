@@ -499,11 +499,15 @@ var (
 // getUPnPPortMapping attempts to create a port-mapping over the UPnP protocol. On success,
 // it will return the externally exposed IP and port. Otherwise, it will return a zeroed IP and
 // port and an error.
+//
+// generation is the mapping generation under which internal was chosen; a
+// mapping is published only if it is still current (see mappingGeneration).
 func (c *Client) getUPnPPortMapping(
 	ctx context.Context,
 	gw netip.Addr,
 	internal netip.AddrPort,
 	prevPort uint16,
+	generation uint64,
 ) (external netip.AddrPort, ok bool) {
 	if disableUPnpEnv() || c.debug.DisableUPnP() {
 		return netip.AddrPort{}, false
@@ -611,13 +615,12 @@ func (c *Client) getUPnPPortMapping(
 		upnp.client = client
 
 		c.mu.Lock()
-		// Don't publish a mapping if SetProtocol changed the requested protocol
-		// while this create was in flight. AddPortMapping already succeeded on
-		// the gateway, so release it -- without holding c.mu -- to avoid leaving
-		// an orphaned external port open until lease expiry.
-		if c.protocol != upnp.protocol {
+		// AddPortMapping already succeeded on the gateway. If the client was
+		// closed or the mapping invalidated meanwhile, release it -- without
+		// holding c.mu -- rather than leak it until lease expiry.
+		if c.closed || c.mappingGeneration != generation {
 			c.mu.Unlock()
-			upnp.Release(ctx)
+			releaseMapping(upnp)
 			return netip.AddrPort{}, false
 		}
 		c.mapping = upnp

@@ -23,7 +23,7 @@
     void (^handler) (NSError *_Nonnull);
 }
 
-- (id)initWithHandler:(void (^__nonnull)(NSError *_Nonnull))handler; {
+- (id)initWithHandler:(void (^__nonnull)(NSError *_Nonnull))handler {
     self = [super init];
     if (self != nil) {
         self->handler = handler;

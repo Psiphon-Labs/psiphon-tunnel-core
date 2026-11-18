@@ -695,6 +695,9 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			// TODO: call server.handleError, for its isFronting special case.
 
 		case inproxy.BrokerEndPointName:
+			if server.inproxyBroker == nil {
+				break
+			}
 			handled = true
 			err := server.inproxyBrokerHandler(
 				endPointClientIP,
@@ -1345,6 +1348,10 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// to resume a meek session and the server can't differentiate
 	// between resuming a session and creating a new session. This
 	// causes the v1 client connection to hang/timeout.
+	//
+	// Limitation: concurrent v1 requests using the same cookie can create
+	// duplicate sessions and orphan shared response-cache buffers when one
+	// replaces the other.
 	sessionID := meekCookie.Value
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()

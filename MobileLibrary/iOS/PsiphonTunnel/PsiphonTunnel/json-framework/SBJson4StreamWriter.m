@@ -340,13 +340,13 @@ static const char *strForChar(int c) {
 
 	switch (objcType[0]) {
 		case 'c': case 'i': case 's': case 'l': case 'q':
-			len = snprintf(num, sizeof num, "%lld", [number longLongValue]);
+			len = (size_t)snprintf(num, sizeof num, "%lld", [number longLongValue]);
 			break;
 		case 'C': case 'I': case 'S': case 'L': case 'Q':
-			len = snprintf(num, sizeof num, "%llu", [number unsignedLongLongValue]);
+			len = (size_t)snprintf(num, sizeof num, "%llu", [number unsignedLongLongValue]);
 			break;
 		case 'f': case 'd': default: {
-            len = snprintf(num, sizeof num, "%.17g", [number doubleValue]);
+            len = (size_t)snprintf(num, sizeof num, "%.17g", [number doubleValue]);
 			break;
         }
 	}

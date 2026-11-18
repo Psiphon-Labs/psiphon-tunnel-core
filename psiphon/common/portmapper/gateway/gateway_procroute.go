@@ -33,6 +33,7 @@ package gateway
 
 import (
 	"bufio"
+	"io"
 	"net/netip"
 	"os"
 	"strconv"
@@ -56,20 +57,36 @@ const (
 // parseProcNetRoute reads /proc/net/route and returns the private IPv4 gateway
 // of the up default route (Destination 0.0.0.0/0). If ifaceName is non-empty,
 // only routes on that interface are considered.
+func parseProcNetRoute(ifaceName string) (netip.Addr, bool) {
+	routes := procNetDefaultRoutes(ifaceName)
+	if len(routes) == 0 {
+		return netip.Addr{}, false
+	}
+	return routes[0].gateway, true
+}
+
+// procNetDefaultRoutes reads /proc/net/route and returns every up default
+// route (Destination 0.0.0.0/0) to a private IPv4 gateway, in table order,
+// which the kernel keeps sorted by metric. If ifaceName is non-empty, only
+// routes on that interface are considered.
 //
 // /proc/net/route columns are:
 //
 //	Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
 //
 // with the Gateway in little-endian hex (e.g. 0100000A == 10.0.0.1).
-func parseProcNetRoute(ifaceName string) (netip.Addr, bool) {
+func procNetDefaultRoutes(ifaceName string) []defaultRoute {
 	f, err := os.Open(procNetRoutePath)
 	if err != nil {
-		return netip.Addr{}, false
+		return nil
 	}
 	defer f.Close()
+	return parseProcNetRoutes(f, ifaceName)
+}
 
-	sc := bufio.NewScanner(f)
+func parseProcNetRoutes(r io.Reader, ifaceName string) []defaultRoute {
+	var routes []defaultRoute
+	sc := bufio.NewScanner(r)
 	lineNum := 0
 	for sc.Scan() {
 		lineNum++
@@ -112,8 +129,8 @@ func parseProcNetRoute(ifaceName string) (netip.Addr, bool) {
 		ip := netip.AddrFrom4([4]byte{
 			byte(ipu32), byte(ipu32 >> 8), byte(ipu32 >> 16), byte(ipu32 >> 24)})
 		if ip.IsPrivate() {
-			return ip, true
+			routes = append(routes, defaultRoute{ifaceName: iface, gateway: ip})
 		}
 	}
-	return netip.Addr{}, false
+	return routes
 }

@@ -10,7 +10,6 @@ All other values will be provided to you by Psiphon Inc.
     "SponsorId" : "...",
     "RemoteServerListURLs": "[...]",
     "RemoteServerListSignaturePublicKey" : "...",
-    "DataStoreDirectory" : "",
     "DataStoreTempDirectory" : "",
     "LogFilename" : "",
     "LocalHttpProxyPort" : 0,

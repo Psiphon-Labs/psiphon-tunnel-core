@@ -223,6 +223,8 @@ type Proxy struct {
 	eventReceiver              ProxyEventReceiver
 	ID                         string
 	proxyGeoIPData             common.GeoIPData
+	proxyIPv4                  net.IP
+	proxyIPv6                  net.IP
 	tlsConfig                  *tls.Config
 	obfuscatorSeedHistory      *obfuscator.SeedHistory
 	allowedDestinations        common.StringLookup
@@ -528,6 +530,18 @@ func NewProxy(
 	}
 	proxyGeoIPData := lookupGeoIP(proxyIP.String())
 
+	var proxyIPv6 net.IP
+	if config.DialAddressIPv6 != "" {
+		host, _, err := net.SplitHostPort(config.DialAddressIPv6)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		proxyIPv6 = net.ParseIP(host)
+		if proxyIPv6 == nil {
+			return nil, errors.TraceNew("invalid IPv6 dial address")
+		}
+	}
+
 	tlsCertificate, err := tls.X509KeyPair(
 		config.TLSCertificate,
 		config.TLSPrivateKey)
@@ -571,6 +585,8 @@ func NewProxy(
 		eventReceiver:              newRedactingProxyEventReceiver(eventReceiver),
 		ID:                         makeProxyID(config.DialAddressIPv4, config.ObfuscationKey),
 		proxyGeoIPData:             proxyGeoIPData,
+		proxyIPv4:                  proxyIP,
+		proxyIPv6:                  proxyIPv6,
 		tlsConfig:                  tlsConfig,
 		obfuscatorSeedHistory:      obfuscator.NewSeedHistory(nil),
 		allowedDestinations:        common.NewStringLookup(normalizedAllowedDestinations),
@@ -1037,6 +1053,9 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	// later enforcement also means the client is authenticated as having the
 	// obfuscation key, and a prober behind shared NAT can't consume or
 	// observe limits.
+	//
+	// TCP handshakes and pre-header connections are outside these limits.
+	// Deployments should use host-based ingress rate and connection limits.
 
 	limitIP := common.GetRateLimitIP(clientIP)
 	err = proxy.applyRateLimit(limitIP)
@@ -1061,7 +1080,11 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 
 	normalizedDestinationAddress, err = normalizeDestinationAddress(header.DestinationAddress)
 	if err != nil {
-		return errors.Trace(err)
+		// Don't return the normalizeDestinationAddress error, which includes
+		// the client-supplied destination address; the error is logged, and
+		// destination addresses are logged only when LogDestinationAddresses
+		// is set.
+		return errors.TraceNew("invalid destination address")
 	}
 	if proxy.allowedDestinations.Len() > 0 &&
 		!proxy.allowedDestinations.Contains(normalizedDestinationAddress) {
@@ -1072,8 +1095,10 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	dialCtx, dialCancel := context.WithTimeout(ctx, proxy.upstreamDialTimeout)
 	defer dialCancel()
 
-	// In addition to resolving domains, proxy.resolve also enforces the
-	// IsBogon check against direct or indirect (resolved) bogon IP dials.
+	// In addition to resolving domains, proxy.resolve rejects bogons and
+	// the proxy's configured IPs, including resolved destinations.
+	// Limitation: with NAT64, these checks see only the IPv6 destination;
+	// the gateway must restrict destinations after translation.
 
 	upstreamAddrs, cached, err := proxy.resolve(dialCtx, normalizedDestinationAddress)
 	if err != nil {
@@ -1103,6 +1128,8 @@ func (proxy *Proxy) handleConn(ctx context.Context, conn net.Conn) (retErr error
 	})
 	defer unassociateAfter()
 
+	// The client-reported sponsor ID selects the sponsor MAC key;
+	// it does not convey an entitlement.
 	proxyProtocolHeaderConfig, addProxyProtocolHeader :=
 		proxy.proxyProtocolHeaderConfigs[sponsorID]
 	if addProxyProtocolHeader {
@@ -1401,8 +1428,9 @@ func (proxy *Proxy) resolve(
 	IP := net.ParseIP(host)
 	if IP != nil {
 
-		if !proxy.config.AllowBogons && common.IsBogon(IP) {
-			return addrs, false, errors.TraceNew("IP is bogon")
+		if !proxy.config.AllowBogons &&
+			(common.IsBogon(IP) || IP.Equal(proxy.proxyIPv4) || IP.Equal(proxy.proxyIPv6)) {
+			return addrs, false, errors.TraceNew("IP is bogon or proxy address")
 		}
 
 		return netIPAddrs(IP, port), false, nil
@@ -1434,12 +1462,13 @@ func (proxy *Proxy) resolve(
 			return addrs, false, errors.Trace(err)
 		}
 
-		// Perform the bogon check here so it doesn't need to be repeated for
-		// cached values.
+		// Perform the bogon and proxy IP checks here so they don't need to be
+		// repeated for cached values.
 
 		for _, ipAddr := range ipAddrs {
-			if !proxy.config.AllowBogons && common.IsBogon(ipAddr.IP) {
-				return addrs, false, errors.TraceNew("IP is bogon")
+			if !proxy.config.AllowBogons &&
+				(common.IsBogon(ipAddr.IP) || ipAddr.IP.Equal(proxy.proxyIPv4) || ipAddr.IP.Equal(proxy.proxyIPv6)) {
+				return addrs, false, errors.TraceNew("IP is bogon or proxy address")
 			}
 		}
 
@@ -1478,6 +1507,13 @@ func makeBindToDeviceControl(interfaceName string) func(string, string, syscall.
 
 // redactingProxyEventReceiver is a ProxyEventReceiver which redacts IP addresses from
 // log messages and ConnectionStats.Failure errors.
+//
+// redactingProxyEventReceiver also limits the size of log messages and of
+// ConnectionStats values which are, or may include, client-supplied light
+// header values. The light header is limited only by its 64K wire size, so
+// without this limit an individual client could produce oversized logs.
+// Values are not otherwise sanitized; receivers which write line-oriented
+// logs must escape these values.
 type redactingProxyEventReceiver struct {
 	ProxyEventReceiver
 }
@@ -1489,22 +1525,36 @@ func newRedactingProxyEventReceiver(
 }
 
 func (r *redactingProxyEventReceiver) Connection(stats *ConnectionStats) {
-	stats.Failure = common.RedactIPAddressesString(stats.Failure)
+	stats.SponsorID = limitLogString(stats.SponsorID)
+	stats.ClientBuildRev = limitLogString(stats.ClientBuildRev)
+	stats.DeviceRegion = limitLogString(stats.DeviceRegion)
+	stats.SessionID = limitLogString(stats.SessionID)
+	stats.DestinationAddress = limitLogString(stats.DestinationAddress)
+	stats.SNI = limitLogString(stats.SNI)
+	stats.Failure = redactAndLimitLogString(stats.Failure)
 	r.ProxyEventReceiver.Connection(stats)
 }
 
 func (r *redactingProxyEventReceiver) DebugLog(proxyID string, message string) {
-	r.ProxyEventReceiver.DebugLog(proxyID, common.RedactIPAddressesString(message))
+	r.ProxyEventReceiver.DebugLog(proxyID, redactAndLimitLogString(message))
 }
 
 func (r *redactingProxyEventReceiver) InfoLog(proxyID string, message string) {
-	r.ProxyEventReceiver.InfoLog(proxyID, common.RedactIPAddressesString(message))
+	r.ProxyEventReceiver.InfoLog(proxyID, redactAndLimitLogString(message))
 }
 
 func (r *redactingProxyEventReceiver) WarningLog(proxyID string, message string) {
-	r.ProxyEventReceiver.WarningLog(proxyID, common.RedactIPAddressesString(message))
+	r.ProxyEventReceiver.WarningLog(proxyID, redactAndLimitLogString(message))
 }
 
 func (r *redactingProxyEventReceiver) ErrorLog(proxyID string, message string) {
-	r.ProxyEventReceiver.ErrorLog(proxyID, common.RedactIPAddressesString(message))
+	r.ProxyEventReceiver.ErrorLog(proxyID, redactAndLimitLogString(message))
+}
+
+func limitLogString(value string) string {
+	return common.TruncateUTF8String(value, maxLogStringLength)
+}
+
+func redactAndLimitLogString(value string) string {
+	return limitLogString(common.RedactIPAddressesString(value))
 }

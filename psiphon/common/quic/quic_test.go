@@ -276,6 +276,35 @@ func runQUIC(
 				return errors.Trace(err)
 			}
 
+			if isObfuscated(quicVersion) {
+				// Wait for server establishment before attempting a mode change.
+				serverPacketConn := listener.(*Listener).packetConn.ObfuscatedPacketConn
+				address := peerAddress(packetConn.LocalAddr().(*net.UDPAddr))
+				for {
+					serverPacketConn.peerModesMutex.Lock()
+					_, state, ok := serverPacketConn.lookupPeer(address)
+					serverPacketConn.peerModesMutex.Unlock()
+					if ok && state == peerEstablished {
+						break
+					}
+					select {
+					case <-ctx.Done():
+						conn.Close()
+						return errors.Trace(ctx.Err())
+					case <-time.After(10 * time.Millisecond):
+					}
+				}
+
+				// A plain Initial from the same address must not break the
+				// obfuscated connection's subsequent data transfer.
+				_, err = packetConn.WriteTo(
+					makeInitialPacket(t, func([]byte) {}), remoteAddr)
+				if err != nil {
+					conn.Close()
+					return errors.Trace(err)
+				}
+			}
+
 			// Cancel should interrupt dialing only
 			cancelFunc()
 

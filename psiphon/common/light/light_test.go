@@ -434,6 +434,7 @@ func runTestLightProxy(
 		expectedTLSClientHelloPadding,
 		addProxyHeader,
 		testClientRegion)
+	receiver.expectedDeviceRegion = testDeviceRegion
 
 	maxConcurrent := numClients * numConnectionsPerClient * 2
 	if sharedProxyLimits {
@@ -954,6 +955,7 @@ type testProxyEventReceiver struct {
 	expectedTLSClientHelloPadding    int
 	expectedProxyProtocolHeaderAdded bool
 	expectedActivityRegion           string
+	expectedDeviceRegion             string
 	activityRegionSeen               chan struct{}
 	activityRegionSeenOnce           sync.Once
 }
@@ -1101,6 +1103,11 @@ func (r *testProxyEventReceiver) checkConnectionStats(stats *ConnectionStats) {
 	r.successfulConnectionStats++
 
 	if r.statsErr != nil {
+		return
+	}
+
+	if r.expectedDeviceRegion != "" && stats.DeviceRegion != r.expectedDeviceRegion {
+		r.statsErr = errors.TraceNew("unexpected DeviceRegion")
 		return
 	}
 

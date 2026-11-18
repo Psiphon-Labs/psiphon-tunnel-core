@@ -52,7 +52,6 @@ type InproxyDialParams struct {
 	InproxyClientPortMappingTypes                    []string               `protobuf:"bytes,27,rep,name=inproxy_client_port_mapping_types,json=inproxyClientPortMappingTypes,proto3" json:"inproxy_client_port_mapping_types,omitempty"`
 	InproxyConnectionId                              *string                `protobuf:"bytes,28,opt,name=inproxy_connection_id,json=inproxyConnectionId,proto3,oneof" json:"inproxy_connection_id,omitempty"`
 	InproxyDialBrokerOfferDuration                   *int64                 `protobuf:"varint,29,opt,name=inproxy_dial_broker_offer_duration,json=inproxyDialBrokerOfferDuration,proto3,oneof" json:"inproxy_dial_broker_offer_duration,omitempty"`
-	InproxyDialFailedAttemptsDuration                *int64                 `protobuf:"varint,30,opt,name=inproxy_dial_failed_attempts_duration,json=inproxyDialFailedAttemptsDuration,proto3,oneof" json:"inproxy_dial_failed_attempts_duration,omitempty"`
 	InproxyDialNatDiscoveryDuration                  *int64                 `protobuf:"varint,31,opt,name=inproxy_dial_nat_discovery_duration,json=inproxyDialNatDiscoveryDuration,proto3,oneof" json:"inproxy_dial_nat_discovery_duration,omitempty"`
 	InproxyDialWebrtcConnectionDuration              *int64                 `protobuf:"varint,32,opt,name=inproxy_dial_webrtc_connection_duration,json=inproxyDialWebrtcConnectionDuration,proto3,oneof" json:"inproxy_dial_webrtc_connection_duration,omitempty"`
 	InproxyDialWebrtcIceGatheringDuration            *int64                 `protobuf:"varint,33,opt,name=inproxy_dial_webrtc_ice_gathering_duration,json=inproxyDialWebrtcIceGatheringDuration,proto3,oneof" json:"inproxy_dial_webrtc_ice_gathering_duration,omitempty"`
@@ -120,6 +119,10 @@ type InproxyDialParams struct {
 	InproxyClientIceAsn                              *string                `protobuf:"bytes,95,opt,name=inproxy_client_ice_asn,json=inproxyClientIceAsn,proto3,oneof" json:"inproxy_client_ice_asn,omitempty"`
 	InproxyProxyIceRegion                            *string                `protobuf:"bytes,96,opt,name=inproxy_proxy_ice_region,json=inproxyProxyIceRegion,proto3,oneof" json:"inproxy_proxy_ice_region,omitempty"`
 	InproxyProxyIceAsn                               *string                `protobuf:"bytes,97,opt,name=inproxy_proxy_ice_asn,json=inproxyProxyIceAsn,proto3,oneof" json:"inproxy_proxy_ice_asn,omitempty"`
+	InproxyBrokerCandidateNumber                     *int64                 `protobuf:"varint,98,opt,name=inproxy_broker_candidate_number,json=inproxyBrokerCandidateNumber,proto3,oneof" json:"inproxy_broker_candidate_number,omitempty"`
+	InproxyBrokerTransportDialDuration               *int64                 `protobuf:"varint,99,opt,name=inproxy_broker_transport_dial_duration,json=inproxyBrokerTransportDialDuration,proto3,oneof" json:"inproxy_broker_transport_dial_duration,omitempty"`
+	InproxyBrokerSessionHandshakeDuration            *int64                 `protobuf:"varint,100,opt,name=inproxy_broker_session_handshake_duration,json=inproxyBrokerSessionHandshakeDuration,proto3,oneof" json:"inproxy_broker_session_handshake_duration,omitempty"`
+	InproxyDialBrokerClientAcquireDuration           *int64                 `protobuf:"varint,101,opt,name=inproxy_dial_broker_client_acquire_duration,json=inproxyDialBrokerClientAcquireDuration,proto3,oneof" json:"inproxy_dial_broker_client_acquire_duration,omitempty"`
 	unknownFields                                    protoimpl.UnknownFields
 	sizeCache                                        protoimpl.SizeCache
 }
@@ -353,13 +356,6 @@ func (x *InproxyDialParams) GetInproxyConnectionId() string {
 func (x *InproxyDialParams) GetInproxyDialBrokerOfferDuration() int64 {
 	if x != nil && x.InproxyDialBrokerOfferDuration != nil {
 		return *x.InproxyDialBrokerOfferDuration
-	}
-	return 0
-}
-
-func (x *InproxyDialParams) GetInproxyDialFailedAttemptsDuration() int64 {
-	if x != nil && x.InproxyDialFailedAttemptsDuration != nil {
-		return *x.InproxyDialFailedAttemptsDuration
 	}
 	return 0
 }
@@ -833,11 +829,39 @@ func (x *InproxyDialParams) GetInproxyProxyIceAsn() string {
 	return ""
 }
 
+func (x *InproxyDialParams) GetInproxyBrokerCandidateNumber() int64 {
+	if x != nil && x.InproxyBrokerCandidateNumber != nil {
+		return *x.InproxyBrokerCandidateNumber
+	}
+	return 0
+}
+
+func (x *InproxyDialParams) GetInproxyBrokerTransportDialDuration() int64 {
+	if x != nil && x.InproxyBrokerTransportDialDuration != nil {
+		return *x.InproxyBrokerTransportDialDuration
+	}
+	return 0
+}
+
+func (x *InproxyDialParams) GetInproxyBrokerSessionHandshakeDuration() int64 {
+	if x != nil && x.InproxyBrokerSessionHandshakeDuration != nil {
+		return *x.InproxyBrokerSessionHandshakeDuration
+	}
+	return 0
+}
+
+func (x *InproxyDialParams) GetInproxyDialBrokerClientAcquireDuration() int64 {
+	if x != nil && x.InproxyDialBrokerClientAcquireDuration != nil {
+		return *x.InproxyDialBrokerClientAcquireDuration
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_inproxy_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xafT\n" +
+	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xc7W\n" +
 	"\x11InproxyDialParams\x12>\n" +
 	"\x19inproxy_broker_client_bpf\x18\x01 \x01(\tH\x00R\x16inproxyBrokerClientBpf\x88\x01\x01\x12B\n" +
 	"\x1binproxy_broker_dial_address\x18\x02 \x01(\tH\x01R\x18inproxyBrokerDialAddress\x88\x01\x01\x12@\n" +
@@ -869,75 +893,78 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x17inproxy_client_nat_type\x18\x1a \x01(\tH\x19R\x14inproxyClientNatType\x88\x01\x01\x12H\n" +
 	"!inproxy_client_port_mapping_types\x18\x1b \x03(\tR\x1dinproxyClientPortMappingTypes\x127\n" +
 	"\x15inproxy_connection_id\x18\x1c \x01(\tH\x1aR\x13inproxyConnectionId\x88\x01\x01\x12O\n" +
-	"\"inproxy_dial_broker_offer_duration\x18\x1d \x01(\x03H\x1bR\x1einproxyDialBrokerOfferDuration\x88\x01\x01\x12U\n" +
-	"%inproxy_dial_failed_attempts_duration\x18\x1e \x01(\x03H\x1cR!inproxyDialFailedAttemptsDuration\x88\x01\x01\x12Q\n" +
-	"#inproxy_dial_nat_discovery_duration\x18\x1f \x01(\x03H\x1dR\x1finproxyDialNatDiscoveryDuration\x88\x01\x01\x12Y\n" +
-	"'inproxy_dial_webrtc_connection_duration\x18  \x01(\x03H\x1eR#inproxyDialWebrtcConnectionDuration\x88\x01\x01\x12^\n" +
-	"*inproxy_dial_webrtc_ice_gathering_duration\x18! \x01(\x03H\x1fR%inproxyDialWebrtcIceGatheringDuration\x88\x01\x01\x12R\n" +
-	"#inproxy_matched_common_compartments\x18\" \x01(\bH R inproxyMatchedCommonCompartments\x88\x01\x01\x12V\n" +
-	"%inproxy_matched_personal_compartments\x18# \x01(\bH!R\"inproxyMatchedPersonalCompartments\x88\x01\x01\x12M\n" +
-	"!inproxy_proxy_applied_tactics_tag\x18$ \x01(\tH\"R\x1dinproxyProxyAppliedTacticsTag\x88\x01\x01\x12/\n" +
-	"\x11inproxy_proxy_asn\x18% \x01(\tH#R\x0finproxyProxyAsn\x88\x01\x01\x12/\n" +
-	"\x11inproxy_proxy_aso\x18& \x01(\tH$R\x0finproxyProxyAso\x88\x01\x01\x121\n" +
-	"\x12inproxy_proxy_city\x18' \x01(\tH%R\x10inproxyProxyCity\x88\x01\x01\x12G\n" +
-	"\x1einproxy_proxy_client_build_rev\x18( \x01(\tH&R\x1ainproxyProxyClientBuildRev\x88\x01\x01\x12F\n" +
-	"\x1dinproxy_proxy_client_platform\x18) \x01(\tH'R\x1ainproxyProxyClientPlatform\x88\x01\x01\x12D\n" +
-	"\x1cinproxy_proxy_client_version\x18* \x01(\x03H(R\x19inproxyProxyClientVersion\x88\x01\x01\x12J\n" +
-	"\x1finproxy_proxy_connected_clients\x18+ \x01(\x03H)R\x1cinproxyProxyConnectedClients\x88\x01\x01\x12L\n" +
-	" inproxy_proxy_connecting_clients\x18, \x01(\x03H*R\x1dinproxyProxyConnectingClients\x88\x01\x01\x12F\n" +
-	"\x1dinproxy_proxy_device_location\x18- \x01(\tH+R\x1ainproxyProxyDeviceLocation\x88\x01\x01\x12B\n" +
-	"\x1binproxy_proxy_device_region\x18. \x01(\tH,R\x18inproxyProxyDeviceRegion\x88\x01\x01\x12O\n" +
-	"\"inproxy_proxy_fronting_provider_id\x18/ \x01(\tH-R\x1einproxyProxyFrontingProviderId\x88\x01\x01\x12-\n" +
-	"\x10inproxy_proxy_id\x180 \x01(\tH.R\x0einproxyProxyId\x88\x01\x01\x12>\n" +
-	"\x19inproxy_proxy_is_priority\x181 \x01(\bH/R\x16inproxyProxyIsPriority\x88\x01\x01\x12/\n" +
-	"\x11inproxy_proxy_isp\x182 \x01(\tH0R\x0finproxyProxyIsp\x88\x01\x01\x12g\n" +
-	"/inproxy_proxy_limit_downstream_bytes_per_second\x183 \x01(\x03H1R)inproxyProxyLimitDownstreamBytesPerSecond\x88\x01\x01\x12c\n" +
-	"-inproxy_proxy_limit_upstream_bytes_per_second\x184 \x01(\x03H2R'inproxyProxyLimitUpstreamBytesPerSecond\x88\x01\x01\x12>\n" +
-	"\x19inproxy_proxy_max_clients\x185 \x01(\x03H3R\x16inproxyProxyMaxClients\x88\x01\x01\x128\n" +
-	"\x16inproxy_proxy_nat_type\x186 \x01(\tH4R\x13inproxyProxyNatType\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_proxy_network_type\x187 \x01(\tH5R\x17inproxyProxyNetworkType\x88\x01\x01\x12e\n" +
-	".inproxy_proxy_peak_downstream_bytes_per_second\x188 \x01(\x03H6R(inproxyProxyPeakDownstreamBytesPerSecond\x88\x01\x01\x12a\n" +
-	",inproxy_proxy_peak_upstream_bytes_per_second\x189 \x01(\x03H7R&inproxyProxyPeakUpstreamBytesPerSecond\x88\x01\x01\x12F\n" +
+	"\"inproxy_dial_broker_offer_duration\x18\x1d \x01(\x03H\x1bR\x1einproxyDialBrokerOfferDuration\x88\x01\x01\x12Q\n" +
+	"#inproxy_dial_nat_discovery_duration\x18\x1f \x01(\x03H\x1cR\x1finproxyDialNatDiscoveryDuration\x88\x01\x01\x12Y\n" +
+	"'inproxy_dial_webrtc_connection_duration\x18  \x01(\x03H\x1dR#inproxyDialWebrtcConnectionDuration\x88\x01\x01\x12^\n" +
+	"*inproxy_dial_webrtc_ice_gathering_duration\x18! \x01(\x03H\x1eR%inproxyDialWebrtcIceGatheringDuration\x88\x01\x01\x12R\n" +
+	"#inproxy_matched_common_compartments\x18\" \x01(\bH\x1fR inproxyMatchedCommonCompartments\x88\x01\x01\x12V\n" +
+	"%inproxy_matched_personal_compartments\x18# \x01(\bH R\"inproxyMatchedPersonalCompartments\x88\x01\x01\x12M\n" +
+	"!inproxy_proxy_applied_tactics_tag\x18$ \x01(\tH!R\x1dinproxyProxyAppliedTacticsTag\x88\x01\x01\x12/\n" +
+	"\x11inproxy_proxy_asn\x18% \x01(\tH\"R\x0finproxyProxyAsn\x88\x01\x01\x12/\n" +
+	"\x11inproxy_proxy_aso\x18& \x01(\tH#R\x0finproxyProxyAso\x88\x01\x01\x121\n" +
+	"\x12inproxy_proxy_city\x18' \x01(\tH$R\x10inproxyProxyCity\x88\x01\x01\x12G\n" +
+	"\x1einproxy_proxy_client_build_rev\x18( \x01(\tH%R\x1ainproxyProxyClientBuildRev\x88\x01\x01\x12F\n" +
+	"\x1dinproxy_proxy_client_platform\x18) \x01(\tH&R\x1ainproxyProxyClientPlatform\x88\x01\x01\x12D\n" +
+	"\x1cinproxy_proxy_client_version\x18* \x01(\x03H'R\x19inproxyProxyClientVersion\x88\x01\x01\x12J\n" +
+	"\x1finproxy_proxy_connected_clients\x18+ \x01(\x03H(R\x1cinproxyProxyConnectedClients\x88\x01\x01\x12L\n" +
+	" inproxy_proxy_connecting_clients\x18, \x01(\x03H)R\x1dinproxyProxyConnectingClients\x88\x01\x01\x12F\n" +
+	"\x1dinproxy_proxy_device_location\x18- \x01(\tH*R\x1ainproxyProxyDeviceLocation\x88\x01\x01\x12B\n" +
+	"\x1binproxy_proxy_device_region\x18. \x01(\tH+R\x18inproxyProxyDeviceRegion\x88\x01\x01\x12O\n" +
+	"\"inproxy_proxy_fronting_provider_id\x18/ \x01(\tH,R\x1einproxyProxyFrontingProviderId\x88\x01\x01\x12-\n" +
+	"\x10inproxy_proxy_id\x180 \x01(\tH-R\x0einproxyProxyId\x88\x01\x01\x12>\n" +
+	"\x19inproxy_proxy_is_priority\x181 \x01(\bH.R\x16inproxyProxyIsPriority\x88\x01\x01\x12/\n" +
+	"\x11inproxy_proxy_isp\x182 \x01(\tH/R\x0finproxyProxyIsp\x88\x01\x01\x12g\n" +
+	"/inproxy_proxy_limit_downstream_bytes_per_second\x183 \x01(\x03H0R)inproxyProxyLimitDownstreamBytesPerSecond\x88\x01\x01\x12c\n" +
+	"-inproxy_proxy_limit_upstream_bytes_per_second\x184 \x01(\x03H1R'inproxyProxyLimitUpstreamBytesPerSecond\x88\x01\x01\x12>\n" +
+	"\x19inproxy_proxy_max_clients\x185 \x01(\x03H2R\x16inproxyProxyMaxClients\x88\x01\x01\x128\n" +
+	"\x16inproxy_proxy_nat_type\x186 \x01(\tH3R\x13inproxyProxyNatType\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_proxy_network_type\x187 \x01(\tH4R\x17inproxyProxyNetworkType\x88\x01\x01\x12e\n" +
+	".inproxy_proxy_peak_downstream_bytes_per_second\x188 \x01(\x03H5R(inproxyProxyPeakDownstreamBytesPerSecond\x88\x01\x01\x12a\n" +
+	",inproxy_proxy_peak_upstream_bytes_per_second\x189 \x01(\x03H6R&inproxyProxyPeakUpstreamBytesPerSecond\x88\x01\x01\x12F\n" +
 	" inproxy_proxy_port_mapping_types\x18: \x03(\tR\x1cinproxyProxyPortMappingTypes\x12S\n" +
-	"$inproxy_proxy_propagation_channel_id\x18; \x01(\tH8R inproxyProxyPropagationChannelId\x88\x01\x01\x12H\n" +
-	"\x1einproxy_proxy_protocol_version\x18< \x01(\x03H9R\x1binproxyProxyProtocolVersion\x88\x01\x01\x125\n" +
-	"\x14inproxy_proxy_region\x18= \x01(\tH:R\x12inproxyProxyRegion\x88\x01\x01\x12<\n" +
-	"\x18inproxy_proxy_session_id\x18> \x01(\tH;R\x15inproxyProxySessionId\x88\x01\x01\x12<\n" +
-	"\x18inproxy_proxy_sponsor_id\x18? \x01(\tH<R\x15inproxyProxySponsorId\x88\x01\x01\x12K\n" +
-	" inproxy_proxy_stored_tactics_tag\x18@ \x01(\tH=R\x1cinproxyProxyStoredTacticsTag\x88\x01\x01\x12A\n" +
+	"$inproxy_proxy_propagation_channel_id\x18; \x01(\tH7R inproxyProxyPropagationChannelId\x88\x01\x01\x12H\n" +
+	"\x1einproxy_proxy_protocol_version\x18< \x01(\x03H8R\x1binproxyProxyProtocolVersion\x88\x01\x01\x125\n" +
+	"\x14inproxy_proxy_region\x18= \x01(\tH9R\x12inproxyProxyRegion\x88\x01\x01\x12<\n" +
+	"\x18inproxy_proxy_session_id\x18> \x01(\tH:R\x15inproxyProxySessionId\x88\x01\x01\x12<\n" +
+	"\x18inproxy_proxy_sponsor_id\x18? \x01(\tH;R\x15inproxyProxySponsorId\x88\x01\x01\x12K\n" +
+	" inproxy_proxy_stored_tactics_tag\x18@ \x01(\tH<R\x1cinproxyProxyStoredTacticsTag\x88\x01\x01\x12A\n" +
 	"\x1dinproxy_proxy_client_features\x18A \x03(\tR\x1ainproxyProxyClientFeatures\x12W\n" +
-	"&inproxy_webrtc_decoy_messages_received\x18B \x01(\x03H>R\"inproxyWebrtcDecoyMessagesReceived\x88\x01\x01\x12O\n" +
-	"\"inproxy_webrtc_decoy_messages_sent\x18C \x01(\x03H?R\x1einproxyWebrtcDecoyMessagesSent\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_webrtc_dns_attempt\x18D \x01(\x03H@R\x17inproxyWebrtcDnsAttempt\x88\x01\x01\x12D\n" +
-	"\x1cinproxy_webrtc_dns_preferred\x18E \x01(\tHAR\x19inproxyWebrtcDnsPreferred\x88\x01\x01\x12H\n" +
-	"\x1einproxy_webrtc_dns_preresolved\x18F \x01(\tHBR\x1binproxyWebrtcDnsPreresolved\x88\x01\x01\x12Q\n" +
-	"#inproxy_webrtc_dns_qname_mismatches\x18G \x01(\x03HCR\x1finproxyWebrtcDnsQnameMismatches\x88\x01\x01\x12P\n" +
-	"#inproxy_webrtc_dns_qname_must_match\x18H \x01(\bHDR\x1einproxyWebrtcDnsQnameMustMatch\x88\x01\x01\x12V\n" +
-	"&inproxy_webrtc_dns_qname_random_casing\x18I \x01(\bHER!inproxyWebrtcDnsQnameRandomCasing\x88\x01\x01\x12D\n" +
-	"\x1cinproxy_webrtc_dns_transform\x18J \x01(\tHFR\x19inproxyWebrtcDnsTransform\x88\x01\x01\x12]\n" +
-	"*inproxy_webrtc_local_ice_candidate_is_IPv6\x18K \x01(\bHGR$inproxyWebrtcLocalIceCandidateIsIPv6\x88\x01\x01\x12g\n" +
-	"/inproxy_webrtc_local_ice_candidate_is_initiator\x18L \x01(\bHHR)inproxyWebrtcLocalIceCandidateIsInitiator\x88\x01\x01\x12X\n" +
-	"'inproxy_webrtc_local_ice_candidate_port\x18M \x01(\x03HIR\"inproxyWebrtcLocalIceCandidatePort\x88\x01\x01\x12X\n" +
-	"'inproxy_webrtc_local_ice_candidate_type\x18N \x01(\tHJR\"inproxyWebrtcLocalIceCandidateType\x88\x01\x01\x12Y\n" +
-	"'inproxy_webrtc_padded_messages_received\x18O \x01(\x03HKR#inproxyWebrtcPaddedMessagesReceived\x88\x01\x01\x12Q\n" +
-	"#inproxy_webrtc_padded_messages_sent\x18P \x01(\x03HLR\x1finproxyWebrtcPaddedMessagesSent\x88\x01\x01\x12F\n" +
-	"\x1dinproxy_webrtc_randomize_dtls\x18Q \x01(\bHMR\x1ainproxyWebrtcRandomizeDtls\x88\x01\x01\x12_\n" +
-	"+inproxy_webrtc_remote_ice_candidate_is_IPv6\x18R \x01(\bHNR%inproxyWebrtcRemoteIceCandidateIsIPv6\x88\x01\x01\x12Z\n" +
-	"(inproxy_webrtc_remote_ice_candidate_port\x18S \x01(\x03HOR#inproxyWebrtcRemoteIceCandidatePort\x88\x01\x01\x12Z\n" +
-	"(inproxy_webrtc_remote_ice_candidate_type\x18T \x01(\tHPR#inproxyWebrtcRemoteIceCandidateType\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_webrtc_stun_server\x18U \x01(\tHQR\x17inproxyWebrtcStunServer\x88\x01\x01\x12O\n" +
-	"\"inproxy_webrtc_stun_server_RFC5780\x18V \x01(\tHRR\x1einproxyWebrtcStunServerRFC5780\x88\x01\x01\x12t\n" +
-	"6inproxy_webrtc_stun_server_RFC5780_resolved_ip_address\x18W \x01(\tHSR/inproxyWebrtcStunServerRFC5780ResolvedIpAddress\x88\x01\x01\x12e\n" +
-	".inproxy_webrtc_stun_server_resolved_ip_address\x18X \x01(\tHTR(inproxyWebrtcStunServerResolvedIpAddress\x88\x01\x01\x12K\n" +
-	" inproxy_webrtc_use_media_streams\x18Y \x01(\bHUR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01\x12K\n" +
-	" inproxy_proxy_max_common_clients\x18Z \x01(\x03HVR\x1cinproxyProxyMaxCommonClients\x88\x01\x01\x12O\n" +
-	"\"inproxy_proxy_max_personal_clients\x18[ \x01(\x03HWR\x1einproxyProxyMaxPersonalClients\x88\x01\x01\x12J\n" +
-	"\x1finproxy_webrtc_dtls_fingerprint\x18\\ \x01(\tHXR\x1cinproxyWebrtcDtlsFingerprint\x88\x01\x01\x12U\n" +
-	"%inproxy_proxy_webrtc_dtls_fingerprint\x18] \x01(\tHYR!inproxyProxyWebrtcDtlsFingerprint\x88\x01\x01\x12>\n" +
-	"\x19inproxy_client_ice_region\x18^ \x01(\tHZR\x16inproxyClientIceRegion\x88\x01\x01\x128\n" +
-	"\x16inproxy_client_ice_asn\x18_ \x01(\tH[R\x13inproxyClientIceAsn\x88\x01\x01\x12<\n" +
-	"\x18inproxy_proxy_ice_region\x18` \x01(\tH\\R\x15inproxyProxyIceRegion\x88\x01\x01\x126\n" +
-	"\x15inproxy_proxy_ice_asn\x18a \x01(\tH]R\x12inproxyProxyIceAsn\x88\x01\x01B\x1c\n" +
+	"&inproxy_webrtc_decoy_messages_received\x18B \x01(\x03H=R\"inproxyWebrtcDecoyMessagesReceived\x88\x01\x01\x12O\n" +
+	"\"inproxy_webrtc_decoy_messages_sent\x18C \x01(\x03H>R\x1einproxyWebrtcDecoyMessagesSent\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_webrtc_dns_attempt\x18D \x01(\x03H?R\x17inproxyWebrtcDnsAttempt\x88\x01\x01\x12D\n" +
+	"\x1cinproxy_webrtc_dns_preferred\x18E \x01(\tH@R\x19inproxyWebrtcDnsPreferred\x88\x01\x01\x12H\n" +
+	"\x1einproxy_webrtc_dns_preresolved\x18F \x01(\tHAR\x1binproxyWebrtcDnsPreresolved\x88\x01\x01\x12Q\n" +
+	"#inproxy_webrtc_dns_qname_mismatches\x18G \x01(\x03HBR\x1finproxyWebrtcDnsQnameMismatches\x88\x01\x01\x12P\n" +
+	"#inproxy_webrtc_dns_qname_must_match\x18H \x01(\bHCR\x1einproxyWebrtcDnsQnameMustMatch\x88\x01\x01\x12V\n" +
+	"&inproxy_webrtc_dns_qname_random_casing\x18I \x01(\bHDR!inproxyWebrtcDnsQnameRandomCasing\x88\x01\x01\x12D\n" +
+	"\x1cinproxy_webrtc_dns_transform\x18J \x01(\tHER\x19inproxyWebrtcDnsTransform\x88\x01\x01\x12]\n" +
+	"*inproxy_webrtc_local_ice_candidate_is_IPv6\x18K \x01(\bHFR$inproxyWebrtcLocalIceCandidateIsIPv6\x88\x01\x01\x12g\n" +
+	"/inproxy_webrtc_local_ice_candidate_is_initiator\x18L \x01(\bHGR)inproxyWebrtcLocalIceCandidateIsInitiator\x88\x01\x01\x12X\n" +
+	"'inproxy_webrtc_local_ice_candidate_port\x18M \x01(\x03HHR\"inproxyWebrtcLocalIceCandidatePort\x88\x01\x01\x12X\n" +
+	"'inproxy_webrtc_local_ice_candidate_type\x18N \x01(\tHIR\"inproxyWebrtcLocalIceCandidateType\x88\x01\x01\x12Y\n" +
+	"'inproxy_webrtc_padded_messages_received\x18O \x01(\x03HJR#inproxyWebrtcPaddedMessagesReceived\x88\x01\x01\x12Q\n" +
+	"#inproxy_webrtc_padded_messages_sent\x18P \x01(\x03HKR\x1finproxyWebrtcPaddedMessagesSent\x88\x01\x01\x12F\n" +
+	"\x1dinproxy_webrtc_randomize_dtls\x18Q \x01(\bHLR\x1ainproxyWebrtcRandomizeDtls\x88\x01\x01\x12_\n" +
+	"+inproxy_webrtc_remote_ice_candidate_is_IPv6\x18R \x01(\bHMR%inproxyWebrtcRemoteIceCandidateIsIPv6\x88\x01\x01\x12Z\n" +
+	"(inproxy_webrtc_remote_ice_candidate_port\x18S \x01(\x03HNR#inproxyWebrtcRemoteIceCandidatePort\x88\x01\x01\x12Z\n" +
+	"(inproxy_webrtc_remote_ice_candidate_type\x18T \x01(\tHOR#inproxyWebrtcRemoteIceCandidateType\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_webrtc_stun_server\x18U \x01(\tHPR\x17inproxyWebrtcStunServer\x88\x01\x01\x12O\n" +
+	"\"inproxy_webrtc_stun_server_RFC5780\x18V \x01(\tHQR\x1einproxyWebrtcStunServerRFC5780\x88\x01\x01\x12t\n" +
+	"6inproxy_webrtc_stun_server_RFC5780_resolved_ip_address\x18W \x01(\tHRR/inproxyWebrtcStunServerRFC5780ResolvedIpAddress\x88\x01\x01\x12e\n" +
+	".inproxy_webrtc_stun_server_resolved_ip_address\x18X \x01(\tHSR(inproxyWebrtcStunServerResolvedIpAddress\x88\x01\x01\x12K\n" +
+	" inproxy_webrtc_use_media_streams\x18Y \x01(\bHTR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01\x12K\n" +
+	" inproxy_proxy_max_common_clients\x18Z \x01(\x03HUR\x1cinproxyProxyMaxCommonClients\x88\x01\x01\x12O\n" +
+	"\"inproxy_proxy_max_personal_clients\x18[ \x01(\x03HVR\x1einproxyProxyMaxPersonalClients\x88\x01\x01\x12J\n" +
+	"\x1finproxy_webrtc_dtls_fingerprint\x18\\ \x01(\tHWR\x1cinproxyWebrtcDtlsFingerprint\x88\x01\x01\x12U\n" +
+	"%inproxy_proxy_webrtc_dtls_fingerprint\x18] \x01(\tHXR!inproxyProxyWebrtcDtlsFingerprint\x88\x01\x01\x12>\n" +
+	"\x19inproxy_client_ice_region\x18^ \x01(\tHYR\x16inproxyClientIceRegion\x88\x01\x01\x128\n" +
+	"\x16inproxy_client_ice_asn\x18_ \x01(\tHZR\x13inproxyClientIceAsn\x88\x01\x01\x12<\n" +
+	"\x18inproxy_proxy_ice_region\x18` \x01(\tH[R\x15inproxyProxyIceRegion\x88\x01\x01\x126\n" +
+	"\x15inproxy_proxy_ice_asn\x18a \x01(\tH\\R\x12inproxyProxyIceAsn\x88\x01\x01\x12J\n" +
+	"\x1finproxy_broker_candidate_number\x18b \x01(\x03H]R\x1cinproxyBrokerCandidateNumber\x88\x01\x01\x12W\n" +
+	"&inproxy_broker_transport_dial_duration\x18c \x01(\x03H^R\"inproxyBrokerTransportDialDuration\x88\x01\x01\x12]\n" +
+	")inproxy_broker_session_handshake_duration\x18d \x01(\x03H_R%inproxyBrokerSessionHandshakeDuration\x88\x01\x01\x12`\n" +
+	"+inproxy_dial_broker_client_acquire_duration\x18e \x01(\x03H`R&inproxyDialBrokerClientAcquireDuration\x88\x01\x01B\x1c\n" +
 	"\x1a_inproxy_broker_client_bpfB\x1e\n" +
 	"\x1c_inproxy_broker_dial_addressB\x1d\n" +
 	"\x1b_inproxy_broker_dns_attemptB\x1f\n" +
@@ -965,8 +992,7 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x1a_inproxy_broker_user_agentB\x1a\n" +
 	"\x18_inproxy_client_nat_typeB\x18\n" +
 	"\x16_inproxy_connection_idB%\n" +
-	"#_inproxy_dial_broker_offer_durationB(\n" +
-	"&_inproxy_dial_failed_attempts_durationB&\n" +
+	"#_inproxy_dial_broker_offer_durationB&\n" +
 	"$_inproxy_dial_nat_discovery_durationB*\n" +
 	"(_inproxy_dial_webrtc_connection_durationB-\n" +
 	"+_inproxy_dial_webrtc_ice_gathering_durationB&\n" +
@@ -1031,7 +1057,11 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x1a_inproxy_client_ice_regionB\x19\n" +
 	"\x17_inproxy_client_ice_asnB\x1b\n" +
 	"\x19_inproxy_proxy_ice_regionB\x18\n" +
-	"\x16_inproxy_proxy_ice_asnBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x16_inproxy_proxy_ice_asnB\"\n" +
+	" _inproxy_broker_candidate_numberB)\n" +
+	"'_inproxy_broker_transport_dial_durationB,\n" +
+	"*_inproxy_broker_session_handshake_durationB.\n" +
+	",_inproxy_dial_broker_client_acquire_durationJ\x04\b\x1e\x10\x1fBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDescOnce sync.Once

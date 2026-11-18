@@ -72,11 +72,11 @@ var (
 	ErrPortMappingDisabled   = errors.New("port mapping is disabled")
 )
 
-// errProtocolChangedDuringCreate is returned (wrapped in NoMappingError) when
-// SetProtocol changes the requested protocol while a mapping create is in
-// flight. The stale mapping is discarded rather than published, so the client
-// never caches a mapping for a protocol it is no longer configured for.
-var errProtocolChangedDuringCreate = errors.New("port mapping protocol changed during creation")
+// errMappingInvalidated is returned (wrapped in NoMappingError) when the
+// client was closed, or the mapping invalidated by a reconfiguration or
+// gateway change, while a create was in flight. A mapping the gateway did
+// create is released rather than published.
+var errMappingInvalidated = errors.New("port mapping invalidated during creation")
 
 // ProbeResult is the result of a portmapper probe, saying which port mapping
 // protocols were discovered. It replaces tailscale.com/net/portmapper/
@@ -197,6 +197,11 @@ type Client struct {
 	// a port mapping (whether GetCachedMappingOrStartCreatingOne kicked
 	// off a createMapping goroutine).
 	runningCreate bool
+	// mappingGeneration counts invalidations of the active mapping. A create
+	// publishes its result only if the generation it started under is still
+	// current, so a mapping completed after Close, a reconfiguration, or a
+	// gateway change is released instead of leaked on the gateway.
+	mappingGeneration uint64
 
 	lastMyIP netip.Addr
 	lastGW   netip.Addr
@@ -574,12 +579,23 @@ func (c *Client) invalidateMappingsLocked(releaseOld bool) {
 // mapping parameter does not make the network's discovery results stale.
 // c.mu must be held.
 func (c *Client) invalidateMappingLocked(releaseOld bool) {
+	c.mappingGeneration++
 	if c.mapping != nil {
 		if releaseOld {
-			c.mapping.Release(context.Background())
+			releaseMapping(c.mapping)
 		}
 		c.mapping = nil
 	}
+}
+
+// releaseTimeout bounds a mapping release. UPnP's is a SOAP request, and the
+// callers hold c.mu, so an unresponsive gateway must not wedge the client.
+const releaseTimeout = 3 * time.Second
+
+func releaseMapping(m mapping) {
+	ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+	defer cancel()
+	m.Release(ctx)
 }
 
 func (c *Client) sawPMPRecently() bool {
@@ -685,7 +701,7 @@ func (c *Client) GetCachedMappingOrStartCreatingOne() (external netip.AddrPort, 
 //
 // c.mu must be held.
 func (c *Client) maybeStartMappingLocked() {
-	if !c.runningCreate {
+	if !c.closed && !c.runningCreate {
 		c.runningCreate = true
 		go c.createMapping()
 	}
@@ -795,6 +811,11 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 	c.mu.Lock()
 	localPort := c.localPort
 	protocol := c.protocol
+	generation := c.mappingGeneration
+	if c.closed {
+		c.mu.Unlock()
+		return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
+	}
 	internalAddr := netip.AddrPortFrom(myIP, localPort)
 
 	// prevPort is the port we had most previously, if any. We try
@@ -826,7 +847,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 
 	if c.debug.DisablePCP() && c.debug.DisablePMP() {
 		c.mu.Unlock()
-		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort); ok {
+		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
 			return nil, external, nil
 		}
 		c.vlogf("fallback to UPnP due to PCP and PMP being disabled failed")
@@ -857,7 +878,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 	if c.lastProbe.After(now.Add(-5*time.Second)) && !haveRecentPMP && !haveRecentPCP {
 		c.mu.Unlock()
 		// fallback to UPnP portmapping
-		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort); ok {
+		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
 			return nil, external, nil
 		}
 		c.vlogf("fallback to UPnP due to no PCP and PMP failed")
@@ -917,7 +938,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 				return nil, netip.AddrPort{}, err
 			}
 			// fallback to UPnP portmapping
-			if mapping, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort); ok {
+			if mapping, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
 				return nil, mapping, nil
 			}
 			return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
@@ -960,15 +981,13 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 				pcpMapping.internal = m.internal
 				pcpMapping.gw = netip.AddrPortFrom(gw, c.pxpPort())
 				c.mu.Lock()
-				// Don't publish a mapping if SetProtocol changed the requested
-				// protocol while this create was in flight. The mapping was
-				// already created on the gateway, so release it -- without
-				// holding c.mu -- to avoid leaving an orphaned external port
-				// open until lease expiry.
-				if c.protocol != pcpMapping.protocol {
+				// The mapping exists on the gateway. If the client was closed
+				// or the mapping invalidated meanwhile, release it -- without
+				// holding c.mu -- rather than leak it until lease expiry.
+				if c.closed || c.mappingGeneration != generation {
 					c.mu.Unlock()
-					pcpMapping.Release(ctx)
-					return nil, netip.AddrPort{}, NoMappingError{errProtocolChangedDuringCreate}
+					releaseMapping(pcpMapping)
+					return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
 				}
 				c.mapping = pcpMapping
 				c.mu.Unlock()
@@ -981,14 +1000,13 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 
 		if m.externalValid() {
 			c.mu.Lock()
-			// Don't publish a mapping if SetProtocol changed the requested
-			// protocol while this create was in flight. The mapping was already
-			// created on the gateway, so release it -- without holding c.mu --
-			// to avoid leaving an orphaned external port open until lease expiry.
-			if c.protocol != m.protocol {
+			// The mapping exists on the gateway. If the client was closed or
+			// the mapping invalidated meanwhile, release it -- without holding
+			// c.mu -- rather than leak it until lease expiry.
+			if c.closed || c.mappingGeneration != generation {
 				c.mu.Unlock()
-				m.Release(ctx)
-				return nil, netip.AddrPort{}, NoMappingError{errProtocolChangedDuringCreate}
+				releaseMapping(m)
+				return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
 			}
 			c.mapping = m
 			c.mu.Unlock()

@@ -52,27 +52,46 @@ func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
 	return androidIPRouteGateway(ifaceName)
 }
 
-// androidIPRouteGateway parses the output of `/system/bin/ip route show table
-// 0`, looking for a line like:
+// defaultRoutes returns every IPv4 default route, from /proc/net/route when
+// readable and otherwise from `ip route`, as gatewayForInterface does.
+func defaultRoutes(ifaceName string) []defaultRoute {
+	if routes := procNetDefaultRoutes(ifaceName); len(routes) > 0 {
+		return routes
+	}
+	return androidIPRoutes(ifaceName)
+}
+
+// androidIPRouteGateway returns the first IPv4 default gateway reported by
+// `ip route`; see androidIPRoutes.
+func androidIPRouteGateway(ifaceName string) (netip.Addr, bool) {
+	routes := androidIPRoutes(ifaceName)
+	if len(routes) == 0 {
+		return netip.Addr{}, false
+	}
+	return routes[0].gateway, true
+}
+
+// androidIPRoutes parses the output of `/system/bin/ip route show table 0`,
+// collecting lines like:
 //
 //	default via 10.0.2.2 dev radio0 table 1016 proto static mtu 1500
 //
-// If ifaceName is non-empty, only the matching "dev" line is used.
-func androidIPRouteGateway(ifaceName string) (netip.Addr, bool) {
+// If ifaceName is non-empty, only matching "dev" lines are used.
+func androidIPRoutes(ifaceName string) []defaultRoute {
 	cmd := exec.Command("/system/bin/ip", "route", "show", "table", "0")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return netip.Addr{}, false
+		return nil
 	}
 	if err := cmd.Start(); err != nil {
-		return netip.Addr{}, false
+		return nil
 	}
 	defer func() {
 		cmd.Process.Kill()
 		cmd.Wait()
 	}()
 
-	var ret netip.Addr
+	var routes []defaultRoute
 	sc := bufio.NewScanner(out)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
@@ -87,8 +106,7 @@ func androidIPRouteGateway(ifaceName string) (netip.Addr, bool) {
 		if err != nil || !ip.Is4() {
 			continue
 		}
-		ret = ip
-		break
+		routes = append(routes, defaultRoute{ifaceName: fields[4], gateway: ip})
 	}
-	return ret, ret.IsValid()
+	return routes
 }

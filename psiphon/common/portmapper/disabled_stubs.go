@@ -53,6 +53,7 @@ func (c *Client) getUPnPPortMapping(
 	gw netip.Addr,
 	internal netip.AddrPort,
 	prevPort uint16,
+	generation uint64,
 ) (external netip.AddrPort, ok bool) {
 	return netip.AddrPort{}, false
 }

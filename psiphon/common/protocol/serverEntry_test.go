@@ -371,10 +371,25 @@ func TestIsValidInproxyDialAddress(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
 			if testCase.isValid != serverEntry.IsValidInproxyDialAddress(
-				testCase.networkProtocol, testCase.dialHost, testCase.dialPortNumber) {
+				testCase.networkProtocol, testCase.dialHost, testCase.dialPortNumber, true) {
 
 				t.Errorf("unexpected IsValidInproxyDialAddress result")
 			}
 		})
+	}
+
+	serverEntry.MeekFrontingAddresses = []string{"front.example", "192.0.2.1"}
+	for _, regex := range []string{"", `front[.]example|192[.]0[.]2[.]1`} {
+		serverEntry.MeekFrontingAddressesRegex = regex
+		for _, host := range serverEntry.MeekFrontingAddresses {
+			for _, allow := range []bool{false, true} {
+				if got := serverEntry.IsValidInproxyDialAddress("tcp", host, 443, allow); got != allow {
+					t.Errorf("fronted host=%s regex=%q allow=%t: got %t", host, regex, allow, got)
+				}
+			}
+		}
+	}
+	if !serverEntry.IsValidInproxyDialAddress("tcp", serverEntry.IpAddress, 1, false) {
+		t.Error("direct dial rejected with fronting disabled")
 	}
 }

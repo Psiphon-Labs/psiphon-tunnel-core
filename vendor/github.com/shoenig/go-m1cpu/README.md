@@ -6,7 +6,7 @@
 
 The `go-m1cpu` module is a library for inspecting Apple Silicon CPUs in Go.
 
-Use the `m1cpu` Go package for looking up the CPU frequency for Apple M1 and M2 CPUs.
+Use the `m1cpu` Go package for looking up the CPU frequency for Apple Silicon M-series CPUs, M1 and later.
 
 # Install
 
@@ -23,7 +23,7 @@ framework, which is accessible only through system C libraries.
 
 # Example
 
-Simple Go program to print Apple Silicon M1/M2 CPU speeds.
+Simple Go program to print Apple Silicon CPU speeds.
 
 ```go
 package main

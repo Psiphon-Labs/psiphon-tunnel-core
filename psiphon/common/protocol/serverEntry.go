@@ -882,7 +882,7 @@ func (serverEntry *ServerEntry) GetTLSSessionCacheKeyAddress(tunnelProtocol stri
 // - TAPDANCE-OSSH and CONJURE-OSSH are not supported.
 // - The host header is not considered in the case of fronted protocols.
 func (serverEntry *ServerEntry) IsValidInproxyDialAddress(
-	networkProtocol string, dialHost string, dialPortNumber int) bool {
+	networkProtocol string, dialHost string, dialPortNumber int, allowDomainFronted bool) bool {
 
 	// The TapDance and Conjure destination addresses are not included
 	// in the server entry, so TAPDANCE-OSSH and CONJURE-OSSH dial
@@ -920,8 +920,12 @@ func (serverEntry *ServerEntry) IsValidInproxyDialAddress(
 
 		} else {
 
-			// For fronted protocols, the destination host may be domain and
-			// must match either MeekFrontingAddressesRegex or
+			if !allowDomainFronted {
+				continue
+			}
+
+			// For fronted protocols, the destination host may be a domain name
+			// and must match either MeekFrontingAddressesRegex or
 			// MeekFrontingAddresses. As in psiphon.selectFrontingParameters,
 			// MeekFrontingAddressesRegex takes precedence when not empty.
 			//

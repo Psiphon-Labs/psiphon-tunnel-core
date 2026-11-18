@@ -27,6 +27,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -228,6 +229,22 @@ func TestHttpProxyOverUnixSocket(t *testing.T) {
 	}
 	if string(body) != "hello-http" {
 		t.Fatalf("expected 'hello-http', got %q", string(body))
+	}
+
+	req, err = http.NewRequest("GET", "http://proxy/direct/"+url.QueryEscape(originURL), nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %s", err)
+	}
+	if err := req.Write(conn); err != nil {
+		t.Fatalf("Write failed: %s", err)
+	}
+	resp, err = http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		t.Fatalf("ReadResponse failed: %s", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected /direct/ to be disabled, got status %d", resp.StatusCode)
 	}
 }
 

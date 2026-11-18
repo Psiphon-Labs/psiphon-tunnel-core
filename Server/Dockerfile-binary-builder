@@ -1,6 +1,7 @@
-FROM alpine:3.23.4
+FROM alpine:3.23.4@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
 
 ENV GOLANG_VERSION 1.26.10
+ENV GOLANG_SRC_SHA256 fd63e883ba2f2bfca93c1646b31ebef63e2b1e4d2b317c9789d976a68d81f36f
 ENV GOLANG_SRC_URL https://go.dev/dl/go$GOLANG_VERSION.src.tar.gz
 
 RUN set -ex \
@@ -17,6 +18,7 @@ RUN set -ex \
 	&& export GOROOT_BOOTSTRAP="$(go env GOROOT)" \
 	\
 	&& wget -q "$GOLANG_SRC_URL" -O golang.tar.gz \
+	&& echo "$GOLANG_SRC_SHA256  golang.tar.gz" | sha256sum -c - \
 	&& tar -C /usr/local -xzf golang.tar.gz \
 	&& rm golang.tar.gz \
 	&& cd /usr/local/go/src \

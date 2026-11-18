@@ -42,19 +42,15 @@ type testBrokerDialCoordinator struct {
 	brokerRootObfuscationSecret       ObfuscationSecret
 	brokerClientRoundTripper          RoundTripper
 	brokerClientRoundTripperSucceeded func(RoundTripper)
-	brokerClientRoundTripperFailed    func(RoundTripper)
+	brokerClientRoundTripperFailed    func(RoundTripper, error)
 	brokerClientNoMatch               func(RoundTripper)
+	brokerClientResponseReceived      func(RoundTripper, bool)
 	metricsForBrokerRequests          common.LogFields
 	sessionHandshakeRoundTripTimeout  time.Duration
 	announceRequestTimeout            time.Duration
-	announceDelay                     time.Duration
-	announceMaxBackoffDelay           time.Duration
-	announceDelayJitter               float64
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
 	offerRequestPersonalTimeout       time.Duration
-	offerRetryDelay                   time.Duration
-	offerRetryJitter                  float64
 	relayedPacketRequestTimeout       time.Duration
 	dslRequestTimeout                 time.Duration
 }
@@ -89,6 +85,10 @@ func (t *testBrokerDialCoordinator) DisableWaitToShareSession() bool {
 	return t.disableWaitToShareSession
 }
 
+func (t *testBrokerDialCoordinator) BrokerClientID() string {
+	return ""
+}
+
 func (t *testBrokerDialCoordinator) BrokerClientPrivateKey() SessionPrivateKey {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -119,16 +119,22 @@ func (t *testBrokerDialCoordinator) BrokerClientRoundTripperSucceeded(roundTripp
 	t.brokerClientRoundTripperSucceeded(roundTripper)
 }
 
-func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper RoundTripper) {
+func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper RoundTripper, err error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	t.brokerClientRoundTripperFailed(roundTripper)
+	t.brokerClientRoundTripperFailed(roundTripper, err)
 }
 
-func (t *testBrokerDialCoordinator) BrokerClientNoMatch(roundTripper RoundTripper) {
+func (t *testBrokerDialCoordinator) BrokerClientResponseReceived(
+	roundTripper RoundTripper, retryableNoMatch bool) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	t.brokerClientNoMatch(roundTripper)
+	if t.brokerClientResponseReceived != nil {
+		t.brokerClientResponseReceived(roundTripper, retryableNoMatch)
+	}
+	if retryableNoMatch && t.brokerClientNoMatch != nil {
+		t.brokerClientNoMatch(roundTripper)
+	}
 }
 
 func (t *testBrokerDialCoordinator) MetricsForBrokerRequests() common.LogFields {
@@ -149,24 +155,6 @@ func (t *testBrokerDialCoordinator) AnnounceRequestTimeout() time.Duration {
 	return t.announceRequestTimeout
 }
 
-func (t *testBrokerDialCoordinator) AnnounceDelay() time.Duration {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.announceDelay
-}
-
-func (t *testBrokerDialCoordinator) AnnounceMaxBackoffDelay() time.Duration {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.announceMaxBackoffDelay
-}
-
-func (t *testBrokerDialCoordinator) AnnounceDelayJitter() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.announceDelayJitter
-}
-
 func (t *testBrokerDialCoordinator) AnswerRequestTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -183,18 +171,6 @@ func (t *testBrokerDialCoordinator) OfferRequestPersonalTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.offerRequestPersonalTimeout
-}
-
-func (t *testBrokerDialCoordinator) OfferRetryDelay() time.Duration {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.offerRetryDelay
-}
-
-func (t *testBrokerDialCoordinator) OfferRetryJitter() float64 {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	return t.offerRetryJitter
 }
 
 func (t *testBrokerDialCoordinator) RelayedPacketRequestTimeout() time.Duration {

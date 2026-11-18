@@ -109,6 +109,9 @@ func ExportExchangePayload(config *Config) string {
 // will be the first candidate in any establishment that begins after the
 // import.
 //
+// Exchange assumes a trusted peer. A signed entry may replace a newer stored
+// version, since version ordering does not establish which entry is currently usable.
+//
 // The current network ID. This may not be the same network as the exporter,
 // even if the client-to-client exchange occurs in real time. For example, if
 // the exchange is performed over NFC between two devices, they may be on
@@ -223,6 +226,9 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 	err = json.Unmarshal(payloadJSON, &payload)
 	if err != nil {
 		return errors.Trace(err)
+	}
+	if payload == nil {
+		return errors.TraceNew("missing exchange payload")
 	}
 
 	// Explicitly strip any unsigned fields that should not be exchanged or
