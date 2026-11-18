@@ -32,10 +32,8 @@ import (
 )
 
 // This test isn't built with the race detector, which enables pointer
-// checks: the vendored netlink package converts each multipath next hop to
-// a struct that needs 8-byte alignment, at an offset that may be only
-// 4-byte aligned, and the check stops the test binary. The fields it reads
-// are 4-byte aligned.
+// checks that stop the test binary when the vendored netlink package
+// reads the test's multipath routes. See getHostIPv4Subnets.
 
 // TestExclusionsGetHostIPv4SubnetsNamespace sets up interfaces, addresses
 // and routes in a new network namespace, and checks which subnets are

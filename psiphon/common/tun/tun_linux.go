@@ -220,6 +220,13 @@ const hostSubnetDiscoverySupported = true
 // NLM_F_DUMP_INTR, so a route or address change during the dump may give
 // a partial result without an error. Discovery runs once, at startup, on a
 // host whose network configuration is expected to be static.
+//
+// Limitation: in builds with pointer checks, such as -race, -asan and
+// -msan builds, the vendored netlink package stops the program when it
+// reads a multipath route: it converts each next hop to a struct that
+// needs 8-byte alignment, at an offset that may be only 4-byte aligned.
+// The fields it reads are 4-byte aligned, so other builds aren't
+// affected.
 func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
 
 	// Skip routes and addresses on tunDeviceName.
