@@ -37,7 +37,9 @@ import (
 
 // TestExclusionsGetHostIPv4SubnetsNamespace sets up interfaces, addresses
 // and routes in a new network namespace, and checks which subnets are
-// reported. It must run as root.
+// reported. It must run as root. The namespace starts empty and is removed
+// when the test ends, so the test doesn't change the host's network
+// configuration, and the reported subnets are exactly those it sets up.
 func TestExclusionsGetHostIPv4SubnetsNamespace(t *testing.T) {
 
 	if os.Geteuid() != 0 {

@@ -1030,6 +1030,8 @@ func (server *Server) allocateIndex(newSession *session) error {
 
 	excluded := server.excludedIndexes
 
+	// NewServer ensures at least minAvailableAddresses; this handles an
+	// excludedIndexes built without that check, such as in tests.
 	if excluded.available() == 0 {
 		return errors.TraceNew("no assignable index")
 	}
