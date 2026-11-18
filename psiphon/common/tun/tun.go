@@ -263,8 +263,9 @@ type ServerConfig struct {
 	// address range from which client addresses are not assigned. On
 	// supported platforms, subnets routed through other host interfaces
 	// are discovered at startup and excluded automatically;
-	// ExcludedIPv4Subnets adds to those. Each subnet must pass
-	// ValidateExcludedIPv4Subnet. See exclusions.go.
+	// ExcludedIPv4Subnets adds to those. NewServer fails if a subnet
+	// doesn't pass ValidateExcludedIPv4Subnet, or if the excluded subnets
+	// leave too few client addresses. See exclusions.go.
 	ExcludedIPv4Subnets []*net.IPNet
 
 	// DisableHostSubnetDiscovery turns off the discovery of host subnets,
@@ -1029,13 +1030,19 @@ func (server *Server) allocateIndex(newSession *session) error {
 
 	excluded := server.excludedIndexes
 
+	if excluded.available() == 0 {
+		return errors.TraceNew("no assignable index")
+	}
+
 	// Start at a random index that may be assigned and isn't excluded; see
 	// excludedIndexes.randomIndex.
 	index := excluded.randomIndex()
 
 	idleExpiry := server.sessionIdleExpiry()
 
-	for tries := 0; tries < 100000; index++ {
+	maxTries := excluded.maxAllocateTries()
+
+	for tries := 0; tries < maxTries; index++ {
 
 		tries++
 

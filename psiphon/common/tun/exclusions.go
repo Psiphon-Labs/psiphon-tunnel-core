@@ -20,6 +20,8 @@
 package tun
 
 import (
+	"bytes"
+	"fmt"
 	"net"
 	"slices"
 	"strings"
@@ -40,6 +42,12 @@ import (
 // where supported, subnets discovered from the host's routes and interface
 // addresses. ServerConfig.DisableHostSubnetDiscovery turns discovery off.
 //
+// The server fails to start when the excluded subnets leave fewer than
+// minAvailableAddresses client addresses. A host route or address prefix
+// equal to privateSubnetIPv4 on another interface can't be excluded, since
+// excluding it would leave no addresses; the server logs a warning, as for
+// a host subnet containing the server tun device address.
+//
 // Only IPv4 subnets are excluded. Client IPv6 addresses are in
 // privateSubnetIPv6, a randomly chosen unique local prefix that host
 // networks aren't expected to use. Each index maps to one IPv4 and one
@@ -52,10 +60,19 @@ import (
 // ExcludedIPv4Subnets to exclude them regardless.
 
 // minAvailableAddresses is the number of assignable client addresses below
-// which the excluded subnets are logged as a warning. Each client session
-// holds one address until it expires (see SessionIdleExpirySeconds), and a
-// server has far fewer sessions than this.
+// which the server fails to start. Each client session holds one address
+// until it has had no client attached for SessionIdleExpirySeconds, so a
+// server holds at most tens of thousands of addresses at once. Keeping that
+// a small share of the available addresses keeps allocateIndex searches
+// short, and keeps the reuse of an expired session's address rare; see
+// resetRouting. Falling below this takes excluding about 94% of
+// privateSubnetIPv4.
 const minAvailableAddresses = 1 << 20
+
+// maxLoggedExcludedSubnets is the number of excluded subnets listed in logs
+// and errors. A host may have many routes, such as one per gateway or one
+// per address.
+const maxLoggedExcludedSubnets = 32
 
 // indexRange is an inclusive range of session indexes.
 type indexRange struct {
@@ -63,11 +80,15 @@ type indexRange struct {
 }
 
 // excludedIndexes is a sorted list of non-overlapping session index ranges
-// which must not be assigned. subnets lists the excluded subnets, for
-// logging.
+// which must not be assigned. availableCount is the number of indexes that
+// allocateIndex may assign, less the excluded indexes. subnets lists up to
+// maxLoggedExcludedSubnets of the excluded subnets, for logging, and
+// omittedSubnets is the number not listed.
 type excludedIndexes struct {
-	ranges  []indexRange
-	subnets []string
+	ranges         []indexRange
+	availableCount int
+	subnets        []string
+	omittedSubnets int
 }
 
 // newExcludedIndexes maps subnets to session index ranges. Subnets outside
@@ -101,22 +122,31 @@ func newExcludedIndexes(subnets []*net.IPNet) *excludedIndexes {
 
 	// For logging, list each subnet once, omitting subnets covered by
 	// another listed subnet, such as host addresses within their prefix.
+	// Two subnets either don't overlap or one contains the other. Sorted
+	// by address, with shorter prefixes first, a subnet that contains
+	// another comes before it, and a subnet is covered by a listed subnet
+	// only if it's covered by the last one listed.
+	slices.SortFunc(included, func(a, b *net.IPNet) int {
+		if c := bytes.Compare(a.IP, b.IP); c != 0 {
+			return c
+		}
+		aPrefixLength, _ := a.Mask.Size()
+		bPrefixLength, _ := b.Mask.Size()
+		return aPrefixLength - bPrefixLength
+	})
 	var names []string
-	for i, subnet := range included {
-		prefixLength, _ := subnet.Mask.Size()
-		covered := false
-		for j, other := range included {
-			otherPrefixLength, _ := other.Mask.Size()
-			if i != j && other.Contains(subnet.IP) &&
-				(otherPrefixLength < prefixLength ||
-					(otherPrefixLength == prefixLength && j < i)) {
-				covered = true
-				break
-			}
+	omitted := 0
+	var lastListed *net.IPNet
+	for _, subnet := range included {
+		if lastListed != nil && lastListed.Contains(subnet.IP) {
+			continue
 		}
-		if !covered {
-			names = append(names, subnet.String())
+		lastListed = subnet
+		if len(names) == maxLoggedExcludedSubnets {
+			omitted++
+			continue
 		}
+		names = append(names, subnet.String())
 	}
 
 	slices.SortFunc(ranges, func(a, b indexRange) int {
@@ -132,9 +162,19 @@ func newExcludedIndexes(subnets []*net.IPNet) *excludedIndexes {
 		merged = append(merged, r)
 	}
 
-	slices.Sort(names)
+	availableCount := lastAssignableIndex - firstAssignableIndex + 1
+	for _, r := range merged {
+		if r, ok := assignableRange(r); ok {
+			availableCount -= int(r.last-r.first) + 1
+		}
+	}
 
-	return &excludedIndexes{ranges: merged, subnets: names}
+	return &excludedIndexes{
+		ranges:         merged,
+		availableCount: availableCount,
+		subnets:        names,
+		omittedSubnets: omitted,
+	}
 }
 
 // lastExcluded returns the last index of the excluded range containing
@@ -176,16 +216,27 @@ func assignableRange(r indexRange) (indexRange, bool) {
 // available returns the number of indexes that allocateIndex may assign,
 // less the excluded indexes.
 func (e *excludedIndexes) available() int {
-	n := lastAssignableIndex - firstAssignableIndex + 1
 	if e == nil {
-		return n
+		return lastAssignableIndex - firstAssignableIndex + 1
 	}
-	for _, r := range e.ranges {
-		if r, ok := assignableRange(r); ok {
-			n -= int(r.last-r.first) + 1
-		}
+	return e.availableCount
+}
+
+// allocateIndexMaxTries is the most tries allocateIndex makes.
+const allocateIndexMaxTries = 100000
+
+// maxAllocateTries returns the number of tries allocateIndex makes before
+// it gives up. A try steps over one index, or skips one excluded range,
+// or one of the reserved indexes, or wraps to the start; so one pass over
+// all indexes takes at most available() + len(ranges) + 4 tries. Twice
+// that leaves room for reaping an expired session, which retries the same
+// index. With few indexes available, this ends a failing search after
+// one pass instead of after allocateIndexMaxTries.
+func (e *excludedIndexes) maxAllocateTries() int {
+	if e == nil {
+		return allocateIndexMaxTries
 	}
-	return n
+	return min(allocateIndexMaxTries, 2*(e.available()+len(e.ranges)+4))
 }
 
 // randomIndex returns an index chosen uniformly at random from the indexes
@@ -198,7 +249,7 @@ func (e *excludedIndexes) available() int {
 // indexes, sessions would collect there, and each new search would step
 // through all of them, until searches ran out of tries.
 //
-// This costs two passes over the excluded ranges, which are few.
+// This costs a pass over the excluded ranges, which are few.
 func (e *excludedIndexes) randomIndex() int32 {
 	n := e.available()
 	if n <= 0 {
@@ -238,7 +289,11 @@ func (e *excludedIndexes) String() string {
 	if e == nil {
 		return ""
 	}
-	return strings.Join(e.subnets, ",")
+	s := strings.Join(e.subnets, ",")
+	if e.omittedSubnets > 0 {
+		s += fmt.Sprintf(" (%d more)", e.omittedSubnets)
+	}
+	return s
 }
 
 // ValidateExcludedIPv4Subnet returns an error if subnet can't be used in
@@ -266,34 +321,66 @@ func ValidateExcludedIPv4Subnet(subnet *net.IPNet) error {
 
 // makeExcludedIndexes returns the excluded indexes for
 // config.ExcludedIPv4Subnets and, unless config.DisableHostSubnetDiscovery
-// is set, the host subnets discovered by getHostIPv4Subnets, and logs the
-// excluded subnets.
+// is set, the host subnets discovered by getHostIPv4Subnets. See
+// newServerExcludedIndexes.
 func makeExcludedIndexes(
 	config *ServerConfig, tunDeviceName string) (*excludedIndexes, error) {
 
-	subnets := append([]*net.IPNet(nil), config.ExcludedIPv4Subnets...)
-
-	if !config.DisableHostSubnetDiscovery {
-		hostSubnets, err := getHostIPv4Subnets(tunDeviceName)
+	for _, subnet := range config.ExcludedIPv4Subnets {
+		err := ValidateExcludedIPv4Subnet(subnet)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		subnets = append(subnets, hostSubnets...)
 	}
+
+	discovery := hostSubnetDiscoverySupported &&
+		!config.DisableHostSubnetDiscovery
+
+	var hostSubnets []*net.IPNet
+	if discovery {
+		var err error
+		hostSubnets, err = getHostIPv4Subnets(tunDeviceName)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	excluded, err := newServerExcludedIndexes(
+		config.Logger, config.ExcludedIPv4Subnets, hostSubnets, discovery)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return excluded, nil
+}
+
+// newServerExcludedIndexes returns the excluded indexes for the configured
+// and discovered host subnets, and logs them. It returns an error when
+// fewer than minAvailableAddresses client addresses remain, and logs a
+// warning for host configurations that it can't work around.
+// hostSubnetDiscovery is logged, and is whether discovery ran.
+func newServerExcludedIndexes(
+	logger common.Logger,
+	configuredSubnets []*net.IPNet,
+	hostSubnets []*net.IPNet,
+	hostSubnetDiscovery bool) (*excludedIndexes, error) {
+
+	subnets := append(
+		append([]*net.IPNet(nil), configuredSubnets...), hostSubnets...)
 
 	excluded := newExcludedIndexes(subnets)
 
-	availableAddresses := excluded.available()
-	logger := config.Logger.WithTraceFields(
-		common.LogFields{
-			"excludedSubnets":     excluded.String(),
-			"availableAddresses":  availableAddresses,
-			"hostSubnetDiscovery": !config.DisableHostSubnetDiscovery,
-		})
-	if availableAddresses < minAvailableAddresses {
-		logger.Warning("packet tunnel excluded subnets leave few client addresses")
-	} else {
-		logger.Info("packet tunnel excluded subnets")
+	// A host route or address prefix equal to privateSubnetIPv4 on another
+	// interface, such as a static 10.0.0.0/8 route or a 10.x.y.z/8
+	// address, ties with the tun device's own route. Which route the host
+	// uses then isn't determined by prefix length, and replies to all
+	// clients may leave through the other interface. Excluding it would
+	// leave no addresses, so the server logs a warning and continues, as
+	// for the server tun device address below. Configured subnets can't be
+	// equal to privateSubnetIPv4; see ValidateExcludedIPv4Subnet.
+	if containsPrivateSubnetIPv4(hostSubnets) {
+		logger.WithTraceFields(
+			common.LogFields{"privateSubnet": privateSubnetIPv4.String()}).Warning(
+			"packet tunnel private subnet is also routed through another interface")
 	}
 
 	// The server tun device address, 10.0.0.1, is fixed, so it can't be
@@ -312,7 +399,7 @@ func makeExcludedIndexes(
 	serverIPv4 := serverIP.To4()
 	serverIndex := int32(serverIPv4[1])<<16 | int32(serverIPv4[2])<<8 | int32(serverIPv4[3])
 	if excluded.contains(serverIndex) {
-		config.Logger.WithTraceFields(
+		logger.WithTraceFields(
 			common.LogFields{
 				"excludedSubnets":        excluded.String(),
 				"serverTunDeviceAddress": serverIP.String(),
@@ -320,5 +407,37 @@ func makeExcludedIndexes(
 			"packet tunnel server tun device address conflicts with host subnet")
 	}
 
+	availableAddresses := excluded.available()
+	if availableAddresses < minAvailableAddresses {
+		return nil, errors.Tracef(
+			"excluded subnets leave %d client addresses, fewer than %d: %s",
+			availableAddresses, minAvailableAddresses, excluded)
+	}
+
+	logger.WithTraceFields(
+		common.LogFields{
+			"excludedSubnets":     excluded.String(),
+			"availableAddresses":  availableAddresses,
+			"hostSubnetDiscovery": hostSubnetDiscovery,
+		}).Info("packet tunnel excluded subnets")
+
 	return excluded, nil
+}
+
+// containsPrivateSubnetIPv4 returns true if a subnet in subnets has the
+// same prefix as privateSubnetIPv4, such as 10.0.0.0/8 or 10.1.2.3/8.
+func containsPrivateSubnetIPv4(subnets []*net.IPNet) bool {
+	privatePrefixLength, _ := privateSubnetIPv4.Mask.Size()
+	for _, subnet := range subnets {
+		if subnet == nil {
+			continue
+		}
+		prefixLength, bits := subnet.Mask.Size()
+		if subnet.IP.To4() != nil && bits == 32 &&
+			prefixLength == privatePrefixLength &&
+			privateSubnetIPv4.Contains(subnet.IP) {
+			return true
+		}
+	}
+	return false
 }

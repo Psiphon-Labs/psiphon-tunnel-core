@@ -804,7 +804,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	for _, s := range config.PacketTunnelExcludedIPv4Subnets {
 		_, subnet, err := net.ParseCIDR(s)
 		if err != nil {
-			return nil, errors.Tracef("invalid PacketTunnelExcludedIPv4Subnets: %v", err)
+			return nil, errors.Tracef("invalid PacketTunnelExcludedIPv4Subnets: %w", err)
 		}
 		err = tun.ValidateExcludedIPv4Subnet(subnet)
 		if err != nil {

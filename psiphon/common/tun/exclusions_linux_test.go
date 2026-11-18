@@ -27,7 +27,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
-func TestGetHostIPv4Subnets(t *testing.T) {
+func TestExclusionsGetHostIPv4Subnets(t *testing.T) {
 
 	if _, err := getHostIPv4Subnets("tun-does-not-exist"); err == nil {
 		t.Errorf("getHostIPv4Subnets: no error for a missing device")
@@ -56,16 +56,38 @@ func TestGetHostIPv4Subnets(t *testing.T) {
 		t.Fatalf("getHostIPv4Subnets: %v", err)
 	}
 
-	tunAddrs := make(map[string]bool)
-	if iface, err := net.InterfaceByName(tunDeviceName); err == nil {
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			tunAddrs[addr.String()] = true
+	// The tun device's own routes include its address prefix, its
+	// address, and its broadcast address. None may be reported.
+	tunIface, err := net.InterfaceByName(tunDeviceName)
+	if err != nil {
+		t.Fatalf("InterfaceByName: %v", err)
+	}
+	tunAddrs, err := tunIface.Addrs()
+	if err != nil {
+		t.Fatalf("Addrs: %v", err)
+	}
+	tunSubnets := make(map[string]bool)
+	for _, addr := range tunAddrs {
+		IPNet, ok := addr.(*net.IPNet)
+		if !ok || IPNet.IP.To4() == nil {
+			continue
 		}
+		IP := IPNet.IP.To4()
+		broadcast := make(net.IP, 4)
+		for i := range IP {
+			broadcast[i] = IP[i] | ^IPNet.Mask[i]
+		}
+		tunSubnets[IPNet.String()] = true
+		tunSubnets[(&net.IPNet{IP: IP.Mask(IPNet.Mask), Mask: IPNet.Mask}).String()] = true
+		tunSubnets[hostSubnet(IP).String()] = true
+		tunSubnets[hostSubnet(broadcast).String()] = true
+	}
+	if len(tunSubnets) == 0 {
+		t.Fatalf("%s has no IPv4 address", tunDeviceName)
 	}
 	for _, subnet := range subnets {
-		if tunAddrs[subnet.String()] {
-			t.Errorf("tun device address %s reported", subnet)
+		if tunSubnets[subnet.String()] {
+			t.Errorf("tun device subnet %s reported", subnet)
 		}
 	}
 
@@ -78,21 +100,36 @@ func TestGetHostIPv4Subnets(t *testing.T) {
 		return false
 	}
 
-	// Every IPv4 interface address prefix must be reported.
-	addrs, err := net.InterfaceAddrs()
+	// Every IPv4 interface address prefix must be reported. Point-to-point
+	// interfaces are skipped, since the standard library and netlink
+	// report their addresses differently.
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		t.Fatalf("InterfaceAddrs: %v", err)
+		t.Fatalf("Interfaces: %v", err)
 	}
-	for _, addr := range addrs {
-		IPNet, ok := addr.(*net.IPNet)
-		if !ok || IPNet.IP.To4() == nil || tunAddrs[IPNet.String()] {
+	for _, iface := range ifaces {
+		if iface.Name == tunDeviceName || iface.Flags&net.FlagPointToPoint != 0 {
 			continue
 		}
-		if !contains(IPNet) {
-			t.Errorf("interface address %s not reported", IPNet)
+		addrs, err := iface.Addrs()
+		if err != nil {
+			t.Fatalf("Addrs: %v", err)
+		}
+		for _, addr := range addrs {
+			IPNet, ok := addr.(*net.IPNet)
+			if !ok || IPNet.IP.To4() == nil {
+				continue
+			}
+			if !contains(IPNet) {
+				t.Errorf("interface address %s not reported", IPNet)
+			}
 		}
 	}
 
 	t.Logf("host subnets: %v", subnets)
 	t.Logf("excluded: %s", newExcludedIndexes(subnets))
+}
+
+func hostSubnet(IP net.IP) *net.IPNet {
+	return &net.IPNet{IP: IP, Mask: net.CIDRMask(32, 32)}
 }

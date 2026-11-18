@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -207,10 +208,18 @@ func setSysctl(key, value string) error {
 	return nil
 }
 
+const hostSubnetDiscoverySupported = true
+
 // getHostIPv4Subnets returns the IPv4 subnets the host reaches through
 // interfaces other than tunDeviceName, the packet tunnel server's own tun
 // device: destinations and gateways of routes in all routing tables, and the
-// subnets of interface addresses. See exclusions.go.
+// subnets of interface addresses, including point-to-point peers. See
+// exclusions.go.
+//
+// Limitation: the vendored netlink package doesn't check for
+// NLM_F_DUMP_INTR, so a route or address change during the dump may give
+// a partial result without an error. Discovery runs once, at startup, on a
+// host whose network configuration is expected to be static.
 func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
 
 	// Skip routes and addresses on tunDeviceName.
@@ -238,6 +247,14 @@ func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
 		if route.LinkIndex == tunIndex {
 			continue
 		}
+		// A multipath route has LinkIndex 0 and an interface per next
+		// hop. Skip it when every next hop is on tunDeviceName.
+		if len(route.MultiPath) > 0 && !slices.ContainsFunc(
+			route.MultiPath, func(nextHop *netlink.NexthopInfo) bool {
+				return nextHop.LinkIndex != tunIndex
+			}) {
+			continue
+		}
 		if route.Dst != nil {
 			subnets = append(subnets, route.Dst)
 		}
@@ -261,6 +278,12 @@ func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
 			continue
 		}
 		subnets = append(subnets, addr.IPNet)
+		// A point-to-point address's peer is normally covered by its
+		// route, but not when the route is missing, such as with
+		// noprefixroute or a link that is down.
+		if addr.Peer != nil {
+			subnets = append(subnets, addr.Peer)
+		}
 	}
 
 	return subnets, nil
