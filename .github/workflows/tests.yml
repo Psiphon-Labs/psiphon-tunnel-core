@@ -68,13 +68,17 @@ jobs:
       # - github.com/sergeyfrolov/bsbuffer: is LGPL-3.0, but may be excluded by
       #   omitting the build tag PSIPHON_ENABLE_REFRACTION_NETWORKING.
       #
+      # - github.com/pion/dtls/v2: disabled due to go-licenses issue 310.
+      #   Previously checked and verified as MIT. Excluded by omitting the
+      #   build tag PSIPHON_ENABLE_REFRACTION_NETWORKING.
+      #
       # Deliberately run before paving CONTROLLER_TEST_CONFIG.
       - name: Check licenses
         if: ${{ matrix.test-type == 'code-vetting' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
-          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer,github.com/pion/dtls/v2 --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses/v2@v2.0.1 check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer,github.com/pion/dtls/v2 --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi
 
       - name: Check known vulnerabilities
         if: ${{ matrix.test-type == 'code-vetting' }}
