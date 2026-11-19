@@ -43,13 +43,12 @@ import (
 // addresses. ServerConfig.DisableHostSubnetDiscovery turns discovery off.
 //
 // Host configurations that exclusion can't work around are logged as
-// warnings, and the server keeps running, since stopping would take down
-// all of its protocols: a host route or address prefix equal to
-// privateSubnetIPv4 on another interface, which can't be excluded without
-// leaving no addresses; a host subnet containing the server tun device
-// address; and excluded subnets that leave fewer than minAvailableAddresses
-// client addresses. With no addresses left, each packet tunnel session
-// fails to start; other protocols are unaffected.
+// warnings: a host route or address prefix equal to privateSubnetIPv4 on
+// another interface, which can't be excluded without leaving no
+// addresses; a host subnet containing the server tun device address; and
+// excluded subnets that leave fewer than minAvailableAddresses client
+// addresses. With no addresses left, each packet tunnel session fails to
+// start.
 //
 // Only IPv4 subnets are excluded. Client IPv6 addresses are in
 // privateSubnetIPv6, a randomly chosen unique local prefix that host
@@ -376,9 +375,9 @@ func newServerExcludedIndexes(
 	// address, ties with the tun device's own route. Which route the host
 	// uses then isn't determined by prefix length, and replies to all
 	// clients may leave through the other interface. Excluding it would
-	// leave no addresses, so log a warning and continue, as for the server
-	// tun device address below. Configured subnets can't be equal to
-	// privateSubnetIPv4; see ValidateExcludedIPv4Subnet.
+	// leave no addresses, so it's logged as a warning instead of returning
+	// an error that would stop the server. Configured subnets can't be equal
+	// to privateSubnetIPv4; see ValidateExcludedIPv4Subnet.
 	if containsPrivateSubnetIPv4(hostSubnets) {
 		logger.WithTraceFields(
 			common.LogFields{"privateSubnet": privateSubnetIPv4.String()}).Warning(
@@ -389,11 +388,9 @@ func newServerExcludedIndexes(
 	// excluded. When a host subnet contains it, for example when it's the
 	// host's default gateway, the host treats 10.0.0.1 as its own address:
 	// packets addressed to it stay on the host instead of reaching that
-	// subnet. Log a warning and continue: a private network with its
-	// gateway at 10.0.0.1 is a common default with some providers, and
-	// stopping would take down all of the server's protocols. Avoid this
-	// host configuration, for example by using a private network outside
-	// of privateSubnetIPv4.
+	// subnet. This is logged as a warning instead of returning an error that
+	// would stop the server. Avoid this host configuration, for example by
+	// using a private network outside of privateSubnetIPv4.
 	//
 	// The transparent DNS address, 10.0.0.2, needs no such check: the server
 	// rewrites packets to and from it before they reach the host.
@@ -409,8 +406,9 @@ func newServerExcludedIndexes(
 			"packet tunnel server tun device address conflicts with host subnet")
 	}
 
-	// Few or no addresses left is logged as a warning, for the same reason:
-	// it affects only the packet tunnel. See minAvailableAddresses.
+	// Few or no addresses left is also logged as a warning instead of
+	// returning an error that would stop the server; see
+	// minAvailableAddresses.
 	availableAddresses := excluded.available()
 	trace := logger.WithTraceFields(
 		common.LogFields{

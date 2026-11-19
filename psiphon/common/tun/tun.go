@@ -102,12 +102,12 @@ Some hosts route parts of 10.0.0.0/8 through other interfaces; the server
 excludes those parts from address assignment. See exclusions.go.
 
 TODO: a host subnet that contains the server tun device address 10.0.0.1,
-such as a provider's default gateway, can't be excluded; the server logs a
-warning. First try to move the host's private network outside 10.0.0.0/8
-with the provider. Where that isn't possible, should the IPv4 address space
-be configurable, for example to 240.0.0.0/8, which has the same number of
-addresses? The other private ranges are smaller, such as 172.16.0.0/12 with
-20 bits, and hosts commonly use them too.
+such as the host's default gateway, can't be excluded; the server logs a
+warning. First try to move the host's private network outside 10.0.0.0/8.
+Where that isn't possible, should the IPv4 address space be configurable,
+for example to 240.0.0.0/8, which has the same number of addresses? The
+other private ranges are smaller, such as 172.16.0.0/12 with 20 bits, and
+hosts commonly use them too.
 
 The server maintains client "sessions". A session maintains client IP
 address state and effectively holds the lease on assigned addresses. If a
