@@ -66,6 +66,12 @@ func resetNATTables(_ *ServerConfig, _ net.IP) error {
 	return errors.Trace(errUnsupported)
 }
 
+const hostSubnetDiscoverySupported = false
+
+func getHostIPv4Subnets(_ string) ([]*net.IPNet, error) {
+	return nil, nil
+}
+
 func configureServerInterface(_ *ServerConfig, _ string) error {
 	return errors.Trace(errUnsupported)
 }

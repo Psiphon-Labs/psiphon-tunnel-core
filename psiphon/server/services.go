@@ -128,6 +128,8 @@ func RunServices(configJSON []byte) (retErr error) {
 			DownstreamPacketQueueSize:   config.PacketTunnelDownstreamPacketQueueSize,
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
 			AllowBogons:                 config.AllowBogons,
+			ExcludedIPv4Subnets:         config.packetTunnelExcludedIPv4Subnets,
+			DisableHostSubnetDiscovery:  config.PacketTunnelDisableHostSubnetDiscovery,
 		})
 		if err != nil {
 			return errors.Trace(err)

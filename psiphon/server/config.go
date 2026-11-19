@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -431,6 +432,19 @@ type Config struct {
 	// tun.ServerConfig.SessionIdleExpirySeconds.
 	PacketTunnelSessionIdleExpirySeconds int `json:",omitempty"`
 
+	// PacketTunnelExcludedIPv4Subnets specifies
+	// tun.ServerConfig.ExcludedIPv4Subnets, in CIDR notation. LoadConfig
+	// fails if an entry is invalid. When the excluded subnets, configured
+	// and discovered, leave few client addresses, psiphond logs a warning
+	// and runs.
+	PacketTunnelExcludedIPv4Subnets []string `json:",omitempty"`
+
+	// PacketTunnelDisableHostSubnetDiscovery sets
+	// tun.ServerConfig.DisableHostSubnetDiscovery. When host subnet
+	// discovery fails, psiphond doesn't start; set this to start without
+	// discovery.
+	PacketTunnelDisableHostSubnetDiscovery bool `json:",omitempty"`
+
 	// PacketTunnelSudoNetworkConfigCommands sets
 	// tun.ServerConfig.SudoNetworkConfigCommands,
 	// packetman.Config.SudoNetworkConfigCommands, and
@@ -646,6 +660,7 @@ type Config struct {
 	providerID                                     string
 	frontingProviderID                             string
 	region                                         string
+	packetTunnelExcludedIPv4Subnets                []*net.IPNet
 	serverEntryTag                                 string
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
@@ -789,6 +804,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 	if config.ServerIPAddress == "" {
 		return nil, errors.TraceNew("ServerIPAddress is required")
+	}
+
+	for _, s := range config.PacketTunnelExcludedIPv4Subnets {
+		_, subnet, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, errors.Tracef("invalid PacketTunnelExcludedIPv4Subnets: %w", err)
+		}
+		err = tun.ValidateExcludedIPv4Subnet(subnet)
+		if err != nil {
+			return nil, errors.Tracef("invalid PacketTunnelExcludedIPv4Subnets: %w", err)
+		}
+		config.packetTunnelExcludedIPv4Subnets = append(
+			config.packetTunnelExcludedIPv4Subnets, subnet)
 	}
 
 	if config.InproxyBrokerHTTP2MaxConcurrentStreams < 0 ||
