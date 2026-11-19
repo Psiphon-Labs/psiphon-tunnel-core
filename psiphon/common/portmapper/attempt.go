@@ -26,6 +26,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"slices"
 	"time"
 )
 
@@ -131,25 +132,47 @@ type plannedAttempt struct {
 	upnp  bool
 	first mappingProtocol
 
-	// known reports that discovery, or the mapping being renewed, saw this
-	// service. A service that is not known is given only silenceDeadline to
-	// answer.
+	// known reports that the service is expected to answer: it is the one
+	// behind the mapping being renewed, or it granted a mapping before, or
+	// discovery saw it and it has not refused a mapping. A service that is
+	// not known is given only silenceDeadline to answer.
 	known bool
+
+	// rank orders the steps; a lower rank is tried earlier.
+	rank int
 }
 
+// The ranks of a plannedAttempt.
+const (
+	rankRenewing = iota // the service behind the mapping being renewed
+	rankGranted         // a service that granted a mapping on this network
+	rankSeen            // a service that discovery saw
+	rankOther           // a service that was not seen, or that refused
+)
+
 // attemptPlanLocked returns the steps of a create, in the order they are
-// tried: the protocol of the mapping being renewed, then the services
-// discovery saw, then the rest. Every enabled protocol with something to
-// ask appears in the plan, so a create fails only when none of them grants
-// a mapping.
+// tried: the protocol of the mapping being renewed, then the services that
+// granted a mapping before, then the ones discovery saw, then the rest.
+// Every enabled protocol with something to ask appears in the plan, so a
+// create fails only when none of them grants a mapping.
 //
 // c.mu must be held.
 func (c *Client) attemptPlanLocked() []plannedAttempt {
 	pmpEnabled := !c.debug.DisablePMP()
 	pcpEnabled := !c.debug.DisablePCP()
 
-	knownPMP := pmpEnabled && c.pmpPubIP.IsValid()
-	knownPCP := pcpEnabled && !c.pcpSawTime.IsZero()
+	// rankOf is the rank the state of a service earns its step.
+	rankOf := func(p mappingProtocol, enabled bool) int {
+		switch {
+		case !enabled:
+			return rankOther
+		case c.services[p] == ServiceGranted:
+			return rankGranted
+		case c.services[p] == ServiceSeen:
+			return rankSeen
+		}
+		return rankOther
+	}
 
 	renewing := mappingProtocol(-1)
 	if c.mapping != nil {
@@ -165,45 +188,41 @@ func (c *Client) attemptPlanLocked() []plannedAttempt {
 
 	var plan []plannedAttempt
 
-	// UPnP can only be asked when there is a device to ask: one from
-	// discovery, or the one that granted the mapping being renewed.
-	upnp := c.haveUPnPDeviceLocked()
-	if upnp && renewing == protocolUPnP {
-		plan = append(plan, plannedAttempt{upnp: true, known: true})
-		upnp = false
-	}
-
 	// NAT-PMP and PCP share a port on the gateway and are one step: each
-	// tells the client when the gateway speaks only the other.
-	var pxp *plannedAttempt
+	// tells the client when the gateway speaks only the other. The step
+	// takes the better rank of the two, and starts with the format of the
+	// protocol that earned it.
 	if pmpEnabled || pcpEnabled {
-		pxp = &plannedAttempt{known: knownPMP || knownPCP}
+		pmpRank, pcpRank := rankOf(protocolPMP, pmpEnabled), rankOf(protocolPCP, pcpEnabled)
 		switch {
 		case renewing == protocolPMP && pmpEnabled:
-			pxp.first, pxp.known = protocolPMP, true
+			pmpRank = rankRenewing
 		case renewing == protocolPCP && pcpEnabled:
-			pxp.first, pxp.known = protocolPCP, true
-		case knownPMP:
-			pxp.first = protocolPMP
-		case knownPCP:
-			pxp.first = protocolPCP
-		case pmpEnabled:
-			pxp.first = protocolPMP
-		default:
-			pxp.first = protocolPCP
+			pcpRank = rankRenewing
 		}
+		step := plannedAttempt{first: protocolPMP, rank: pmpRank}
+		if !pmpEnabled || pcpRank < pmpRank {
+			step = plannedAttempt{first: protocolPCP, rank: pcpRank}
+		}
+		step.known = step.rank < rankOther
+		plan = append(plan, step)
 	}
 
-	if pxp != nil && pxp.known {
-		plan = append(plan, *pxp)
-		pxp = nil
+	// UPnP can only be asked when there is a device to ask: one from
+	// discovery, or the one that granted the mapping being renewed.
+	if c.haveUPnPDeviceLocked() {
+		step := plannedAttempt{upnp: true, known: true, rank: rankOf(protocolUPnP, true)}
+		if renewing == protocolUPnP {
+			step.rank = rankRenewing
+		}
+		plan = append(plan, step)
 	}
-	if upnp {
-		plan = append(plan, plannedAttempt{upnp: true, known: true})
-	}
-	if pxp != nil {
-		plan = append(plan, *pxp)
-	}
+
+	// On equal rank NAT-PMP/PCP stays ahead of UPnP: it takes one round
+	// trip where UPnP takes several.
+	slices.SortStableFunc(plan, func(a, b plannedAttempt) int {
+		return a.rank - b.rank
+	})
 	return plan
 }
 
@@ -368,12 +387,14 @@ func (c *Client) tryPxP(
 		}
 		switch reply {
 		case pxpGranted:
+			c.noteAttempt(format, ServiceGranted, req.generation)
 			return external, attemptGranted
 		case pxpAbandoned:
 			return netip.AddrPort{}, attemptAbandoned
 		case pxpUnreachable:
 			return netip.AddrPort{}, outcome
 		case pxpRefused:
+			c.noteAttempt(format, ServiceRefused, req.generation)
 			outcome = attemptRefused
 		}
 	}

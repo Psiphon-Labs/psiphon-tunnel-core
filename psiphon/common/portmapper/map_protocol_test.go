@@ -351,7 +351,7 @@ func TestInvalidateBetweenAttempts(t *testing.T) {
 	// answers no PCP request; change the local port while the create waits
 	// for it.
 	c.mu.Lock()
-	c.pcpSawTime = time.Now()
+	c.services[protocolPCP] = ServiceSeen
 	c.mu.Unlock()
 	var reconfigured sync.Once
 	igd.SetPxPHook(func() {

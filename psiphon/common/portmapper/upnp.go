@@ -726,6 +726,7 @@ func (c *Client) tryUPnP(
 		}
 		superseded := c.replaceMappingLocked(upnp)
 		c.localPort = internal.Port()
+		c.services[protocolUPnP] = ServiceGranted
 		c.mu.Unlock()
 		if superseded != nil {
 			c.releaseSuperseded(superseded)
@@ -740,6 +741,9 @@ func (c *Client) tryUPnP(
 		if isUPnPRefusal(err) {
 			outcome = attemptRefused
 		}
+	}
+	if outcome == attemptRefused {
+		c.noteAttempt(protocolUPnP, ServiceRefused, generation)
 	}
 	return netip.AddrPort{}, outcome
 }

@@ -119,9 +119,10 @@ func (g *testGateway) pxpMapRequests() int32 {
 }
 
 // TestCreateTriesEveryProtocol checks, for every combination of gateway
-// services and for a fresh and an old probe, that a create obtains a mapping
-// exactly when some protocol would grant one, and that it does not ask a
-// service the probe did not see while one the probe saw grants the mapping.
+// services, and for a client with a fresh probe, an old probe and no probe,
+// that a create obtains a mapping exactly when some protocol would grant
+// one, and that it does not ask a service that is not known to be available
+// while one that is known grants the mapping.
 func TestCreateTriesEveryProtocol(t *testing.T) {
 	type pxpModel struct {
 		name       string
@@ -142,8 +143,8 @@ func TestCreateTriesEveryProtocol(t *testing.T) {
 
 	for _, pxp := range pxpModels {
 		for _, upnp := range []serviceBehavior{serviceAbsent, serviceWorks, serviceRefuses} {
-			for _, probeAge := range []time.Duration{0, 11 * time.Minute} {
-				name := fmt.Sprintf("%s, UPnP %v, probe %v old", pxp.name, upnp, probeAge)
+			for _, probe := range []string{"fresh", "old", "none"} {
+				name := fmt.Sprintf("%s, UPnP %v, %s probe", pxp.name, upnp, probe)
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 					g := newTestGateway(t, pxp.pmp, pxp.pcp, upnp, pxp.portClosed)
@@ -153,11 +154,14 @@ func TestCreateTriesEveryProtocol(t *testing.T) {
 						return time.Now().Add(time.Duration(clockOffset.Load()))
 					}
 					ctx := context.Background()
-					res, err := g.c.Probe(ctx)
-					if err != nil {
-						t.Fatalf("Probe: %v", err)
+					if probe != "none" {
+						if _, err := g.c.Probe(ctx); err != nil {
+							t.Fatalf("Probe: %v", err)
+						}
 					}
-					clockOffset.Store(int64(probeAge))
+					if probe == "old" {
+						clockOffset.Store(int64(time.Hour))
+					}
 
 					pxpRequestsBefore := g.pxpMapRequests()
 					_, external, err := g.c.createOrGetMapping(ctx)
@@ -182,15 +186,15 @@ func TestCreateTriesEveryProtocol(t *testing.T) {
 						}
 					}
 
-					// The probe hears NAT-PMP only when it works, and hears
-					// PCP whenever it answers at all.
-					pxpSeen := res.PMP || pxp.pcp != serviceAbsent
-					pxpGrants := pxp.pmp == serviceWorks || pxp.pcp == serviceWorks
-					if pxpSeen && pxpGrants && g.upnpAdds.Load() != 0 {
-						t.Errorf("asked UPnP although NAT-PMP or PCP was seen and grants the mapping")
+					// Discovery finds a service available when it works. One
+					// that refuses says so to discovery too, or is found out
+					// by the mapping request.
+					pxpAvailable := pxp.pmp == serviceWorks || pxp.pcp == serviceWorks
+					if pxpAvailable && g.upnpAdds.Load() != 0 {
+						t.Errorf("asked UPnP although NAT-PMP or PCP is available and grants the mapping")
 					}
-					if !pxpSeen && upnp == serviceWorks && g.pxpMapRequests() != pxpRequestsBefore {
-						t.Errorf("asked NAT-PMP or PCP although only UPnP was seen and it grants the mapping")
+					if !pxpAvailable && upnp == serviceWorks && g.pxpMapRequests() != pxpRequestsBefore {
+						t.Errorf("asked NAT-PMP or PCP although only UPnP is available and it grants the mapping")
 					}
 				})
 			}
@@ -204,12 +208,21 @@ func TestPxPFollowsOtherVersion(t *testing.T) {
 	t.Run("NAT-PMP request to a PCP-only gateway", func(t *testing.T) {
 		g := newTestGateway(t, serviceAbsent, serviceWorks, serviceAbsent, false)
 
-		// A client that was never probed asks in the NAT-PMP format first.
+		// A client whose probe heard nothing asks in the NAT-PMP format
+		// first. The gateway lookup comes first, as the first one discards
+		// what the client knows.
+		g.c.gatewayAndSelfIP()
+		g.c.mu.Lock()
+		g.c.probed = true
+		g.c.mu.Unlock()
 		if _, _, err := g.c.createOrGetMapping(context.Background()); err != nil {
 			t.Fatalf("createOrGetMapping: %v", err)
 		}
 		if got := mappingTypeOf(g.c); got != "pcp" {
 			t.Errorf("mapping type = %q, want pcp", got)
+		}
+		if got := g.igd.stats().numPMPMapRecv; got == 0 {
+			t.Error("the NAT-PMP format was not asked first")
 		}
 	})
 
@@ -221,7 +234,8 @@ func TestPxPFollowsOtherVersion(t *testing.T) {
 		// client knows.
 		g.c.gatewayAndSelfIP()
 		g.c.mu.Lock()
-		g.c.pcpSawTime = time.Now()
+		g.c.probed = true
+		g.c.services[protocolPCP] = ServiceSeen
 		g.c.mu.Unlock()
 		if _, _, err := g.c.createOrGetMapping(context.Background()); err != nil {
 			t.Fatalf("createOrGetMapping: %v", err)
@@ -249,8 +263,13 @@ func TestPxPAsksOtherFormatAfterSilence(t *testing.T) {
 		c.silenceDeadline = 200 * time.Millisecond
 		c.SetLocalPort(12345)
 
-		// A client that knows of no service asks in the NAT-PMP format
-		// first.
+		// A client whose probe heard nothing asks in the NAT-PMP format
+		// first. The gateway lookup comes first, as the first one discards
+		// what the client knows.
+		c.gatewayAndSelfIP()
+		c.mu.Lock()
+		c.probed = true
+		c.mu.Unlock()
 		if _, _, err := c.createOrGetMapping(context.Background()); err != nil {
 			t.Fatalf("createOrGetMapping: %v", err)
 		}
@@ -277,7 +296,8 @@ func TestPxPAsksOtherFormatAfterSilence(t *testing.T) {
 		// client knows.
 		c.gatewayAndSelfIP()
 		c.mu.Lock()
-		c.pcpSawTime = time.Now()
+		c.probed = true
+		c.services[protocolPCP] = ServiceSeen
 		c.mu.Unlock()
 		if _, _, err := c.createOrGetMapping(context.Background()); err != nil {
 			t.Fatalf("createOrGetMapping: %v", err)
