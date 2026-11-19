@@ -933,9 +933,17 @@ func ResumeDownload(
 		return 0, responseETag, nil
 	}
 
-	if response.StatusCode == http.StatusOK && fileInfo.Size() > 0 {
-		resetPartialDownload()
-		return 0, "", errors.TraceNew("partial download range ignored")
+	partialSize := fileInfo.Size()
+	if response.StatusCode == http.StatusOK && partialSize > 0 {
+		// The server ignored Range and sent the whole resource, so restart
+		// the download. Truncate by name: on Windows, an append-only handle
+		// can't be truncated.
+		err = os.Truncate(partialFilename, 0)
+		if err != nil {
+			resetPartialDownload()
+			return 0, "", errors.Trace(err)
+		}
+		partialSize = 0
 	}
 
 	if response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
@@ -985,7 +993,7 @@ func ResumeDownload(
 		return 0, responseETag, nil
 	}
 
-	remainingBytes := maxResumeDownloadSize - fileInfo.Size()
+	remainingBytes := maxResumeDownloadSize - partialSize
 	if response.ContentLength > remainingBytes {
 		resetPartialDownload()
 		return 0, "", errors.TraceNew("download exceeds maximum size")
