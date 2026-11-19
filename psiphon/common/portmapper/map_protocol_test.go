@@ -121,11 +121,11 @@ func TestParsePMPResponseTCP(t *testing.T) {
 func TestBuildPCPRequestMappingPacketProtocol(t *testing.T) {
 	myIP := netip.MustParseAddr("192.168.1.2")
 
-	udp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, MapProtocolUDP)
+	udp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, pcpNonce{}, MapProtocolUDP)
 	if got := udp[24:][12]; got != pcpUDPMapping {
 		t.Errorf("UDP PCP protocol = %d, want %d", got, pcpUDPMapping)
 	}
-	tcp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, MapProtocolTCP)
+	tcp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, pcpNonce{}, MapProtocolTCP)
 	if got := tcp[24:][12]; got != pcpTCPMapping {
 		t.Errorf("TCP PCP protocol = %d, want %d", got, pcpTCPMapping)
 	}
