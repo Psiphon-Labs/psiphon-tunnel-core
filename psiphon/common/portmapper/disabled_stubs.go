@@ -48,12 +48,15 @@ func processUPnPResponses(metas []uPnPDiscoResponse) []uPnPDiscoResponse {
 	return metas
 }
 
-func (c *Client) getUPnPPortMapping(
+func (c *Client) haveUPnPDeviceLocked() bool {
+	return false
+}
+
+func (c *Client) releaseSuperseded(m mapping) {}
+
+func (c *Client) tryUPnP(
 	ctx context.Context,
-	gw netip.Addr,
-	internal netip.AddrPort,
-	prevPort uint16,
-	generation uint64,
-) (external netip.AddrPort, ok bool) {
-	return netip.AddrPort{}, false
+	req mappingRequest,
+) (external netip.AddrPort, outcome attemptOutcome) {
+	return netip.AddrPort{}, attemptNoAnswer
 }

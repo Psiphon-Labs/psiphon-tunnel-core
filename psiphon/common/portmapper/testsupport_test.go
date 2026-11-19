@@ -28,7 +28,9 @@ package portmapper
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -95,4 +97,22 @@ func waitForMapping(tb testing.TB, c *Client, timeout time.Duration) bool {
 		time.Sleep(10 * time.Millisecond)
 	}
 	return c.HaveMapping()
+}
+
+// getUPnPPortMapping asks for a mapping over UPnP alone, as the upstream
+// tests do.
+func (c *Client) getUPnPPortMapping(
+	ctx context.Context,
+	gw netip.Addr,
+	internal netip.AddrPort,
+	prevPort uint16,
+	generation uint64,
+) (external netip.AddrPort, ok bool) {
+	external, outcome := c.tryUPnP(ctx, mappingRequest{
+		gw:         gw,
+		internal:   internal,
+		prevPort:   prevPort,
+		generation: generation,
+	})
+	return external, outcome == attemptGranted
 }

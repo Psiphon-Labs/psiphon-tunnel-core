@@ -61,8 +61,9 @@ const (
 	// the IP assignment is valid for.
 	pcpMapLifetimeSec = 7200
 
-	pcpCodeOK            pcpResultCode = 0
-	pcpCodeNotAuthorized pcpResultCode = 2
+	pcpCodeOK                 pcpResultCode = 0
+	pcpCodeUnsupportedVersion pcpResultCode = 1
+	pcpCodeNotAuthorized      pcpResultCode = 2
 	// From RFC 6887:
 	// ADDRESS_MISMATCH: The source IP address of the request packet does
 	// not match the contents of the PCP Client's IP Address field, due
@@ -175,7 +176,10 @@ func buildPCPRequestMappingPacket(
 // the protocol in its opcode-specific data, and a response whose protocol does
 // not match (e.g. a stale or mismatched response) is rejected so that a mapping
 // is never recorded under the wrong protocol.
-func parsePCPMapResponse(resp []byte, expectedProtocol MapProtocol) (*pcpMapping, error) {
+//
+// now is the time the response was received, from which the mapping's
+// lifetime runs.
+func parsePCPMapResponse(resp []byte, expectedProtocol MapProtocol, now time.Time) (*pcpMapping, error) {
 	if len(resp) < 60 {
 		return nil, fmt.Errorf("Does not appear to be PCP MAP response")
 	}
@@ -215,7 +219,6 @@ func parsePCPMapResponse(resp []byte, expectedProtocol MapProtocol) (*pcpMapping
 	external := netip.AddrPortFrom(externalIP, externalPort)
 
 	lifetime := time.Second * time.Duration(res.Lifetime)
-	now := time.Now()
 	mapping := &pcpMapping{
 		external:   external,
 		protocol:   protocol,

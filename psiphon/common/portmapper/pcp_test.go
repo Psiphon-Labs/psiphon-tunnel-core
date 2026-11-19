@@ -45,7 +45,7 @@ var examplePCPMapResponse = []byte{2, 129, 0, 0, 0, 0, 28, 32, 0, 2, 155, 237, 0
 
 func TestParsePCPMapResponse(t *testing.T) {
 	// The example response carries the UDP protocol (17).
-	mapping, err := parsePCPMapResponse(examplePCPMapResponse, MapProtocolUDP)
+	mapping, err := parsePCPMapResponse(examplePCPMapResponse, MapProtocolUDP, time.Now())
 	if err != nil {
 		t.Fatalf("failed to parse PCP Map Response: %v", err)
 	}

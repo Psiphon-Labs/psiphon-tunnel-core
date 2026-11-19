@@ -155,12 +155,13 @@ func TestCloneSetLocalPortPreservesProbeResults(t *testing.T) {
 		t.Error("SetLocalPort cleared cloned UPnP discovery metadata")
 	}
 
-	// The one-shot probe is intentionally old: clone users create mappings on
-	// demand, after the five-second probe fast-path has elapsed.
-	clone.mu.Lock()
-	clone.lastProbe = time.Now().Add(-6 * time.Second)
-	clone.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// Clone users create mappings on demand, long after the one-shot probe.
+	// The mapping must still come straight from UPnP, the service the probe
+	// found, without first asking for NAT-PMP or PCP.
+	now := time.Now().Add(time.Hour)
+	clone.now = func() time.Time { return now }
+	before := igd.stats()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, external, err := clone.createOrGetMapping(ctx)
 	if err != nil {
@@ -168,6 +169,10 @@ func TestCloneSetLocalPortPreservesProbeResults(t *testing.T) {
 	}
 	if external.Addr() != netip.MustParseAddr("123.123.123.123") {
 		t.Errorf("external address = %v, want 123.123.123.123", external)
+	}
+	after := igd.stats()
+	if after.numPMPRecv != before.numPMPRecv || after.numPCPRecv != before.numPCPRecv {
+		t.Errorf("sent NAT-PMP or PCP requests to a gateway known to have only UPnP")
 	}
 }
 

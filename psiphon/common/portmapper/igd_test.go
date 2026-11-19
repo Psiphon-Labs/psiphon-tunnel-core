@@ -33,6 +33,7 @@ package portmapper
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -54,6 +55,7 @@ type TestIGD struct {
 
 	// do* will log which packets are sent, but will not reply to unexpected packets.
 
+	opts   TestIGDOptions
 	doPMP  bool
 	doPCP  bool
 	doUPnP bool
@@ -65,6 +67,9 @@ type TestIGD struct {
 	// it is handled; tests use it to act while the client's PMP/PCP read is
 	// pending.
 	onPxP func()
+	// dropMapRequests is the number of NAT-PMP or PCP mapping requests
+	// still to be ignored, as if they were lost.
+	dropMapRequests int
 }
 
 // TestIGDOptions are options
@@ -72,6 +77,16 @@ type TestIGDOptions struct {
 	PMP  bool
 	PCP  bool
 	UPnP bool // TODO: more options for 3 flavors of UPnP services
+
+	// PMPRefuses and PCPRefuses make the service answer every request with
+	// a not-authorized result instead of granting it.
+	PMPRefuses bool
+	PCPRefuses bool
+
+	// StrictVersions makes a gateway that speaks only one of NAT-PMP and
+	// PCP answer a request for the other with an unsupported-version
+	// result, as RFC 6886 and RFC 6887 require, instead of staying silent.
+	StrictVersions bool
 }
 
 type igdCounters struct {
@@ -83,6 +98,7 @@ type igdCounters struct {
 	numPCPMapRecv        int32
 	numPCPOtherRecv      int32
 	numPMPPublicAddrRecv int32
+	numPMPMapRecv        int32
 	numPMPBogusRecv      int32
 
 	numFailedWrites  int32
@@ -95,6 +111,7 @@ func NewTestIGD(tb testing.TB, t TestIGDOptions) (*TestIGD, error) {
 		doPMP:  t.PMP,
 		doPCP:  t.PCP,
 		doUPnP: t.UPnP,
+		opts:   t,
 	}
 	d.logf = func(msg string, args ...any) {
 		// Don't log after the device has closed;
@@ -159,6 +176,25 @@ func (d *TestIGD) SetPxPHook(fn func()) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.onPxP = fn
+}
+
+// SetDropMapRequests makes the gateway ignore the next n NAT-PMP or PCP
+// mapping requests, as if they were lost on the way.
+func (d *TestIGD) SetDropMapRequests(n int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.dropMapRequests = n
+}
+
+// dropMapRequest reports whether a mapping request is to be ignored.
+func (d *TestIGD) dropMapRequest() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.dropMapRequests == 0 {
+		return false
+	}
+	d.dropMapRequests--
+	return true
 }
 
 func (d *TestIGD) SetUPnPHandler(h http.Handler) {
@@ -251,16 +287,64 @@ func (d *TestIGD) handlePMPQuery(pkt []byte, src netip.AddrPort) {
 		return
 	}
 	op := pkt[1]
-	switch op {
-	case pmpOpMapPublicAddr:
+	if op == pmpOpMapPublicAddr {
 		if len(pkt) != 2 {
 			d.inc(&d.counters.numPMPBogusRecv)
 			return
 		}
 		d.inc(&d.counters.numPMPPublicAddrRecv)
-
+	} else {
+		d.inc(&d.counters.numPMPMapRecv)
 	}
-	// TODO
+	reply := func(out []byte) {
+		if _, err := d.pxpConn.WriteTo(out, net.UDPAddrFromAddrPort(src)); err != nil {
+			d.inc(&d.counters.numFailedWrites)
+		}
+	}
+
+	if !d.doPMP {
+		if d.doPCP && d.opts.StrictVersions {
+			// A PCP-only gateway answers in the PCP format.
+			out := make([]byte, 24)
+			out[0] = pcpVersion
+			out[1] = op | pcpOpReply
+			out[3] = byte(pcpCodeUnsupportedVersion)
+			reply(out)
+		}
+		return
+	}
+
+	result := pmpCodeOK
+	if d.opts.PMPRefuses {
+		result = pmpCodeNotAuthorized
+	}
+	switch op {
+	case pmpOpMapPublicAddr:
+		out := make([]byte, 12)
+		out[1] = pmpOpReply | pmpOpMapPublicAddr
+		binary.BigEndian.PutUint16(out[2:], uint16(result))
+		if result == pmpCodeOK {
+			copy(out[8:], []byte{123, 123, 123, 123})
+		}
+		reply(out)
+	case pmpOpMapUDP, pmpOpMapTCP:
+		if len(pkt) != 12 {
+			d.inc(&d.counters.numPMPBogusRecv)
+			return
+		}
+		if d.dropMapRequest() {
+			return
+		}
+		out := make([]byte, 16)
+		out[1] = pmpOpReply | op
+		binary.BigEndian.PutUint16(out[2:], uint16(result))
+		copy(out[8:10], pkt[4:6]) // internal port
+		if result == pmpCodeOK {
+			binary.BigEndian.PutUint16(out[10:], 4242) // external port
+			copy(out[12:16], pkt[8:12])                // lifetime
+		}
+		reply(out)
+	}
 }
 
 func (d *TestIGD) handlePCPQuery(pkt []byte, src netip.AddrPort) {
@@ -277,6 +361,13 @@ func (d *TestIGD) handlePCPQuery(pkt []byte, src netip.AddrPort) {
 		// Since it's a test it's difficult to get them the same though.
 		d.logf("mismatch of packet source and source IP: got %v, expected %v", pktSrc, src.Addr())
 	}
+	if !d.doPCP && d.doPMP && d.opts.StrictVersions {
+		// A NAT-PMP-only gateway answers with a NAT-PMP error.
+		out := make([]byte, 8)
+		out[1] = op | pmpOpReply
+		binary.BigEndian.PutUint16(out[2:], uint16(pmpCodeUnsupportedVersion))
+		d.pxpConn.WriteTo(out, net.UDPAddrFromAddrPort(src))
+	}
 	switch op {
 	case pcpOpAnnounce:
 		d.inc(&d.counters.numPCPDiscoRecv)
@@ -284,6 +375,9 @@ func (d *TestIGD) handlePCPQuery(pkt []byte, src netip.AddrPort) {
 			return
 		}
 		resp := buildPCPDiscoResponse(pkt)
+		if d.opts.PCPRefuses {
+			resp[3] = byte(pcpCodeNotAuthorized)
+		}
 		if _, err := d.pxpConn.WriteTo(resp, net.UDPAddrFromAddrPort(src)); err != nil {
 			d.inc(&d.counters.numFailedWrites)
 		}
@@ -294,10 +388,13 @@ func (d *TestIGD) handlePCPQuery(pkt []byte, src netip.AddrPort) {
 			return
 		}
 		d.inc(&d.counters.numPCPMapRecv)
-		if !d.doPCP {
+		if !d.doPCP || d.dropMapRequest() {
 			return
 		}
 		resp := buildPCPMapResponse(pkt)
+		if d.opts.PCPRefuses {
+			resp[3] = byte(pcpCodeNotAuthorized)
+		}
 		d.pxpConn.WriteTo(resp, net.UDPAddrFromAddrPort(src))
 	default:
 		// unknown op code, ignore it for now.
