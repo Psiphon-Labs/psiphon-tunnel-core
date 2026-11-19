@@ -186,33 +186,35 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			portForward = nil
 		}
 
+		// Validate DNS packets and check the domain blocklist both when the client
+		// indicates DNS or when DNS is _not_ indicated and the destination port is
+		// 53. Reused transparent DNS flows are checked even if the client clears
+		// the DNS flag.
+		if message.forwardDNS || message.remotePort == 53 ||
+			(portForward != nil && portForward.forwardDNS) {
+
+			domain, err := common.ParseDNSQuestion(message.packet)
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": err}).Debug("ParseDNSQuestion failed")
+				// Drop packet
+				continue
+			}
+
+			if domain != "" {
+				ok, _ := mux.sshClient.isDomainPermitted(domain)
+				if !ok {
+					// Drop packet
+					continue
+				}
+			}
+		}
+
 		if portForward == nil {
 
 			// Create a new port forward
 
 			dialIP := net.IP(message.remoteIP)
 			dialPort := int(message.remotePort)
-
-			// Validate DNS packets and check the domain blocklist both when the client
-			// indicates DNS or when DNS is _not_ indicated and the destination port is
-			// 53.
-			if message.forwardDNS || message.remotePort == 53 {
-
-				domain, err := common.ParseDNSQuestion(message.packet)
-				if err != nil {
-					log.WithTraceFields(LogFields{"error": err}).Debug("ParseDNSQuestion failed")
-					// Drop packet
-					continue
-				}
-
-				if domain != "" {
-					ok, _ := mux.sshClient.isDomainPermitted(domain)
-					if !ok {
-						// Drop packet
-						continue
-					}
-				}
-			}
 
 			if message.forwardDNS {
 				// Transparent DNS forwarding. In this case, isPortForwardPermitted
@@ -293,6 +295,7 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 				preambleSize:   message.preambleSize,
 				remoteIP:       message.remoteIP,
 				remotePort:     message.remotePort,
+				forwardDNS:     message.forwardDNS,
 				dialIP:         dialIP,
 				conn:           conn,
 				lruEntry:       lruEntry,
@@ -354,6 +357,7 @@ type udpgwPortForward struct {
 	preambleSize      int
 	remoteIP          []byte
 	remotePort        uint16
+	forwardDNS        bool
 	dialIP            net.IP
 	conn              net.Conn
 	lruEntry          *common.LRUConnsEntry

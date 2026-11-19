@@ -35,6 +35,15 @@ const chanSize = 16
 // * maxPacket bytes, which is ~16.8MB.
 const maxPendingPackets = 64
 
+// [Psiphon]
+// Allow two early rekeys, then replenish the allowance from traffic in both
+// directions. Limit the allowance to two rekeys, even after a large transfer.
+// 500 MB leaves margin below the client's minimum normal threshold of 1 GiB.
+const (
+	minRekeyBytes          = 500 * 1000 * 1000
+	maxRekeyAllowanceBytes = 2 * minRekeyBytes
+)
+
 // keyingTransport is a packet based transport that supports key
 // changes. It need not be thread-safe. It should pass through
 // msgNewKeys in both directions.
@@ -127,6 +136,9 @@ type handshakeTransport struct {
 	readPacketsLeft uint32
 	readBytesLeft   int64
 
+	// [Psiphon]
+	rekeyAllowanceBytes int64
+
 	// The session ID or nil if first kex did not complete yet.
 	sessionID []byte
 
@@ -160,6 +172,9 @@ func newHandshakeTransport(conn keyingTransport, config *Config, clientVersion, 
 
 		// [Psiphon]
 		signalCloseReadLoop: make(chan struct{}),
+
+		// [Psiphon]
+		rekeyAllowanceBytes: maxRekeyAllowanceBytes,
 
 		config: config,
 	}
@@ -489,6 +504,28 @@ func (t *handshakeTransport) readOnePacket(first bool) ([]byte, error) {
 	}
 
 	firstKex := t.sessionID == nil
+
+	// [Psiphon]
+	// Reject excessive rekeys before scheduling public-key operations. Reuse
+	// the existing byte counters; only the write counter needs mu here.
+	if len(t.hostKeys) > 0 && !firstKex {
+		readLimit := int64(t.config.RekeyThreshold)
+		writeLimit := readLimit
+		if readLimit == 0 {
+			readLimit = t.algorithms.Read.rekeyBytes()
+			writeLimit = t.algorithms.Write.rekeyBytes()
+		}
+
+		t.mu.Lock()
+		transferredBytes := (readLimit - t.readBytesLeft) + (writeLimit - t.writeBytesLeft)
+		t.mu.Unlock()
+
+		t.rekeyAllowanceBytes = min(maxRekeyAllowanceBytes, t.rekeyAllowanceBytes+transferredBytes)
+		if t.rekeyAllowanceBytes < minRekeyBytes {
+			return nil, errors.New("ssh: excessive rekeys")
+		}
+		t.rekeyAllowanceBytes -= minRekeyBytes
+	}
 
 	kex := pendingKex{
 		done:      make(chan error, 1),

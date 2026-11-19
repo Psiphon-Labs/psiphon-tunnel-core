@@ -482,12 +482,6 @@ var sendFeedbackResetNoticeWriter bool
 //     any underlying resources are cleaned up; failing to do so may result in
 //     data store corruption or other undefined behavior.
 //
-//   - Start and StartSendFeedback both make an attempt to migrate persistent
-//     files from legacy locations in a one-time operation. If these functions
-//     are called in parallel, then there is a chance that the migration attempts
-//     could execute at the same time and result in non-fatal errors in one, or
-//     both, of the migration operations.
-//
 //   - Calling StartSendFeedback or StopSendFeedback on the same call stack
 //     that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
 //     is delivered on can cause a deadlock. I.E. the callback code must return

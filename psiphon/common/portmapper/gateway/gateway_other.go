@@ -34,3 +34,8 @@ import "net/netip"
 func gatewayForInterface(string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
+
+// defaultRoutes always reports no routes on unsupported platforms.
+func defaultRoutes(string) []defaultRoute {
+	return nil
+}

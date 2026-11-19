@@ -22,6 +22,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"net"
 	"regexp"
 	"strconv"
@@ -41,8 +42,10 @@ import (
 )
 
 const (
-	MAX_API_PARAM_ARRAY_ENTRIES = 256
-	PADDING_MAX_BYTES           = 16 * 1024
+	MAX_API_PARAM_ARRAY_ENTRIES       = 256
+	MAX_API_PARAM_STRING_LENGTH       = 1024
+	MAX_API_PARAM_STRING_ARRAY_LENGTH = 8 * 1024
+	PADDING_MAX_BYTES                 = 16 * 1024
 
 	PERSISTENT_STATS_MAX_LOGS_PER_TUNNEL         = 1024
 	PERSISTENT_STATS_MAX_DROPPED_LOGS_PER_TUNNEL = 16
@@ -707,6 +710,11 @@ var uniqueUserParams = append(
 var connectedRequestParams = append(
 	[]requestParamSpec{
 		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_id", isAnyString, requestParamOptional},
 		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1329,7 +1337,9 @@ var inproxyBrokerRequestParams = append(
 	append(
 		[]requestParamSpec{
 			{"session_id", isHexDigits, 0},
-			{"fronting_provider_id", isAnyString, requestParamOptional}},
+			{"fronting_provider_id", isAnyString, requestParamOptional},
+			{"inproxy_broker_is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+			{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt}},
 		tacticsParams...),
 	baseParams...)
 
@@ -1357,6 +1367,16 @@ func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogField
 }
 
 func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+	// Broker replay and candidate metrics belong in broker request logs,
+	// not in each tunnel's copy of the proxy metrics. Build the field list
+	// once without modifying the request specs used by the broker.
+	reportParams := make([]requestParamSpec, 0, len(inproxyBrokerRequestParams))
+	for _, spec := range inproxyBrokerRequestParams {
+		if spec.name == "inproxy_broker_is_replay" || spec.name == "inproxy_broker_candidate_number" {
+			continue
+		}
+		reportParams = append(reportParams, spec)
+	}
 
 	return func(prefix string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
 
@@ -1367,7 +1387,7 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 			GeoIPData{}, // Proxy GeoIP data is added in sshClient.logTunnel
 			nil,
 			params,
-			inproxyBrokerRequestParams)
+			reportParams)
 
 		return common.LogFields(logFields)
 	}
@@ -1417,6 +1437,8 @@ var sessionBaseParams = append(
 // as GeoIP fields and authorized_access_types, are not accepted from clients
 // and are populated by the server; other fields, such as last_connected, are
 // only sent by the client for certain API requests.
+//
+// Returned strings and string arrays use the same size limits as log fields.
 //
 // Overall request size is not checked here; packedParams is already
 // deserialized, and the caller's transport is expected to enforce a
@@ -1628,12 +1650,15 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_remote_ice_candidate_type", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_remote_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"inproxy_webrtc_remote_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_dial_broker_client_acquire_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_nat_discovery_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"inproxy_dial_failed_attempts_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_ice_gathering_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_connection_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_is_reuse", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_broker_transport_dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_broker_session_handshake_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_use_media_streams", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
@@ -1722,7 +1747,8 @@ func validateStringRequestParam(
 		return errors.Tracef("unexpected string param type: %s", expectedParam.name)
 	}
 	if !expectedParam.validator(strValue) {
-		return errors.Tracef("invalid param: %s: %s", expectedParam.name, strValue)
+		return errors.Tracef("invalid param: %s: %s", expectedParam.name,
+			common.TruncateUTF8String(strValue, MAX_API_PARAM_STRING_LENGTH))
 	}
 	return nil
 }
@@ -1914,8 +1940,10 @@ func getRequestLogFields(
 					logFields[name] = intValue
 
 				} else if expectedParam.flags&requestParamLogStringAsFloat != 0 {
-					floatValue, _ := strconv.ParseFloat(strValue, 64)
-					logFields[name] = floatValue
+					floatValue, err := strconv.ParseFloat(strValue, 64)
+					if err == nil && !math.IsNaN(floatValue) && !math.IsInf(floatValue, 0) {
+						logFields[name] = floatValue
+					}
 
 				} else if expectedParam.flags&requestParamLogStringLengthAsInt != 0 {
 					logFields[name] = len(strValue)
@@ -1935,53 +1963,133 @@ func getRequestLogFields(
 				}
 			}
 
+		case []map[string]interface{}:
+			// Packed speed test samples are unpacked to this type; see
+			// protocol.unpackSliceOfJSONCompatibleMaps. Any other parameter
+			// with this type is unexpected and is omitted.
+			if expectedParam.name == tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME {
+				logSamples := make([]interface{}, len(v))
+				for i, sample := range v {
+					logSamples[i] = makeSpeedTestSampleLogField(sample)
+				}
+				logFields[name] = logSamples
+			}
+
 		case []interface{}:
 			if expectedParam.name == tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME {
 				logFields[name] = makeSpeedTestSamplesLogField(v)
-			} else {
-				logFields[name] = v
+			} else if expectedParam.flags&requestParamArray != 0 {
+				// Apply per-string and total byte limits to the logged copy.
+				remainingBytes := MAX_API_PARAM_STRING_ARRAY_LENGTH
+				values := make([]interface{}, 0, len(v))
+				for _, value := range v {
+					strValue, ok := value.(string)
+					if !ok {
+						continue
+					}
+					strValue = common.TruncateUTF8String(
+						strValue, min(MAX_API_PARAM_STRING_LENGTH, remainingBytes))
+					values = append(values, strValue)
+					remainingBytes -= len(strValue)
+					if remainingBytes == 0 {
+						break
+					}
+				}
+				logFields[name] = values
 			}
 
+			// Any other parameter with an array value is unexpected, as
+			// validateRequestParams accepts arrays only for
+			// requestParamArray and requestParamJSON parameters, and is
+			// omitted.
+
 		default:
-			logFields[name] = v
+			// requestParamJSON values are not validated and, when packed,
+			// may contain values that encoding/json cannot marshal, such as
+			// non-finite floats or CBOR map[interface{}]interface{} maps. A
+			// single unmarshalable field causes the entire JSON log record
+			// to be dropped, so only scalar values are logged here.
+			if logValue, ok := sanitizeLogScalar(v); ok {
+				logFields[name] = logValue
+			}
+		}
+
+		strValue, ok := logFields[name].(string)
+		if ok {
+			logFields[name] = common.TruncateUTF8String(strValue, MAX_API_PARAM_STRING_LENGTH)
 		}
 	}
 
 	return logFields
 }
 
+// sanitizeLogScalar returns a loggable copy of an unvalidated request
+// parameter value. Only scalar types are accepted: non-finite floats, which
+// encoding/json cannot marshal, and maps, slices, and any other type are
+// rejected. Strings are truncated.
+func sanitizeLogScalar(v interface{}) (interface{}, bool) {
+	switch value := v.(type) {
+	case string:
+		return common.TruncateUTF8String(value, MAX_API_PARAM_STRING_LENGTH), true
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, false
+		}
+		return value, true
+	case float32:
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return nil, false
+		}
+		return value, true
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, bool:
+		return value, true
+	}
+	return nil, false
+}
+
 // makeSpeedTestSamplesLogField renames the tactics.SpeedTestSample json tag
 // fields to more verbose names for metrics.
 func makeSpeedTestSamplesLogField(samples []interface{}) []interface{} {
+	logSamples := make([]interface{}, len(samples))
+	for i, sample := range samples {
+		m, _ := sample.(map[string]interface{})
+		logSamples[i] = makeSpeedTestSampleLogField(m)
+	}
+	return logSamples
+}
+
+// makeSpeedTestSampleLogField returns the log field for a single speed test
+// sample. Samples are not validated before logging, so only scalar field
+// values are retained; see sanitizeLogScalar.
+func makeSpeedTestSampleLogField(sample map[string]interface{}) map[string]interface{} {
 	// TODO: use reflection and add additional tags, e.g.,
 	// `json:"s" log:"timestamp"` to remove hard-coded
 	// tag value dependency?
-	logSamples := make([]interface{}, len(samples))
-	for i, sample := range samples {
-		logSample := make(map[string]interface{})
-		if m, ok := sample.(map[string]interface{}); ok {
-			for k, v := range m {
-				logK := k
-				switch k {
-				case "s":
-					logK = "timestamp"
-				case "r":
-					logK = "server_region"
-				case "p":
-					logK = "relay_protocol"
-				case "t":
-					logK = "round_trip_time_ms"
-				case "u":
-					logK = "bytes_up"
-				case "d":
-					logK = "bytes_down"
-				}
-				logSample[logK] = v
-			}
+	logSample := make(map[string]interface{}, len(sample))
+	for k, v := range sample {
+		logV, ok := sanitizeLogScalar(v)
+		if !ok {
+			continue
 		}
-		logSamples[i] = logSample
+		logK := k
+		switch k {
+		case "s":
+			logK = "timestamp"
+		case "r":
+			logK = "server_region"
+		case "p":
+			logK = "relay_protocol"
+		case "t":
+			logK = "round_trip_time_ms"
+		case "u":
+			logK = "bytes_up"
+		case "d":
+			logK = "bytes_down"
+		}
+		logSample[logK] = logV
 	}
-	return logSamples
+	return logSample
 }
 
 func getOptionalStringRequestParam(params common.APIParameters, name string) (string, bool) {
@@ -2191,8 +2299,8 @@ func isIntString(value string) bool {
 }
 
 func isFloatString(value string) bool {
-	_, err := strconv.ParseFloat(value, 64)
-	return err == nil
+	floatValue, err := strconv.ParseFloat(value, 64)
+	return err == nil && !math.IsNaN(floatValue) && !math.IsInf(floatValue, 0)
 }
 
 func isClientPlatform(value string) bool {

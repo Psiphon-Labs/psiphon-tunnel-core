@@ -26,7 +26,7 @@
 
 #import <Foundation/Foundation.h>
 #import "JailbreakCheck.h"
-#if TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
 #import <UIKit/UIKit.h>
 #import <sys/stat.h>
 #endif
@@ -35,7 +35,7 @@
 @implementation JailbreakCheck
 
 
-#if TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
 BOOL checkReadWritePermissions()
 {
     // UIApplication:sharedApplication is disallowed in an application exetension
@@ -131,7 +131,7 @@ BOOL checkJailbreakFiles()
 
 + (BOOL)isDeviceJailbroken
 {
-#if TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
     return
         checkJailbreakSymlinks()
         || checkJailbreakFiles()

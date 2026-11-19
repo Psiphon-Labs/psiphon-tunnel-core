@@ -99,6 +99,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer support.GeoIPService.Close()
 
 	startupFields := buildinfo.GetBuildInfo().ToMap()
 	startupFields["GODEBUG"] = os.Getenv("GODEBUG")
@@ -662,7 +663,7 @@ type SupportServices struct {
 }
 
 // NewSupportServices initializes a new SupportServices.
-func NewSupportServices(config *Config) (*SupportServices, error) {
+func NewSupportServices(config *Config) (retSupport *SupportServices, retErr error) {
 
 	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
 	if err != nil {
@@ -683,6 +684,11 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	defer func() {
+		if retErr != nil {
+			geoIPService.Close()
+		}
+	}()
 
 	dnsResolver, err := NewDNSResolver(config.DNSResolverIPAddress)
 	if err != nil {

@@ -98,6 +98,8 @@ const (
 	RANDOM_STREAM_CHANNEL_TYPE            = "random@psiphon.ca"
 	TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE = "direct-tcpip-no-split-tunnel@psiphon.ca"
 
+	DEFAULT_UDPGW_INTERCEPT_ADDRESS = "127.0.0.1:7300"
+
 	// Reject reason codes are returned in SSH open channel responses.
 	//
 	// Values 0xFE000000 to 0xFFFFFFFF are reserved for "PRIVATE USE" (see

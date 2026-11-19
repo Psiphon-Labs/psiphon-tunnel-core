@@ -505,8 +505,8 @@ type Config struct {
 	// addition to logging events.
 	BlocklistActive bool `json:",omitempty"`
 
-	// AllowBogons disables port forward bogon checks. This should be used only
-	// for testing.
+	// AllowBogons disables port forward bogon and server IP address checks.
+	// This should be used only for testing.
 	AllowBogons bool `json:",omitempty"`
 
 	// EnableSteeringIPs enables meek server steering IP support.
@@ -1374,7 +1374,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		TunnelProtocolPorts:                params.TunnelProtocolPorts,
 		TunnelProtocolPassthroughAddresses: params.TunnelProtocolPassthroughAddresses,
 		DNSResolverIPAddress:               "8.8.8.8",
-		UDPInterceptUdpgwServerAddress:     "127.0.0.1:7300",
+		UDPInterceptUdpgwServerAddress:     protocol.DEFAULT_UDPGW_INTERCEPT_ADDRESS,
 		MeekCookieEncryptionPrivateKey:     meekCookieEncryptionPrivateKey,
 		MeekObfuscatedKey:                  meekObfuscatedKey,
 		MeekProhibitedHeaders:              nil,

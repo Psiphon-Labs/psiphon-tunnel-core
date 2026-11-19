@@ -39,7 +39,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -325,14 +324,17 @@ func NewController(config *Config) (controller *Controller, err error) {
 		}
 	}
 
-	// Initialize shared in-proxy broker clients to be used for all in-proxy
-	// client dials and in-proxy proxy operations.
+	// Initialize the two in-proxy broker client managers: one for in-proxy
+	// client dials and one for in-proxy proxy operations.
 	//
 	// Using shared broker connections minimizes the overhead of establishing
-	// broker connections at the start of an in-proxy dial or operation. By
-	// design, established broker connections will be retained for up to the
-	// entire lifetime of the controller run, so past the end of client
-	// tunnel establishment.
+	// broker connections at the start of an in-proxy dial or operation.
+	// The broker client manager used for client dials and untunneled DSL
+	// closes its shared broker client after a configured idle timeout, which
+	// can be disabled. The broker client manager used for proxy operations
+	// does not expire its shared broker client when idle. Failures and resets
+	// may end sharing in either broker client manager, and controller
+	// shutdown closes all broker clients.
 	//
 	// No network operations are performed by NewInproxyBrokerClientManager or
 	// NewInproxyNATStateManager; each manager operates on demand, when
@@ -378,6 +380,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 // Run executes the controller. Run exits if a controller
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
+	// Ensure any open connections are cleaned up on shutdown.
+	defer controller.inproxyClientBrokerClientManager.closeClientBrokerClients()
+	defer controller.inproxyProxyBrokerClientManager.closeClientBrokerClients()
 
 	// Exported Controller methods may be called after NewController and
 	// before Run, so no exported method should depend on variables that are
@@ -921,11 +926,7 @@ func (controller *Controller) RecordClientEvent(event string) {
 			dropReason = "event length limit is zero"
 			return
 		}
-		end := lengthLimit - 1
-		for end > 0 && !utf8.RuneStart(event[end]) {
-			end--
-		}
-		event = event[:end] + "*"
+		event = common.TruncateUTF8String(event, lengthLimit)
 	}
 
 	// Apply a simple heuristic to attribute client events to the current
@@ -2055,14 +2056,14 @@ func (controller *Controller) Dial(
 func (controller *Controller) dial(
 	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, isLightProxy bool, err error) {
 
-	// TODO: explicitly exclude udpgw port forwards from the light proxy path.
-
 	readInactiveThreshold := controller.config.GetLightProxyTunnelInactiveThreshold()
 
 	tunnel := controller.getNextActiveTunnel(readInactiveThreshold)
 	if tunnel == nil {
 
-		if controller.config.EnableLightProxyFallback {
+		// TODO: make the excluded udpgw address configurable.
+		if controller.config.EnableLightProxyFallback &&
+			remoteAddr != protocol.DEFAULT_UDPGW_INTERCEPT_ADDRESS {
 
 			lightProxyClient := controller.config.GetLightProxyClient()
 			if lightProxyClient != nil {
@@ -2349,6 +2350,36 @@ func (p *protocolSelectionConstraints) canDefer(
 	return len(deferredProtocols) > 0
 }
 
+// pruneInproxyLimitsAfterMustUpgrade removes in-proxy tunnel protocols from
+// the protocol limits of a new establishment after a broker has returned
+// MustUpgrade. The initial limit phase then does not dial them again, and is
+// skipped when no protocols remain; and candidate and egress region counts,
+// which use the limits directly, exclude server entries reachable only
+// through in-proxy tunnel protocols. A limit allowing only in-proxy tunnel
+// protocols is retained, so that selectProtocol shuts down. See the
+// MustUpgrade comment in selectProtocol.
+func (p *protocolSelectionConstraints) pruneInproxyLimitsAfterMustUpgrade() {
+
+	if !p.config.isInproxyMustUpgrade() {
+		return
+	}
+
+	if len(p.initialLimitTunnelProtocols) > 0 {
+
+		p.initialLimitTunnelProtocols = p.initialLimitTunnelProtocols.PruneInproxyTunnelProtocols()
+
+		if len(p.initialLimitTunnelProtocols) == 0 {
+			p.initialLimitTunnelProtocolsCandidateCount = 0
+		}
+	}
+
+	if len(p.limitTunnelProtocols) > 0 &&
+		!p.limitTunnelProtocols.IsOnlyInproxyTunnelProtocols() {
+
+		p.limitTunnelProtocols = p.limitTunnelProtocols.PruneInproxyTunnelProtocols()
+	}
+}
+
 func (p *protocolSelectionConstraints) getLimitTunnelProtocols(
 	connectTunnelCount int) protocol.TunnelProtocols {
 
@@ -2386,6 +2417,46 @@ func (p *protocolSelectionConstraints) selectProtocol(
 
 	candidateProtocols := p.supportedProtocols(
 		connectTunnelCount, excludeIntensive, serverEntry)
+
+	// After a broker returns MustUpgrade, in-proxy dials cannot succeed until
+	// the app is upgraded, so in-proxy tunnel protocols are no longer
+	// selected. When the protocol limits allow only in-proxy tunnel
+	// protocols, no protocol can be selected, so shut down, as is done in
+	// personal pairing mode. The limits are checked by protocol name: a limit
+	// whose other protocols are all unavailable, for example disabled, does
+	// not cause a shutdown. The length check is required as
+	// IsOnlyInproxyTunnelProtocols is true for an empty list, which applies
+	// no limit.
+	//
+	// In the initial limit phase, in-proxy tunnel protocols are retained when
+	// no other protocol remains for the candidate. The phase ends only after
+	// InitialLimitTunnelProtocolsCandidateCount selections, so skipping such
+	// candidates could leave establishment in the phase indefinitely; the
+	// count bounds these dials. An establishment that starts after
+	// MustUpgrade removes in-proxy tunnel protocols from the limits instead;
+	// see pruneInproxyLimitsAfterMustUpgrade.
+
+	if p.config.isInproxyMustUpgrade() {
+
+		if len(p.limitTunnelProtocols) > 0 &&
+			p.limitTunnelProtocols.IsOnlyInproxyTunnelProtocols() {
+
+			// Concurrent establishment workers may each signal before the
+			// shutdown stops them; only the first signal takes effect.
+			NoticeWarning(
+				"in-proxy must upgrade: limits allow only in-proxy tunnel protocols")
+			p.config.signalComponentFailure.Load().(func())()
+			return "", 0, false
+		}
+
+		isInitialLimitPhase := p.hasInitialProtocols() &&
+			connectTunnelCount < p.initialLimitTunnelProtocolsCandidateCount
+
+		prunedProtocols := candidateProtocols.PruneInproxyTunnelProtocols()
+		if len(prunedProtocols) > 0 || !isInitialLimitPhase {
+			candidateProtocols = prunedProtocols
+		}
+	}
 
 	// Prefer selecting an in-proxy tunnel protocol when indicated, but fall
 	// back to other protocols when no in-proxy protocol is supported.
@@ -2746,6 +2817,8 @@ func (controller *Controller) launchEstablishing() {
 		}
 	}
 
+	controller.protocolSelectionConstraints.pruneInproxyLimitsAfterMustUpgrade()
+
 	// Initialize the in-proxy client dial rate limiter, using the latest
 	// tactics. Rate limits are used in
 	// protocolSelectionConstraints.selectProtocol. When
@@ -3064,6 +3137,10 @@ func (controller *Controller) stopEstablishing() {
 	controller.concurrentEstablishTunnelsMutex.Unlock()
 	NoticeInfo("peak concurrent establish tunnels: %d", peakConcurrent)
 	NoticeInfo("peak concurrent resource intensive establish tunnels: %d", peakConcurrentIntensive)
+	created, peakConcurrent := controller.inproxyClientBrokerClientManager.takeBrokerClientCounts()
+	if created > 0 {
+		NoticeInfo("inproxy: broker clients created %d, peak concurrent %d", created, peakConcurrent)
+	}
 
 	emitMemoryMetrics()
 	DoGarbageCollection()
@@ -3327,9 +3404,10 @@ loop:
 			}
 		}
 
-		// Trigger RSL, OSL, and upgrade checks after failing to establish a
-		// tunnel within parameters.EstablishTunnelWorkTime, or if there are
-		// no server entries present.
+		// Trigger RSL, OSL, untunneled DSL, and upgrade checks after
+		// failing to establish a tunnel within
+		// parameters.EstablishTunnelWorkTime, or if there are no server
+		// entries present.
 		//
 		// While the trigger is made after each round,
 		// parameter.FetchRemoteServerListStalePeriod will limit the actual
@@ -3605,9 +3683,11 @@ loop:
 			//
 			// Forced selection is skipped when excluding intensive protocols, as
 			// TunnelProtocolIsResourceIntensive currently includes
-			// TunnelProtocolUsesInproxy.
+			// TunnelProtocolUsesInproxy; and after a broker has returned
+			// MustUpgrade, as in-proxy tunnel protocols are no longer selected.
 
 			if !excludeIntensive &&
+				!controller.config.isInproxyMustUpgrade() &&
 				controller.establishInproxyForceSelectionCount > 0 &&
 				controller.protocolSelectionConstraints.supportedProtocols(
 					controller.establishConnectTunnelCount,
@@ -3994,9 +4074,19 @@ loop:
 				break loop
 			}
 
-			NoticeInfo("failed to connect to %s: %v",
-				candidateServerEntry.serverEntry.GetDiagnosticID(),
-				errors.Trace(err))
+			// The in-proxy broker client ID is logged here rather than added
+			// to the error, as the error is also sent to the server in the
+			// failed tunnel stat.
+			if brokerDialParams := dialParams.inproxyBrokerDialParameters.Load(); brokerDialParams != nil {
+				NoticeInfo("failed to connect to %s: broker client %s: %v",
+					candidateServerEntry.serverEntry.GetDiagnosticID(),
+					brokerDialParams.brokerClientID,
+					errors.Trace(err))
+			} else {
+				NoticeInfo("failed to connect to %s: %v",
+					candidateServerEntry.serverEntry.GetDiagnosticID(),
+					errors.Trace(err))
+			}
 
 			continue
 		}
@@ -4220,6 +4310,7 @@ func (controller *Controller) runInproxyProxy() {
 		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
+		GetAnnounceDelayParameters:           controller.inproxyGetProxyAnnounceDelayParameters,
 		ExcludeInterfaceName:                 controller.config.splitInterfaceUpstreamInterfaceName(),
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
@@ -4408,16 +4499,15 @@ func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
 		isCompatibleNetwork)
 }
 
-// inproxyGetProxyBrokerClient returns the broker client shared by all proxy
-// operations.
-func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClient, error) {
-
-	brokerClient, _, err := controller.inproxyProxyBrokerClientManager.GetBrokerClient(
-		controller.config.GetNetworkID())
+// inproxyGetProxyBrokerClient acquires a broker client. The input ctx bounds
+// acquisition only. The caller must invoke release when the broker client is
+// no longer required.
+func (controller *Controller) inproxyGetProxyBrokerClient(ctx context.Context) (*inproxy.BrokerClient, func(), error) {
+	brokerClient, _, release, err := controller.inproxyProxyBrokerClientManager.GetBrokerClient(ctx, controller.config.GetNetworkID())
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
-	return brokerClient, nil
+	return brokerClient, release, nil
 }
 
 func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParameters bool) (
@@ -4483,6 +4573,19 @@ func (controller *Controller) inproxyMakeProxyWebRTCDialCoordinator() (
 	}
 
 	return webRTCDialInstance, nil
+}
+
+// inproxyGetProxyAnnounceDelayParameters returns the current tactics values
+// for proxy announcement staggering and failure backoff.
+func (controller *Controller) inproxyGetProxyAnnounceDelayParameters() (
+	time.Duration, time.Duration, float64) {
+
+	p := controller.config.GetParameters().Get()
+	defer p.Close()
+
+	return p.Duration(parameters.InproxyProxyAnnounceDelay),
+		p.Duration(parameters.InproxyProxyAnnounceMaxBackoffDelay),
+		p.Float(parameters.InproxyProxyAnnounceDelayJitter)
 }
 
 // inproxyHandleProxyTacticsPayload handles new tactics returned from the

@@ -61,6 +61,10 @@ type TestIGD struct {
 	mu       sync.Mutex // guards below
 	upnpHTTP http.Handler
 	counters igdCounters
+	// onPxP, if set, is called when a NAT-PMP or PCP request arrives, before
+	// it is handled; tests use it to act while the client's PMP/PCP read is
+	// pending.
+	onPxP func()
 }
 
 // TestIGDOptions are options
@@ -150,6 +154,13 @@ func (d *TestIGD) stats() igdCounters {
 	return d.counters
 }
 
+// SetPxPHook sets a callback invoked on each NAT-PMP or PCP request.
+func (d *TestIGD) SetPxPHook(fn func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onPxP = fn
+}
+
 func (d *TestIGD) SetUPnPHandler(h http.Handler) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -214,12 +225,21 @@ func (d *TestIGD) servePxP() {
 			continue
 		}
 		ver := pkt[0]
+		d.mu.Lock()
+		onPxP := d.onPxP
+		d.mu.Unlock()
 		switch ver {
 		default:
 			continue
 		case pmpVersion:
+			if onPxP != nil {
+				onPxP()
+			}
 			d.handlePMPQuery(pkt, src)
 		case pcpVersion:
+			if onPxP != nil {
+				onPxP()
+			}
 			d.handlePCPQuery(pkt, src)
 		}
 	}
@@ -288,6 +308,14 @@ func (d *TestIGD) handlePCPQuery(pkt []byte, src netip.AddrPort) {
 
 // newTestClient configures a new test client connected to igd for mapping updates.
 // A cleanup for the resulting client is added to t.
+// currentGeneration returns the client's current mapping generation, for
+// tests that call getUPnPPortMapping directly.
+func (c *Client) currentGeneration() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mappingGeneration
+}
+
 func newTestClient(t *testing.T, igd *TestIGD) *Client {
 	var c *Client
 	c = NewClient(Config{

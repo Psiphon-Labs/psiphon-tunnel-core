@@ -31,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 func TestServerEntryExchange(t *testing.T) {
@@ -338,5 +339,16 @@ func TestServerEntryExchange(t *testing.T) {
 		t.Fatalf("ImportExchangePayload failed")
 	}
 
+	checkFirstServerEntry(serverEntry3, tunnelProtocol3, true)
+
+	t.Run("null payload", func(t *testing.T) {
+		var nonce [24]byte
+		var key [32]byte
+		copy(key[:], obfuscationKeyBytes)
+		boxed := secretbox.Seal(nonce[:], []byte("null"), &nonce, &key)
+		if ImportExchangePayload(config, base64.StdEncoding.EncodeToString(boxed)) {
+			t.Fatal("ImportExchangePayload accepted null payload")
+		}
+	})
 	checkFirstServerEntry(serverEntry3, tunnelProtocol3, true)
 }

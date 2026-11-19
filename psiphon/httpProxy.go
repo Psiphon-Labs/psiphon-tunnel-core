@@ -59,7 +59,8 @@ import (
 //
 // An example use case for direct, untunneled, relaying is to make use of Go's TLS
 // stack for HTTPS requests in cases where the native TLS stack is lacking (e.g.,
-// WinHTTP on Windows XP). The URL for direct relaying is:
+// WinHTTP on Windows XP). Direct relaying requires Config.EnableLocalHTTPProxyDirect.
+// The URL for direct relaying is:
 // "http://127.0.0.1:<proxy-port>/direct/<origin URL>".
 // Again, the <origin URL> must be escaped in such a way that it can be used inside a URL query.
 //
@@ -68,6 +69,8 @@ import (
 // For example, in iOS 10 the UIWebView media player does not put requests through the
 // NSURLProtocol, so they are not tunneled. Instead, we rewrite those URLs to use the URL
 // proxy, and rewrite retrieved playlist files so they also contain proxied URLs.
+// Apps should use M3U8 rewriting only with trusted origins: response bodies
+// are buffered without a size limit.
 //
 // The URL proxy offers /tunneled-icy/ which is compatible with both HTTP and ICY protocol
 // resources.
@@ -324,6 +327,10 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 		rewrites = request.URL.Query()
 
 	case strings.HasPrefix(request.URL.RawPath, URL_PROXY_DIRECT_REQUEST_PATH):
+		if !proxy.config.EnableLocalHTTPProxyDirect {
+			http.NotFound(responseWriter, request)
+			return
+		}
 		originURLString, err = url.QueryUnescape(request.URL.RawPath[len(URL_PROXY_DIRECT_REQUEST_PATH):])
 		client = proxy.urlProxyDirectClient
 

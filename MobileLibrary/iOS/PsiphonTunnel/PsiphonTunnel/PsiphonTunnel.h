@@ -95,10 +95,12 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
    - `RemoteServerListSignaturePublicKey`: This is the same field as above. It is required if either `RemoteServerListURLs` or `ObfuscatedServerListRootURLs` is supplied.
 
  Optional fields (if you don't need them, don't set them):
- - `DataStoreDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
- - `RemoteServerListDownloadFilename`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept.
- - `ObfuscatedServerListDownloadDirectory`: If not set, the library will use a sane location. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable.
+ - `DataRootDirectory`: If not set, the library will use a sane location; see `defaultDataRootDirectoryWithError:`. Override if the client wants to restrict where operational data is kept. If overridden, the directory must already exist and be writable. All persistent files, including the datastore and downloaded server lists, are stored under this directory.
+ - The legacy fields `DataStoreDirectory`, `RemoteServerListDownloadFilename`, and `ObfuscatedServerListDownloadDirectory` are deprecated and ignored. Files in those legacy locations are no longer migrated to `DataRootDirectory`.
  - `UpstreamProxyUrl`
+ - `UseUnixDomainSockets`
+ - `LocalSocksProxyUnixPath`
+ - `LocalHttpProxyUnixPath`
  - `EmitDiagnosticNotices`
  - `EgressRegion`
  - `EstablishTunnelTimeoutSeconds`
@@ -623,9 +625,6 @@ Returns the path where the rotated notices file will be created.
  @warning An ongoing feedback upload started with `startSendFeedback:` should be stopped with `stopSendFeedback` before the
  process exits. This ensures that any underlying resources are cleaned up; failing to do so may result in data store corruption or other
  undefined behavior.
- @warning `PsiphonTunnel.start:` and `startSendFeedback:`  both make an attempt to migrate persistent files from legacy locations in a
- one-time operation. If these functions are called in parallel, then there is a chance that the migration attempts could execute at the same
- time and result in non-fatal errors in one, or both, of the migration operations.
  */
 - (void)startSendFeedback:(NSString * _Nonnull)feedbackJson
        feedbackConfigJson:(id _Nonnull)feedbackConfigJson

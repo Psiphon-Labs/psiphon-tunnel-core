@@ -57,17 +57,13 @@ func DialShadowsocksTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	tcpDialer := NewTCPDialer(dialConfig)
-	conn, err := tcpDialer(ctx, "tcp", shadowsocksConfig.dialAddr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	ssw := shadowsocks.NewWriter(conn, key)
-
+	// Make the prefix before dialing, so that an invalid prefix does not leave
+	// an open conn; for in-proxy protocols, the conn holds a broker client
+	// until it is closed.
+	var prefix []byte
 	if shadowsocksConfig.prefix != nil {
 
-		prefix, err := makePrefix(shadowsocksConfig.prefix)
+		prefix, err = makePrefix(shadowsocksConfig.prefix)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -79,7 +75,17 @@ func DialShadowsocksTunnel(
 		if len(prefix) > 16 {
 			return nil, errors.Tracef("invalid prefix length %d", len(prefix))
 		}
+	}
 
+	tcpDialer := NewTCPDialer(dialConfig)
+	conn, err := tcpDialer(ctx, "tcp", shadowsocksConfig.dialAddr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	ssw := shadowsocks.NewWriter(conn, key)
+
+	if shadowsocksConfig.prefix != nil {
 		ssw.SetSaltGenerator(shadowsocks.NewPrefixSaltGenerator(prefix))
 	}
 

@@ -884,6 +884,169 @@ func runTestMatcher() error {
 	return nil
 }
 
+func TestMatcherProxyQuality(t *testing.T) {
+
+	type testProxy struct {
+		natType    NATType
+		isPriority bool
+		hasQuality bool
+	}
+
+	priorityUnknown := testProxy{natType: NATTypeUnknown, isPriority: true}
+	priorityNAT := testProxy{natType: NATTypeFullCone, isPriority: true}
+	priorityQuality := testProxy{natType: NATTypeUnknown, isPriority: true, hasQuality: true}
+	priorityQualityNAT := testProxy{natType: NATTypeFullCone, isPriority: true, hasQuality: true}
+	ordinaryUnknown := testProxy{natType: NATTypeUnknown}
+	ordinaryNAT := testProxy{natType: NATTypeFullCone}
+	ordinaryQuality := testProxy{natType: NATTypeUnknown, hasQuality: true}
+
+	probeLimitProxies := []testProxy{priorityNAT}
+	for i := 0; i < matcherMaxBetterMatchProbe; i++ {
+		probeLimitProxies = append(probeLimitProxies, priorityUnknown)
+	}
+	probeLimitProxies = append(probeLimitProxies, priorityQuality)
+
+	// A better NAT match at the probe limit does not extend the probe.
+	fixedProbeLimitProxies := []testProxy{}
+	for i := 0; i < matcherMaxBetterMatchProbe; i++ {
+		fixedProbeLimitProxies = append(fixedProbeLimitProxies, priorityUnknown)
+	}
+	fixedProbeLimitProxies = append(
+		fixedProbeLimitProxies, priorityNAT, priorityUnknown, priorityQuality)
+
+	for _, test := range []struct {
+		name          string
+		proxies       []testProxy
+		expectedMatch int
+	}{
+		{
+			name:          "quality_after_preferred_nat",
+			proxies:       []testProxy{priorityNAT, priorityQuality, priorityNAT},
+			expectedMatch: 1,
+		},
+		{
+			name:          "quality_without_preferred_nat",
+			proxies:       []testProxy{priorityUnknown, priorityQuality},
+			expectedMatch: 1,
+		},
+		{
+			name:          "quality_with_preferred_nat",
+			proxies:       []testProxy{priorityNAT, priorityQualityNAT, priorityQuality},
+			expectedMatch: 1,
+		},
+		{
+			name:          "first_nat_match_without_quality",
+			proxies:       []testProxy{priorityUnknown, priorityNAT, priorityNAT},
+			expectedMatch: 1,
+		},
+		{
+			name:          "first_quality_match",
+			proxies:       []testProxy{priorityQuality, priorityQualityNAT},
+			expectedMatch: 0,
+		},
+		{
+			name:          "priority_before_non_priority",
+			proxies:       []testProxy{priorityUnknown, ordinaryNAT},
+			expectedMatch: 0,
+		},
+		{
+			name:          "non_priority_quality_ignored",
+			proxies:       []testProxy{ordinaryUnknown, ordinaryQuality, ordinaryNAT},
+			expectedMatch: 2,
+		},
+		{
+			name:          "non_priority_without_preferred_nat",
+			proxies:       []testProxy{ordinaryUnknown, ordinaryQuality},
+			expectedMatch: 0,
+		},
+		{
+			name:          "quality_beyond_probe_limit",
+			proxies:       probeLimitProxies,
+			expectedMatch: 0,
+		},
+		{
+			name:          "nat_match_does_not_extend_probe_limit",
+			proxies:       fixedProbeLimitProxies,
+			expectedMatch: matcherMaxBetterMatchProbe,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+
+			const proxyASN = "65537"
+			const clientASN = "65538"
+			const otherClientASN = "65539"
+
+			quality := NewProxyQuality()
+			m := NewMatcher(&MatcherConfig{
+				Logger:            testutils.NewTestLogger(),
+				ProxyQualityState: quality,
+				AllowMatch:        func(common.GeoIPData, common.GeoIPData) bool { return true },
+			})
+
+			// Call matchOffer directly so all candidates are queued before matching.
+
+			compartmentIDs := []ID{{1}}
+			var announcements []*announcementEntry
+			for i, proxy := range test.proxies {
+				proxyID := ID{byte(i + 1)}
+
+				// All proxies have quality for another ASN, so the priority
+				// candidates qualify even without quality for this client.
+				counts := ProxyQualityASNCounts{otherClientASN: 1}
+				if proxy.hasQuality {
+					counts[clientASN] = 1
+				}
+				quality.AddQuality(MakeProxyQualityKey(proxyID, proxyASN), counts)
+
+				announcement := &announcementEntry{
+					ctx: context.Background(),
+					announcement: &MatchAnnouncement{
+						ProxyID: proxyID,
+						Properties: MatchProperties{
+							IsPriority:           proxy.isPriority,
+							ProtocolVersion:      LatestProtocolVersion,
+							CommonCompartmentIDs: compartmentIDs,
+							GeoIPData:            common.GeoIPData{Country: "C1", ASN: proxyASN},
+							NATType:              proxy.natType,
+						},
+					},
+				}
+				if err := m.addAnnouncementEntry(announcement); err != nil {
+					t.Fatal(err)
+				}
+				announcements = append(announcements, announcement)
+			}
+
+			offer := &offerEntry{
+				ctx: context.Background(),
+				offer: &MatchOffer{
+					Properties: MatchProperties{
+						ProtocolVersion:      LatestProtocolVersion,
+						CommonCompartmentIDs: compartmentIDs,
+						GeoIPData:            common.GeoIPData{Country: "C2", ASN: clientASN},
+						NATType:              NATTypeUnknown,
+					},
+				},
+			}
+
+			var metrics MatcherMetrics
+			m.announcementQueueMutex.Lock()
+			m.offerQueueMutex.Lock()
+			match, index, hasQuality := m.matchOffer(offer, &metrics)
+			m.offerQueueMutex.Unlock()
+			m.announcementQueueMutex.Unlock()
+
+			expected := test.proxies[test.expectedMatch]
+			if match != announcements[test.expectedMatch] || index != test.expectedMatch {
+				t.Fatalf("unexpected match at index %d; want %d", index, test.expectedMatch)
+			}
+			if hasQuality != (expected.isPriority && expected.hasQuality) {
+				t.Fatalf("unexpected match hasQuality: %v", hasQuality)
+			}
+		})
+	}
+}
+
 func randomIPAddress() string {
 	return fmt.Sprintf("%d.%d.%d.%d",
 		prng.Range(0, 255),
@@ -1331,7 +1494,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 				}
 
 				var metrics MatcherMetrics
-				match, _ := m.matchOffer(offerEntry, &metrics)
+				match, _, _ := m.matchOffer(offerEntry, &metrics)
 				if match == nil {
 					b.Fatal(errors.TraceNew("unexpected no match").Error())
 				}

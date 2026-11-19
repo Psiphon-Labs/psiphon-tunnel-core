@@ -30,3 +30,14 @@ import "net/netip"
 func gatewayForInterface(ifaceName string) (netip.Addr, bool) {
 	return parseProcNetRoute(ifaceName)
 }
+
+// defaultRoutes returns every IPv4 default route from an rtnetlink dump,
+// which, unlike /proc/net/route, exposes every next hop of a multipath
+// route. /proc/net/route is the fallback when netlink is unavailable.
+func defaultRoutes(ifaceName string) []defaultRoute {
+	routes, err := netlinkDefaultRoutes(ifaceName)
+	if err != nil {
+		return procNetDefaultRoutes(ifaceName)
+	}
+	return routes
+}

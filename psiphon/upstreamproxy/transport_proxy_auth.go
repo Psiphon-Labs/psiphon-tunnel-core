@@ -30,6 +30,8 @@ import (
 // by tapping into HTTP conversation and adding authentication headers to the requests
 // when requested by server
 //
+// Callers must apply timeouts to bound proxy authentication retries.
+//
 // Limitation: in violation of https://golang.org/pkg/net/http/#RoundTripper,
 // ProxyAuthTransport is _not_ safe for concurrent RoundTrip calls. This is acceptable
 // for its use in Psiphon to provide upstream proxy support for meek, which makes only

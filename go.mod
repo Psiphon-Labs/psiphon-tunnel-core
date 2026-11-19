@@ -4,11 +4,6 @@ go 1.26.0
 
 toolchain go1.26.10
 
-// The following replaces are required only when the build tag
-// PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
-
-replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
-
 replace github.com/pion/dtls/v2 => ./replace/dtls
 
 // pion/dtls v2 uses a local replace (replace/dtls) with [Psiphon] patches
@@ -36,7 +31,6 @@ require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 	github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
-	github.com/deckarep/golang-set v0.0.0-20171013212420-1d4478f51bed
 	github.com/dgraph-io/badger v1.5.4-0.20180815194500-3a87f6d9c273
 	github.com/elazarl/goproxy v0.0.0-20200809112317-0581fc3aee2d
 	github.com/elazarl/goproxy/ext v0.0.0-20200809112317-0581fc3aee2d
@@ -75,11 +69,11 @@ require (
 	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
 	github.com/wlynxg/anet v0.0.5
 	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/crypto v0.54.0
-	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/sys v0.47.0
-	golang.org/x/term v0.45.0
+	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.62.0
+	golang.org/x/sync v0.24.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	golang.org/x/time v0.14.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	golang.zx2c4.com/wireguard/windows v0.5.3
@@ -136,7 +130,7 @@ require (
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
-	github.com/shoenig/go-m1cpu v0.1.6 // indirect
+	github.com/shoenig/go-m1cpu v0.2.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
@@ -146,8 +140,8 @@ require (
 	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
-	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
-	golang.org/x/tools v0.47.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/tools v0.51.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
