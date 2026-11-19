@@ -45,16 +45,11 @@
 #import "ReachabilityProtocol.h"
 #import "Reachability+ReachabilityProtocol.h"
 #import "DefaultRouteMonitor.h"
-#import "WiFiNetworkInfo.h"
 
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
 
 const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
 const BOOL UseHasIPv6RouteGetter = FALSE;
-
-// Time from the start of a network's NEHotspotNetwork fetch after which its Wi-Fi network ID is chosen without the
-// BSSID. On device, fetches took 14-65 ms.
-static const NSTimeInterval WiFiBSSIDTimeout = 1.0;
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -130,9 +125,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
 
-    // Chooses and keeps the Wi-Fi network ID for each network. Nil when NEHotspotNetwork is unavailable.
-    WiFiNetworkInfo *_Nullable wifiNetworkInfo;
-
     BOOL tunnelWholeDevice;
 
     _Atomic BOOL usingNoticeFiles;
@@ -187,15 +179,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         self->reachability = [Reachability reachabilityForInternetConnection];
     }
     atomic_init(&self->currentNetworkStatus, NetworkReachabilityNotReachable);
-#if TARGET_OS_IPHONE
-    if (@available(iOS 14.0, macCatalyst 14.0, *)) {
-        __weak PsiphonTunnel *weakSelf = self;
-        self->wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithTimeout:WiFiBSSIDTimeout
-                                                                  logger:^(NSString * _Nonnull message) {
-            [weakSelf logMessage:message];
-        }];
-    }
-#endif
     self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
@@ -361,18 +344,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         [self startInternetReachabilityMonitoring];
 
-        // Fetch the Wi-Fi BSSID of the current network. Off the main thread, wait for it to be decided before
-        // GoPsiStart, in which tunnel-core requests the network ID to load stored tactics, unless tactics are
-        // disabled. The network ID is then kept for the network, so tunnel-core sees the same network ID throughout.
-        // See WiFiNetworkInfo.
-        //
-        // The NEHotspotNetwork completion handler runs on the main queue, so the BSSID cannot arrive while the main
-        // thread is blocked. On the main thread, waitForBSSID returns without waiting. A network ID request on the
-        // main thread then chooses the fallback network ID, and one on another thread waits up to the timeout.
-        BOOL usesWiFi = atomic_load(&self->currentNetworkStatus) == NetworkReachabilityReachableViaWiFi;
-        [self->wifiNetworkInfo startUsingWiFi:usesWiFi];
-        [self->wifiNetworkInfo waitForBSSID];
-
         return [self startPsiphonLibraryWithConfig:configStr
                              embeddedServerEntries:embeddedServerEntries
                          embeddedServerEntriesPath:embeddedServerEntriesPath
@@ -489,7 +460,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [self logMessage: @"Stopping Psiphon library"];
 
         [self stopInternetReachabilityMonitoring];
-        [self->wifiNetworkInfo stop];
 
         GoPsiStop();
         
@@ -1396,42 +1366,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)getNetworkID {
-    // Checked first, as in NetworkID getNetworkIDWithReachability, including before a kept Wi-Fi network ID.
-    NSString *vpnNetworkID = [NetworkID vpnNetworkIDWithTunnelWholeDevice:self->tunnelWholeDevice];
-    if (vpnNetworkID != nil) {
-        return vpnNetworkID;
-    }
-
-    NetworkReachability networkStatus = atomic_load(&self->currentNetworkStatus);
-
-    // The Wi-Fi network ID is chosen once per network and kept, so that it does not change on the same network,
-    // for example when the BSSID arrives after the fallback network ID was chosen. See WiFiNetworkInfo.
-    if (networkStatus == NetworkReachabilityReachableViaWiFi) {
-        NSString *networkID = [self->wifiNetworkInfo networkIDWithBuilder:^NSString *(NSString *bssid, BOOL *outStable) {
-            BOOL warned;
-            NSString *wifiNetworkID = [self networkIDWithStatus:networkStatus wifiBSSID:bssid warned:&warned];
-            // Without the BSSID or an interface address, the network ID is bare "WIFI", which does not identify
-            // the network. Do not keep it, so that an interface address is used once available.
-            *outStable = !warned;
-            return wifiNetworkID;
-        }];
-        if (networkID != nil) {
-            return networkID;
-        }
-    }
-
-    return [self networkIDWithStatus:networkStatus wifiBSSID:nil warned:NULL];
-}
-
-/// Returns the network ID for networkStatus, logging any warning asynchronously, without the VPN check.
-- (NSString *)networkIDWithStatus:(NetworkReachability)networkStatus
-                        wifiBSSID:(NSString *_Nullable)wifiBSSID
-                           warned:(BOOL *_Nullable)outWarned {
     NSError *warn;
-    NSString *networkID = [NetworkID networkIDWithReachability:self->reachability
-                                       andCurrentNetworkStatus:networkStatus
-                                                     wifiBSSID:wifiBSSID
-                                                       warning:&warn];
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
+                                          andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                tunnelWholeDevice:self->tunnelWholeDevice
+                                                          warning:&warn];
     if (warn != nil) {
         // Go holds the provider mutex during this lookup. Logging back into Go synchronously can invert the
         // provider/notice lock order, so let the lookup return without waiting for warning delivery.
@@ -1439,9 +1378,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             [self logMessage:message];
         });
-    }
-    if (outWarned != NULL) {
-        *outWarned = warn != nil;
     }
     return networkID;
 }
@@ -1753,17 +1689,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
 
-        // currentNetworkStatus is only written with @synchronized (PsiphonTunnel.self) held.
-        previousNetworkStatus = atomic_load(&self->currentNetworkStatus);
-        BOOL networkChanged = networkStatus != previousNetworkStatus || interfaceChanged;
-
-        // A new network gets a new Wi-Fi network ID, decided before GoPsiNetworkChanged below causes tunnel-core
-        // to request it. Other notifications keep the network ID, which must not change on the same network.
-        if (networkChanged) {
-            [self->wifiNetworkInfo networkChangedUsingWiFi:networkStatus == NetworkReachabilityReachableViaWiFi];
-        }
-
-        atomic_store(&self->currentNetworkStatus, networkStatus);
+        previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
 
         // Signal when the network status or interface has changed, unless the
         // previous status was NetworkReachabilityNotReachable, because the
@@ -1771,7 +1697,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         //
         // GoPsiNetworkChanged initiates a reset of all open network
         // connections, including a tunnel reconnect.
-        if (networkChanged && previousNetworkStatus != NetworkReachabilityNotReachable) {
+        if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
             GoPsiNetworkChanged();
         }
     }

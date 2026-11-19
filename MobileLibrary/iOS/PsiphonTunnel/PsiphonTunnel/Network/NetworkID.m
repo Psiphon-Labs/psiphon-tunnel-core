@@ -21,7 +21,6 @@
 #import "NetworkInterface.h"
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-#import <SystemConfiguration/CaptiveNetwork.h>
 
 @implementation NetworkID
 
@@ -29,24 +28,10 @@
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
                          tunnelWholeDevice:(BOOL)tunnelWholeDevice
-                                 wifiBSSID:(NSString *_Nullable)wifiBSSID
                                    warning:(NSError *_Nullable *_Nonnull)outWarn {
 
     *outWarn = nil;
 
-    NSString *vpnNetworkID = [NetworkID vpnNetworkIDWithTunnelWholeDevice:tunnelWholeDevice];
-    if (vpnNetworkID != nil) {
-        return vpnNetworkID;
-    }
-
-    return [NetworkID networkIDWithReachability:reachability
-                        andCurrentNetworkStatus:currentNetworkStatus
-                                      wifiBSSID:wifiBSSID
-                                        warning:outWarn];
-}
-
-// See comment in header.
-+ (NSString *_Nullable)vpnNetworkIDWithTunnelWholeDevice:(BOOL)tunnelWholeDevice {
     // NetworkID is "VPN" if the library is used in non-VPN mode,
     // and an active VPN is found on the system.
     // This method is not exact and relies on CFNetworkCopySystemProxySettings,
@@ -59,21 +44,13 @@
             }
         }
     }
-    return nil;
-}
-
-// See comment in header.
-+ (NSString *)networkIDWithReachability:(id<ReachabilityProtocol>)reachability
-                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                              wifiBSSID:(NSString *_Nullable)wifiBSSID
-                                warning:(NSError *_Nullable *_Nonnull)outWarn {
-
-    *outWarn = nil;
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {
         [networkID setString:@"WIFI"];
-#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+
+        // The access point's hardware address is deliberately not used: it identifies a single access point radio,
+        // not the network, so one network with several access points or bands would get several network IDs.
         NSError *err;
         NSString *activeInterfaceAddress =
             [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
@@ -81,25 +58,12 @@
                                                                   error:&err];
         if (err != nil) {
             NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
-            *outWarn = [[NSError alloc] initWithDomain:@"PsiphonTunnelError"
+            *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
                                                   code:1
                                               userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
             return networkID;
         }
         [networkID appendFormat:@"-%@", activeInterfaceAddress];
-#else
-        return [NetworkID wifiNetworkIDWithBSSID:wifiBSSID
-                        currentNetworkInfoBSSIDs:^NSArray<NSString *> *{
-            return [NetworkID currentNetworkInfoBSSIDs];
-        }
-                                interfaceAddress:^NSString *(NSError *_Nullable *_Nonnull outError) {
-            // As the Android library does with WifiInfo.getIpAddress when it has no BSSID.
-            return [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
-                                                       andCurrentNetworkStatus:currentNetworkStatus
-                                                                         error:outError];
-        }
-                                         warning:outWarn];
-#endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
 
@@ -157,53 +121,5 @@
     }
     return networkID;
 }
-
-// See comment in header.
-+ (NSString *)wifiNetworkIDWithBSSID:(NSString *_Nullable)wifiBSSID
-            currentNetworkInfoBSSIDs:(NetworkIDCurrentNetworkInfoBSSIDs)currentNetworkInfoBSSIDs
-                    interfaceAddress:(NetworkIDInterfaceAddress)interfaceAddress
-                             warning:(NSError *_Nullable *_Nonnull)outWarn {
-
-    *outWarn = nil;
-
-    if (wifiBSSID.length > 0) {
-        return [@"WIFI-" stringByAppendingString:wifiBSSID];
-    }
-
-    NSArray<NSString *> *bssids = currentNetworkInfoBSSIDs();
-    if (bssids.count > 0) {
-        return [@"WIFI-" stringByAppendingString:[bssids componentsJoinedByString:@"-"]];
-    }
-
-    NSError *err;
-    NSString *activeInterfaceAddress = interfaceAddress(&err);
-    if (err != nil || activeInterfaceAddress.length == 0) {
-        NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@",
-                                          err != nil ? err.localizedDescription : @"empty address"];
-        *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
-                                              code:1
-                                          userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
-        return @"WIFI";
-    }
-    return [@"WIFI-" stringByAppendingString:activeInterfaceAddress];
-}
-
-#if TARGET_OS_IPHONE
-+ (NSArray<NSString *> *)currentNetworkInfoBSSIDs {
-    NSMutableArray<NSString *> *bssids = [NSMutableArray array];
-    // CNCopyCurrentNetworkInfo is not available on Mac Catalyst before 14.0.
-    if (@available(macCatalyst 14.0, *)) {
-        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
-        for (NSString *networkInterfaceName in networkInterfaceNames) {
-            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
-            id bssid = networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID];
-            if ([bssid isKindOfClass:[NSString class]] && [bssid length] > 0) {
-                [bssids addObject:bssid];
-            }
-        }
-    }
-    return bssids;
-}
-#endif
 
 @end

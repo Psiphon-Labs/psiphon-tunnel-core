@@ -770,20 +770,9 @@ public class PsiphonTunnel {
                         .getSystemService(Context.WIFI_SERVICE);
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
-                    String wifiNetworkID = wifiInfo.getBSSID();
-                    if (wifiNetworkID == null) {
-                        // Per
-                        // https://developer.android.com/reference/android/net/wifi/WifiInfo#getBSSID()
-                        // "The BSSID may be null, if there is no network currently connected."
-                        wifiNetworkID = "NOT_CONNECTED";
-                    } else if (wifiNetworkID.equals("02:00:00:00:00:00")) {
-                        // "02:00:00:00:00:00" is reported when the app does not have the ACCESS_COARSE_LOCATION permission:
-                        // https://developer.android.com/about/versions/marshmallow/android-6.0-changes#behavior-hardware-id
-                        // The Psiphon client should allow the user to opt-in to this permission. If they decline, fail over
-                        // to using the WiFi IP address.
-                        wifiNetworkID = String.valueOf(wifiInfo.getIpAddress());
-                    }
-                    networkID += "-" + wifiNetworkID;
+                    // The BSSID is deliberately not used: it identifies a single access point
+                    // radio rather than the network, and reading it requires location permission.
+                    networkID += "-" + String.valueOf(wifiInfo.getIpAddress());
                 }
             } catch (java.lang.Exception e) {
                 // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
