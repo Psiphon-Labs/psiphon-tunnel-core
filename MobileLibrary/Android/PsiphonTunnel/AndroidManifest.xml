@@ -3,5 +3,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- ACCESS_WIFI_STATE implies a required android.hardware.wifi feature. Wi-Fi is
+         optional here: PsiphonTunnel only reads WifiManager on a Wi-Fi network and
+         falls back to the plain "WIFI" network ID when that fails. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false"/>
     <application android:fullBackupContent="@xml/ca_psiphon_psiphontunnel_backup_rules"/>
 </manifest>
