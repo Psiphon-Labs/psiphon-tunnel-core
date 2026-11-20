@@ -24,6 +24,7 @@ package inproxy
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"sync"
@@ -40,10 +41,12 @@ import (
 // which probes the local network and gateway for UPnP-IGD, NAT-PMP, and PCP
 // port mapping capabilities.
 type portMapper struct {
-	havePortMappingOnce sync.Once
-	portMappingAddress  chan string
-	client              *portmapper.Client
-	portMappingLogger   func(format string, args ...any)
+	havePortMappingOnce   sync.Once
+	portMappingAddress    chan string
+	portMappingFailedOnce sync.Once
+	portMappingFailed     chan struct{}
+	client                *portmapper.Client
+	portMappingLogger     func(format string, args ...any)
 }
 
 // newPortMapper initializes a new port mapper, configured to map to the
@@ -71,6 +74,7 @@ func newPortMapper(
 
 	p := &portMapper{
 		portMappingAddress: make(chan string, 1),
+		portMappingFailed:  make(chan struct{}),
 		portMappingLogger:  portMappingLogger,
 	}
 
@@ -87,20 +91,25 @@ func newPortMapper(
 		p.havePortMappingOnce.Do(func() {
 			address, ok := p.client.GetCachedMappingOrStartCreatingOne()
 			if ok {
-				// With sync.Once and a buffer size of 1, this send won't block.
-				p.portMappingAddress <- address.String()
-				portMappingLogger("address obtained")
+				p.deliver(address)
 			} else {
 
 				// This is not an expected case; there should be a port
 				// mapping when the callback is invoked.
-				//
-				// TODO: deliver "" to the channel? Otherwise, receiving on
-				// portMapper.portMappingExternalAddress will hang, or block
-				// until a context is done.
 				portMappingLogger("unexpected missing port mapping")
+				p.signalFailed()
 			}
 		})
+	})
+
+	// The port mapping attempt reports when it ends without a port mapping:
+	// every port mapping service was asked, and each either refused or did
+	// not answer.
+	p.client.SetOnMappingOutcome(func(outcome portmapper.MappingOutcome) {
+		if outcome != portmapper.MappingGranted {
+			portMappingLogger("no port mapping: %v", outcome)
+			p.signalFailed()
+		}
 	})
 
 	p.client.SetLocalPort(uint16(localPort))
@@ -115,31 +124,41 @@ func (p *portMapper) start() {
 	_, _ = p.client.GetCachedMappingOrStartCreatingOne()
 }
 
+// deliver sends the port mapping external address to the
+// portMappingExternalAddress channel, when the address is usable.
+//
+// A port mapping whose external address is not usable is not added to the
+// SDP, and the receipt of a port mapping address ends the await for ICE
+// candidate gathering. Such a port mapping is instead signaled as a failed
+// attempt, so that ICE candidate gathering is awaited.
+func (p *portMapper) deliver(address netip.AddrPort) {
+	if !isUsablePortMappingIP(net.IP(address.Addr().Unmap().AsSlice())) {
+		p.portMappingLogger("external address is not usable")
+		p.signalFailed()
+		return
+	}
+	// With sync.Once and a buffer size of 1, this send won't block.
+	p.portMappingAddress <- address.String()
+	p.portMappingLogger("address obtained")
+}
+
 // portMappingExternalAddress returns a channel which receives a successful
 // port mapping external address, if any.
 func (p *portMapper) portMappingExternalAddress() <-chan string {
 	return p.portMappingAddress
 }
 
-// respondingPortMappingTypes returns the port mapping types that have
-// responded recently for this port mapper's client. It is used for reporting
-// metrics.
-//
-// Limitation: the return value does not indicate which of several responding
-// port mapping types was used for a particular dial.
-func (p *portMapper) respondingPortMappingTypes() PortMappingTypes {
-	upnp, pmp, pcp := p.client.RespondingPortMappingTypes()
-	portMappingTypes := PortMappingTypes{}
-	if upnp {
-		portMappingTypes = append(portMappingTypes, PortMappingTypeUPnP)
-	}
-	if pmp {
-		portMappingTypes = append(portMappingTypes, PortMappingTypePMP)
-	}
-	if pcp {
-		portMappingTypes = append(portMappingTypes, PortMappingTypePCP)
-	}
-	return portMappingTypes
+// portMappingAttemptFailed returns a channel which is closed when the port
+// mapping attempt has ended without a port mapping. No address will be
+// received from portMappingExternalAddress after that.
+func (p *portMapper) portMappingAttemptFailed() <-chan struct{} {
+	return p.portMappingFailed
+}
+
+func (p *portMapper) signalFailed() {
+	p.portMappingFailedOnce.Do(func() {
+		close(p.portMappingFailed)
+	})
 }
 
 // close releases the port mapping
@@ -166,12 +185,23 @@ func formatPortMappingLog(format string, args ...any) string {
 // in a port mapping service probe.
 type PortMappingProbe struct {
 	client *portmapper.Client
+
+	// verified indicates that a port mapping service granted a trial port
+	// mapping, with a usable external address, so port mappings are expected
+	// to be established on this network.
+	verified bool
 }
 
 // probePortMapping discovers and reports which port mapping protocols are
-// supported on this network. probePortMapping does not establish a port
-// mapping. probePortMapping caches a PortMappingProbe for use in subsequent
-// port mapping establishment.
+// supported on this network. probePortMapping caches a PortMappingProbe for
+// use in subsequent port mapping establishment.
+//
+// A port mapping service that answers discovery does not necessarily grant
+// port mappings; for example, some routers answer UPnP discovery with port
+// mapping switched off. To find out, probePortMapping asks for a trial port
+// mapping, to a local port reserved for the purpose, and releases it before
+// returning. Port mapping types are reported only when the trial port mapping
+// was granted, with a usable external address; see verifiedPortMappingTypes.
 //
 // It is intended that in-proxy proxies make a blocking call to
 // probePortMapping on start up (and after a network change) in order to
@@ -211,50 +241,115 @@ func probePortMapping(
 		BindToDevice: coordinator.BindToDevice,
 	})
 
+	// Verify runs Probe and then the trial port mapping.
+	//
 	// ErrGatewayRange is "skipping portmap; gateway range likely lacks
-	// support". The probe did not fail, and the result fields will all be
-	// false. Drop through and report PortMappingTypeNone in this case.
-	// Currently, this is the only special case; and Probe doesn't wrap this
-	// error with the type NoMappingError.
+	// support". The probe did not fail, and no service will be reported as
+	// granting a port mapping. Drop through and report PortMappingTypeNone
+	// in this case. Currently, this is the only special case; and Probe
+	// doesn't wrap this error with the type NoMappingError.
 
-	result, err := client.Probe(ctx)
+	verification, err := client.Verify(ctx)
 	if err != nil && err != portmapper.ErrGatewayRange {
 		return nil, nil, errors.Trace(err)
 	}
 
-	portMappingTypes := PortMappingTypes{}
-	if result.UPnP {
-		portMappingTypes = append(portMappingTypes, PortMappingTypeUPnP)
-	}
-	if result.PMP {
-		portMappingTypes = append(portMappingTypes, PortMappingTypePMP)
-	}
-	if result.PCP {
-		portMappingTypes = append(portMappingTypes, PortMappingTypePCP)
+	portMappingTypes := verifiedPortMappingTypes(verification)
+
+	verified := len(portMappingTypes) > 0
+
+	portMappingLogger(
+		"UPnP %v, NAT-PMP %v, PCP %v, verified %v",
+		verification.UPnP,
+		verification.PMP,
+		verification.PCP,
+		verified)
+
+	if !verified {
+
+		// An empty lists means discovery is needed or the available port mappings
+		// are unknown; a list with None indicates that no port mapping
+		// type granted a usable trial port mapping.
+
+		portMappingTypes = append(portMappingTypes, PortMappingTypeNone)
 	}
 
 	var probe *PortMappingProbe
 
-	if len(portMappingTypes) == 0 {
+	servicesFound := verification.UPnP != portmapper.ServiceNotSeen ||
+		verification.PMP != portmapper.ServiceNotSeen ||
+		verification.PCP != portmapper.ServiceNotSeen
 
-		// An empty lists means discovery is needed or the available port mappings
-		// are unknown; a list with None indicates that a probe returned no
-		// supported port mapping types.
+	// A trial port mapping that was granted with an external address that
+	// is not usable shows that this network's port mappings cannot be used.
+	unusable := verification.Granted() && !verified
 
-		portMappingTypes = append(portMappingTypes, PortMappingTypeNone)
-
-	} else {
+	if servicesFound && !unusable {
 
 		// Return a probe for use in subsequent port mappings only when
-		// services were found.
+		// services were found. This includes the case where the trial port
+		// mapping was not granted, as that may be a temporary condition.
+		//
+		// Limitation: when the trial port mapping was not granted, a
+		// subsequent successful port mapping does not update the reported
+		// port mapping types or the verified flag, as one success does not
+		// establish that port mappings are reliably granted.
 		//
 		// It is not necessary to call PortMappingProbe.client.Close, as it is
 		// not holding open any actual mappings.
 
 		probe = &PortMappingProbe{
-			client: client,
+			client:   client,
+			verified: verified,
 		}
 	}
 
 	return portMappingTypes, probe, nil
+}
+
+// verifiedPortMappingTypes returns the port mapping types to report for a
+// network, given the result of its trial port mapping. No types are returned
+// unless the trial port mapping was granted, with a usable external address.
+//
+// The type that granted the trial port mapping is first in the list. Once one
+// type has granted it, the others are not asked, so the types that follow
+// are those that answered discovery and are not known to grant port
+// mappings. A type that refused the trial port mapping is omitted.
+func verifiedPortMappingTypes(
+	verification portmapper.Verification) PortMappingTypes {
+
+	portMappingTypes := PortMappingTypes{}
+
+	if !verification.Granted() ||
+		!isUsablePortMappingIP(net.IP(verification.External.Unmap().AsSlice())) {
+
+		return portMappingTypes
+	}
+
+	for _, service := range []struct {
+		state           portmapper.ServiceState
+		portMappingType PortMappingType
+	}{
+		{verification.UPnP, PortMappingTypeUPnP},
+		{verification.PMP, PortMappingTypePMP},
+		{verification.PCP, PortMappingTypePCP},
+	} {
+		switch service.state {
+		case portmapper.ServiceGranted:
+			portMappingTypes = append(
+				PortMappingTypes{service.portMappingType}, portMappingTypes...)
+		case portmapper.ServiceSeen:
+			portMappingTypes = append(portMappingTypes, service.portMappingType)
+		}
+	}
+
+	return portMappingTypes
+}
+
+// isUsablePortMappingIP indicates whether a port mapping with the specified
+// external IP address is added to the SDP as an ICE candidate; see
+// prepareSDPAddresses. A network whose port mappings are not added to the
+// SDP is not reported as supporting port mapping.
+func isUsablePortMappingIP(IP net.IP) bool {
+	return IP != nil && IP.To4() != nil && !common.IsBogon(IP)
 }
