@@ -17,15 +17,18 @@
  *
  */
 
-// Package light implements a lightweight, blocking resistent TLS proxy.
+// Package light implements a lightweight, blocking resistant TLS and QUIC
+// proxy.
 package light
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"math"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,32 +36,163 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/proxyheader"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
 	"github.com/fxamacker/cbor/v2"
 )
 
 const (
-	proxyIDSize              = 16
-	maxRecommendedTLSPadding = 65535
+	proxyIDSize               = 16
+	personalCompartmentIDSize = 32
 )
 
+// ProxyAddress specifies a Light transport endpoint.
+type ProxyAddress struct {
+	IPAddress string `cbor:"1,keyasint"`
+	Port      int    `cbor:"2,keyasint"`
+	Protocol  string `cbor:"3,keyasint"`
+}
+
+// String returns the IP:port address.
+func (address ProxyAddress) String() string {
+	return net.JoinHostPort(address.IPAddress, strconv.Itoa(address.Port))
+}
+
+// isSupported indicates whether the address protocol is supported.
+func (address ProxyAddress) isSupported() bool {
+	return address.Protocol == LIGHT_PROTOCOL_TLS ||
+		address.Protocol == LIGHT_PROTOCOL_QUIC
+}
+
+func (address ProxyAddress) validate(listen bool) error {
+	if !address.isSupported() {
+		return errors.TraceNew("unsupported proxy protocol")
+	}
+
+	IP := net.ParseIP(address.IPAddress)
+	if IP == nil || IP.IsMulticast() || (!listen && IP.IsUnspecified()) {
+		return errors.TraceNew("invalid proxy IP address")
+	}
+
+	if address.Port < 0 || address.Port > 65535 ||
+		(!listen && address.Port == 0) {
+
+		return errors.TraceNew("invalid proxy port")
+	}
+
+	return nil
+}
+
+// ValidateProxyAddresses checks public and local endpoints paired by index.
+// Omitted listen addresses default to the dial addresses for validation.
+func ValidateProxyAddresses(
+	dialAddresses, listenAddresses []ProxyAddress) error {
+
+	if len(dialAddresses) == 0 {
+		return errors.TraceNew("missing dial addresses")
+	}
+	if len(listenAddresses) == 0 {
+		listenAddresses = dialAddresses
+	}
+	if len(listenAddresses) != len(dialAddresses) {
+		return errors.TraceNew("mismatched dial and listen address counts")
+	}
+
+	err := ValidateProxyListenAddresses(listenAddresses)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	for i, dialAddress := range dialAddresses {
+		err = dialAddress.validate(false)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		listenAddress := listenAddresses[i]
+		if listenAddress.Protocol != dialAddress.Protocol {
+			return errors.TraceNew("mismatched dial and listen protocols")
+		}
+		dialIsIPv4 := net.ParseIP(dialAddress.IPAddress).To4() != nil
+		listenIsIPv4 := net.ParseIP(listenAddress.IPAddress).To4() != nil
+		if dialIsIPv4 != listenIsIPv4 {
+			return errors.TraceNew("mismatched dial and listen IP address families")
+		}
+	}
+	return nil
+}
+
+// ValidateProxyConfigAddresses validates proxy endpoints and returns the
+// effective listen addresses. requireDialAddresses is false for tunnel proxies,
+// whose public addresses may not be known until port mapping completes.
+func ValidateProxyConfigAddresses(
+	dialAddresses, listenAddresses []ProxyAddress,
+	requireDialAddresses bool) ([]ProxyAddress, error) {
+
+	var err error
+	if len(dialAddresses) == 0 && !requireDialAddresses {
+		err = ValidateProxyListenAddresses(listenAddresses)
+	} else {
+		err = ValidateProxyAddresses(dialAddresses, listenAddresses)
+	}
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if len(listenAddresses) == 0 {
+		listenAddresses = dialAddresses
+	}
+	return listenAddresses, nil
+}
+
+// ValidateProxyListenAddresses validates local endpoints without requiring
+// public addresses, which may not be known until port mapping completes.
+func ValidateProxyListenAddresses(addresses []ProxyAddress) error {
+	if len(addresses) == 0 {
+		return errors.TraceNew("missing listen addresses")
+	}
+	seen := make(map[ProxyAddress]bool)
+	for _, address := range addresses {
+		err := address.validate(true)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		// Port zero requests distinct, dynamically assigned listeners.
+		if address.Port != 0 {
+			address.IPAddress = net.ParseIP(address.IPAddress).String()
+			if seen[address] {
+				return errors.TraceNew("duplicate listen address")
+			}
+			seen[address] = true
+		}
+	}
+	return nil
+}
+
 // ProxyEntry is the proxy connection information distributed to clients.
+// In tunnel mode, ProxyID must match GetTunnelProxyID for the signing key.
+// VerifyServerName is retained for legacy fallback clients; new clients
+// verify only VerifyPin.
+//
+// Protocol and DialAddressIPv4/6 support legacy fallback clients.
+// Non-legacy clients use DialAddresses when present.
 type ProxyEntry struct {
-	Protocol                                  string  `cbor:"1,keyasint,omitempty"`
-	DialAddressIPv4                           string  `cbor:"2,keyasint,omitempty"`
-	RecommendedSNI                            string  `cbor:"3,keyasint,omitempty"`
-	ObfuscationKey                            []byte  `cbor:"4,keyasint,omitempty"`
-	VerifyPin                                 []byte  `cbor:"5,keyasint,omitempty"`
-	VerifyServerName                          string  `cbor:"6,keyasint,omitempty"`
-	DialAddressIPv6                           string  `cbor:"7,keyasint,omitempty"`
-	RecommendedSNIRegex                       string  `cbor:"8,keyasint,omitempty"`
-	RecommendedFragmentClientHelloProbability float64 `cbor:"9,keyasint,omitempty"`
-	RecommendedTLSPaddingProbability          float64 `cbor:"10,keyasint,omitempty"`
-	RecommendedMinTLSPadding                  int     `cbor:"11,keyasint,omitempty"`
-	RecommendedMaxTLSPadding                  int     `cbor:"12,keyasint,omitempty"`
-	RecommendedSNIProbability                 float64 `cbor:"13,keyasint,omitempty"`
-	RecommendedTLSProfile                     string  `cbor:"14,keyasint,omitempty"`
-	RecommendedTLSProfileProbability          float64 `cbor:"15,keyasint,omitempty"`
-	TTLSeconds                                int64   `cbor:"16,keyasint,omitempty"`
+	Protocol                                  string         `cbor:"1,keyasint,omitempty"`
+	DialAddressIPv4                           string         `cbor:"2,keyasint,omitempty"`
+	RecommendedSNI                            string         `cbor:"3,keyasint,omitempty"`
+	ObfuscationKey                            []byte         `cbor:"4,keyasint,omitempty"`
+	VerifyPin                                 []byte         `cbor:"5,keyasint,omitempty"`
+	VerifyServerName                          string         `cbor:"6,keyasint,omitempty"`
+	DialAddressIPv6                           string         `cbor:"7,keyasint,omitempty"`
+	RecommendedSNIRegex                       string         `cbor:"8,keyasint,omitempty"`
+	RecommendedFragmentClientHelloProbability float64        `cbor:"9,keyasint,omitempty"`
+	RecommendedTLSPaddingProbability          float64        `cbor:"10,keyasint,omitempty"`
+	RecommendedMinTLSPadding                  int            `cbor:"11,keyasint,omitempty"`
+	RecommendedMaxTLSPadding                  int            `cbor:"12,keyasint,omitempty"`
+	RecommendedSNIProbability                 float64        `cbor:"13,keyasint,omitempty"`
+	RecommendedTLSProfile                     string         `cbor:"14,keyasint,omitempty"`
+	RecommendedTLSProfileProbability          float64        `cbor:"15,keyasint,omitempty"`
+	TTLSeconds                                int64          `cbor:"16,keyasint,omitempty"`
+	DialAddresses                             []ProxyAddress `cbor:"17,keyasint,omitempty"`
+	ProxyID                                   string         `cbor:"18,keyasint,omitempty"`
+	PersonalCompartmentID                     []byte         `cbor:"19,keyasint,omitempty"`
 }
 
 // SignedProxyEntry is a signed ProxyEntry.
@@ -75,6 +209,9 @@ type SignedProxyEntry struct {
 }
 
 // DecodeAndValidateProxyEntry decodes and validates a SignedProxyEntry.
+//
+// Entries are not signed; see SignedProxyEntry. A personal pairing entry is
+// supplied by the user and is trusted as-is.
 func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, error) {
 
 	var signedProxyEntry SignedProxyEntry
@@ -86,28 +223,80 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 	// There is currently no signature. See SignedProxyEntry comment.
 	proxyEntry := &signedProxyEntry.ProxyEntry
 
-	if proxyEntry.Protocol != LIGHT_PROTOCOL_TLS {
-		return nil, errors.TraceNew("unsupported proxy protocol")
-	}
-
-	err = validateIPAddressFamily(proxyEntry.DialAddressIPv4, false)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if proxyEntry.DialAddressIPv6 != "" {
-		err = validateIPAddressFamily(proxyEntry.DialAddressIPv6, true)
+	legacyEntry := proxyEntry.DialAddresses == nil
+	if legacyEntry {
+		err = validateIPAddressFamily(proxyEntry.DialAddressIPv4, false)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
+		address, err := parseProxyAddress(
+			proxyEntry.DialAddressIPv4, proxyEntry.Protocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		proxyEntry.DialAddresses = append(proxyEntry.DialAddresses, address)
+
+		if proxyEntry.DialAddressIPv6 != "" {
+			err = validateIPAddressFamily(proxyEntry.DialAddressIPv6, true)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			address, err := parseProxyAddress(
+				proxyEntry.DialAddressIPv6, proxyEntry.Protocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			proxyEntry.DialAddresses = append(proxyEntry.DialAddresses, address)
+		}
 	}
+
+	// Skip dial addresses with unsupported protocols, so that entries may
+	// add addresses for future protocols without being rejected by existing
+	// clients.
+	var dialAddresses []ProxyAddress
+	for _, address := range proxyEntry.DialAddresses {
+		if !address.isSupported() {
+			continue
+		}
+		if err := address.validate(false); err != nil {
+			return nil, errors.Trace(err)
+		}
+		dialAddresses = append(dialAddresses, address)
+	}
+	if len(dialAddresses) == 0 {
+		return nil, errors.TraceNew("missing dial addresses")
+	}
+	proxyEntry.DialAddresses = dialAddresses
 
 	if len(proxyEntry.ObfuscationKey) == 0 {
 		return nil, errors.TraceNew("missing obfuscation key")
 	}
 
+	if proxyEntry.ProxyID == "" {
+		if !legacyEntry {
+			return nil, errors.TraceNew("missing proxy ID")
+		}
+		proxyEntry.ProxyID = makeLegacyProxyID(
+			proxyEntry.DialAddressIPv4,
+			hex.EncodeToString(proxyEntry.ObfuscationKey))
+	} else {
+		// The proxy ID is reported in API parameters that require unpadded
+		// base64.
+		_, err := base64.RawStdEncoding.DecodeString(proxyEntry.ProxyID)
+		if err != nil {
+			return nil, errors.TraceNew("invalid proxy ID")
+		}
+	}
+
 	if len(proxyEntry.VerifyPin) == 0 {
-		return nil, errors.TraceNew("missing TLS verify pin")
+		return nil, errors.TraceNew("missing verify pin")
+	}
+
+	if len(proxyEntry.PersonalCompartmentID) != 0 &&
+		len(proxyEntry.PersonalCompartmentID) != personalCompartmentIDSize {
+
+		return nil, errors.TraceNew("invalid personal compartment ID")
 	}
 
 	err = validateRecommendedTLSSettings(
@@ -133,9 +322,51 @@ func DecodeAndValidateProxyEntry(encodedSignedProxyEntry []byte) (*ProxyEntry, e
 	return proxyEntry, nil
 }
 
-// makeProxyID derives a unique proxy ID from a proxy's dial address and
-// obfuscation key. This derivation saves light header space.
-func makeProxyID(dialAddress, obfuscationKey string) string {
+func getLightProtocols(addresses []ProxyAddress) []string {
+	var protocols []string
+	for _, address := range addresses {
+		if !common.Contains(protocols, address.Protocol) {
+			protocols = append(protocols, address.Protocol)
+		}
+	}
+	return protocols
+}
+
+func parseProxyAddress(address, protocol string) (ProxyAddress, error) {
+	host, portString, err := net.SplitHostPort(address)
+	if err != nil {
+		return ProxyAddress{}, errors.Trace(err)
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		return ProxyAddress{}, errors.Trace(err)
+	}
+
+	return ProxyAddress{
+		IPAddress: host,
+		Port:      port,
+		Protocol:  protocol,
+	}, nil
+}
+
+func validateIPAddressFamily(addr string, isIPv6 bool) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	IP := net.ParseIP(host)
+	if IP == nil {
+		return errors.TraceNew("invalid IP address")
+	}
+	if (IP.To4() == nil) != isIPv6 {
+		return errors.TraceNew("unexpected IP address family")
+	}
+	return nil
+}
+
+// makeLegacyProxyID derives the legacy fallback proxy ID from the IPv4
+// dial address and hex obfuscation key.
+func makeLegacyProxyID(dialAddress, obfuscationKey string) string {
 	h := hmac.New(sha256.New, []byte(obfuscationKey))
 	h.Write([]byte(dialAddress))
 	return base64.RawStdEncoding.EncodeToString(h.Sum(nil)[:proxyIDSize])
@@ -169,7 +400,7 @@ func validateRecommendedTLSSettings(
 
 	if minTLSPadding < 0 ||
 		maxTLSPadding < minTLSPadding ||
-		maxTLSPadding > maxRecommendedTLSPadding {
+		maxTLSPadding > tlsdialer.MaxTLSPadding {
 		return errors.TraceNew("invalid recommended TLS padding range")
 	}
 
@@ -232,11 +463,10 @@ func prepareProxyProtocolHeaderConfigs(
 		}
 		normalizedTargets := make([]string, 0, len(targets))
 		for _, target := range targets {
-			normalizedTarget, err := normalizeDestinationAddress(target)
-			if err != nil {
-				return nil, errors.Trace(err)
+			if target == "" || (net.ParseIP(target) == nil && strings.ContainsAny(target, ":[]")) {
+				return nil, errors.TraceNew("PROXY protocol target must be a host without a port")
 			}
-			normalizedTargets = append(normalizedTargets, normalizedTarget)
+			normalizedTargets = append(normalizedTargets, common.NormalizeHostAddress(target))
 		}
 		proxyProtocolHeaderConfig.targetDestinationAddresses =
 			common.NewStringLookup(normalizedTargets)
@@ -247,36 +477,29 @@ func prepareProxyProtocolHeaderConfigs(
 }
 
 func normalizeDestinationAddress(address string) (string, error) {
-
-	// TODO: make common helper and also use for
-	// psiphon/server.normalizeHostAddress.
-
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
-
-	// Normalize IP address representation.
-	ip := net.ParseIP(host)
-	if ip != nil {
-		return net.JoinHostPort(ip.String(), port), nil
-	}
-
-	// Normalize domain case and remove any trailing .
-	host = strings.TrimSuffix(host, ".")
-	host = strings.ToLower(host)
-	return net.JoinHostPort(host, port), nil
+	return net.JoinHostPort(common.NormalizeHostAddress(host), port), nil
 }
 
 func encodeClientPlatform(clientPlatform string) uint8 {
 	clientPlatform = strings.ToLower(clientPlatform)
 	switch {
-	case strings.Contains(clientPlatform, "ios"):
+	case strings.Contains(clientPlatform, "ios") ||
+		strings.Contains(clientPlatform, "ipados"):
 		return 1
 	case strings.Contains(clientPlatform, "android"):
 		return 2
 	case strings.Contains(clientPlatform, "windows"):
 		return 3
+	case strings.Contains(clientPlatform, "linux"):
+		return 4
+	case strings.Contains(clientPlatform, "macos") ||
+		strings.Contains(clientPlatform, "darwin") ||
+		strings.Contains(clientPlatform, "osx"):
+		return 5
 	default:
 		return 0
 	}
@@ -290,6 +513,10 @@ func decodeClientPlatform(encodedClientPlatform uint8) string {
 		return "Android"
 	case 3:
 		return "Windows"
+	case 4:
+		return "Linux"
+	case 5:
+		return "macOS"
 	default:
 		return ""
 	}
@@ -392,4 +619,26 @@ func encodeTLSProfile(tlsProfile string) uint8 {
 
 func decodeTLSProfile(encodedTLSProfile uint8) string {
 	return codeToTLSProfile[encodedTLSProfile]
+}
+
+var quicVersionToCode = map[string]uint8{
+	protocol.QUIC_VERSION_V1:            1,
+	protocol.QUIC_VERSION_RANDOMIZED_V1: 2,
+	protocol.QUIC_VERSION_OBFUSCATED_V1: 3,
+	protocol.QUIC_VERSION_DECOY_V1:      4,
+}
+
+var codeToQUICVersion = map[uint8]string{
+	1: protocol.QUIC_VERSION_V1,
+	2: protocol.QUIC_VERSION_RANDOMIZED_V1,
+	3: protocol.QUIC_VERSION_OBFUSCATED_V1,
+	4: protocol.QUIC_VERSION_DECOY_V1,
+}
+
+func encodeQUICVersion(QUICVersion string) uint8 {
+	return quicVersionToCode[QUICVersion]
+}
+
+func decodeQUICVersion(encodedQUICVersion uint8) string {
+	return codeToQUICVersion[encodedQUICVersion]
 }

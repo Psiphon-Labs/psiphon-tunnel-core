@@ -631,3 +631,69 @@ func TestApplicationParameters(t *testing.T) {
 		}
 	}
 }
+
+func TestLightParameterFallbacks(t *testing.T) {
+	for _, testCase := range []struct {
+		name             string
+		override         bool
+		probability      float64
+		stockProbability float64
+		selected         bool
+	}{
+		{"Stock", false, -1, 1, true},
+		{"Override", true, -1, 1, true},
+		{"InheritedZero", true, -1, 0, false},
+		{"ExplicitZero", true, 0, 1, false},
+		{"ExplicitOne", true, 1, 0, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			params, err := NewParameters(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			values := map[string]interface{}{
+				LimitTLSProfiles:                               protocol.TLSProfiles{protocol.TLS_PROFILE_CHROME_133},
+				LimitTLSProfilesProbability:                    testCase.stockProbability,
+				LimitQUICVersions:                              protocol.QUICVersions{protocol.QUIC_VERSION_V1},
+				LimitQUICVersionsProbability:                   testCase.stockProbability,
+				CustomHostNameRegexes:                          RegexStrings{"stock"},
+				CustomHostNameProbability:                      testCase.stockProbability,
+				LightTunnelIngressLimitTLSProfilesProbability:  testCase.probability,
+				LightTunnelIngressLimitQUICVersionsProbability: testCase.probability,
+				LightTunnelIngressCustomHostNameProbability:    testCase.probability,
+			}
+			wantTLS := protocol.TLSProfiles{protocol.TLS_PROFILE_CHROME_133}
+			wantQUIC := protocol.QUICVersions{protocol.QUIC_VERSION_V1}
+			wantRegex := RegexStrings{"stock"}
+			if testCase.override {
+				wantTLS = protocol.TLSProfiles{protocol.TLS_PROFILE_RANDOMIZED}
+				wantQUIC = protocol.QUICVersions{protocol.QUIC_VERSION_RANDOMIZED_V1}
+				wantRegex = RegexStrings{"override"}
+				values[LightTunnelIngressLimitTLSProfiles] = wantTLS
+				values[LightTunnelIngressLimitQUICVersions] = wantQUIC
+				values[LightTunnelIngressCustomHostNameRegexes] = wantRegex
+			}
+			if _, err := params.Set("", 0, values); err != nil {
+				t.Fatal(err)
+			}
+			if !testCase.selected {
+				wantTLS = protocol.TLSProfiles{}
+				wantQUIC = protocol.QUICVersions{}
+			}
+			p := params.Get()
+			defer p.Close()
+			if got := p.TLSProfiles(LightTunnelIngressLimitTLSProfiles, LimitTLSProfiles); !reflect.DeepEqual(got, wantTLS) {
+				t.Fatalf("TLS profiles: got %v, expected %v", got, wantTLS)
+			}
+			if got := p.QUICVersions(LightTunnelIngressLimitQUICVersions, LimitQUICVersions); !reflect.DeepEqual(got, wantQUIC) {
+				t.Fatalf("QUIC versions: got %v, expected %v", got, wantQUIC)
+			}
+			if got := p.RegexStrings(LightTunnelIngressCustomHostNameRegexes, CustomHostNameRegexes); !reflect.DeepEqual(got, wantRegex) {
+				t.Fatalf("hostname regexes: got %v, expected %v", got, wantRegex)
+			}
+			if p.WeightedCoinFlip(LightTunnelIngressCustomHostNameProbability, CustomHostNameProbability) != testCase.selected {
+				t.Fatal("unexpected hostname probability")
+			}
+		})
+	}
+}

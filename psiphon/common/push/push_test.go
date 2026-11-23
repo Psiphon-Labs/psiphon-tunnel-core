@@ -178,7 +178,7 @@ func runTestPush() error {
 
 	result, err = maker.MakePushPayloads(
 		0, 0, 1*time.Hour, serverEntries[:16],
-		PinnedEntries{LightProxyEntries: []*LightProxyEntry{lightProxyEntry}}, 2048)
+		PinnedEntries{FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry}}, 2048)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -244,7 +244,7 @@ func runTestPush() error {
 
 	result, err = maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
-		PinnedEntries{LightProxyEntries: []*LightProxyEntry{lightProxyEntry}}, 0)
+		PinnedEntries{FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry}}, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -290,7 +290,7 @@ func runTestPush() error {
 	}
 	result, err = maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
-		PinnedEntries{LightProxyEntries: []*LightProxyEntry{lightProxyEntry, lightProxyEntry2}}, 0)
+		PinnedEntries{FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry, lightProxyEntry2}}, 0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -384,7 +384,7 @@ func runTestPush() error {
 	}
 	result, err = maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
-		PinnedEntries{LightProxyEntries: []*LightProxyEntry{oversizeLightProxyEntry}},
+		PinnedEntries{FallbackLightProxyEntries: []*LightProxyEntry{oversizeLightProxyEntry}},
 		2048)
 	if err != nil {
 		return errors.Trace(err)
@@ -871,7 +871,7 @@ func TestMakePushPayloads_PinnedLightProxyAndServerEntries_AllFit(t *testing.T) 
 	}
 
 	pinned := PinnedEntries{
-		LightProxyEntries: []*LightProxyEntry{lightProxyEntry},
+		FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry},
 		PrioritizedServerEntries: []*PrioritizedServerEntry{
 			pinnedServerEntry1, pinnedServerEntry2,
 		},
@@ -980,8 +980,8 @@ func TestMakePushPayloads_PinnedServerEntries_SpillIntoEarlyPayloads(t *testing.
 	measureResult, err := maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
 		PinnedEntries{
-			LightProxyEntries:        []*LightProxyEntry{lightProxyEntry},
-			PrioritizedServerEntries: []*PrioritizedServerEntry{pinnedEntryProto},
+			FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry},
+			PrioritizedServerEntries:  []*PrioritizedServerEntry{pinnedEntryProto},
 		},
 		0)
 	if err != nil {
@@ -996,8 +996,8 @@ func TestMakePushPayloads_PinnedServerEntries_SpillIntoEarlyPayloads(t *testing.
 	result, err := maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
 		PinnedEntries{
-			LightProxyEntries:        []*LightProxyEntry{lightProxyEntry},
-			PrioritizedServerEntries: pinnedEntries,
+			FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry},
+			PrioritizedServerEntries:  pinnedEntries,
 		},
 		maxPayloadSizeBytes)
 	if err != nil {
@@ -1126,8 +1126,8 @@ func TestMakePushPayloads_PinnedLightProxyAndServerEntries_PackingOrder(t *testi
 	result, err := maker.MakePushPayloads(
 		0, 0, 1*time.Hour, regularEntries,
 		PinnedEntries{
-			LightProxyEntries:        []*LightProxyEntry{lightProxyEntry},
-			PrioritizedServerEntries: pinnedEntries,
+			FallbackLightProxyEntries: []*LightProxyEntry{lightProxyEntry},
+			PrioritizedServerEntries:  pinnedEntries,
 		},
 		maxPayloadSizeBytes)
 	if err != nil {
@@ -1255,8 +1255,8 @@ func TestMakePushPayloads_MultiplePinnedLightProxies_PrecedeServerEntries(t *tes
 	result, err := maker.MakePushPayloads(
 		0, 0, 1*time.Hour, regularEntries,
 		PinnedEntries{
-			LightProxyEntries:        lightProxyEntries,
-			PrioritizedServerEntries: pinnedEntries,
+			FallbackLightProxyEntries: lightProxyEntries,
+			PrioritizedServerEntries:  pinnedEntries,
 		},
 		maxPayloadSizeBytes)
 	if err != nil {
@@ -1366,7 +1366,7 @@ func TestMakePushPayloads_PinnedLightProxySkipped_ServerEntriesStillFit(t *testi
 	result, err := maker.MakePushPayloads(
 		0, 0, 1*time.Hour, nil,
 		PinnedEntries{
-			LightProxyEntries: []*LightProxyEntry{oversizedLightProxy},
+			FallbackLightProxyEntries: []*LightProxyEntry{oversizedLightProxy},
 			PrioritizedServerEntries: []*PrioritizedServerEntry{
 				pinnedServerEntry1, pinnedServerEntry2,
 			},
@@ -1790,7 +1790,7 @@ func (m *PushPayloadMaker) measureObfuscatedPayloadSize(
 		PrioritizedServerEntries: prioritizedServerEntries,
 	}
 	if lightProxyEntry != nil {
-		payload.LightProxyEntries = []*LightProxyEntry{lightProxyEntry}
+		payload.FallbackLightProxyEntries = []*LightProxyEntry{lightProxyEntry}
 	}
 
 	cborPayload, err := protocol.CBOREncoding.Marshal(&payload)

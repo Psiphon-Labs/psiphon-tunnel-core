@@ -26,6 +26,7 @@ import (
 	"math"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -42,11 +43,18 @@ const (
 	paddingMinTargetSize          = 900
 	paddingMaxTargetSize          = 1400
 	stopPaddingWriteSizeThreshold = paddingMaxTargetSize
+	minPaddedWritesMin            = 8
+	minPaddedWritesMax            = 16
+	dialStaggerMinDuration        = 100 * time.Millisecond
+	dialStaggerMaxDuration        = 300 * time.Millisecond
+	gracefulShutdownTimeout       = 1 * time.Second
+	maxPaddedWritesMin            = 64
+	maxPaddedWritesMax            = 128
 )
 
-// lightConn is layered over the proxy TLS connection and adds a light proxy
-// header; and traffic shape obfuscation with initial payload padding and
-// large write splitting.
+// lightConn wraps a TLS or QUIC connection with traffic shape obfuscation:
+// initial payload padding and large write splitting. When supplied, a light
+// proxy header is prepended to the first write.
 type lightConn struct {
 	net.Conn
 	header *lightHeader
@@ -55,28 +63,42 @@ type lightConn struct {
 	doneReadPadding bool
 	readBuffer      bytes.Buffer
 
-	writeMutex       sync.Mutex
-	doneWriteHeader  bool
-	doneWritePadding bool
-	writeBuffer      bytes.Buffer
+	writeMutex              sync.Mutex
+	doneWriteHeader         bool
+	doneWritePadding        bool
+	stopWritePaddingPending bool
+	paddedWrites            int
+	minPaddedWrites         int
+	maxPaddedWrites         int
+	writeBuffer             bytes.Buffer
 }
 
-// lightHeader is the header sent from the client to the proxy. With CBOR
-// encoding and parameter packing (hex strings to binary, enum strings to
-// single bytes), the expected header size is under 150 bytes.
+// lightHeader is the header sent from the client to the proxy. CBOR encoding
+// and parameter packing (hex strings to binary, enum strings to single bytes)
+// reduce its size. Personal pairing adds 35 bytes for the compartment ID.
 type lightHeader struct {
-	SponsorID          []byte `cbor:"1,keyasint,omitempty"`
-	ClientPlatform     uint8  `cbor:"2,keyasint,omitempty"`
-	ClientBuildRev     []byte `cbor:"3,keyasint,omitempty"`
-	DeviceRegion       string `cbor:"4,keyasint,omitempty"`
-	SessionID          []byte `cbor:"5,keyasint,omitempty"`
-	ProxyEntryTracker  int64  `cbor:"6,keyasint,omitempty"`
-	NetworkType        uint8  `cbor:"7,keyasint,omitempty"`
-	ConnectionNum      int64  `cbor:"8,keyasint,omitempty"`
-	DestinationAddress string `cbor:"9,keyasint,omitempty"`
-	TLSProfile         uint8  `cbor:"10,keyasint,omitempty"`
-	TCPDuration        int64  `cbor:"11,keyasint,omitempty"`
-	TLSDuration        int64  `cbor:"12,keyasint,omitempty"`
+	SponsorID                         []byte `cbor:"1,keyasint,omitempty"`
+	ClientPlatform                    uint8  `cbor:"2,keyasint,omitempty"`
+	ClientBuildRev                    []byte `cbor:"3,keyasint,omitempty"`
+	DeviceRegion                      string `cbor:"4,keyasint,omitempty"`
+	SessionID                         []byte `cbor:"5,keyasint,omitempty"`
+	ProxyEntryTracker                 int64  `cbor:"6,keyasint,omitempty"`
+	NetworkType                       uint8  `cbor:"7,keyasint,omitempty"`
+	ConnectionNum                     int64  `cbor:"8,keyasint,omitempty"`
+	DestinationAddress                string `cbor:"9,keyasint,omitempty"`
+	TLSProfile                        uint8  `cbor:"10,keyasint,omitempty"`
+	TCPDuration                       int64  `cbor:"11,keyasint,omitempty"`
+	TLSDuration                       int64  `cbor:"12,keyasint,omitempty"`
+	TunnelDialAuthorization           []byte `cbor:"13,keyasint,omitempty"`
+	EgressProtocol                    uint8  `cbor:"14,keyasint,omitempty"`
+	EgressTLSProfile                  uint8  `cbor:"15,keyasint,omitempty"`
+	EgressRandomizedTLSProfileSeed    []byte `cbor:"16,keyasint,omitempty"`
+	EgressQUICVersion                 uint8  `cbor:"17,keyasint,omitempty"`
+	EgressSNI                         string `cbor:"18,keyasint,omitempty"`
+	EgressQUICDialRootObfuscationSeed []byte `cbor:"19,keyasint,omitempty"`
+	QUICVersion                       uint8  `cbor:"20,keyasint,omitempty"`
+	QUICDuration                      int64  `cbor:"21,keyasint,omitempty"`
+	PersonalCompartmentID             []byte `cbor:"22,keyasint,omitempty"`
 }
 
 func newLightHeader(
@@ -89,29 +111,67 @@ func newLightHeader(
 	networkType uint8,
 	connectionNum int64,
 	destinationAddress string,
+	tunnelDialAuthorization []byte,
+	egressProtocol uint8,
+	egressTLSProfile uint8,
+	egressRandomizedTLSProfileSeed []byte,
+	egressQUICVersion uint8,
+	egressQUICDialRootObfuscationSeed []byte,
+	egressSNI string,
 	tlsProfile uint8,
+	quicVersion uint8,
 	tcpDuration int64,
-	tlsDuration int64) (*lightHeader, error) {
+	tlsDuration int64,
+	quicDuration int64,
+	personalCompartmentID []byte) (*lightHeader, error) {
+
+	if len(tunnelDialAuthorization) > 0 {
+		// Omit this client metadata from tunnel headers to avoid exposing it
+		// to the proxy.
+		//
+		// Note: the proxy can still potentially link a client's connections.
+		// It relays the plaintext SSH handshake, in which the client's
+		// version string and KEX are the same for as long as the client
+		// replays its SSH dial parameters. Replay takes priority.
+		sponsorID = nil
+		clientPlatform = 0
+		clientBuildRev = nil
+		deviceRegion = ""
+		sessionID = nil
+		proxyEntryTracker = 0
+		networkType = 0
+		connectionNum = 0
+	}
 
 	// Truncate any unexpectedly long device region, which should be an ISO
 	// 3166-1 alpha-2 country code or a UN M49 three-digit region code. The
 	// limit is small since the header counts towards the initial padding
-	// target size, and an oversized header would disable that padding. The
+	// target size, and an oversized header would exceed that target. The
 	// proxy applies its own, independent limit to logged values.
 
 	return &lightHeader{
-		SponsorID:          sponsorID,
-		ClientPlatform:     clientPlatform,
-		ClientBuildRev:     clientBuildRev,
-		DeviceRegion:       common.TruncateUTF8String(deviceRegion, maxDeviceRegionLength),
-		SessionID:          sessionID,
-		ProxyEntryTracker:  proxyEntryTracker,
-		NetworkType:        networkType,
-		ConnectionNum:      connectionNum,
-		DestinationAddress: destinationAddress,
-		TLSProfile:         tlsProfile,
-		TCPDuration:        tcpDuration,
-		TLSDuration:        tlsDuration,
+		SponsorID:                         sponsorID,
+		ClientPlatform:                    clientPlatform,
+		ClientBuildRev:                    clientBuildRev,
+		DeviceRegion:                      common.TruncateUTF8String(deviceRegion, maxDeviceRegionLength),
+		SessionID:                         sessionID,
+		ProxyEntryTracker:                 proxyEntryTracker,
+		NetworkType:                       networkType,
+		ConnectionNum:                     connectionNum,
+		DestinationAddress:                destinationAddress,
+		TunnelDialAuthorization:           tunnelDialAuthorization,
+		EgressProtocol:                    egressProtocol,
+		EgressTLSProfile:                  egressTLSProfile,
+		EgressRandomizedTLSProfileSeed:    egressRandomizedTLSProfileSeed,
+		EgressQUICVersion:                 egressQUICVersion,
+		EgressQUICDialRootObfuscationSeed: egressQUICDialRootObfuscationSeed,
+		EgressSNI:                         egressSNI,
+		TLSProfile:                        tlsProfile,
+		QUICVersion:                       quicVersion,
+		TCPDuration:                       tcpDuration,
+		TLSDuration:                       tlsDuration,
+		QUICDuration:                      quicDuration,
+		PersonalCompartmentID:             personalCompartmentID,
 	}, nil
 }
 
@@ -119,7 +179,19 @@ func newLightConn(conn net.Conn, header *lightHeader) *lightConn {
 	return &lightConn{
 		Conn:   conn,
 		header: header,
+		minPaddedWrites: prng.Range(
+			minPaddedWritesMin, minPaddedWritesMax),
 	}
+}
+
+// NewLightFramingConn adds Light traffic shape framing to conn without a
+// light proxy header. Padded writes are capped, since the peer controls the
+// scope of padding.
+func NewLightFramingConn(conn net.Conn) net.Conn {
+	framingConn := newLightConn(conn, nil)
+	framingConn.maxPaddedWrites = prng.Range(
+		maxPaddedWritesMin, maxPaddedWritesMax)
+	return framingConn
 }
 
 func (conn *lightConn) Read(b []byte) (int, error) {
@@ -250,10 +322,11 @@ func (conn *lightConn) Write(b []byte) (int, error) {
 		conn.doneWriteHeader = true
 	}
 
-	// Pad initial inner protocol payloads until a size threshold is observed.
-	// This is a heuristic intended to obfuscate traffic shapes for many
-	// possible inner protocols with small, predictable size handshake
-	// payloads.
+	// Pad initial inner protocol payloads until a size threshold is observed,
+	// after a minimum number of padded writes. This is a heuristic intended
+	// to obfuscate traffic shapes for many possible inner protocols with
+	// small, predictable size handshake payloads. The minimum covers an SSH
+	// handshake, where a large KEX reply may precede small payloads.
 	//
 	// Pad so that the TLS record is within the target range. First calculate
 	// the size of the TLS record excluding the padding: the light header, if
@@ -266,10 +339,17 @@ func (conn *lightConn) Write(b []byte) (int, error) {
 	releaseWriteBuffer := false
 	size := conn.writeBuffer.Len() + len(b) + 2 + 17
 	if !conn.doneWritePadding {
-		if size > stopPaddingWriteSizeThreshold {
+		if conn.stopWritePaddingPending ||
+			len(b) > math.MaxUint16 ||
+			(size > stopPaddingWriteSizeThreshold &&
+				conn.paddedWrites >= conn.minPaddedWrites) ||
+			(conn.maxPaddedWrites > 0 &&
+				conn.paddedWrites >= conn.maxPaddedWrites) {
+
 			var wirePaddingSize [2]byte
 			binary.BigEndian.PutUint16(wirePaddingSize[:], stopPadding)
 			conn.writeBuffer.Write(wirePaddingSize[:])
+			conn.stopWritePaddingPending = false
 			conn.doneWritePadding = true
 			releaseWriteBuffer = true
 		} else {
@@ -290,7 +370,7 @@ func (conn *lightConn) Write(b []byte) (int, error) {
 			var wirePaddingSize [2]byte
 			binary.BigEndian.PutUint16(wirePaddingSize[:], uint16(len(padding)))
 			if len(b) > math.MaxUint16 {
-				// Should not happen assuming stopPaddingWriteSizeThreshold < 2^16.
+				// Should not happen; larger writes stop padding above.
 				return 0, errors.TraceNew("unexpected payload size")
 			}
 			var wirePayloadSize [2]byte
@@ -298,6 +378,7 @@ func (conn *lightConn) Write(b []byte) (int, error) {
 			conn.writeBuffer.Write(wirePaddingSize[:])
 			conn.writeBuffer.Write(wirePayloadSize[:])
 			conn.writeBuffer.Write(padding)
+			conn.paddedWrites += 1
 		}
 	}
 
@@ -317,6 +398,60 @@ func (conn *lightConn) Write(b []byte) (int, error) {
 	}
 
 	return n, errors.Trace(err)
+}
+
+func (conn *lightConn) stoppedReadingPadding() bool {
+	conn.readMutex.Lock()
+	defer conn.readMutex.Unlock()
+	return conn.doneReadPadding
+}
+
+func (conn *lightConn) stopWritePadding() {
+	conn.writeMutex.Lock()
+	defer conn.writeMutex.Unlock()
+	if !conn.doneWritePadding {
+		conn.stopWritePaddingPending = true
+	}
+}
+
+// RelayLightFrames relays between Light framing connections while preserving
+// the stop-padding transition.
+func RelayLightFrames(dst, src net.Conn, buffer []byte) (int64, error) {
+	dstConn, ok := dst.(*lightConn)
+	if !ok {
+		return 0, errors.TraceNew("invalid destination connection")
+	}
+	srcConn, ok := src.(*lightConn)
+	if !ok {
+		return 0, errors.TraceNew("invalid source connection")
+	}
+	if len(buffer) == 0 {
+		return 0, errors.TraceNew("invalid relay buffer")
+	}
+
+	var written int64
+	for {
+		n, readErr := srcConn.Read(buffer)
+		if n > 0 {
+			if srcConn.stoppedReadingPadding() {
+				dstConn.stopWritePadding()
+			}
+			writeN, writeErr := dstConn.Write(buffer[:n])
+			written += int64(writeN)
+			if writeErr != nil {
+				return written, errors.Trace(writeErr)
+			}
+			if writeN != n {
+				return written, errors.Trace(io.ErrShortWrite)
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return written, nil
+			}
+			return written, errors.Trace(readErr)
+		}
+	}
 }
 
 func (conn *lightConn) splitWrite(b []byte) (int, error) {
@@ -406,6 +541,12 @@ func (conn *lightConn) readHeader() (*lightHeader, error) {
 
 	if header == nil {
 		return nil, errors.TraceNew("unexpected nil header")
+	}
+
+	if len(header.PersonalCompartmentID) != 0 &&
+		len(header.PersonalCompartmentID) != personalCompartmentIDSize {
+
+		return nil, errors.TraceNew("invalid personal compartment ID")
 	}
 
 	return header, nil

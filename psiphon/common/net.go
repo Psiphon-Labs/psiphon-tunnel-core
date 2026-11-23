@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/miekg/dns"
 )
+
+// NormalizeHostAddress canonicalizes an IP literal or a domain without a port.
+func NormalizeHostAddress(host string) string {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
 
 // Dialer is a custom network dialer.
 type Dialer func(context.Context, string, string) (net.Conn, error)

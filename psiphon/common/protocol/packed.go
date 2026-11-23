@@ -326,7 +326,7 @@ type packConverter struct {
 func packInt(v interface{}) (interface{}, error) {
 	switch value := v.(type) {
 	case string:
-		i, err := strconv.Atoi(value)
+		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -334,7 +334,7 @@ func packInt(v interface{}) (interface{}, error) {
 	case float64:
 		// Decoding server entry JSON from the local datastore may produce
 		// float64 field types.
-		return int(value), nil
+		return int64(value), nil
 	default:
 		return nil, errors.TraceNew(
 			"expected string or float type")
@@ -862,20 +862,18 @@ func init() {
 
 		// Specs: server.connectedRequestParams
 
-		{179, "light_proxy_id", unpaddedBase64Converter},
-		{180, "light_proxy_entry_tracker", intConverter},
-		{181, "light_proxy_dial_IPv4", intConverter},
-		{182, "light_proxy_dial_IPv6", intConverter},
-		{183, "light_proxy_dial_failed", intConverter},
+		{179, "light_fallback_proxy_id", unpaddedBase64Converter},
+		{180, "light_fallback_proxy_entry_tracker", intConverter},
+		{181, "light_fallback_proxy_dial_IPv4", intConverter},
+		{182, "light_fallback_proxy_dial_IPv6", intConverter},
+		{183, "light_fallback_proxy_dial_failed", intConverter},
 
-		// Specs: server.baseDialParams
-
-		{184, "tunnel_personal_light_proxy_id", unpaddedBase64Converter},
+		// Key 184 is retired.
 
 		// Specs: server.connectedRequestParams
 
-		{185, "light_proxy_dial_canceled", intConverter},
-		{186, "light_proxy_client_events", nil},
+		{185, "light_fallback_proxy_dial_canceled", intConverter},
+		{186, "light_fallback_proxy_client_events", nil},
 
 		// Specs: server.inproxyDialParams,
 		// server.inproxyBrokerRequestParams
@@ -888,7 +886,34 @@ func init() {
 		{189, "inproxy_broker_session_handshake_duration", intConverter},
 		{190, "inproxy_dial_broker_client_acquire_duration", intConverter},
 
-		// Next key value = 191
+		// Specs: server.baseDialParams
+
+		{191, "light_sni", nil},
+		{192, "light_tls_profile", nil},
+		{193, "light_tls_fragmented", intConverter},
+		{194, "light_tls_padding", intConverter},
+		{195, "light_quic_version", nil},
+		{196, "light_egress_sni", nil},
+		{197, "light_egress_tls_profile", nil},
+		{198, "light_egress_quic_version", nil},
+		{199, "light_tcp_duration", intConverter},
+		{200, "light_tls_duration", intConverter},
+		{201, "light_quic_duration", intConverter},
+		{202, "light_dial_is_IPv6", intConverter},
+		{203, "light_dial_port_number", intConverter},
+		{204, "light_tls_sent_ticket", intConverter},
+		{205, "light_tls_did_resume", intConverter},
+		{206, "light_quic_sent_ticket", intConverter},
+		{207, "light_quic_did_resume", intConverter},
+		{208, "light_proxy_entry_tracker", intConverter},
+		{210, "light_quic_disable_client_path_mtu_discovery", intConverter},
+		{211, "light_seed_transform", nil},
+
+		// Specs: server.handshakeRequestParams
+
+		{209, "light_proxy_id", unpaddedBase64Converter},
+
+		// Next key value = 212
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
@@ -921,9 +946,24 @@ func init() {
 	// - local-only fields are also packed, to allow for future use of packed
 	//   encodings in the local datastore.
 	//
-	// Known limitation: sshShadowsocksPort, sshShadowsocksKey,
-	// disableShadowsocksPrefix, and inproxyShadowsocksPort are not assigned
-	// packed field keys and fall through to UnrecognizedFields.
+	// Known limitations:
+	//
+	// - sshShadowsocksPort, sshShadowsocksKey, disableShadowsocksPrefix, and
+	//   inproxyShadowsocksPort were not assigned packed field keys and fall
+	//   through to UnrecognizedFields.
+	//
+	// - allowUpstreamProxy, lightDialAuthorization, lightTlsSSHPort,
+	//   lightQuicSSHPort are also not assigned packed field keys, due to
+	//   this design issue: DecodePackedServerEntryFields is strict and fails
+	//   on an unknown key; full signature checking and JSON format
+	//   reconstruction requires knowledge of the full field names.
+	//
+	//   Originally, unpacking was only performed by brokers, on in-proxy
+	//   destination check packed server entries, and brokers could be kept
+	//   up to date. With the introduction of the DSL protocol using packed
+	//   server entries, now clients call DecodePackedServerEntryFields and
+	//   we can no longer guarantee that all decoders are compatible. Packing
+	//   of new fields will require client/decoder version awareness.
 
 	packedServerEntryFieldSpecs := []packSpec{
 		{1, "tag", base64Converter},
@@ -973,7 +1013,6 @@ func init() {
 		{45, "localSource", nil},
 		{46, "localTimestamp", nil},
 		{47, "isLocalDerivedTag", nil},
-		{48, "allowUpstreamProxy", nil},
 	}
 
 	for _, spec := range packedServerEntryFieldSpecs {

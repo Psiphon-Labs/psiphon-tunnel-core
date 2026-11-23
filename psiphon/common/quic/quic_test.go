@@ -23,6 +23,7 @@
 package quic
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -45,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/sync/errgroup"
 )
@@ -78,6 +80,304 @@ func TestQUIC(t *testing.T) {
 					runQUIC(t, quicVersion, GQUICEnabled(), false, useObfuscatedPSK, true)
 				})
 			}
+		}
+	}
+}
+
+func TestIETFQUICExporterAndPin(t *testing.T) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	certificate, privateKey, verifyPin, err :=
+		common.GenerateWebServerCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCertificate, err := tls.X509KeyPair(
+		[]byte(certificate), []byte(privateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obfuscationKey := prng.HexString(32)
+	listener, err := Listen(
+		nil,
+		func(_ string, err error, _ common.LogFields) {
+			t.Errorf("unexpected irregular tunnel event: %v", err)
+		},
+		"127.0.0.1:0",
+		nil,
+		false,
+		0,
+		obfuscationKey,
+		nil,
+		&tlsCertificate,
+		false,
+		false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	const exporterLabel = "EXPORTER-psiphon-quic-test"
+	const exporterSize = 32
+
+	type exporterResult struct {
+		exporter []byte
+		err      error
+	}
+	resultChannel := make(chan exporterResult, 2)
+	closeServerConn := make(chan struct{})
+	defer close(closeServerConn)
+
+	go func() {
+		for i := 0; i < 2; i++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				resultChannel <- exporterResult{err: err}
+				return
+			}
+			defer conn.Close()
+
+			exporter, err := conn.(*Conn).ExportKeyingMaterial(
+				exporterLabel, nil, exporterSize)
+			resultChannel <- exporterResult{
+				exporter: exporter,
+				err:      err,
+			}
+		}
+
+		<-closeServerConn
+	}()
+
+	sessionCache := &testQUICClientSessionCache{
+		ClientSessionCache: tls.NewLRUClientSessionCache(0),
+		stored:             make(chan struct{}, 1),
+	}
+
+	dial := func(verifyPin string, useObfuscatedPSK bool) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(
+			ctx, 5*time.Second)
+		defer cancel()
+
+		remoteAddr, err := net.ResolveUDPAddr(
+			"udp", listener.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+
+		return Dial(
+			ctx,
+			packetConn,
+			remoteAddr,
+			"localhost",
+			protocol.QUIC_VERSION_V1,
+			nil,
+			obfuscationKey,
+			nil,
+			nil,
+			false,
+			0,
+			false,
+			useObfuscatedPSK,
+			verifyPin,
+			common.WrapClientSessionCache(sessionCache, "localhost"))
+	}
+
+	// Test: exporters match and change when resuming a session without 0-RTT.
+
+	var previousExporter []byte
+	for _, expectedDidResume := range []string{"0", "1"} {
+		clientConn, err := dial(verifyPin, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer clientConn.Close()
+
+		clientExporter, err := clientConn.(*Conn).ExportKeyingMaterial(
+			exporterLabel, nil, exporterSize)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var result exporterResult
+		select {
+		case result = <-resultChannel:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if !bytes.Equal(clientExporter, result.exporter) {
+			t.Fatal("exported key material mismatch")
+		}
+		if bytes.Equal(clientExporter, previousExporter) {
+			t.Fatal("reused QUIC exporter")
+		}
+		previousExporter = clientExporter
+		if clientConn.(*Conn).GetMetrics()["quic_did_resume"] != expectedDidResume {
+			t.Fatal("unexpected QUIC resumption")
+		}
+
+		// Wait for ticket storage before the next dial.
+		select {
+		case <-sessionCache.stored:
+		case <-ctx.Done():
+			t.Fatal("session ticket not received:", ctx.Err())
+		}
+	}
+
+	// Test: an incorrect pin is rejected even with a cached session.
+
+	_, _, wrongVerifyPin, err :=
+		common.GenerateWebServerCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := dial(wrongVerifyPin, false)
+	if err == nil {
+		conn.Close()
+		t.Fatal("unexpected dial success with incorrect verify pin")
+	}
+
+	if !strings.Contains(err.Error(), "no pin found") {
+		t.Fatal(err)
+	}
+
+	conn, err = dial(verifyPin, true)
+	if err == nil {
+		conn.Close()
+		t.Fatal("unexpected dial success with verify pin and obfuscated PSK")
+	}
+	if !strings.Contains(err.Error(), "not supported with obfuscated PSK") {
+		t.Fatal(err)
+	}
+}
+
+func TestIETFQUICEarlyResumptionMetrics(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCertificate, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	packetConn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer packetConn.Close()
+
+	// Hold the second handshake before ServerHello so DialEarly must return
+	// before the client knows whether TLS resumption succeeded.
+	resumeHandshake := make(chan struct{})
+	var clientHelloCount atomic.Int32
+	listener, err := ietf_quic.Listen(packetConn, &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			if clientHelloCount.Add(1) > 1 {
+				select {
+				case <-resumeHandshake:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return nil, nil
+		},
+	}, &ietf_quic.Config{Allow0RTT: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	// Release a blocked TLS callback before closing the listener on failure.
+	defer cancel()
+
+	sessionCache := &testQUICClientSessionCache{
+		ClientSessionCache: tls.NewLRUClientSessionCache(0),
+		stored:             make(chan struct{}, 1),
+	}
+	transporter, err := NewQUICTransporter(
+		ctx, nil,
+		func(context.Context) (net.PacketConn, *net.UDPAddr, error) {
+			conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			return conn, listener.Addr().(*net.UDPAddr), err
+		},
+		"localhost", protocol.QUIC_VERSION_V1, nil, false, true,
+		common.WrapClientSessionCache(sessionCache, "localhost"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transporter.CloseIdleConnections()
+
+	for _, expectedDidResume := range []string{"0", "1"} {
+		connection, err := transporter.dialQUIC()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close()
+		earlyConnection := connection.(*ietfQUICConnection).Connection.(ietf_quic.EarlyConnection)
+		if expectedDidResume == "1" {
+			if earlyConnection.ConnectionState().TLS.HandshakeComplete {
+				t.Fatal("early dial waited for the blocked handshake")
+			}
+			if transporter.GetMetrics()["quic_did_resume"] != "0" {
+				t.Fatal("resumption reported before ServerHello")
+			}
+			close(resumeHandshake)
+		}
+		select {
+		case <-earlyConnection.HandshakeComplete():
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if earlyConnection.ConnectionState().TLS.DidResume != (expectedDidResume == "1") {
+			t.Fatal("unexpected TLS resumption state")
+		}
+		metrics := transporter.GetMetrics()
+		if metrics["quic_dial_early"] != "1" ||
+			metrics["quic_sent_ticket"] != expectedDidResume ||
+			metrics["quic_did_resume"] != expectedDidResume {
+			t.Fatalf("unexpected QUIC metrics after handshake: %v", metrics)
+		}
+
+		serverConn, err := listener.Accept(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer serverConn.CloseWithError(0, "")
+		select {
+		case <-sessionCache.stored:
+		case <-ctx.Done():
+			t.Fatal("session ticket not received:", ctx.Err())
+		}
+	}
+}
+
+type testQUICClientSessionCache struct {
+	tls.ClientSessionCache
+	stored chan struct{}
+}
+
+func (cache *testQUICClientSessionCache) Put(
+	key string, state *tls.ClientSessionState) {
+
+	cache.ClientSessionCache.Put(key, state)
+	if state != nil {
+		select {
+		case cache.stored <- struct{}{}:
+		default:
 		}
 	}
 }
@@ -137,10 +437,14 @@ func runQUIC(
 		nil,
 		irregularTunnelLogger,
 		"127.0.0.1:0",
+		nil,
 		disablePathMTUDiscovery,
 		0,
 		obfuscationKey,
-		enableGQUIC)
+		nil,
+		nil,
+		enableGQUIC,
+		true)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
@@ -252,6 +556,7 @@ func runQUIC(
 				0,
 				true,
 				useObfuscatedPSK,
+				"",
 				clientSessionCache)
 
 			if invokeAntiProbing {
@@ -622,10 +927,14 @@ func TestQUICPeerLimits(t *testing.T) {
 		nil,
 		func(string, error, common.LogFields) {},
 		"127.0.0.1:0",
+		nil,
 		false,
 		0,
 		obfuscationKey,
-		false)
+		nil,
+		nil,
+		false,
+		true)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
@@ -680,6 +989,7 @@ func TestQUICPeerLimits(t *testing.T) {
 			0,
 			true,
 			false,
+			"",
 			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "localhost"))
 	}
 
@@ -986,10 +1296,14 @@ func TestQUICInitialWithoutClientHello(t *testing.T) {
 		nil,
 		func(string, error, common.LogFields) {},
 		"127.0.0.1:0",
+		nil,
 		false,
 		0,
 		obfuscationKey,
-		false)
+		nil,
+		nil,
+		false,
+		true)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}

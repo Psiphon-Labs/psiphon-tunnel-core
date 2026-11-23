@@ -638,10 +638,18 @@ func runTestInproxy(doMustUpgrade bool) error {
 		if i < sharedProxyLimitsProxyCount {
 			proxyConfig.ProxyLimits = sharedProxyLimits
 		} else {
-			proxyConfig.MaxCommonClients = proxyMaxClients
-			proxyConfig.MaxPersonalClients = proxyMaxClients
-			proxyConfig.LimitUpstreamBytesPerSecond = bytesToSend / targetElapsedSeconds
-			proxyConfig.LimitDownstreamBytesPerSecond = bytesToSend / targetElapsedSeconds
+			proxyConfig.ProxyLimits, err = common.NewProxyLimits(&common.ProxyLimitsConfig{
+				MaxCommonClients:               proxyMaxClients,
+				CommonUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
+				CommonDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
+
+				MaxPersonalClients:               proxyMaxClients,
+				PersonalUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
+				PersonalDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
+			})
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		proxy, err := NewProxy(proxyConfig)
@@ -768,6 +776,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 					GetQUICMaxPacketSizeAdjustment(),
 					false,
 					false,
+					"",
 					common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), ""),
 				)
 				if err != nil {
@@ -1403,10 +1412,14 @@ func newQuicEchoServer() (*quicEchoServer, error) {
 		nil,
 		nil,
 		"127.0.0.1:0",
+		nil,
 		true,
 		GetQUICMaxPacketSizeAdjustment(),
 		obfuscationKey,
-		false)
+		nil,
+		nil,
+		false,
+		true)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1538,8 +1551,13 @@ func TestProxyWorkerBrokerAcquisition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			proxyLimits, err := common.NewProxyLimits(
+				&common.ProxyLimitsConfig{MaxCommonClients: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
 			p, err := NewProxy(&ProxyConfig{
-				Logger: testutils.NewTestLoggerWithComponent("acquisition"), MaxCommonClients: 1,
+				Logger: testutils.NewTestLoggerWithComponent("acquisition"), ProxyLimits: proxyLimits,
 				GetBrokerClient: func(context.Context) (*BrokerClient, func(), error) {
 					acquired++
 					return client, sync.OnceFunc(func() { released++ }), nil
@@ -1624,8 +1642,13 @@ func TestProxyRaceUsesCapacityBackedWorkers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan struct{}, 10)
+	proxyLimits, err := common.NewProxyLimits(
+		&common.ProxyLimitsConfig{MaxCommonClients: 2, MaxPersonalClients: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, err := NewProxy(&ProxyConfig{
-		Logger: testutils.NewTestLoggerWithComponent("capacity"), MaxCommonClients: 2, MaxPersonalClients: 1,
+		Logger: testutils.NewTestLoggerWithComponent("capacity"), ProxyLimits: proxyLimits,
 		MakeWebRTCDialCoordinator: func() (WebRTCDialCoordinator, error) { return &testWebRTCDialCoordinator{networkID: "TEST"}, nil },
 		GetBrokerClient: func(ctx context.Context) (*BrokerClient, func(), error) {
 			started <- struct{}{}

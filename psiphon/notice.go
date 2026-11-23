@@ -36,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -101,6 +102,11 @@ func GetEmitNetworkParameters() bool {
 // notices are written to stderr. Notices are newline delimited.
 //
 // writer specifies an alternate io.Writer where notices are to be written.
+//
+// Writes are synchronous and may occur while notice or controller locks are
+// held. Reentrancy is unsupported: the writer and any callback it invokes must
+// not call tunnel-core APIs or emit notices synchronously. Dispatch such work
+// asynchronously and return promptly.
 //
 // Notices are encoded in JSON. Here's an example:
 //
@@ -217,12 +223,13 @@ func setNoticeFiles(
 }
 
 const (
-	noticeIsDiagnostic    = 1
-	noticeIsHomepage      = 2
-	noticeClearHomepages  = 4
-	noticeSyncHomepages   = 8
-	noticeSkipRedaction   = 16
-	noticeIsNotDiagnostic = 32
+	noticeIsDiagnostic            = 1
+	noticeIsHomepage              = 2
+	noticeClearHomepages          = 4
+	noticeSyncHomepages           = 8
+	noticeSkipRedaction           = 16
+	noticeIsNotDiagnostic         = 32
+	noticeRedactionForDiagnostics = 64
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -273,12 +280,16 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	// diagnostics logs.
 
 	skipRedaction := (noticeFlags&noticeSkipRedaction != 0)
+	writerOutput := output
 
 	if !skipRedaction {
 		// Ensure direct server IPs are not exposed in notices. The "net" package,
 		// and possibly other 3rd party packages, will include destination addresses
 		// in I/O error messages.
 		output = common.RedactIPAddresses(output)
+	}
+	if noticeFlags&noticeRedactionForDiagnostics == 0 {
+		writerOutput = output
 	}
 
 	// Don't call RedactFilePaths here, as the file path redaction can
@@ -328,7 +339,7 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	}
 
 	if !skipWriter {
-		_, _ = nl.writer.Write(output)
+		_, _ = nl.writer.Write(writerOutput)
 	}
 }
 
@@ -710,6 +721,13 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 		}
 
+		if protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
+			metrics := dialParams.GetLightTunnelMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
+		}
+
 		if dialParams.ShadowsocksPrefixSpec != nil {
 			if dialParams.ShadowsocksPrefixSpec.Spec != nil {
 				args = append(args, "ShadowsocksPrefix", dialParams.ShadowsocksPrefixSpec.Name)
@@ -723,8 +741,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "DSLPrioritizedTunnelProtocol", dialParams.DSLPrioritizedTunnelProtocol)
 		}
 
-		if dialParams.TunnelLightProxyID != "" {
-			args = append(args, "tunnelPersonalLightProxyID", dialParams.TunnelLightProxyID)
+		if dialParams.LightProxyID != "" {
+			args = append(args, "lightProxyID", dialParams.LightProxyID)
 		}
 
 	}
@@ -1165,16 +1183,35 @@ func NoticeSkipServerEntry(format string, args ...interface{}) {
 		"SkipServerEntry", 0, "reason", reason)
 }
 
-// NoticeInproxyMustUpgrade reports that an in-proxy component requires an app
-// upgrade. Currently this includes running a proxy; and running a client in
-// personal pairing mode. The receiver should alert the user to upgrade the
-// app.
+// NoticeInproxyMustUpgrade reports that a broker requires an app upgrade.
+// It is emitted when either proxy type is enabled or the client uses in-proxy
+// personal pairing. The receiver should alert the user to upgrade the app.
 //
 // There is at most one InproxyMustUpgrade notice emitted per controller run,
 // and an InproxyMustUpgrade notice is followed by a tunnel-core shutdown.
 func NoticeInproxyMustUpgrade() {
 	singletonNoticeLogger.outputNotice(
 		"InproxyMustUpgrade", 0)
+}
+
+// NoticeInproxyProxyStarted reports that the controller is running the proxy.
+func NoticeInproxyProxyStarted() {
+	singletonNoticeLogger.outputNotice("InproxyProxyStarted", 0)
+}
+
+// NoticeInproxyProxyStopped reports that the in-proxy component has stopped,
+// including startup exclusions or failures without a preceding InproxyProxyStarted.
+func NoticeInproxyProxyStopped(reason, message string) {
+
+	singletonNoticeLogger.outputNotice(
+		"InproxyProxyStopped", 0, "reason", reason,
+		"message", common.RedactIPAddressesString(message))
+}
+
+// NoticeInproxyProxyDisallowed reports a tactics restriction. In combined
+// proxy/tunnel mode this does not currently stop the running proxy.
+func NoticeInproxyProxyDisallowed() {
+	singletonNoticeLogger.outputNotice("InproxyProxyDisallowed", 0)
 }
 
 // NoticeInproxyProxyActivity reports proxy usage statistics. The stats are
@@ -1222,9 +1259,95 @@ func NoticeInproxyProxyTotalActivity(
 		"totalBytesDown", totalBytesDown)
 }
 
-// NoticeLightProxyAvailable indicates that a light proxy is available for use.
+// NoticeLightProxyAvailable indicates that a fallback Light proxy is
+// available for use. It is not emitted for personal or common Light tunnels.
 func NoticeLightProxyAvailable() {
 	singletonNoticeLogger.outputNotice("LightProxyAvailable", 0)
+}
+
+// NoticeLightProxyAllowed reports that StartLightProxy may be called. It is
+// emitted once Controller.Run is ready, when tactics allow hosting a Light
+// proxy, and again each time tactics change to allow it.
+func NoticeLightProxyAllowed() {
+	singletonNoticeLogger.outputNotice("LightProxyAllowed", 0)
+}
+
+// NoticeLightProxyDisallowed reports that tactics no longer allow hosting a
+// Light proxy. A running Light proxy is stopped, and StartLightProxy fails
+// until LightProxyAllowed is emitted.
+func NoticeLightProxyDisallowed() {
+	singletonNoticeLogger.outputNotice("LightProxyDisallowed", 0)
+}
+
+// NoticeLightProxyListening reports a bound Light proxy endpoint.
+// The address is unredacted for the host app and redacted in diagnostic files.
+// The host app must also redact the address in its own diagnostics.
+func NoticeLightProxyListening(address, protocol string) {
+	singletonNoticeLogger.outputNotice(
+		"LightProxyListening", noticeRedactionForDiagnostics,
+		"address", address,
+		"protocol", protocol)
+}
+
+// NoticeLightProxyStarted reports that all Light proxy listeners are ready.
+func NoticeLightProxyStarted() {
+	singletonNoticeLogger.outputNotice("LightProxyStarted", 0)
+}
+
+// NoticeLightProxyStopped reports that the hosted Light proxy has stopped.
+// Listener startup failures also emit this notice, without LightProxyStarted.
+func NoticeLightProxyStopped() {
+	singletonNoticeLogger.outputNotice("LightProxyStopped", 0)
+}
+
+// NoticeLightProxyListenError reports a listener startup failure.
+// The address is unredacted for the host app and redacted in diagnostic files.
+// The host app must also redact the address in its own diagnostics.
+func NoticeLightProxyListenError(listenAddress, message string) {
+	singletonNoticeLogger.outputNotice(
+		"LightProxyListenError", noticeRedactionForDiagnostics,
+		"listenAddress", listenAddress,
+		"message", common.RedactIPAddressesString(message))
+}
+
+// NoticeLightProxyActivity reports the hosted Light proxy's current connection
+// count and bytes transferred since the previous update.
+// Limitation: aggregate counts include pre-header and passthrough activity
+// without personal/common attribution. Independently sampled aggregate and
+// region counters may also differ at interval boundaries.
+//
+// This is not a diagnostic notice: the user app has requested this notice
+// with EmitLightProxyActivity for functionality such as traffic display;
+// and this frequent notice is not intended to be included with feedback.
+func NoticeLightProxyActivity(
+	currentConnectionCount int64,
+	bytesUp int64,
+	bytesDown int64,
+	bytesDurationMilliseconds int64,
+	personalRegionActivity, commonRegionActivity map[string]light.RegionActivitySnapshot) {
+
+	singletonNoticeLogger.outputNotice(
+		"LightProxyActivity", noticeIsNotDiagnostic,
+		"currentConnectionCount", currentConnectionCount,
+		"bytesUp", bytesUp,
+		"bytesDown", bytesDown,
+		"bytesDurationMilliseconds", bytesDurationMilliseconds,
+		"personalRegionActivity", personalRegionActivity,
+		"commonRegionActivity", commonRegionActivity)
+}
+
+// NoticeLightProxyTotalActivity reports the hosted Light proxy's current
+// connection count and byte totals since startup. This is a diagnostic notice.
+func NoticeLightProxyTotalActivity(
+	currentConnectionCount int64,
+	totalBytesUp int64,
+	totalBytesDown int64) {
+
+	singletonNoticeLogger.outputNotice(
+		"LightProxyTotalActivity", noticeIsDiagnostic,
+		"currentConnectionCount", currentConnectionCount,
+		"totalBytesUp", totalBytesUp,
+		"totalBytesDown", totalBytesDown)
 }
 
 // NoticeDSLAccessTokenAvailable indicates that an opaque DSL access token is

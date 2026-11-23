@@ -410,7 +410,8 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 // NewClientSeedState creates a new client seed state to track
 // client progress towards seeding SLOKs. psiphond maintains one
-// ClientSeedState for each connected client.
+// ClientSeedState for each connected client. An empty clientRegion selects only
+// schemes without region restrictions.
 //
 // A signal is sent on signalIssueSLOKs when sufficient progress
 // has been made that a new SLOK *may* be issued. psiphond will
@@ -440,7 +441,8 @@ func (config *Config) NewClientSeedState(
 		// maps for more efficient lookup.
 		if scheme.epoch.Before(time.Now().UTC()) &&
 			common.Contains(scheme.PropagationChannelIDs, propagationChannelID) &&
-			(len(scheme.Regions) == 0 || common.Contains(scheme.Regions, clientRegion)) {
+			(len(scheme.Regions) == 0 ||
+				(clientRegion != "" && common.Contains(scheme.Regions, clientRegion))) {
 
 			// Empty progress is initialized up front for all seed specs. Once
 			// created, the progress structure is read-only (the slice, not the

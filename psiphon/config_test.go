@@ -31,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/stretchr/testify/suite"
@@ -260,6 +261,288 @@ func (suite *ConfigTestSuite) Test_LoadConfig_GoodJson() {
 		err = config.Commit(false)
 	}
 	suite.Nil(err, "JSON with null for optional values should succeed")
+}
+
+func TestConfigProxyReducedLimits(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		configJSON    string
+		expected      [5]any
+		expectedError string
+	}{
+		{
+			name: "LegacyFields",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxCommonClients": 4,
+				"InproxyReducedLimitUpstreamBytesPerSecond": 100,
+				"InproxyReducedLimitDownstreamBytesPerSecond": 200
+			}`,
+			expected: [5]any{"01:00", "02:00", 4, 100, 200},
+		},
+		{
+			name: "NewFields",
+			configJSON: `{
+				"ProxyReducedStartTime": "01:00", "ProxyReducedEndTime": "02:00",
+				"ProxyReducedMaxCommonClients": 4,
+				"ProxyReducedUpstreamBytesPerSecond": 100,
+				"ProxyReducedDownstreamBytesPerSecond": 200
+			}`,
+			expected: [5]any{"01:00", "02:00", 4, 100, 200},
+		},
+		{
+			name: "NewFieldsOverrideInvalidLegacyFields",
+			configJSON: `{
+				"InproxyReducedStartTime": "invalid", "InproxyReducedEndTime": "invalid",
+				"InproxyReducedMaxCommonClients": -1,
+				"InproxyReducedLimitUpstreamBytesPerSecond": -1,
+				"InproxyReducedLimitDownstreamBytesPerSecond": -1,
+				"ProxyReducedStartTime": "01:00", "ProxyReducedEndTime": "02:00",
+				"ProxyReducedMaxCommonClients": 4,
+				"ProxyReducedUpstreamBytesPerSecond": 100,
+				"ProxyReducedDownstreamBytesPerSecond": 200
+			}`,
+			expected: [5]any{"01:00", "02:00", 4, 100, 200},
+		},
+		{
+			name: "OmittedFieldsUseLegacyValues",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "04:00",
+				"InproxyReducedMaxCommonClients": 4,
+				"InproxyReducedLimitUpstreamBytesPerSecond": 100,
+				"InproxyReducedLimitDownstreamBytesPerSecond": 200,
+				"ProxyReducedStartTime": "03:00", "ProxyReducedUpstreamBytesPerSecond": 300
+			}`,
+			expected: [5]any{"03:00", "04:00", 4, 300, 200},
+		},
+		{
+			name: "ExplicitZeroOverridesLegacyValues",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxCommonClients": 4,
+				"InproxyReducedLimitUpstreamBytesPerSecond": 100,
+				"InproxyReducedLimitDownstreamBytesPerSecond": 200,
+				"ProxyReducedMaxCommonClients": 0,
+				"ProxyReducedUpstreamBytesPerSecond": 0,
+				"ProxyReducedDownstreamBytesPerSecond": 0
+			}`,
+			expected: [5]any{"01:00", "02:00", 0, 0, 0},
+		},
+		{
+			name: "ExplicitEmptyValuesClearLegacySchedule",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxCommonClients": 4,
+				"InproxyReducedLimitUpstreamBytesPerSecond": 100,
+				"InproxyReducedLimitDownstreamBytesPerSecond": 200,
+				"ProxyReducedStartTime": "", "ProxyReducedEndTime": "",
+				"ProxyReducedMaxCommonClients": 0,
+				"ProxyReducedUpstreamBytesPerSecond": 0,
+				"ProxyReducedDownstreamBytesPerSecond": 0
+			}`,
+			expected: [5]any{"", "", 0, 0, 0},
+		},
+		{
+			name: "OldestClientLimitAlias",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxClients": 3
+			}`,
+			expected: [5]any{"01:00", "02:00", 3, 0, 0},
+		},
+		{
+			name: "LegacyClientLimitPrecedence",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxClients": 9, "InproxyReducedMaxCommonClients": 4
+			}`,
+			expected: [5]any{"01:00", "02:00", 4, 0, 0},
+		},
+		{
+			name: "NewClientLimitOverridesBothAliases",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxClients": 9, "InproxyReducedMaxCommonClients": 4,
+				"ProxyReducedMaxCommonClients": 0
+			}`,
+			expected: [5]any{"01:00", "02:00", 0, 0, 0},
+		},
+		{
+			name: "NullUsesLegacyValues",
+			configJSON: `{
+				"InproxyReducedStartTime": "01:00", "InproxyReducedEndTime": "02:00",
+				"InproxyReducedMaxCommonClients": 4,
+				"InproxyReducedLimitUpstreamBytesPerSecond": 100,
+				"InproxyReducedLimitDownstreamBytesPerSecond": 200,
+				"ProxyReducedStartTime": null, "ProxyReducedEndTime": null,
+				"ProxyReducedMaxCommonClients": null,
+				"ProxyReducedUpstreamBytesPerSecond": null,
+				"ProxyReducedDownstreamBytesPerSecond": null
+			}`,
+			expected: [5]any{"01:00", "02:00", 4, 100, 200},
+		},
+		{
+			name:          "InvalidStartOverridesValidLegacy",
+			configJSON:    `{"InproxyReducedStartTime":"01:00","InproxyReducedEndTime":"02:00","ProxyReducedStartTime":"invalid"}`,
+			expectedError: "invalid ProxyReducedStartTime",
+		},
+		{
+			name:          "InvalidEnd",
+			configJSON:    `{"ProxyReducedStartTime":"01:00","ProxyReducedEndTime":"invalid"}`,
+			expectedError: "invalid ProxyReducedEndTime",
+		},
+		{
+			name:          "MissingEnd",
+			configJSON:    `{"ProxyReducedStartTime":"01:00"}`,
+			expectedError: "invalid ProxyReducedEndTime",
+		},
+		{
+			name:          "EqualStartAndEnd",
+			configJSON:    `{"ProxyReducedStartTime":"01:00","ProxyReducedEndTime":"01:00"}`,
+			expectedError: "invalid ProxyReducedStartTime/ProxyReducedEndTime",
+		},
+		{
+			name:          "ClientLimitExceedsBase",
+			configJSON:    `{"ProxyReducedStartTime":"01:00","ProxyReducedEndTime":"02:00","ProxyReducedMaxCommonClients":11}`,
+			expectedError: "invalid ProxyReducedMaxCommonClients",
+		},
+		{
+			name:          "NegativeClientLimit",
+			configJSON:    `{"ProxyReducedMaxCommonClients":-1}`,
+			expectedError: "invalid ProxyReducedMaxCommonClients",
+		},
+		{
+			name:          "NegativeUpstreamRate",
+			configJSON:    `{"ProxyReducedUpstreamBytesPerSecond":-1}`,
+			expectedError: "invalid ProxyReducedUpstreamBytesPerSecond",
+		},
+		{
+			name:          "NegativeDownstreamRate",
+			configJSON:    `{"ProxyReducedDownstreamBytesPerSecond":-1}`,
+			expectedError: "invalid ProxyReducedDownstreamBytesPerSecond",
+		},
+		{
+			name:          "InvalidLegacyValueStillRejected",
+			configJSON:    `{"InproxyReducedMaxCommonClients":-1}`,
+			expectedError: "invalid ProxyReducedMaxCommonClients",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			config, err := LoadConfig([]byte(testCase.configJSON))
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.DataRootDirectory = t.TempDir()
+			config.PropagationChannelId = "ABCDEFGH"
+			config.SponsorId = "12345678"
+			config.ClientVersion = "1"
+			config.DisableTunnels = true
+			config.InproxyEnableProxy = true
+			config.InproxyMaxCommonClients = 10
+			config.InproxyMaxPersonalClients = 1
+
+			err = config.Commit(false)
+			if testCase.expectedError != "" {
+				if err == nil || !strings.Contains(err.Error(), testCase.expectedError) {
+					t.Fatalf("expected %q, got %v", testCase.expectedError, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved := config.getProxyLimitsConfig()
+			actual := [5]any{
+				resolved.ReducedStartTime, resolved.ReducedEndTime,
+				resolved.ReducedMaxCommonClients,
+				resolved.ReducedUpstreamBytesPerSecond,
+				resolved.ReducedDownstreamBytesPerSecond,
+			}
+			if actual != testCase.expected {
+				t.Fatalf("unexpected reduced limits: got %v, want %v", actual, testCase.expected)
+			}
+			if _, err := common.NewProxyLimits(resolved); err != nil {
+				t.Fatalf("resolved limits rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestControllerProxyReducedLimits(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		inproxy bool
+		light   bool
+	}{
+		{"Inproxy", true, false},
+		{"Light", false, true},
+		{"Combined", true, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if testCase.inproxy && !inproxy.Enabled() {
+				t.Skip("In-proxy is not enabled")
+			}
+			config := newRunningLightProxyTestConfig(t)
+			config.InproxyEnableProxy = testCase.inproxy
+			config.EnableRunningLightProxy = testCase.light
+			err := json.Unmarshal([]byte(`{
+				"ProxyMaxCommonClients": 10,
+				"ProxyReducedStartTime": "01:00", "ProxyReducedEndTime": "02:00",
+				"ProxyReducedMaxCommonClients": 4
+			}`), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := config.Commit(false); err != nil {
+				t.Fatal(err)
+			}
+			controller, err := NewController(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := controller.SetCommonProxyLimits(10, 0, 0); err == nil ||
+				!strings.Contains(err.Error(), "reduced limits configured") {
+				t.Fatalf("expected reduced schedule to prevent dynamic updates, got %v", err)
+			}
+		})
+	}
+
+	t.Run("SharedLimitsOverrideScheduleFields", func(t *testing.T) {
+		config := newRunningLightProxyTestConfig(t)
+		err := json.Unmarshal([]byte(`{
+			"ProxyReducedStartTime": "invalid", "ProxyReducedEndTime": "invalid",
+			"ProxyReducedMaxCommonClients": -1,
+			"ProxyReducedUpstreamBytesPerSecond": -1,
+			"ProxyReducedDownstreamBytesPerSecond": -1,
+			"InproxyReducedStartTime": "invalid", "InproxyReducedEndTime": "invalid",
+			"InproxyReducedMaxCommonClients": -1,
+			"InproxyReducedLimitUpstreamBytesPerSecond": -1,
+			"InproxyReducedLimitDownstreamBytesPerSecond": -1
+		}`), config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		limits, err := common.NewProxyLimits(&common.ProxyLimitsConfig{
+			MaxCommonClients: 10, MaxPersonalClients: 2,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		config.ProxyLimits = limits
+		if err := config.Commit(false); err != nil {
+			t.Fatal(err)
+		}
+		controller, err := NewController(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if controller.proxyLimits != limits {
+			t.Fatal("controller did not use the supplied shared limits")
+		}
+		if err := controller.SetCommonProxyLimits(10, 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // stubDeviceBinder is a DeviceBinder that records the device name it would

@@ -30,10 +30,10 @@ github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059 h1:sz2lvE
 github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059/go.mod h1:1wPnOxXitLtJGniz6eehmc6e6d30YYR829Ix55iYz1c=
 github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88 h1:aj/YXY3ULAL3NTMZnITIwKWnzPIukoSEar3tHBaYQW4=
 github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88/go.mod h1:Hr9BTdONt074FS0Y1jd1g9f6jmIVRrYfc7He0elh/DI=
-github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d h1:5i/eGuBHM5shLXpa1lRQBzKsaeRT1WZFWlMaY9fiX4c=
-github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
-github.com/Psiphon-Labs/quic-go v0.0.0-20261103172121-ba3c8406711b h1:ZQ0hWe+lJTCCP6HwsO9jvi8F6fcYXU4W66vU8TSevDY=
-github.com/Psiphon-Labs/quic-go v0.0.0-20261103172121-ba3c8406711b/go.mod h1:rONdWgPMbFjyyBai7gB1IBF4pT9r4l0GyiDst5XR1SY=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261123190542-d9f99c3443cf h1:VbcftTr99IPncGUWA9TawO3cQ8u71/lSRght92rCxfo=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261123190542-d9f99c3443cf/go.mod h1:ZRbEGoQNxAbn+8YID9WIyK8/s458BhBI7M84XQaxT9Y=
+github.com/Psiphon-Labs/quic-go v0.0.0-20261123191126-dd96c1dca9f8 h1:FtywePhZ3egv6sSCgv58W440orkjwrITECzzYI6U5oQ=
+github.com/Psiphon-Labs/quic-go v0.0.0-20261123191126-dd96c1dca9f8/go.mod h1:rONdWgPMbFjyyBai7gB1IBF4pT9r4l0GyiDst5XR1SY=
 github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d h1:htAwZYlfEn3FJXqmY2iTh/53RRfcbkBahdAjDr25UnA=
 github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
 github.com/andybalholm/brotli v1.2.7 h1:UgafRPGMam5ySHfRkhthMqOFA6IFoeF3D7mWIDLjG5A=

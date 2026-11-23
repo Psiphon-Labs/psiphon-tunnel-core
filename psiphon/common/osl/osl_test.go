@@ -758,3 +758,20 @@ func TestOSL(t *testing.T) {
 		})
 	}
 }
+
+func TestClientSeedStateWithoutRegion(t *testing.T) {
+	config := &Config{}
+	for _, regions := range [][]string{nil, {""}, {"None"}, {"CA"}} {
+		config.Schemes = append(config.Schemes, &Scheme{
+			Regions:               regions,
+			PropagationChannelIDs: []string{"test"},
+			SeedPeriodNanoseconds: int64(time.Second),
+		})
+	}
+	state := config.NewClientSeedState("", "test", nil)
+	if len(state.seedProgress) != 1 ||
+		state.seedProgress[0].scheme != config.Schemes[0] {
+
+		t.Fatal("a client without a region must select only unrestricted schemes")
+	}
+}

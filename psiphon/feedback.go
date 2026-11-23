@@ -105,6 +105,11 @@ func encryptFeedback(diagnostics, b64EncodedPublicKey string) ([]byte, error) {
 // that the feedback upload will be tunneled, indirectly, if it routes
 // through the VPN. When the config specifies a split-interface
 // configuration, the upstream device binder is applied to all dials.
+//
+// The config must be committed, and Commit disallows certain tunnel dial
+// configurations, such as personal pairing combined with UpstreamProxyURL.
+// When only sending feedback, the caller should omit tunnel dial settings
+// that are not required for the upload.
 func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath string) error {
 
 	if !config.EnableFeedbackUpload {

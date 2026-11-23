@@ -66,7 +66,10 @@ const (
 type Payload struct {
 	Expires                  time.Time                 `cbor:"1,keyasint,omitempty"`
 	PrioritizedServerEntries []*PrioritizedServerEntry `cbor:"2,keyasint,omitempty"`
-	LightProxyEntries        []*LightProxyEntry        `cbor:"3,keyasint,omitempty"`
+
+	// FallbackLightProxyEntries are fallback Light proxy entries. Common
+	// Light tunnel proxy entries require a separate field.
+	FallbackLightProxyEntries []*LightProxyEntry `cbor:"3,keyasint,omitempty"`
 }
 
 // SignedPayload is Payload with a digital signature.
@@ -105,14 +108,14 @@ type PinnedEntries struct {
 	// PrioritizedServerEntries are prioritized into the first generated
 	// payloads before regular entries are packed.
 	PrioritizedServerEntries []*PrioritizedServerEntry
-	// LightProxyEntries are prioritized into the first generated payloads
-	// before pinned server entries are packed.
-	LightProxyEntries []*LightProxyEntry
+	// FallbackLightProxyEntries are prioritized into the first generated
+	// payloads before pinned server entries are packed.
+	FallbackLightProxyEntries []*LightProxyEntry
 }
 
 // IsEmpty reports whether PinnedEntries contains no entries.
 func (p PinnedEntries) IsEmpty() bool {
-	return len(p.PrioritizedServerEntries) == 0 && len(p.LightProxyEntries) == 0
+	return len(p.PrioritizedServerEntries) == 0 && len(p.FallbackLightProxyEntries) == 0
 }
 
 // ServerEntryImporter is a callback that is invoked for each server entry in
@@ -124,9 +127,9 @@ type ServerEntryImporter func(
 	prioritizeReason string,
 	prioritizeTunnelProtocol string) error
 
-// LightProxyEntryImporter is a callback that is invoked for each light proxy
-// entry in an imported push payload.
-type LightProxyEntryImporter func(
+// FallbackLightProxyEntryImporter is a callback that is invoked for each
+// fallback light proxy entry in an imported push payload.
+type FallbackLightProxyEntryImporter func(
 	proxyEntry []byte,
 	proxyEntryTracker int64) error
 
@@ -171,7 +174,7 @@ func ImportPushPayload(
 	payloadSignaturePublicKey string,
 	obfuscatedPayload []byte,
 	serverEntryImporter ServerEntryImporter,
-	lightProxyEntryImporter LightProxyEntryImporter) (int, int, error) {
+	lightProxyEntryImporter FallbackLightProxyEntryImporter) (int, int, error) {
 
 	obfuscationKey, err := base64.StdEncoding.DecodeString(
 		payloadObfuscationKey)
@@ -279,13 +282,13 @@ func ImportPushPayload(
 		importedServerEntries += 1
 	}
 
-	if len(payload.LightProxyEntries) > 0 {
+	if len(payload.FallbackLightProxyEntries) > 0 {
 		if lightProxyEntryImporter == nil {
 			return importedServerEntries, importedLightProxyEntries,
 				errors.TraceNew("missing light proxy entry importer")
 		}
 
-		for _, lightProxyEntry := range payload.LightProxyEntries {
+		for _, lightProxyEntry := range payload.FallbackLightProxyEntries {
 			if lightProxyEntry == nil {
 				return importedServerEntries, importedLightProxyEntries,
 					errors.TraceNew("missing light proxy entry")
@@ -316,8 +319,8 @@ type MakePushPayloadsResult struct {
 	// entries are provided, they are prioritized into the earliest payloads.
 	Payloads [][]byte
 	// PayloadPinnedLightProxyEntryIndexes contains original input indexes of
-	// pinned light proxy entries (from pinned.LightProxyEntries) packed into
-	// each payload, aligned by index with Payloads.
+	// pinned light proxy entries (from pinned.FallbackLightProxyEntries)
+	// packed into each payload, aligned by index with Payloads.
 	PayloadPinnedLightProxyEntryIndexes [][]int
 	// PayloadRegularEntryIndexes contains original input indexes of regular entries
 	// (from MakePushPayloads's prioritizedServerEntries argument) packed into
@@ -333,8 +336,8 @@ type MakePushPayloadsResult struct {
 	// input pinned.PrioritizedServerEntries.
 	SkippedPinnedIndexes []int
 	// SkippedPinnedLightProxyEntryIndexes contains input indexes of pinned
-	// LightProxyEntries that could not fit into any payload when max payload
-	// size is enforced. Sorted ascending.
+	// FallbackLightProxyEntries that could not fit into any payload when max
+	// payload size is enforced. Sorted ascending.
 	SkippedPinnedLightProxyEntryIndexes []int
 }
 
@@ -428,10 +431,10 @@ func NewPushPayloadMaker(
 // entries and optional pinned entries, reusing the cached key material and
 // cipher from the maker.
 //
-// When pinned is non-empty, its LightProxyEntries are considered first and
-// packed into the earliest payloads. Entries that cannot fit by themselves
-// under maxPayloadSizeBytes are dropped and reported in the result. Pinned
-// PrioritizedServerEntries are then packed before regular
+// When pinned is non-empty, its FallbackLightProxyEntries are considered
+// first and packed into the earliest payloads. Entries that cannot fit by
+// themselves under maxPayloadSizeBytes are dropped and reported in the
+// result. Pinned PrioritizedServerEntries are then packed before regular
 // prioritizedServerEntries so they get first claim on the earliest payloads
 // that can fit them. Within a payload, pinned server entries are encoded
 // before regular server entries.
@@ -479,8 +482,8 @@ func (m *PushPayloadMaker) MakePushPayloads(
 		for i := range pinned.PrioritizedServerEntries {
 			pinnedEntryIndexes[i] = i
 		}
-		pinnedLightProxyEntryIndexes := make([]int, len(pinned.LightProxyEntries))
-		for i, entry := range pinned.LightProxyEntries {
+		pinnedLightProxyEntryIndexes := make([]int, len(pinned.FallbackLightProxyEntries))
+		for i, entry := range pinned.FallbackLightProxyEntries {
 			if entry == nil {
 				return result, errors.TraceNew("missing light proxy entry")
 			}
@@ -537,8 +540,8 @@ func (m *PushPayloadMaker) MakePushPayloads(
 	// Pre-compute light proxy sizes once for the priority packing pass when a
 	// max payload size is enforced.
 	pinnedLightProxyEntries := make(
-		[]sortableLightProxyEntry, 0, len(pinned.LightProxyEntries))
-	for i, entry := range pinned.LightProxyEntries {
+		[]sortableLightProxyEntry, 0, len(pinned.FallbackLightProxyEntries))
+	for i, entry := range pinned.FallbackLightProxyEntries {
 		if entry == nil {
 			return result, errors.TraceNew("missing light proxy entry")
 		}
@@ -855,7 +858,7 @@ func (m *PushPayloadMaker) MakePushPayloads(
 	for _, bin := range bins {
 		var binPinned PinnedEntries
 		if len(bin.lightProxyEntries) > 0 {
-			binPinned.LightProxyEntries = bin.lightProxyEntries
+			binPinned.FallbackLightProxyEntries = bin.lightProxyEntries
 		}
 		if len(bin.pinnedServerEntries) > 0 {
 			binPinned.PrioritizedServerEntries = bin.pinnedServerEntries
@@ -945,7 +948,7 @@ func (m *PushPayloadMaker) buildObfuscatedPayload(
 	}
 
 	obfuscatedPayload, err := m.makeObfuscatedPayload(
-		bufs, combinedServerEntries, pinned.LightProxyEntries, expires, paddingSize)
+		bufs, combinedServerEntries, pinned.FallbackLightProxyEntries, expires, paddingSize)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1035,9 +1038,9 @@ func (m *PushPayloadMaker) makeObfuscatedPayload(
 	paddingSize int) ([]byte, error) {
 
 	payload := Payload{
-		Expires:                  expires,
-		PrioritizedServerEntries: prioritizedServerEntries,
-		LightProxyEntries:        lightProxyEntries,
+		Expires:                   expires,
+		PrioritizedServerEntries:  prioritizedServerEntries,
+		FallbackLightProxyEntries: lightProxyEntries,
 	}
 
 	cborPayload, err := protocol.CBOREncoding.Marshal(&payload)

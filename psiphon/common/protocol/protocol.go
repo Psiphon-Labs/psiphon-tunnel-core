@@ -46,6 +46,10 @@ const (
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH = "FRONTED-MEEK-QUIC-OSSH"
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH          = "TAPDANCE-OSSH"
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH           = "CONJURE-OSSH"
+	TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH                = "LIGHT-TLS-TLS-SSH"
+	TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH               = "LIGHT-TLS-QUIC-SSH"
+	TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH               = "LIGHT-QUIC-TLS-SSH"
+	TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH              = "LIGHT-QUIC-QUIC-SSH"
 
 	FRONTING_TRANSPORT_HTTPS = "FRONTED-HTTPS"
 	FRONTING_TRANSPORT_HTTP  = "FRONTED-HTTP"
@@ -162,10 +166,11 @@ func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	return u
 }
 
-func (t TunnelProtocols) PruneNonInproxyTunnelProtocols() TunnelProtocols {
+// Intersection returns the protocols present in both lists.
+func (t TunnelProtocols) Intersection(other TunnelProtocols) TunnelProtocols {
 	u := make(TunnelProtocols, 0)
 	for _, p := range t {
-		if TunnelProtocolUsesInproxy(p) {
+		if common.Contains(other, p) {
 			u = append(u, p)
 		}
 	}
@@ -194,6 +199,15 @@ func (t TunnelProtocols) IsOnlyInproxyTunnelProtocols() bool {
 func (t TunnelProtocols) HasInproxyTunnelProtocols() bool {
 	for _, p := range t {
 		if TunnelProtocolUsesInproxy(p) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t TunnelProtocols) HasLightTunnelProtocols() bool {
+	for _, p := range t {
+		if TunnelProtocolUsesLight(p) {
 			return true
 		}
 	}
@@ -234,12 +248,27 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH,
+	TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH,
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH,
+}
+
+var LightTunnelProtocols = TunnelProtocols{
+	TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH,
+	TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH,
 }
 
 // DisabledTunnelProtocols are protocols which are still integrated, but which
@@ -295,17 +324,39 @@ func TunnelProtocolUsesInproxy(protocol string) bool {
 	return strings.HasPrefix(protocol, INPROXY_PROTOCOL_WEBRTC)
 }
 
+func TunnelProtocolUsesLight(protocol string) bool {
+	return TunnelProtocolUsesLightTLSIngress(protocol) ||
+		TunnelProtocolUsesLightQUICIngress(protocol)
+}
+
+func TunnelProtocolUsesLightTLSIngress(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH ||
+		protocol == TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH
+}
+
+func TunnelProtocolUsesLightQUICIngress(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH ||
+		protocol == TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH
+}
+
+func TunnelProtocolUsesLightTLSEgress(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH ||
+		protocol == TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH
+}
+
+func TunnelProtocolUsesLightQUICEgress(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH ||
+		protocol == TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH
+}
+
 func TunnelProtocolIsCompatibleWithInproxy(protocol string) bool {
 	// The TapDance and Conjure destination addresses are not included
 	// in the server entry, so TAPDANCE-OSSH and CONJURE-OSSH dial
 	// destinations cannot be validated for inproxy use.
-	return !TunnelProtocolUsesRefractionNetworking(protocol)
-}
-
-func TunnelProtocolUsesTCP(protocol string) bool {
-	protocol = TunnelProtocolMinusInproxy(protocol)
-	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
-		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
+	//
+	// Light protocols already have a proxy first hop.
+	return !TunnelProtocolUsesLight(protocol) &&
+		!TunnelProtocolUsesRefractionNetworking(protocol)
 }
 
 func TunnelProtocolUsesSSH(protocol string) bool {
@@ -318,8 +369,18 @@ func TunnelProtocolIsObfuscatedSSH(protocol string) bool {
 }
 
 func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
+	if TunnelProtocolUsesLight(protocol) {
+		return false
+	}
 	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol != TUNNEL_PROTOCOL_SSH
+}
+
+// TunnelProtocolUsesPlainSSH indicates that the tunnel protocol is plain SSH
+// on the wire, with no obfuscation or transport layer over SSH.
+func TunnelProtocolUsesPlainSSH(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
+	return protocol == TUNNEL_PROTOCOL_SSH
 }
 
 // NOTE: breaks the naming convention of dropping the OSSH suffix because
@@ -367,10 +428,33 @@ func TunnelProtocolUsesObfuscatedSessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
-func TunnelProtocolUsesQUIC(protocol string) bool {
+func TunnelProtocolUsesQUICOSSH(protocol string) bool {
 	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
+}
+
+// TunnelProtocolClientUsesQUIC indicates that the client dials QUIC; for
+// Light, the ingress hop.
+func TunnelProtocolClientUsesQUIC(protocol string) bool {
+	return TunnelProtocolUsesQUICOSSH(protocol) ||
+		TunnelProtocolUsesLightQUICIngress(protocol)
+}
+
+func TunnelProtocolClientUsesTCP(protocol string) bool {
+	return !TunnelProtocolClientUsesQUIC(protocol)
+}
+
+// TunnelProtocolServerUsesQUIC indicates that the server entry dial port is
+// QUIC; for Light, the egress hop. For fronted meek QUIC, this is the
+// client-to-edge hop.
+func TunnelProtocolServerUsesQUIC(protocol string) bool {
+	return TunnelProtocolUsesQUICOSSH(protocol) ||
+		TunnelProtocolUsesLightQUICEgress(protocol)
+}
+
+func TunnelProtocolServerUsesTCP(protocol string) bool {
+	return !TunnelProtocolServerUsesQUIC(protocol)
 }
 
 func TunnelProtocolUsesFrontedMeekQUIC(protocol string) bool {
@@ -404,7 +488,7 @@ func TunnelProtocolUsesShadowsocks(protocol string) bool {
 
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
-		TunnelProtocolUsesQUIC(protocol) ||
+		TunnelProtocolClientUsesQUIC(protocol) ||
 		TunnelProtocolUsesRefractionNetworking(protocol) ||
 		TunnelProtocolUsesInproxy(protocol)
 }
@@ -445,6 +529,9 @@ func TunnelProtocolRequiresTLS13Support(protocol string) bool {
 }
 
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
+	if TunnelProtocolUsesLightTLSEgress(protocol) {
+		return true
+	}
 	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
@@ -454,7 +541,8 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 	return !TunnelProtocolUsesInproxy(protocol) &&
-		!TunnelProtocolUsesQUIC(protocol) &&
+		!TunnelProtocolUsesLight(protocol) &&
+		!TunnelProtocolClientUsesQUIC(protocol) &&
 		// Conjure DTLS uses UDP.
 		!TunnelProtocolUsesRefractionNetworking(protocol)
 }
@@ -476,6 +564,9 @@ func TunnelProtocolSupportsTactics(protocol string) bool {
 }
 
 func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
+	if TunnelProtocolUsesLightTLSEgress(protocol) {
+		return true
+	}
 	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
@@ -490,8 +581,7 @@ func TunnelProtocolMayUseClientBPF(protocol string) bool {
 	if TunnelProtocolUsesInproxy(protocol) {
 		return false
 	}
-	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
-		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
+	return !TunnelProtocolClientUsesQUIC(protocol)
 }
 
 func IsValidClientTunnelProtocol(

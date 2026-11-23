@@ -29,6 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/sirupsen/logrus"
 )
 
@@ -391,6 +392,28 @@ func (conn *bufferedConn) Read(b []byte) (n int, err error) {
 	conn.buffer = nil
 
 	return conn.Conn.Read(b)
+}
+
+// SetReplay implements common.FragmentorAccessor.
+func (conn *bufferedConn) SetReplay(PRNG *prng.PRNG) {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		fragmentor.SetReplay(PRNG)
+	}
+}
+
+// GetReplay implements common.FragmentorAccessor.
+func (conn *bufferedConn) GetReplay() (*prng.Seed, bool) {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		return fragmentor.GetReplay()
+	}
+	return nil, false
+}
+
+// StopFragmenting implements common.FragmentorAccessor.
+func (conn *bufferedConn) StopFragmenting() {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		fragmentor.StopFragmenting()
+	}
 }
 
 // GetMetrics implements the common.MetricsSource interface.

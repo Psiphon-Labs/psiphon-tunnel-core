@@ -118,7 +118,7 @@ func runTestDestBytes() error {
 						}
 
 						for _, destASN := range destASNs {
-							destBytesLogger.AddASNBytes(destASN, geoIPData, apiParams, bytesTCP, bytesUDP)
+							destBytesLogger.AddASNBytes(destASN, geoIPData, false, apiParams, bytesTCP, bytesUDP)
 						}
 					}
 				}

@@ -134,7 +134,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 
 	tlsCache := utls.NewLRUClientSessionCache(0)
 
-	manager := NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager := NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	// Test: no broker specs
 
@@ -162,7 +162,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 	}
 	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	brokerClient, brokerDialParams, release, err := manager.GetBrokerClient(context.Background(), networkID)
 	if err != nil {
@@ -196,7 +196,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 
 	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperSucceeded(roundTripper)
 
-	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	release()
 	brokerClient, brokerDialParams, release, err = manager.GetBrokerClient(context.Background(), networkID)
@@ -276,7 +276,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 
 	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperFailed(roundTripper, testRoundTripFailure)
 
-	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	release()
 	brokerClient, brokerDialParams, release, err = manager.GetBrokerClient(context.Background(), networkID)
@@ -297,9 +297,9 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 	// Test: no common compartment IDs sent when personal ID is set
 
 	config.InproxyClientPersonalCompartmentID = personalCompartmentID.String()
-	config.InproxyProxyPersonalCompartmentID = personalCompartmentID.String()
+	config.ProxyPersonalCompartmentID = personalCompartmentID.String()
 
-	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	release()
 	brokerClient, brokerDialParams, release, err = manager.GetBrokerClient(context.Background(), networkID)
@@ -329,7 +329,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 	}
 	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache)
+	manager = NewInproxyBrokerClientManager(config, isProxy, tlsCache, inproxy.SessionPrivateKey{})
 
 	release()
 	brokerClient, brokerDialParams, release, err = manager.GetBrokerClient(context.Background(), networkID)
@@ -606,18 +606,24 @@ func newGateTestManager(t testing.TB) *InproxyBrokerClientManager {
 	if err := setGateTestParameters(config, "", nil); err != nil {
 		t.Fatal(err)
 	}
-	m := NewInproxyBrokerClientManager(config, false, utls.NewLRUClientSessionCache(0))
+	// Some tests switch this manager to proxy mode before acquiring clients.
+	proxySessionPrivateKey, err := inproxy.GenerateSessionPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewInproxyBrokerClientManager(
+		config, false, utls.NewLRUClientSessionCache(0), proxySessionPrivateKey)
 	t.Cleanup(m.closeClientBrokerClients)
 	return m
 }
 
 // gateTestBaseParameters enables broker racing for the gate fixtures: two
 // client broker clients, three proxy broker clients and client idle expiry.
-// The shipped defaults disable racing (M=1, no idle expiry), and
-// Config.SetParameters replaces the entire applied parameter set, so every
-// fixture publication must carry these values or a later publication that
-// omits them silently reverts to the shipped defaults. Tests that need a
-// different limit pass it explicitly in every publication they make.
+// The shipped defaults use two client broker clients, one proxy broker client,
+// and no idle expiry. Config.SetParameters replaces the entire applied parameter
+// set, so every fixture publication must carry these values or a later
+// publication that omits them silently reverts to the shipped defaults. Tests
+// that need a different limit pass it explicitly in every publication they make.
 var gateTestBaseParameters = map[string]interface{}{
 	parameters.InproxyClientMaxBrokerClients:        2,
 	parameters.InproxyProxyMaxBrokerClients:         3,
@@ -1377,7 +1383,8 @@ func TestInproxyBrokerClientGatePersonalAndProxy(t *testing.T) {
 
 	// Proxy sharing requires a decoded announcement response, not transport
 	// success alone. Client NoMatch policy never rotates proxy brokers.
-	proxy := NewInproxyBrokerClientManager(m.config, true, utls.NewLRUClientSessionCache(0))
+	proxy := NewInproxyBrokerClientManager(
+		m.config, true, utls.NewLRUClientSessionCache(0), m.proxySessionPrivateKey)
 	t.Cleanup(proxy.closeClientBrokerClients)
 	p1 := getGateTestClient(t, proxy)
 	p1.BrokerClientResponseReceived(p1.roundTripper, false)
@@ -4052,11 +4059,17 @@ func TestInproxyDialConnectionOwnedRelay(t *testing.T) {
 				connManager: &meekUnderlyingConnManager{managedConns: common.NewConns[net.Conn](), managedPacketConns: common.NewConns[net.PacketConn]()}}
 			a.roundTripper.dial = 1
 			close(a.roundTripper.dialCompleted)
-			proxyManager := NewInproxyBrokerClientManager(m.config, true, utls.NewLRUClientSessionCache(0))
+			proxyManager := NewInproxyBrokerClientManager(
+				m.config, true, utls.NewLRUClientSessionCache(0), m.proxySessionPrivateKey)
 			defer proxyManager.closeClientBrokerClients()
 			nat := NewInproxyNATStateManager(m.config)
+			proxyLimits, err := common.NewProxyLimits(
+				&common.ProxyLimitsConfig{MaxCommonClients: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
 			proxy, err := inproxy.NewProxy(&inproxy.ProxyConfig{
-				Logger: logger, MaxCommonClients: 1,
+				Logger: logger, ProxyLimits: proxyLimits,
 				WaitForNetworkConnectivity: func() bool { return ctx.Err() == nil },
 				GetCurrentNetworkContext:   func() context.Context { return ctx },
 				GetBrokerClient: func(ctx context.Context) (*inproxy.BrokerClient, func(), error) {
@@ -4287,7 +4300,7 @@ func TestInproxyProxyProviderRace(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				m.config.InproxyProxyPersonalCompartmentID = id.String()
+				m.config.ProxyPersonalCompartmentID = id.String()
 			}
 			var releases [3]func()
 			clients := make([]*InproxyBrokerClientInstance, 3)
@@ -4453,23 +4466,117 @@ func TestInproxyProxyDecodedAnnouncePolicy(t *testing.T) {
 	}
 }
 
+// TestControllerProxyIdentity checks the controller's key selection through
+// proxy and client broker acquisition, including concurrent broker instances
+// and replacement after a network change.
+func TestControllerProxyIdentity(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("in-proxy is disabled")
+	}
+	for _, keySetting := range []string{"ephemeral", "configured", "deprecated"} {
+		t.Run(keySetting, func(t *testing.T) {
+			config := newRunningLightProxyTestConfig(t)
+			config.InproxyEnableProxy = true
+			config.NetworkID = "TEST"
+			config.InproxyBrokerSpecs = []*parameters.InproxyBrokerSpec{
+				newProviderTestBroker(t, "A", "B"),
+			}
+			config.InproxyCommonCompartmentIDs = []string{config.ProxyPersonalCompartmentID}
+			if keySetting == "ephemeral" {
+				config.ProxySessionPrivateKey = ""
+			} else if keySetting == "deprecated" {
+				config.InproxyProxySessionPrivateKey = config.ProxySessionPrivateKey
+				config.ProxySessionPrivateKey = ""
+			}
+			if err := config.Commit(false); err != nil {
+				t.Fatal(err)
+			}
+			if err := OpenDataStore(config); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(CloseDataStore)
+			controller, err := NewController(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolver := NewResolver(config, config.deviceBinder())
+			config.SetResolver(resolver)
+			t.Cleanup(resolver.Stop)
+			proxy := controller.inproxyProxyBrokerClientManager
+			client := controller.inproxyClientBrokerClientManager
+			t.Cleanup(proxy.closeClientBrokerClients)
+			t.Cleanup(client.closeClientBrokerClients)
+			if err := setGateTestParameters(config, "", nil); err != nil {
+				t.Fatal(err)
+			}
+
+			a, b := getGateTestClient(t, proxy), getGateTestClient(t, proxy)
+			key := a.BrokerClientPrivateKey()
+			if a == b || key.IsZero() || b.BrokerClientPrivateKey() != key {
+				t.Fatal("concurrent proxy broker clients did not share one key")
+			}
+			if keySetting != "ephemeral" && key.String() != config.ProxySessionPrivateKey {
+				t.Fatal("configured proxy key ignored")
+			}
+			publicKey, err := key.GetPublicKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			curvePublicKey, err := publicKey.ToCurve25519()
+			if err != nil {
+				t.Fatal(err)
+			}
+			lightProxyID, err := controller.GetLightProxyID()
+			if err != nil || lightProxyID != inproxy.ID(curvePublicKey).String() {
+				t.Fatal("in-proxy and Light proxy IDs differ")
+			}
+
+			clientKeys := map[inproxy.SessionPrivateKey]bool{
+				key: true, {}: true,
+			}
+			for i := 0; i < 2; i++ {
+				clientKey := getGateTestClient(t, client).BrokerClientPrivateKey()
+				if clientKeys[clientKey] {
+					t.Fatal("client broker instance did not use a fresh ephemeral key")
+				}
+				clientKeys[clientKey] = true
+			}
+
+			config.networkIDGetter = newCachingNetworkIDGetter(
+				config, newStaticNetworkIDGetter("TEST2"))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			for _, manager := range []*InproxyBrokerClientManager{proxy, client} {
+				broker, _, release, err := manager.GetBrokerClient(ctx, "TEST2")
+				if err != nil {
+					t.Fatal(err)
+				}
+				release()
+				replacementKey := broker.GetBrokerDialCoordinator().BrokerClientPrivateKey()
+				if manager == proxy && replacementKey != key {
+					t.Fatal("network change replaced the proxy key")
+				}
+				if manager == client && clientKeys[replacementKey] {
+					t.Fatal("network change reused a client key")
+				}
+			}
+		})
+	}
+}
+
 // TestInproxyProxyTacticsAndIdentity verifies that proxy clients use the
-// configured session key, that a tactics callback raising proxy M resets the
+// supplied session key, that a tactics callback raising proxy M resets the
 // live client and wakes a blocked acquisition, which gets a new client with
 // the same key, and that after a broker spec change a response from a closed
 // client cannot resurrect it.
 func TestInproxyProxyTacticsAndIdentity(t *testing.T) {
 	spec := newProviderTestBroker(t, "A", "B", "C")
 	m := newProxyRaceTestManager(t, 1, spec)
-	key, err := inproxy.GenerateSessionPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.config.InproxyProxySessionPrivateKey = key.String()
+	key := m.proxySessionPrivateKey
 	m.config.SetTacticsAppliedReceivers([]TacticsAppliedReceiver{m})
 	a := getGateTestClient(t, m)
 	if a.BrokerClientPrivateKey() != key {
-		t.Fatal("configured key ignored")
+		t.Fatal("supplied key ignored")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -6131,7 +6238,7 @@ func TestInproxyProxyFailureRetryPeriod(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				m.config.InproxyProxyPersonalCompartmentID = id.String()
+				m.config.ProxyPersonalCompartmentID = id.String()
 			}
 			if err := setGateTestParameters(m.config, "", map[string]interface{}{
 				parameters.InproxyBrokerSpecs:                           parameters.InproxyBrokerSpecsValue{spec},
@@ -6691,7 +6798,7 @@ func TestInproxyBrokerTransportSharedLossAdvances(t *testing.T) {
 						m.config.InproxyClientPersonalCompartmentID = id.String()
 					case "personal-proxy":
 						m.isProxy = true
-						m.config.InproxyProxyPersonalCompartmentID = id.String()
+						m.config.ProxyPersonalCompartmentID = id.String()
 					case "common-proxy":
 						m.isProxy = true
 					}
@@ -7141,7 +7248,7 @@ func newPersonalProxyReturnHomeTestManager(
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.config.InproxyProxyPersonalCompartmentID = id.String()
+	m.config.ProxyPersonalCompartmentID = id.String()
 	if err := setGateTestParameters(m.config, "return-home", map[string]interface{}{
 		parameters.InproxyBrokerSpecs:                   parameters.InproxyBrokerSpecsValue(specs),
 		parameters.InproxyProxyMaxBrokerClients:         1,
@@ -7374,7 +7481,7 @@ func TestInproxyProxyPersonalReturnHome(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m.config.InproxyProxyPersonalCompartmentID = id.String()
+		m.config.ProxyPersonalCompartmentID = id.String()
 		if err := setGateTestParameters(m.config, "single", map[string]interface{}{
 			parameters.InproxyBrokerSpecs:                   parameters.InproxyBrokerSpecsValue{spec},
 			parameters.InproxyProxyMaxBrokerClients:         1,

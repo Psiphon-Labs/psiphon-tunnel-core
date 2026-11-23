@@ -564,7 +564,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -650,7 +650,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -660,6 +660,24 @@ func TestSelectTLSProfile(t *testing.T) {
 		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
 			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
+	}
+
+	// Light tunnels exclude custom profiles, including in custom-only configurations.
+
+	profile, version, _, err := SelectTLSProfile(
+		false, true, false, "", "",
+		[]string{parameters.LightTunnelIngressLimitTLSProfiles, parameters.LimitTLSProfiles},
+		[]string{
+			parameters.LightTunnelIngressSelectRandomizedTLSProfileProbability,
+			parameters.SelectRandomizedTLSProfileProbability,
+		},
+		true, params.Get())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !common.Contains(protocol.SupportedTLSProfiles, profile) ||
+		version != protocol.TLS_VERSION_13 {
+		t.Fatalf("unexpected Light TLS profile/version: %s/%s", profile, version)
 	}
 
 	// Disabled TLS profiles should not be selected
@@ -675,7 +693,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -690,7 +708,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// Session ticket incapable TLS 1.2 profiles should not be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile, _, seed, err := SelectTLSProfile(true, false, false, "", "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(true, false, false, "", "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -705,7 +723,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// Only TLS 1.3 profiles should be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", "", params.Get())
+		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}
@@ -721,7 +739,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// session ticket capable.
 
 	for i := 0; i < numSelections; i++ {
-		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", "", params.Get())
+		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", "", nil, nil, false, params.Get())
 		if err != nil {
 			t.Fatalf("SelectTLSProfile failed: %v", err)
 		}

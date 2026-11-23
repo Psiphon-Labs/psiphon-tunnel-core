@@ -137,12 +137,12 @@ public class PsiphonTunnel {
         default void onApplicationParameters(Object parameters) {}
         default void onServerAlert(String reason, String subject, List<String> actionURLs) {}
 
-        // Called when tunnel-core reports that a selected in-proxy mode --
-        // including running a proxy; or running a client in personal pairing
-        // mode -- cannot function without an app upgrade. The receiver
-        // should alert the user to upgrade the app and/or disable the
-        // unsupported mode(s). This callback is followed by a tunnel-core
-        // shutdown.
+        // Called when tunnel-core reports that a selected mode -- including
+        // running an in-proxy proxy or a Light proxy; or running a client in
+        // in-proxy personal pairing mode -- cannot function without an app
+        // upgrade. The receiver should alert the user to upgrade the app
+        // and/or disable the unsupported mode(s). This callback is followed
+        // by a tunnel-core shutdown.
         default void onInproxyMustUpgrade() {}
 
         // Called when tunnel-core reports proxy usage statistics.

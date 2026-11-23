@@ -22,14 +22,15 @@ const (
 )
 
 type DestParams struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	ClientAsn      *string                `protobuf:"bytes,1,opt,name=client_asn,json=clientAsn,proto3,oneof" json:"client_asn,omitempty"`
-	ClientPlatform *string                `protobuf:"bytes,2,opt,name=client_platform,json=clientPlatform,proto3,oneof" json:"client_platform,omitempty"`
-	ClientRegion   *string                `protobuf:"bytes,3,opt,name=client_region,json=clientRegion,proto3,oneof" json:"client_region,omitempty"`
-	DeviceRegion   *string                `protobuf:"bytes,4,opt,name=device_region,json=deviceRegion,proto3,oneof" json:"device_region,omitempty"`
-	SponsorId      *string                `protobuf:"bytes,5,opt,name=sponsor_id,json=sponsorId,proto3,oneof" json:"sponsor_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	ClientAsn              *string                `protobuf:"bytes,1,opt,name=client_asn,json=clientAsn,proto3,oneof" json:"client_asn,omitempty"`
+	ClientPlatform         *string                `protobuf:"bytes,2,opt,name=client_platform,json=clientPlatform,proto3,oneof" json:"client_platform,omitempty"`
+	ClientRegion           *string                `protobuf:"bytes,3,opt,name=client_region,json=clientRegion,proto3,oneof" json:"client_region,omitempty"`
+	DeviceRegion           *string                `protobuf:"bytes,4,opt,name=device_region,json=deviceRegion,proto3,oneof" json:"device_region,omitempty"`
+	SponsorId              *string                `protobuf:"bytes,5,opt,name=sponsor_id,json=sponsorId,proto3,oneof" json:"sponsor_id,omitempty"`
+	IsUntrustedClientGeoip *bool                  `protobuf:"varint,6,opt,name=is_untrusted_client_geoip,json=isUntrustedClientGeoip,proto3,oneof" json:"is_untrusted_client_geoip,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *DestParams) Reset() {
@@ -97,11 +98,18 @@ func (x *DestParams) GetSponsorId() string {
 	return ""
 }
 
+func (x *DestParams) GetIsUntrustedClientGeoip() bool {
+	if x != nil && x.IsUntrustedClientGeoip != nil {
+		return *x.IsUntrustedClientGeoip
+	}
+	return false
+}
+
 var File_ca_psiphon_psiphond_dest_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dest_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dest_params.proto\x12\x13ca.psiphon.psiphond\"\xac\x02\n" +
+	"%ca.psiphon.psiphond/dest_params.proto\x12\x13ca.psiphon.psiphond\"\x8a\x03\n" +
 	"\n" +
 	"DestParams\x12\"\n" +
 	"\n" +
@@ -110,12 +118,14 @@ const file_ca_psiphon_psiphond_dest_params_proto_rawDesc = "" +
 	"\rclient_region\x18\x03 \x01(\tH\x02R\fclientRegion\x88\x01\x01\x12(\n" +
 	"\rdevice_region\x18\x04 \x01(\tH\x03R\fdeviceRegion\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"sponsor_id\x18\x05 \x01(\tH\x04R\tsponsorId\x88\x01\x01B\r\n" +
+	"sponsor_id\x18\x05 \x01(\tH\x04R\tsponsorId\x88\x01\x01\x12>\n" +
+	"\x19is_untrusted_client_geoip\x18\x06 \x01(\bH\x05R\x16isUntrustedClientGeoip\x88\x01\x01B\r\n" +
 	"\v_client_asnB\x12\n" +
 	"\x10_client_platformB\x10\n" +
 	"\x0e_client_regionB\x10\n" +
 	"\x0e_device_regionB\r\n" +
-	"\v_sponsor_idBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\v_sponsor_idB\x1c\n" +
+	"\x1a_is_untrusted_client_geoipBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dest_params_proto_rawDescOnce sync.Once

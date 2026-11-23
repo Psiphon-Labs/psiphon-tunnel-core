@@ -487,6 +487,13 @@ var sendFeedbackResetNoticeWriter bool
 //     is delivered on can cause a deadlock. I.E. the callback code must return
 //     so the wait group can complete and the lock acquired in StopSendFeedback
 //     can be released.
+//
+//   - configJson is validated in the same way as in Start. Certain tunnel dial
+//     configurations are disallowed, such as personal pairing combined with
+//     UpstreamProxyURL, and will cause StartSendFeedback to fail, even though
+//     the feedback upload does not dial tunnels. When only sending feedback,
+//     the caller should omit tunnel dial settings that are not required for
+//     the upload.
 func StartSendFeedback(
 	configJson,
 	diagnosticsJson,

@@ -77,10 +77,9 @@ type BrokerClient struct {
 // BrokerDialCoordinator.
 func NewBrokerClient(coordinator BrokerDialCoordinator) (*BrokerClient, error) {
 
-	// A client is expected to use an ephemeral key, and can return a
-	// zero-value private key. Each proxy should use a persistent key, as the
-	// corresponding public key is the proxy ID, which is used to credit the
-	// proxy for its service.
+	// A zero-value private key requests an ephemeral key for this broker
+	// client. Proxies supply a stable key; see
+	// BrokerDialCoordinator.BrokerClientPrivateKey.
 
 	privateKey := coordinator.BrokerClientPrivateKey()
 	if privateKey.IsZero() {

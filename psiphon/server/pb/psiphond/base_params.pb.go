@@ -23,28 +23,29 @@ const (
 )
 
 type BaseParams struct {
-	state                 protoimpl.MessageState `protogen:"open.v1"`
-	ClientAsn             *string                `protobuf:"bytes,1,opt,name=client_asn,json=clientAsn,proto3,oneof" json:"client_asn,omitempty"`
-	ClientAso             *string                `protobuf:"bytes,2,opt,name=client_aso,json=clientAso,proto3,oneof" json:"client_aso,omitempty"`
-	ClientBuildRev        *string                `protobuf:"bytes,3,opt,name=client_build_rev,json=clientBuildRev,proto3,oneof" json:"client_build_rev,omitempty"`
-	ClientCity            *string                `protobuf:"bytes,4,opt,name=client_city,json=clientCity,proto3,oneof" json:"client_city,omitempty"`
-	ClientFeatures        []string               `protobuf:"bytes,5,rep,name=client_features,json=clientFeatures,proto3" json:"client_features,omitempty"`
-	ClientIsp             *string                `protobuf:"bytes,6,opt,name=client_isp,json=clientIsp,proto3,oneof" json:"client_isp,omitempty"`
-	ClientPlatform        *string                `protobuf:"bytes,7,opt,name=client_platform,json=clientPlatform,proto3,oneof" json:"client_platform,omitempty"`
-	ClientRegion          *string                `protobuf:"bytes,8,opt,name=client_region,json=clientRegion,proto3,oneof" json:"client_region,omitempty"`
-	ClientVersion         *int64                 `protobuf:"varint,9,opt,name=client_version,json=clientVersion,proto3,oneof" json:"client_version,omitempty"`
-	DeviceLocation        *string                `protobuf:"bytes,10,opt,name=device_location,json=deviceLocation,proto3,oneof" json:"device_location,omitempty"` //device_location uses geohash encoding
-	DeviceRegion          *string                `protobuf:"bytes,11,opt,name=device_region,json=deviceRegion,proto3,oneof" json:"device_region,omitempty"`
-	SessionId             *string                `protobuf:"bytes,12,opt,name=session_id,json=sessionId,proto3,oneof" json:"session_id,omitempty"`
-	SponsorId             *string                `protobuf:"bytes,13,opt,name=sponsor_id,json=sponsorId,proto3,oneof" json:"sponsor_id,omitempty"`
-	PropagationChannelId  *string                `protobuf:"bytes,14,opt,name=propagation_channel_id,json=propagationChannelId,proto3,oneof" json:"propagation_channel_id,omitempty"`
-	AppliedTacticsTag     *string                `protobuf:"bytes,15,opt,name=applied_tactics_tag,json=appliedTacticsTag,proto3,oneof" json:"applied_tactics_tag,omitempty"`
-	EgressRegion          *string                `protobuf:"bytes,16,opt,name=egress_region,json=egressRegion,proto3,oneof" json:"egress_region,omitempty"`
-	LastConnected         *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=last_connected,json=lastConnected,proto3,oneof" json:"last_connected,omitempty"`
-	AuthorizedAccessTypes []string               `protobuf:"bytes,18,rep,name=authorized_access_types,json=authorizedAccessTypes,proto3" json:"authorized_access_types,omitempty"`
-	NetworkType           *string                `protobuf:"bytes,19,opt,name=network_type,json=networkType,proto3,oneof" json:"network_type,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	ClientAsn              *string                `protobuf:"bytes,1,opt,name=client_asn,json=clientAsn,proto3,oneof" json:"client_asn,omitempty"`
+	ClientAso              *string                `protobuf:"bytes,2,opt,name=client_aso,json=clientAso,proto3,oneof" json:"client_aso,omitempty"`
+	ClientBuildRev         *string                `protobuf:"bytes,3,opt,name=client_build_rev,json=clientBuildRev,proto3,oneof" json:"client_build_rev,omitempty"`
+	ClientCity             *string                `protobuf:"bytes,4,opt,name=client_city,json=clientCity,proto3,oneof" json:"client_city,omitempty"`
+	ClientFeatures         []string               `protobuf:"bytes,5,rep,name=client_features,json=clientFeatures,proto3" json:"client_features,omitempty"`
+	ClientIsp              *string                `protobuf:"bytes,6,opt,name=client_isp,json=clientIsp,proto3,oneof" json:"client_isp,omitempty"`
+	ClientPlatform         *string                `protobuf:"bytes,7,opt,name=client_platform,json=clientPlatform,proto3,oneof" json:"client_platform,omitempty"`
+	ClientRegion           *string                `protobuf:"bytes,8,opt,name=client_region,json=clientRegion,proto3,oneof" json:"client_region,omitempty"`
+	ClientVersion          *int64                 `protobuf:"varint,9,opt,name=client_version,json=clientVersion,proto3,oneof" json:"client_version,omitempty"`
+	DeviceLocation         *string                `protobuf:"bytes,10,opt,name=device_location,json=deviceLocation,proto3,oneof" json:"device_location,omitempty"` //device_location uses geohash encoding
+	DeviceRegion           *string                `protobuf:"bytes,11,opt,name=device_region,json=deviceRegion,proto3,oneof" json:"device_region,omitempty"`
+	SessionId              *string                `protobuf:"bytes,12,opt,name=session_id,json=sessionId,proto3,oneof" json:"session_id,omitempty"`
+	SponsorId              *string                `protobuf:"bytes,13,opt,name=sponsor_id,json=sponsorId,proto3,oneof" json:"sponsor_id,omitempty"`
+	PropagationChannelId   *string                `protobuf:"bytes,14,opt,name=propagation_channel_id,json=propagationChannelId,proto3,oneof" json:"propagation_channel_id,omitempty"`
+	AppliedTacticsTag      *string                `protobuf:"bytes,15,opt,name=applied_tactics_tag,json=appliedTacticsTag,proto3,oneof" json:"applied_tactics_tag,omitempty"`
+	EgressRegion           *string                `protobuf:"bytes,16,opt,name=egress_region,json=egressRegion,proto3,oneof" json:"egress_region,omitempty"`
+	LastConnected          *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=last_connected,json=lastConnected,proto3,oneof" json:"last_connected,omitempty"`
+	AuthorizedAccessTypes  []string               `protobuf:"bytes,18,rep,name=authorized_access_types,json=authorizedAccessTypes,proto3" json:"authorized_access_types,omitempty"`
+	NetworkType            *string                `protobuf:"bytes,19,opt,name=network_type,json=networkType,proto3,oneof" json:"network_type,omitempty"`
+	IsUntrustedClientGeoip *bool                  `protobuf:"varint,20,opt,name=is_untrusted_client_geoip,json=isUntrustedClientGeoip,proto3,oneof" json:"is_untrusted_client_geoip,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *BaseParams) Reset() {
@@ -210,11 +211,18 @@ func (x *BaseParams) GetNetworkType() string {
 	return ""
 }
 
+func (x *BaseParams) GetIsUntrustedClientGeoip() bool {
+	if x != nil && x.IsUntrustedClientGeoip != nil {
+		return *x.IsUntrustedClientGeoip
+	}
+	return false
+}
+
 var File_ca_psiphon_psiphond_base_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/base_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\x94\t\n" +
+	"%ca.psiphon.psiphond/base_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf2\t\n" +
 	"\n" +
 	"BaseParams\x12\"\n" +
 	"\n" +
@@ -243,7 +251,8 @@ const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\regress_region\x18\x10 \x01(\tH\x0eR\fegressRegion\x88\x01\x01\x12F\n" +
 	"\x0elast_connected\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampH\x0fR\rlastConnected\x88\x01\x01\x126\n" +
 	"\x17authorized_access_types\x18\x12 \x03(\tR\x15authorizedAccessTypes\x12&\n" +
-	"\fnetwork_type\x18\x13 \x01(\tH\x10R\vnetworkType\x88\x01\x01B\r\n" +
+	"\fnetwork_type\x18\x13 \x01(\tH\x10R\vnetworkType\x88\x01\x01\x12>\n" +
+	"\x19is_untrusted_client_geoip\x18\x14 \x01(\bH\x11R\x16isUntrustedClientGeoip\x88\x01\x01B\r\n" +
 	"\v_client_asnB\r\n" +
 	"\v_client_asoB\x13\n" +
 	"\x11_client_build_revB\x0e\n" +
@@ -260,7 +269,8 @@ const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\x14_applied_tactics_tagB\x10\n" +
 	"\x0e_egress_regionB\x11\n" +
 	"\x0f_last_connectedB\x0f\n" +
-	"\r_network_typeBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\r_network_typeB\x1c\n" +
+	"\x1a_is_untrusted_client_geoipBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_base_params_proto_rawDescOnce sync.Once

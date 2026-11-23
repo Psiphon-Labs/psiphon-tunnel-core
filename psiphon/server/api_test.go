@@ -82,4 +82,17 @@ func TestValidateAndGetProtobufBaseParams(t *testing.T) {
 
 		t.Fatalf("unexpected field: %+v", protoBaseParams)
 	}
+
+	// Legacy light_proxy_* connected and status parameters are renamed.
+	legacyParams := common.APIParameters{
+		"light_proxy_id":                 "legacy",
+		"light_proxy_dial_IPv4":          "1",
+		"light_fallback_proxy_dial_IPv4": "2",
+	}
+	renameLegacyLightFallbackParams(legacyParams)
+	if len(legacyParams) != 2 ||
+		legacyParams["light_fallback_proxy_id"] != "legacy" ||
+		legacyParams["light_fallback_proxy_dial_IPv4"] != "2" {
+		t.Fatalf("unexpected legacy rename: %+v", legacyParams)
+	}
 }
