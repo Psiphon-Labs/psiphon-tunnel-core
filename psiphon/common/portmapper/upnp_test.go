@@ -598,6 +598,57 @@ func TestGetUPnPRootDeviceSlowResponse(t *testing.T) {
 	})
 }
 
+// TestUPnPControlRequestsUseClientHTTPClient checks that the UPnP control
+// requests, and not only the root device fetch, are sent through the
+// Client's own HTTP client, which is the one bound to the Client's device.
+func TestUPnPControlRequestsUseClientHTTPClient(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+	igd.SetUPnPHandler(&upnpServer{
+		t:    t,
+		Desc: testRootDesc,
+		Control: map[string]map[string]any{
+			"/ctl/IPConn": {
+				"AddPortMapping":       testAddPortMappingResponse,
+				"GetExternalIPAddress": testGetExternalIPAddressResponse,
+				"GetStatusInfo":        testGetStatusInfoResponse,
+				"DeletePortMapping":    "",
+			},
+		},
+	})
+
+	c := newTestClient(t, igd)
+	var actions []string
+	c.mu.Lock()
+	c.uPnPHTTPClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method == http.MethodPost {
+				// goupnp sets this header under a non-canonical key.
+				actions = append(actions, req.Header["SOAPACTION"]...)
+			}
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+	c.mu.Unlock()
+
+	ctx := context.Background()
+	mustProbeUPnP(t, ctx, c)
+	c.SetLocalPort(12345)
+	if _, _, err := c.createOrGetMapping(ctx); err != nil {
+		t.Fatalf("createOrGetMapping: %v", err)
+	}
+	c.Close()
+
+	for _, action := range []string{"GetExternalIPAddress", "AddPortMapping", "DeletePortMapping"} {
+		if !slices.ContainsFunc(actions, func(a string) bool { return strings.Contains(a, "#"+action) }) {
+			t.Errorf("%s was not sent through the Client's HTTP client; saw %q", action, actions)
+		}
+	}
+}
+
 func TestGetUPnPPortMapping(t *testing.T) {
 	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
 	if err != nil {

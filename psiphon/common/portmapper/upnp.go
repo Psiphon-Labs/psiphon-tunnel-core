@@ -376,6 +376,25 @@ func selectBestService(ctx context.Context, logf logf, root *goupnp.RootDevice, 
 		clients = append(clients, &legacyWANIPConnection1{client})
 	}
 
+	// The control requests of every client go through the HTTP client in
+	// the context, as the root device fetch does. A goupnp service client
+	// otherwise uses the process-wide default transport, which is not bound
+	// to the Client's device and shares its idle connections with every
+	// other user of that transport.
+	if httpClient := upnpHTTPClientKey.Value(ctx); httpClient != nil {
+		for _, client := range clients {
+			serviceClient, ok := client.(interface {
+				GetServiceClient() *goupnp.ServiceClient
+			})
+			if !ok {
+				continue
+			}
+			if svc := serviceClient.GetServiceClient(); svc != nil && svc.SOAPClient != nil {
+				svc.SOAPClient.HTTPClient = *httpClient
+			}
+		}
+	}
+
 	// If we have no clients, then return right now; if we only have one,
 	// just select and return it.
 	if len(clients) == 0 {
