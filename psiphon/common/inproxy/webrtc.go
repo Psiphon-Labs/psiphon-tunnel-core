@@ -64,6 +64,8 @@ import (
 const (
 	portMappingAwaitTimeout = 2 * time.Second
 
+	iceGatheringAwaitTimeout = 1 * time.Second
+
 	readyToProxyAwaitTimeout = 20 * time.Second
 
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
@@ -966,6 +968,35 @@ func newWebRTCConn(
 		case portMappingExternalAddr = <-portMapper.portMappingExternalAddress():
 		case <-ctx.Done():
 			return nil, nil, nil, errors.Trace(ctx.Err())
+		}
+
+		// When the port mapping is obtained first and STUN candidates are
+		// expected, also await ICE completion for a short period, so that
+		// the SDP has both the port mapping candidate and any
+		// server-reflexive candidates. A router may grant a port mapping
+		// that doesn't forward traffic, in which case the port mapping
+		// candidate alone is of no use to the peer.
+		//
+		// The peer is waiting for this SDP, so the await timeout should be
+		// short.
+
+		if !iceCompleted && portMappingExternalAddr != "" && doSTUN {
+
+			timer := time.NewTimer(
+				common.ValueOrDefault(
+					config.WebRTCDialCoordinator.WebRTCAwaitICEGatheringTimeout(),
+					iceGatheringAwaitTimeout))
+			defer timer.Stop()
+
+			select {
+			case <-iceComplete:
+				iceCompleted = true
+			case <-timer.C:
+				// Continue without ICE completion
+			case <-ctx.Done():
+				return nil, nil, nil, errors.Trace(ctx.Err())
+			}
+			timer.Stop()
 		}
 
 		// When STUN is skipped and a port mapping is expected to be

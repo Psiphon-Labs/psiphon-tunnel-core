@@ -442,6 +442,7 @@ type WebRTCDialCoordinator interface {
 	DiscoverNATTimeout() time.Duration
 	WebRTCAnswerTimeout() time.Duration
 	WebRTCAwaitPortMappingTimeout() time.Duration
+	WebRTCAwaitICEGatheringTimeout() time.Duration
 	WebRTCAwaitReadyToProxyTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
 	ProxyRelayInactivityTimeout() time.Duration

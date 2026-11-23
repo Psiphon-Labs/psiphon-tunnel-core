@@ -212,6 +212,7 @@ type testWebRTCDialCoordinator struct {
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitPortMappingTimeout   time.Duration
+	webRTCAwaitICEGatheringTimeout  time.Duration
 	webRTCAwaitReadyToProxyTimeout  time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
@@ -469,6 +470,12 @@ func (t *testWebRTCDialCoordinator) WebRTCAwaitPortMappingTimeout() time.Duratio
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.webRTCAwaitPortMappingTimeout
+}
+
+func (t *testWebRTCDialCoordinator) WebRTCAwaitICEGatheringTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.webRTCAwaitICEGatheringTimeout
 }
 
 func (t *testWebRTCDialCoordinator) WebRTCAwaitReadyToProxyTimeout() time.Duration {
