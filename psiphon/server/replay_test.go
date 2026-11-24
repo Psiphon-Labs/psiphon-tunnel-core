@@ -91,7 +91,7 @@ func runServerReplayTest(
           "ServerReplayUnknownGeoIP" : true,
           "ServerReplayTTL" : "5s",
           "ServerReplayTargetWaitDuration" : "200ms",
-          "ServerReplayTargetTunnelDuration" : "50ms",
+          "ServerReplayTargetTunnelDuration" : "5ms",
           "ServerReplayTargetUpstreamBytes" : 0,
           "ServerReplayTargetDownstreamBytes" : 0,
           "ServerReplayFailedCountThreshold" : 1,
