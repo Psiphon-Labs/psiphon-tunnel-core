@@ -1648,9 +1648,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 			capability := protocol.GetCapability(tunnelProtocol)
 
-			// In-proxy tunnel protocol capabilities don't include
+			// In-proxy and Light tunnel protocol capabilities don't include
 			// v1/-PASSTHROUGHv2 suffixes; see comments in ServerEntry.hasCapability.
-			if !protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+			if !protocol.TunnelProtocolUsesInproxy(tunnelProtocol) &&
+				!protocol.TunnelProtocolUsesLight(tunnelProtocol) {
 
 				// Note: do not add passthrough annotation if HTTP unfronted meek
 				// because it would result in an invalid capability.

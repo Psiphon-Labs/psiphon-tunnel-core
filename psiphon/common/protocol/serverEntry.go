@@ -560,7 +560,8 @@ func (serverEntry *ServerEntry) GetServerEntryFields() (ServerEntryFields, error
 //
 // In-proxy tunnel protocols omit the "v1" and "PASSTHROUGH" suffixes. For
 // in-proxy QUIC, gQUIC is never used; and for in-proxy HTTPS/TLS, clients
-// always apply PASSTHROUGH-v2.
+// always apply PASSTHROUGH-v2. Light tunnel protocols also omit the
+// suffixes; Light clients always apply PASSTHROUGH-v2.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
 
