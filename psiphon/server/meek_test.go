@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -49,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/hpack"
 )
 
 var KB = 1024
@@ -661,6 +663,353 @@ func TestMeekMissingRequiredHeaders(t *testing.T) {
 	runTestMeekAccessControl(t, false, false, true)
 }
 
+func TestMeekSessionDeleteInterruptsReads(t *testing.T) {
+	for _, useHTTP2 := range []bool{false, true} {
+		name := "HTTP1"
+		if useHTTP2 {
+			name = "HTTP2"
+		}
+		t.Run(name, func(t *testing.T) {
+			server, httpServer, connections := newMeekSessionTestHTTPServer(t, useHTTP2)
+			session := newMeekSessionTestSession(server, "stalled")
+			if _, err := session.cachedResponse.Write(make([]byte, 2*MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH)); err != nil {
+				t.Fatal(err)
+			}
+			if len(server.bufferPool.buffers) == cap(server.bufferPool.buffers) {
+				t.Fatal("test did not borrow a response buffer")
+			}
+
+			reading := make(chan struct{})
+			handlerDone := make(chan struct{})
+			httpServer.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/stalled" {
+					r.Body = &meekSessionTestRequestBody{ReadCloser: r.Body, reading: reading}
+					defer close(handlerDone)
+					if (r.ProtoMajor == 2) != useHTTP2 {
+						t.Errorf("unexpected protocol: %s", r.Proto)
+					}
+				}
+				server.ServeHTTP(w, r)
+			})
+			httpServer.StartTLS()
+			client := httpServer.Client()
+			client.Timeout = time.Minute
+			client.Transport.(*http.Transport).MaxConnsPerHost = 1
+			t.Cleanup(client.CloseIdleConnections)
+
+			reader, writer := io.Pipe()
+			t.Cleanup(func() { writer.Close() })
+			request, err := http.NewRequest(http.MethodPost, httpServer.URL+"/stalled", reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.AddCookie(&http.Cookie{Name: "session", Value: "stalled"})
+			requestDone := make(chan struct{})
+			go func() {
+				defer close(requestDone)
+				response, err := client.Do(request)
+				if err == nil {
+					response.Body.Close()
+				}
+			}()
+			if _, err := writer.Write([]byte{1}); err != nil {
+				t.Fatal(err)
+			}
+			waitForMeekSessionTest(t, reading, "request body read")
+
+			reapMeekSessionTestSession(t, server, session, "stalled")
+			waitForMeekSessionTest(t, handlerDone, "request handler")
+			writer.Close()
+			waitForMeekSessionTest(t, requestDone, "client request")
+
+			if useHTTP2 {
+				healthy := newMeekSessionTestSession(server, "healthy")
+				t.Cleanup(func() { healthy.clientConn.Close() })
+				writeDone := make(chan struct{})
+				var writeErr error
+				go func() {
+					defer close(writeDone)
+					_, writeErr = healthy.clientConn.Write([]byte("ok"))
+				}()
+				request, err := http.NewRequest(http.MethodPost, httpServer.URL+"/healthy", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.AddCookie(&http.Cookie{Name: "session", Value: "healthy"})
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := io.ReadAll(response.Body)
+				response.Body.Close()
+				if err != nil || string(data) != "ok" {
+					t.Fatalf("healthy response: %q, %v", data, err)
+				}
+				waitForMeekSessionTest(t, writeDone, "healthy session write")
+				if writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				if connections.Load() != 1 {
+					t.Fatal("HTTP/2 connection was replaced")
+				}
+			}
+		})
+	}
+}
+
+func TestMeekSessionDeleteInterruptsWrites(t *testing.T) {
+	server, httpServer, connections := newMeekSessionTestHTTPServer(t, true)
+	session := newMeekSessionTestSession(server, "stalled")
+	t.Cleanup(func() { session.clientConn.Close() })
+	handlerDone := make(chan struct{})
+	httpServer.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/stalled" {
+			defer close(handlerDone)
+		}
+		server.ServeHTTP(w, r)
+	})
+	httpServer.StartTLS()
+	conn, err := tls.DialWithDialer(
+		&net.Dialer{Timeout: 5 * time.Second}, "tcp", httpServer.Listener.Addr().String(),
+		&tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if conn.ConnectionState().NegotiatedProtocol != "h2" {
+		t.Fatal("HTTP/2 was not negotiated")
+	}
+	if err := conn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, http2.ClientPreface); err != nil {
+		t.Fatal(err)
+	}
+	framer := http2.NewFramer(conn, conn)
+	// Block DATA writes while allowing the response headers through.
+	if err := framer.WriteSettings(http2.Setting{ID: http2.SettingInitialWindowSize, Val: 0}); err != nil {
+		t.Fatal(err)
+	}
+	writeMeekSessionTestHTTP2Request(t, framer, 1, "stalled")
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		session.clientConn.Write(make([]byte, MEEK_MAX_REQUEST_PAYLOAD_LENGTH))
+	}()
+	for {
+		frame := readMeekSessionTestHTTP2Frame(t, framer)
+		if headers, ok := frame.(*http2.HeadersFrame); ok && headers.StreamID == 1 {
+			if headers.StreamEnded() {
+				t.Fatal("response finished before blocking on flow control")
+			}
+			break
+		}
+	}
+	select {
+	case <-handlerDone:
+		t.Fatal("handler finished despite the zero stream window")
+	default:
+	}
+
+	reapMeekSessionTestSession(t, server, session, "stalled")
+	waitForMeekSessionTest(t, handlerDone, "request handler")
+	waitForMeekSessionTest(t, writeDone, "session write")
+
+	healthy := newMeekSessionTestSession(server, "healthy")
+	t.Cleanup(func() { healthy.clientConn.Close() })
+	healthyDone := make(chan struct{})
+	var healthyErr error
+	go func() {
+		defer close(healthyDone)
+		_, healthyErr = healthy.clientConn.Write([]byte("ok"))
+	}()
+	writeMeekSessionTestHTTP2Request(t, framer, 3, "healthy")
+	if err := framer.WriteWindowUpdate(3, 65535); err != nil {
+		t.Fatal(err)
+	}
+	var response []byte
+	for {
+		frame := readMeekSessionTestHTTP2Frame(t, framer)
+		if reset, ok := frame.(*http2.RSTStreamFrame); ok && reset.StreamID == 3 {
+			t.Fatalf("healthy stream reset: %v", reset.ErrCode)
+		}
+		if data, ok := frame.(*http2.DataFrame); ok && data.StreamID == 3 {
+			response = append(response, data.Data()...)
+			if data.StreamEnded() {
+				break
+			}
+		}
+	}
+	if string(response) != "ok" || connections.Load() != 1 {
+		t.Fatalf("healthy response: %q, connections: %d", response, connections.Load())
+	}
+	waitForMeekSessionTest(t, healthyDone, "healthy session write")
+	if healthyErr != nil {
+		t.Fatal(healthyErr)
+	}
+}
+
+func TestMeekSessionDeleteIdlePreservesHTTP1Connection(t *testing.T) {
+	server, httpServer, connections := newMeekSessionTestHTTPServer(t, false)
+	// Keep the handler waiting in pumpWrites after its first write.
+	server.extendedTurnAroundTimeout = time.Minute
+	session := newMeekSessionTestSession(server, "idle")
+	httpServer.StartTLS()
+	client := httpServer.Client()
+	client.Timeout = time.Minute
+	client.Transport.(*http.Transport).MaxConnsPerHost = 1
+	t.Cleanup(client.CloseIdleConnections)
+
+	post := func(id string) (string, error) {
+		request, err := http.NewRequest(http.MethodPost, httpServer.URL+"/"+id, nil)
+		if err != nil {
+			return "", err
+		}
+		request.AddCookie(&http.Cookie{Name: "session", Value: id})
+		response, err := client.Do(request)
+		if err != nil {
+			return "", err
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		return string(data), err
+	}
+
+	idleDone := make(chan struct{})
+	var idleData string
+	var idleErr error
+	go func() {
+		defer close(idleDone)
+		idleData, idleErr = post("idle")
+	}()
+	// Write returns once the handler has written the payload and is back
+	// waiting in pumpWrites, outside of HTTP I/O.
+	if _, err := session.clientConn.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	reapMeekSessionTestSession(t, server, session, "idle")
+	waitForMeekSessionTest(t, idleDone, "idle request")
+	if idleErr != nil || idleData != "x" {
+		t.Fatalf("idle response: %q, %v", idleData, idleErr)
+	}
+
+	healthy := newMeekSessionTestSession(server, "healthy")
+	t.Cleanup(func() { healthy.clientConn.Close() })
+	go func() {
+		healthy.clientConn.Write([]byte("ok"))
+		healthy.clientConn.Close()
+	}()
+	data, err := post("healthy")
+	if err != nil || data != "ok" {
+		t.Fatalf("healthy response: %q, %v", data, err)
+	}
+	if connections.Load() != 1 {
+		t.Fatal("HTTP/1 connection was replaced")
+	}
+}
+
+func TestMeekSessionRequestLifecycle(t *testing.T) {
+	for _, timing := range []string{
+		"before_registration", "idle", "during_return", "after_return", "with_lock",
+		"with_lock_before_return"} {
+		t.Run(timing, func(t *testing.T) {
+			server := newMeekSessionTestServer()
+			session := newMeekSessionTestSession(server, "session")
+			writer := &meekSessionTestResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+			session.lock.Lock()
+			switch timing {
+			case "before_registration":
+				done := make(chan struct{})
+				go func() { session.delete(false); close(done) }()
+				waitForMeekSessionTest(t, session.clientConn.closeBroadcast, "connection close")
+				if session.startRequest(writer, nil) {
+					t.Error("request started after deletion began")
+					session.finishRequest()
+				}
+				session.lock.Unlock()
+				waitForMeekSessionTest(t, done, "deletion")
+
+			case "idle":
+				if !session.startRequest(writer, nil) {
+					t.Fatal("request rejected")
+				}
+				done := make(chan struct{})
+				go func() { session.delete(false); close(done) }()
+				waitForMeekSessionTest(t, session.clientConn.closeBroadcast, "connection close")
+				if session.startIO() {
+					t.Error("I/O started after deletion began")
+					session.finishIO()
+				}
+				session.finishRequest()
+				writer.returned.Store(true)
+				session.lock.Unlock()
+				waitForMeekSessionTest(t, done, "deletion")
+
+			case "during_return":
+				writer.deadlineStarted = make(chan struct{})
+				writer.releaseDeadline = make(chan struct{})
+				if !session.startRequest(writer, nil) || !session.startIO() {
+					t.Fatal("request rejected")
+				}
+				deleted := make(chan struct{})
+				go func() { session.delete(false); close(deleted) }()
+				waitForMeekSessionTest(t, writer.deadlineStarted, "deadline call")
+				if session.requestMutex.TryLock() {
+					session.requestMutex.Unlock()
+					t.Error("request mutex not held during interruption")
+				}
+				returned := make(chan struct{})
+				go func() {
+					session.finishIO()
+					session.finishRequest()
+					writer.returned.Store(true)
+					session.lock.Unlock()
+					close(returned)
+				}()
+				close(writer.releaseDeadline)
+				waitForMeekSessionTest(t, returned, "handler return")
+				waitForMeekSessionTest(t, deleted, "deletion")
+				if writer.deadlines.Load() != 2 {
+					t.Error("read and write deadlines were not both set")
+				}
+
+			case "after_return", "with_lock":
+				if !session.startRequest(writer, nil) {
+					t.Fatal("request rejected")
+				}
+				if timing == "with_lock" {
+					session.delete(true)
+				}
+				session.finishRequest()
+				writer.returned.Store(true)
+				session.lock.Unlock()
+				session.delete(false)
+
+			case "with_lock_before_return":
+				// The handler deleted the session and has not yet returned,
+				// so its response writer is still registered. The reaper
+				// must not interrupt the handler's pending error response.
+				if !session.startRequest(writer, nil) {
+					t.Fatal("request rejected")
+				}
+				session.delete(true)
+				// Release the lock so that delete(false) completes; its
+				// interrupt decision is made before it waits for the lock.
+				session.lock.Unlock()
+				session.delete(false)
+				session.finishRequest()
+				writer.returned.Store(true)
+			}
+			if writer.lateDeadline.Load() {
+				t.Error("deadline set after handler return")
+			}
+			if timing != "during_return" && writer.deadlines.Load() != 0 {
+				t.Error("unexpected deadline call")
+			}
+		})
+	}
+}
+
 func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missingRequiredHeaders bool) {
 
 	attempts := 10
@@ -913,4 +1262,166 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missing
 
 	// This wait will hang if shutdown is broken, and the test will ultimately panic
 	serverWaitGroup.Wait()
+}
+
+func newMeekSessionTestServer() *MeekServer {
+	return &MeekServer{
+		support:                         &SupportServices{Config: &Config{}},
+		isFronted:                       true,
+		sessions:                        make(map[string]*meekSession),
+		bufferPool:                      NewCachedResponseBufferPool(MEEK_DEFAULT_POOL_BUFFER_LENGTH, 2, 2),
+		maxSessionStaleness:             time.Minute,
+		turnAroundTimeout:               time.Minute,
+		skipExtendedTurnAroundThreshold: MEEK_DEFAULT_SKIP_EXTENDED_TURN_AROUND_THRESHOLD,
+	}
+}
+
+func newMeekSessionTestHTTPServer(t *testing.T, useHTTP2 bool) (*MeekServer, *httptest.Server, *atomic.Int32) {
+	t.Helper()
+	server := newMeekSessionTestServer()
+	httpServer := httptest.NewUnstartedServer(server)
+	httpServer.EnableHTTP2 = useHTTP2
+	httpServer.Config.ReadTimeout = time.Minute
+	httpServer.Config.WriteTimeout = time.Minute
+	connections := new(atomic.Int32)
+	httpServer.Config.ConnContext = func(ctx context.Context, conn net.Conn) context.Context {
+		connections.Add(1)
+		return context.WithValue(ctx, meekNetConnContextKey, conn)
+	}
+	t.Cleanup(func() {
+		httpServer.CloseClientConnections()
+		httpServer.Close()
+	})
+	return server, httpServer, connections
+}
+
+func newMeekSessionTestSession(server *MeekServer, id string) *meekSession {
+	session := &meekSession{
+		meekProtocolVersion: MEEK_PROTOCOL_VERSION_2,
+		cachedResponse:      NewCachedResponse(MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH, server.bufferPool),
+	}
+	session.clientConn = newMeekConn(server, session, nil, &net.TCPAddr{}, MEEK_PROTOCOL_VERSION_2)
+	session.touch()
+	server.sessionsLock.Lock()
+	server.sessions[id] = session
+	server.sessionsLock.Unlock()
+	return session
+}
+
+func waitForMeekSessionTest(t *testing.T, done <-chan struct{}, operation string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", operation)
+	}
+}
+
+func reapMeekSessionTestSession(t *testing.T, server *MeekServer, session *meekSession, id string) {
+	t.Helper()
+	session.lastActivity.Store(int64(monotime.Now()) - int64(server.maxSessionStaleness+time.Second))
+	done := make(chan struct{})
+	go func() {
+		server.deleteExpiredSessions()
+		close(done)
+	}()
+	waitForMeekSessionTest(t, done, "session reaping")
+	server.sessionsLock.RLock()
+	_, present := server.sessions[id]
+	server.sessionsLock.RUnlock()
+	if present {
+		t.Fatal("expired session was not removed")
+	}
+	if len(server.bufferPool.buffers) != cap(server.bufferPool.buffers) {
+		t.Fatal("response buffers were not returned to the pool")
+	}
+}
+
+type meekSessionTestRequestBody struct {
+	io.ReadCloser
+	reading chan struct{}
+	reads   atomic.Int32
+}
+
+// Read signals on entry to the second Read. The first Read returns the byte
+// the client has already sent; the second blocks awaiting more.
+func (body *meekSessionTestRequestBody) Read(p []byte) (int, error) {
+	if body.reads.Add(1) == 2 {
+		close(body.reading)
+	}
+	return body.ReadCloser.Read(p)
+}
+
+type meekSessionTestResponseWriter struct {
+	*httptest.ResponseRecorder
+	deadlineStarted chan struct{}
+	releaseDeadline chan struct{}
+	returned        atomic.Bool
+	lateDeadline    atomic.Bool
+	deadlines       atomic.Int32
+}
+
+func (writer *meekSessionTestResponseWriter) SetReadDeadline(time.Time) error {
+	writer.deadlines.Add(1)
+	if writer.returned.Load() {
+		writer.lateDeadline.Store(true)
+	}
+	if writer.deadlineStarted != nil {
+		close(writer.deadlineStarted)
+		<-writer.releaseDeadline
+	}
+	return nil
+}
+
+func (writer *meekSessionTestResponseWriter) SetWriteDeadline(time.Time) error {
+	writer.deadlines.Add(1)
+	if writer.returned.Load() {
+		writer.lateDeadline.Store(true)
+	}
+	return nil
+}
+
+func writeMeekSessionTestHTTP2Request(t *testing.T, framer *http2.Framer, streamID uint32, id string) {
+	t.Helper()
+	var buffer bytes.Buffer
+	encoder := hpack.NewEncoder(&buffer)
+	encoder.SetMaxDynamicTableSize(0)
+	for _, field := range []hpack.HeaderField{
+		{Name: ":method", Value: http.MethodPost},
+		{Name: ":scheme", Value: "https"},
+		{Name: ":authority", Value: "example.com"},
+		{Name: ":path", Value: "/" + id},
+		{Name: "cookie", Value: "session=" + id},
+	} {
+		if err := encoder.WriteField(field); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := framer.WriteHeaders(http2.HeadersFrameParam{
+		StreamID: streamID, BlockFragment: buffer.Bytes(), EndHeaders: true, EndStream: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readMeekSessionTestHTTP2Frame(t *testing.T, framer *http2.Framer) http2.Frame {
+	t.Helper()
+	for {
+		frame, err := framer.ReadFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch frame := frame.(type) {
+		case *http2.SettingsFrame:
+			if !frame.IsAck() {
+				if err := framer.WriteSettingsAck(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			continue
+		case *http2.GoAwayFrame:
+			t.Fatalf("HTTP/2 connection closed: %v", frame.ErrCode)
+		}
+		return frame
+	}
 }

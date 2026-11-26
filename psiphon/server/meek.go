@@ -751,6 +751,18 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	requestNumber := session.requestCount.Add(1)
 
+	// Any error response is sent after session.lock is released. When not
+	// fronted, handleError writes directly to the client connection, which
+	// may block for up to httpClientIOTimeout, and holding session.lock for
+	// that duration would delay session.delete. This defer is registered
+	// before the lock is acquired, so it runs after the lock is released.
+	sendErrorResponse := false
+	defer func() {
+		if sendErrorResponse {
+			server.handleError(responseWriter, request)
+		}
+	}()
+
 	// Wait for the existing request to complete.
 	session.lock.Lock()
 	defer session.lock.Unlock()
@@ -776,18 +788,30 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		return
 	}
 
-	// If the session expired and was deleted while this request was waiting,
+	// If deletion of the session began while this request was waiting,
 	// discard this request. The session is no longer valid, and the final call
-	// to session.cachedResponse.Reset may have already occured, so any further
-	// session.cachedResponse access may deplete resources (fail to refill the pool).
-	if session.deleted {
-		server.handleError(responseWriter, request)
+	// to session.cachedResponse.Reset has either occurred or is pending, so any
+	// further session.cachedResponse access may deplete resources (fail to
+	// refill the pool).
+	if !session.startRequest(responseWriter, request.Body) {
+		sendErrorResponse = true
 		return
 	}
+	defer session.finishRequest()
+
+	// Request body reads and response body writes go through
+	// session.requestIO, which tracks when this handler is in HTTP I/O.
+	// session.delete only interrupts I/O that is in progress, and no new
+	// I/O starts once deletion has begun.
+	sessionIO := &session.requestIO
 
 	// pumpReads causes a TunnelServer/SSH goroutine blocking on a Read to
 	// read the request body as upstream traffic.
+	//
 	// TODO: run pumpReads and pumpWrites concurrently?
+	// Note that session.inIO assumes at most one sessionIO Read or Write
+	// is in progress at a time. If the pumps run concurrently, inIO must
+	// become a counter, or session.delete may skip interrupting I/O.
 
 	// pumpReads checksums the request payload and skips relaying it when
 	// it matches the immediately previous request payload. This allows
@@ -797,7 +821,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	//
 	// pumpReads also handles discarding meek request payload padding.
 
-	requestSize, allowCachedResponse, err := session.clientConn.pumpReads(request.Body)
+	requestSize, allowCachedResponse, err := session.clientConn.pumpReads(sessionIO)
 	if err != nil {
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
@@ -876,8 +900,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		if !session.cachedResponse.HasPosition(position) {
 			greaterThanSwapInt64(&session.metricCachedResponseMissPosition, int64(position))
-			server.handleError(responseWriter, request)
 			session.delete(true)
+			sendErrorResponse = true
 			return
 		}
 
@@ -886,7 +910,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// TODO: cachedResponse can now start releasing extended buffers, as
 		// response bytes before "position" will never be requested again?
 
-		responseSize, responseError = session.cachedResponse.CopyFromPosition(position, responseWriter)
+		responseSize, responseError = session.cachedResponse.CopyFromPosition(position, sessionIO)
 		greaterThanSwapInt64(&session.metricPeakCachedResponseHitSize, int64(responseSize))
 
 		// The client may again fail to receive the payload and may again
@@ -903,7 +927,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// io.MultiWriter: a Write() to the MultiWriter writes first
 		// to the cache, and then to the response writer. So if the
 		// write to the response writer fails, the payload is cached.
-		multiWriter := io.MultiWriter(session.cachedResponse, responseWriter)
+		multiWriter := io.MultiWriter(session.cachedResponse, sessionIO)
 
 		// The client expects 206, not 200, whenever it sets a Range header,
 		// which it may do even when no cached response is prepared.
@@ -1503,19 +1527,27 @@ func (server *MeekServer) rateLimitWorker() {
 func (server *MeekServer) deleteSession(sessionID string) {
 
 	// Don't obtain the server.sessionsLock write lock until modifying
-	// server.sessions, as the session.delete can block for up to
-	// MEEK_HTTP_CLIENT_IO_TIMEOUT. Allow new sessions to be added
-	// concurrently.
+	// server.sessions, as session.delete waits for any active request
+	// handler to return. session.delete interrupts in-progress HTTP I/O, so
+	// the wait is expected to be brief; if an interruption fails, it can
+	// last up to MEEK_HTTP_CLIENT_IO_TIMEOUT. Allow new sessions to be
+	// added concurrently.
 	//
 	// Since a lock isn't held for the duration, concurrent calls to
 	// deleteSession with the same sessionID could happen; this is
 	// not expected since only the reaper goroutine calls deleteExpiredSessions
 	// (and in any case concurrent execution of the ok block is not an issue).
+	//
+	// Expiry is re-checked here, as the session may have resumed activity
+	// since the deleteExpiredSessions snapshot was taken. A session that
+	// resumes after this check is still deleted, and its request receives
+	// an error response; a later expiry check would not change that for a
+	// client that has been silent for maxSessionStaleness.
 	server.sessionsLock.RLock()
 	session, ok := server.sessions[sessionID]
 	server.sessionsLock.RUnlock()
 
-	if ok {
+	if ok && session.expired() {
 		session.delete(false)
 
 		server.sessionsLock.Lock()
@@ -1526,7 +1558,7 @@ func (server *MeekServer) deleteSession(sessionID string) {
 
 func (server *MeekServer) deleteExpiredSessions() {
 
-	// A deleteSession call may block for up to MEEK_HTTP_CLIENT_IO_TIMEOUT,
+	// A deleteSession call waits for any active request handler to return,
 	// so grab a snapshot list of expired sessions and do not hold a lock for
 	// the duration of deleteExpiredSessions. This allows new sessions to be
 	// added concurrently.
@@ -2313,7 +2345,6 @@ type meekSession struct {
 	metricCachedResponseMissPosition atomic.Int64
 	metricUnderlyingConnCount        atomic.Int64
 	lock                             sync.Mutex
-	deleted                          bool
 	underlyingConn                   net.Conn
 	clientConn                       *meekConn
 	meekProtocolVersion              int
@@ -2324,6 +2355,78 @@ type meekSession struct {
 	httpVersion                      string
 	requestPaddingState              *protocol.MeekPayloadPaddingState
 	responsePaddingState             *protocol.MeekPayloadPaddingState
+
+	requestMutex   sync.Mutex
+	deleted        bool
+	responseWriter http.ResponseWriter
+	inIO           bool
+	requestIO      meekSessionIO
+}
+
+// startRequest is called with session.lock held.
+func (session *meekSession) startRequest(
+	responseWriter http.ResponseWriter, requestBody io.Reader) bool {
+
+	session.requestMutex.Lock()
+	defer session.requestMutex.Unlock()
+	if session.deleted {
+		return false
+	}
+	session.responseWriter = responseWriter
+	// requestIO is embedded in the session to avoid a per-request allocation.
+	session.requestIO = meekSessionIO{
+		session: session, reader: requestBody, writer: responseWriter}
+	return true
+}
+
+func (session *meekSession) finishRequest() {
+	session.requestMutex.Lock()
+	session.responseWriter = nil
+	session.requestIO = meekSessionIO{}
+	session.requestMutex.Unlock()
+}
+
+// startIO is called by the active request handler before each request body
+// read or response body write. It returns false once deletion has begun, in
+// which case the handler must not start the I/O.
+func (session *meekSession) startIO() bool {
+	session.requestMutex.Lock()
+	defer session.requestMutex.Unlock()
+	if session.deleted {
+		return false
+	}
+	session.inIO = true
+	return true
+}
+
+func (session *meekSession) finishIO() {
+	session.requestMutex.Lock()
+	session.inIO = false
+	session.requestMutex.Unlock()
+}
+
+// meekSessionIO wraps the request body and response writer of the active
+// request handler, marking each Read and Write as in-progress HTTP I/O.
+type meekSessionIO struct {
+	session *meekSession
+	reader  io.Reader
+	writer  io.Writer
+}
+
+func (sessionIO *meekSessionIO) Read(p []byte) (int, error) {
+	if !sessionIO.session.startIO() {
+		return 0, errors.Trace(errMeekConnectionHasClosed)
+	}
+	defer sessionIO.session.finishIO()
+	return sessionIO.reader.Read(p)
+}
+
+func (sessionIO *meekSessionIO) Write(p []byte) (int, error) {
+	if !sessionIO.session.startIO() {
+		return 0, errors.Trace(errMeekConnectionHasClosed)
+	}
+	defer sessionIO.session.finishIO()
+	return sessionIO.writer.Write(p)
 }
 
 func (session *meekSession) touch() {
@@ -2344,43 +2447,62 @@ func (session *meekSession) expired() bool {
 // delete releases all resources allocated by a session.
 func (session *meekSession) delete(haveLock bool) {
 
-	// TODO: close the persistent HTTP client connection, if one exists?
-
-	// This final call session.cachedResponse.Reset releases shared resources.
+	// This final call to session.cachedResponse.Reset releases shared resources.
 	//
-	// This call requires exclusive access. session.lock is be obtained before
+	// This call requires exclusive access. session.lock must be obtained before
 	// calling session.cachedResponse.Reset. Once the lock is obtained, no
 	// request for this session is being processed concurrently, and pending
 	// requests will block at session.lock.
 	//
 	// This logic assumes that no further session.cachedResponse access occurs,
 	// or else resources may deplete (buffers won't be returned to the pool).
-	// These requirements are achieved by obtaining the lock, setting
-	// session.deleted, and any subsequent request handlers checking
-	// session.deleted immediately after obtaining the lock.
+	// Setting session.deleted before waiting for session.lock prevents new
+	// requests from starting. Acquiring session.lock ensures the active
+	// request has finished before the final Reset.
 	//
-	// session.lock.Lock may block for up to MEEK_HTTP_CLIENT_IO_TIMEOUT,
-	// the timeout for any active request handler processing a session
-	// request.
-	//
-	// When the lock must be acquired, clientConn.Close is called first, to
-	// interrupt any existing request handler blocking on pumpReads or pumpWrites.
+	// Interrupt any in-progress HTTP I/O before waiting for session.lock.
+	// requestMutex synchronizes interruption with request registration, I/O
+	// start/finish, and handler return. When the handler is not in HTTP I/O,
+	// clientConn.Close unblocks pumpReads/pumpWrites and startIO prevents
+	// further I/O, so no deadline is set. For HTTP/1 the deadlines apply to
+	// the whole underlying connection, which net/http then closes. When
+	// fronted, that persistent connection is preserved unless the handler
+	// is in a Read or Write at this moment. That I/O is not necessarily
+	// stalled, but for an expired session the active request has been in
+	// progress for at least maxSessionStaleness with no newer request
+	// arriving, so it is either stalled or progressing slowly for a client
+	// that is no longer polling.
+
+	var err error
+	session.requestMutex.Lock()
+	session.deleted = true
+	if !haveLock && session.inIO {
+		controller := http.NewResponseController(session.responseWriter)
+		deadline := time.Now().Add(-time.Second)
+		err = std_errors.Join(
+			controller.SetReadDeadline(deadline),
+			controller.SetWriteDeadline(deadline))
+	}
+	session.requestMutex.Unlock()
+	if err != nil && !std_errors.Is(err, net.ErrClosed) {
+		// Logged at Warning since, when the interruption fails, the
+		// session.lock.Lock below may block until the in-progress I/O
+		// times out. Deadline errors include only the local address.
+		// Closed connection errors are ignored, as I/O on a closed
+		// connection fails without the interruption.
+		log.WithTraceFields(LogFields{"error": err}).Warning("interrupt request failed")
+	}
 
 	session.clientConn.Close()
 
 	if !haveLock {
 		session.lock.Lock()
+		defer session.lock.Unlock()
 	}
 
 	// Release all extended buffers back to the pool.
 	// session.cachedResponse.Reset is not safe for concurrent calls.
 	session.cachedResponse.Reset()
-
-	session.deleted = true
-
-	if !haveLock {
-		session.lock.Unlock()
-	}
 }
 
 // GetMetrics implements the common.MetricsSource interface.
