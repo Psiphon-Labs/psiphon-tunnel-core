@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -205,6 +206,93 @@ func setSysctl(key, value string) error {
 	}
 
 	return nil
+}
+
+const hostSubnetDiscoverySupported = true
+
+// getHostIPv4Subnets returns the IPv4 subnets the host reaches through
+// interfaces other than tunDeviceName, the packet tunnel server's own tun
+// device: destinations and gateways of routes in all routing tables, and the
+// subnets of interface addresses, including point-to-point peers. See the
+// package comment.
+//
+// Limitation: the vendored netlink package doesn't check for NLM_F_DUMP_INTR,
+// so a route or address change during the dump may give a partial result
+// without an error. Discovery runs once, at startup, on a host whose network
+// configuration is expected to be static.
+//
+// Limitation: in builds with pointer checks, such as -race, -asan and
+// -msan, the vendored netlink package stops the program when it reads a
+// multipath route: it converts each next hop to a struct that needs 8-byte
+// alignment, at an offset that may be only 4-byte aligned. The fields it
+// reads are 4-byte aligned, so other builds aren't affected.
+func getHostIPv4Subnets(tunDeviceName string) ([]*net.IPNet, error) {
+
+	// Skip routes and addresses on tunDeviceName.
+	link, err := netlink.LinkByName(tunDeviceName)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	tunIndex := link.Attrs().Index
+
+	routes, err := netlink.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Table: unix.RT_TABLE_UNSPEC},
+		netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	var subnets []*net.IPNet
+
+	hostAddress := func(IP net.IP) *net.IPNet {
+		return &net.IPNet{IP: IP, Mask: net.CIDRMask(32, 32)}
+	}
+
+	for _, route := range routes {
+		if route.LinkIndex == tunIndex {
+			continue
+		}
+		// A multipath route has LinkIndex 0 and an interface per next hop.
+		// Skip it when every next hop is on tunDeviceName.
+		if len(route.MultiPath) > 0 && !slices.ContainsFunc(
+			route.MultiPath, func(nextHop *netlink.NexthopInfo) bool {
+				return nextHop.LinkIndex != tunIndex
+			}) {
+			continue
+		}
+		if route.Dst != nil {
+			subnets = append(subnets, route.Dst)
+		}
+		if route.Gw != nil {
+			subnets = append(subnets, hostAddress(route.Gw))
+		}
+		for _, nextHop := range route.MultiPath {
+			if nextHop.LinkIndex != tunIndex && nextHop.Gw != nil {
+				subnets = append(subnets, hostAddress(nextHop.Gw))
+			}
+		}
+	}
+
+	addrs, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	for _, addr := range addrs {
+		if addr.LinkIndex == tunIndex || addr.IPNet == nil {
+			continue
+		}
+		subnets = append(subnets, addr.IPNet)
+		// A point-to-point address's peer is normally covered by its
+		// route, but not when the route is missing, such as with
+		// noprefixroute or a link that is down.
+		if addr.Peer != nil {
+			subnets = append(subnets, addr.Peer)
+		}
+	}
+
+	return subnets, nil
 }
 
 func configureServerInterface(
