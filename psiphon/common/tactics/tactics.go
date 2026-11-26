@@ -74,13 +74,14 @@ contains capabilities indicating that a Psiphon server supports tactics requests
 and which meek protocol is to be used.
 
 The Psiphon client requests, stores, and applies distinct tactics based on its
-current network context. The client uses platform-specific APIs to obtain a fine
-grain network ID based on, for example BSSID for WiFi or MCC/MNC for mobile.
-These values provides accurate detection of network context changes and can be
-obtained from the client device without any network activity. As the network ID
-is personally identifying, this ID is only used by the client and is never sent
-to the Psiphon server. The client obtains the current network ID from a callback
-made from tunnel-core to native client code.
+current network context. The client uses platform-specific APIs to obtain a
+best-effort network ID based on, for example the interface address for WiFi or
+MCC/MNC for mobile. These values can be obtained from the client device without
+any network activity. Network IDs approximate network context: one network's ID
+may change, and distinct networks may share an ID; see psiphon.NetworkIDGetter.
+As the network ID is personally identifying, this ID is only used by the client
+and is never sent to the Psiphon server. The client obtains the current network
+ID from a callback made from tunnel-core to native client code.
 
 Tactics returned to the Psiphon client are accompanied by a "tag" which is a
 hash digest of the merged tactics data. This tag uniquely identifies the
