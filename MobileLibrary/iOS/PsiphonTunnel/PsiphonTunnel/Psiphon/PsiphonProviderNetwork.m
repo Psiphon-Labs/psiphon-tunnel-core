@@ -66,7 +66,6 @@
     NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
                                           andCurrentNetworkStatus:self->reachability.reachabilityStatus
                                                 tunnelWholeDevice:self->tunnelWholeDevice
-                                                        wifiBSSID:nil
                                                           warning:&warn];
     if (warn != nil) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];

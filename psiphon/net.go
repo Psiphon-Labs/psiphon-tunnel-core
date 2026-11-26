@@ -232,10 +232,10 @@ type HasIPv6RouteGetter interface {
 // network.
 //
 // The identifier is a string that indicates the network type and
-// identity; for example "WIFI-<BSSID>" or "MOBILE-<MCC/MNC>". As this network
-// ID is personally identifying, it is only used locally in the client to
-// determine network context and is not sent to the Psiphon server. The
-// identifer will be logged in diagnostics messages; in this case only the
+// identity; for example "WIFI-<interface address>" or "MOBILE-<MCC/MNC>". As
+// this network ID is personally identifying, it is only used locally in the
+// client to determine network context and is not sent to the Psiphon server.
+// The identifer will be logged in diagnostics messages; in this case only the
 // substring before the first "-" is logged, so all PII must appear after the
 // first "-".
 //
@@ -245,6 +245,16 @@ type HasIPv6RouteGetter interface {
 // the provider shall return "UNKNOWN" when an accurate network
 // identifier cannot be obtained. Best-effort is acceptable: e.g., return just
 // "WIFI" when only the type of the network but no details can be determined.
+//
+// Network IDs are best-effort local keys, not exact network identities. A key
+// that is stable but shared by more than one network is preferable to one
+// that changes repeatedly on a single network, as each new key starts with no
+// stored network-specific state. Callers must tolerate both outcomes:
+//   - The key for a single interface can change as addresses arrive or are
+//     renumbered; for example, an IPv6 prefix-based ID followed by the
+//     existing IPv4-based ID after DHCP completes, or a different ID when a
+//     preferred unique local IPv6 prefix appears later.
+//   - Distinct networks can produce the same key.
 //
 // The network type is sent to Psiphon servers and logged as
 // server_tunnel.network_type. To ensure consistency in stats, all providers

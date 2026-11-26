@@ -22,12 +22,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Returns the BSSIDs of the current Wi-Fi network reported by CNCopyCurrentNetworkInfo, one per interface.
-typedef NSArray<NSString *> *_Nonnull (^NetworkIDCurrentNetworkInfoBSSIDs)(void);
-
-/// Returns the address of the active interface, or sets outError.
-typedef NSString *_Nullable (^NetworkIDInterfaceAddress)(NSError *_Nullable *_Nonnull outError);
-
 @interface NetworkID : NSObject
 
 /// The network ID contains potential PII. In tunnel-core, the network ID
@@ -36,56 +30,27 @@ typedef NSString *_Nullable (^NetworkIDInterfaceAddress)(NSError *_Nullable *_No
 /// See network ID requirements here:
 /// https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
 ///
-/// On iOS and Mac Catalyst, a Wi-Fi network ID includes the BSSID, if available, or else the address of the active
-/// interface. See wifiNetworkIDWithBSSID:currentNetworkInfoBSSIDs:interfaceAddress:warning:.
+/// All interface-address-based network IDs use the interface's IPv4 address if it has a usable one, e.g.
+/// "WIFI-192.0.2.1", and otherwise only the first 32 bits of one of its unique local or global IPv6 addresses,
+/// e.g. "WIFI-fd12:3456::/32"; see NetworkInterfaceSelectAddress. If no address qualifies, the network ID
+/// contains only the network type.
 ///
-/// All interface-address-based network IDs prefer IPv4, falling back to the first IPv6 address. Link-local and
-/// 464XLAT (192.0.0.0/29) addresses are skipped; see NetworkInterfaceSelectAddress. If no address qualifies, the
-/// network ID contains only the network type.
+/// On iOS >=12 the network type and the active interface name are both taken from one read of the reachability
+/// object's DefaultRouteMonitor path state, so that during a handoff the type of one network is not paired with the
+/// interface of another. The interface's address is read afterwards, so it may have changed or be missing by then.
+/// Unless the VPN check returns "VPN" first, a path state whose status is not reachable gives "UNKNOWN".
 ///
-/// @param reachability ReachabilityProtocol implementer used to determine active interface on iOS >=12 when
-/// the network ID includes the active interface address.
-/// @param currentNetworkStatus Used to determine network ID and, on iOS <12, to determine the active interface when
-/// the network ID includes the active interface address.
+/// @param reachability DefaultRouteMonitor, on iOS >=12, whose path state determines the network type and the
+/// active interface name.
+/// @param currentNetworkStatus Used only on iOS <12, or when the reachability object has no path state, to determine
+/// the network type and, on iOS <12, the active interface. With no path state on iOS >=12, an address-based network
+/// type gives only the bare type, with a warning.
 /// @param tunnelWholeDevice False if library is used in non-VPN mode, true otherwise.
-/// @param wifiBSSID BSSID of the current Wi-Fi network from NEHotspotNetwork, or nil if unavailable. See
-/// WiFiNetworkInfo. Ignored on native macOS.
 /// @param outWarn If non-nil, then a non-fatal error occurred while determining the network ID and a valid network ID will still be returned.
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
                          tunnelWholeDevice:(BOOL)tunnelWholeDevice
-                                 wifiBSSID:(NSString *_Nullable)wifiBSSID
                                    warning:(NSError *_Nullable *_Nonnull)outWarn;
-
-/// Returns "VPN" if the library is used in non-VPN mode and an active VPN is found on the system, or else nil. This
-/// is the first check made by getNetworkIDWithReachability:andCurrentNetworkStatus:tunnelWholeDevice:wifiBSSID:warning:.
-///
-/// The check relies on CFNetworkCopySystemProxySettings, and may not find the tun interfaces of some VPNs on macOS.
-/// @param tunnelWholeDevice False if library is used in non-VPN mode, true otherwise.
-+ (NSString *_Nullable)vpnNetworkIDWithTunnelWholeDevice:(BOOL)tunnelWholeDevice;
-
-/// Returns the network ID for currentNetworkStatus, as
-/// getNetworkIDWithReachability:andCurrentNetworkStatus:tunnelWholeDevice:wifiBSSID:warning: does when no VPN is
-/// found.
-+ (NSString *)networkIDWithReachability:(id<ReachabilityProtocol>)reachability
-                andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                              wifiBSSID:(NSString *_Nullable)wifiBSSID
-                                warning:(NSError *_Nullable *_Nonnull)outWarn;
-
-/// Returns the Wi-Fi network ID built from the first available source:
-///
-/// 1. wifiBSSID, from NEHotspotNetwork: "WIFI-<BSSID>".
-/// 2. The BSSIDs from CNCopyCurrentNetworkInfo: "WIFI-<BSSID>", with one suffix per interface. This API is
-///    deprecated, and returns NULL to apps linked against the iOS 19 SDK or later.
-/// 3. The address of the active interface: "WIFI-<address>". Different networks may share an address, and a
-///    network may assign a new one, but the address distinguishes more networks than "WIFI" alone.
-/// 4. "WIFI", with outWarn set to the interface address error.
-///
-/// Each source is queried only if the previous one yields nothing.
-+ (NSString *)wifiNetworkIDWithBSSID:(NSString *_Nullable)wifiBSSID
-            currentNetworkInfoBSSIDs:(NetworkIDCurrentNetworkInfoBSSIDs)currentNetworkInfoBSSIDs
-                    interfaceAddress:(NetworkIDInterfaceAddress)interfaceAddress
-                             warning:(NSError *_Nullable *_Nonnull)outWarn;
 
 @end
 

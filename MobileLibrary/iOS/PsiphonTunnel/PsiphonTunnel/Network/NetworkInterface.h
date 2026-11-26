@@ -20,19 +20,29 @@
 #import <Foundation/Foundation.h>
 #import <Network/Network.h>
 #import <ifaddrs.h>
+#import <netinet/in.h>
 #import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class NetworkPathState;
+
 /// Selects the address of the named interface from a getifaddrs(3) list. Only up, non-loopback interfaces with
-/// an IPv4 or IPv6 address are considered, and link-local addresses of both families are skipped. IPv4
-/// addresses in 192.0.0.0/29 (RFC 7335) are also skipped: 464XLAT assigns the same address, typically
-/// 192.0.0.2, on every IPv6-only network that provides IPv4 by translation, so it does not identify the network.
+/// an IPv4 or IPv6 address are considered.
 ///
-/// The first remaining IPv4 address is selected if there is one, otherwise the first remaining IPv6 address, the
-/// same order as getInterfaceIP in psiphon/common/networkid/networkid_posix.go. Preferring IPv4 avoids selecting
-/// periodically regenerated IPv6 privacy addresses when IPv4 is available. This does not guarantee a stable
-/// or unique network ID, and the IPv6 fallback does not distinguish temporary addresses from stable ones.
+/// The first IPv4 address is selected if there is one, skipping link-local addresses and addresses in
+/// 192.0.0.0/29 (RFC 7335): 464XLAT assigns the same address, typically 192.0.0.2, on every IPv6-only network
+/// that provides IPv4 by translation, so it does not identify the network.
+///
+/// Otherwise an IPv6 address is selected for its first 32 bits, which are all that the network ID uses (see
+/// NetworkInterfaceFormatIPv6Prefix). Only unique local (fc00::/7) and global unicast (2000::/3) addresses are
+/// considered. Unique local is preferred over global, and within the preferred class the address whose first 32
+/// bits are numerically lowest is selected. Full IPv6 addresses change with the delegated prefix and with privacy
+/// address rotation, so the network ID trades precision for stability: two networks may share an ID, but one
+/// network should keep its ID. This does not guarantee a stable or unique network ID.
+///
+/// For the addresses of an up, non-loopback interface, this selects the same value as selectInterfaceAddress in
+/// psiphon/common/networkid/networkid_posix.go, except that 192.0.0.0/29 is also skipped here.
 ///
 /// @param interfaces getifaddrs(3) list. May be NULL.
 /// @param interfaceName Interface name. E.g. "en0".
@@ -40,11 +50,16 @@ NS_ASSUME_NONNULL_BEGIN
 const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifaddrs *_Nullable interfaces,
                                                               const char *_Nullable interfaceName);
 
+/// Returns the first 32 bits of the IPv6 address as a /32 prefix: the two leading 16-bit groups in lowercase
+/// hexadecimal without leading zeros, followed by "::/32". E.g. 2001:db8:85a3::1 gives "2001:db8::/32".
+NSString *NetworkInterfaceFormatIPv6Prefix(const struct in6_addr *addr);
+
 /// NetworkInterface provides a set of functions for discovering active network interfaces on the device.
 @interface NetworkInterface : NSObject
 
-/// Returns the address assigned to the given interface, chosen with NetworkInterfaceSelectAddress. If no address
-/// qualifies, then nil is returned.
+/// Returns the network ID value of the given interface, chosen with NetworkInterfaceSelectAddress: the full
+/// address if an IPv4 address is selected, or the /32 prefix formatted by NetworkInterfaceFormatIPv6Prefix if an
+/// IPv6 address is selected. If no address qualifies, then nil is returned.
 /// @param interfaceName Interface name. E.g. "en0".
 /// @param outError If non-nil, then an error occurred while trying determine the interface address.
 + (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName
@@ -54,19 +69,21 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
 + (NSSet<NSString*>*)activeInterfaces:(NSError *_Nullable *_Nonnull)outError;
 
 /// Returns the active interface name.
-/// @param reachability ReachabilityProtocol implementer used to determine active interface on iOS >=12.
+/// @param pathState DefaultRouteMonitor path state whose defaultActiveInterfaceName is the active interface on
+/// iOS >=12. If nil on iOS >=12, then an error is returned.
 /// @param currentNetworkStatus Used to determine active interface on iOS <12.
 /// @param outError If non-nil, then an error occurred while determining the active interface.
-+ (NSString*)getActiveInterfaceWithReachability:(id<ReachabilityProtocol>)reachability
-                        andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                                          error:(NSError *_Nullable *_Nonnull)outError;
-/// Returns the active interface address.
-/// @param reachability ReachabilityProtocol implementer used to determine active interface on iOS >=12.
++ (NSString*)getActiveInterfaceWithPathState:(NetworkPathState *_Nullable)pathState
+                     andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                       error:(NSError *_Nullable *_Nonnull)outError;
+/// Returns getInterfaceAddress for the active interface: an IPv4 address or an IPv6 /32 prefix.
+/// @param pathState DefaultRouteMonitor path state whose defaultActiveInterfaceName is the active interface on
+/// iOS >=12. If nil on iOS >=12, then an error is returned.
 /// @param currentNetworkStatus Used to determine active interface on iOS <12.
 /// @param outError If non-nil, then an error occurred while determining the active interface.
-+ (NSString*)getActiveInterfaceAddressWithReachability:(id<ReachabilityProtocol>)reachability
-                               andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                                                 error:(NSError *_Nullable *_Nonnull)outError;
++ (NSString*)getActiveInterfaceAddressWithPathState:(NetworkPathState *_Nullable)pathState
+                            andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                              error:(NSError *_Nullable *_Nonnull)outError;
 
 @end
 
