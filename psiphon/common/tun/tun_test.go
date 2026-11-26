@@ -69,10 +69,6 @@ func TestTrafficRules(t *testing.T) {
 	t.Skip("TODO: negative tests for checkAllowedTCPPortFunc, checkAllowedUDPPortFunc")
 }
 
-func TestResetRouting(t *testing.T) {
-	t.Skip("TODO: test conntrack delete effectiveness")
-}
-
 func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 	// This test harness does the following:

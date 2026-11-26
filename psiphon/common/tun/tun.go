@@ -98,6 +98,42 @@ The server multiplexes all client packets into a single tun device. When a
 packet is read, the destination address is used to map the packet back to the
 correct index, which maps back to the client.
 
+Some hosts also route a more specific part of 10.0.0.0/8 through another
+interface, such as a private network. Replies to a client assigned an
+address there follow the more specific route and never reach the tun device:
+the client stays connected but receives no downstream packets. So the server
+excludes such subnets from address assignment: the configured
+ServerConfig.ExcludedIPv4Subnets plus, on Linux, subnets discovered from the
+host's routes and interface addresses. ServerConfig.DisableHostSubnetDiscovery
+turns discovery off.
+
+Host configurations that exclusion can't work around are logged as warnings:
+a host route or address prefix equal to 10.0.0.0/8 on another interface,
+which can't be excluded without leaving no addresses; a host subnet
+containing the server tun device address; and excluded subnets that leave
+fewer than minAvailableAddresses (2^20) client addresses. With no addresses
+left, ClientConnected fails for each new packet tunnel client.
+
+Only IPv4 subnets are excluded. Client IPv6 addresses are in a fixed unique
+local prefix, fd19:ca83:e6d5:1c44::/64, that host networks aren't expected
+to use. Each index maps to one IPv4 and one IPv6 address, so excluding an
+index also excludes its IPv6 address.
+
+Discovery runs once, at startup. Server network configuration is expected to
+be static: the server should start after the host's interfaces and routes
+are configured, and be restarted after host network changes. Subnets added
+later are not excluded until then; list known subnets in
+ServerConfig.ExcludedIPv4Subnets to exclude them regardless.
+
+TODO: a host subnet that contains the server tun device address 10.0.0.1,
+for example when 10.0.0.1 is the host's default gateway, is excluded, but
+the server address itself is fixed, so the conflict remains; the server logs
+a warning. First try to move the host's private network outside 10.0.0.0/8.
+Where that isn't possible, should the IPv4 address space be configurable,
+for example to 240.0.0.0/8, which has the same number of addresses? The
+other private ranges are smaller, such as 172.16.0.0/12 with 20 bits, and
+hosts commonly use them too.
+
 The server maintains client "sessions". A session maintains client IP
 address state and effectively holds the lease on assigned addresses. If a
 client is disconnected and quickly reconnects, it will resume its previous
@@ -247,6 +283,19 @@ type ServerConfig struct {
 	// AllowBogons disables bogon checks. This should be used only
 	// for testing.
 	AllowBogons bool
+
+	// ExcludedIPv4Subnets specifies subnets of 10.0.0.0/8, the client IPv4
+	// address range, from which client addresses are not assigned. On
+	// supported platforms, subnets routed through other host interfaces are
+	// discovered at startup and excluded automatically; ExcludedIPv4Subnets
+	// adds to those. NewServer fails if a subnet doesn't pass
+	// ValidateExcludedIPv4Subnet. See the package comment.
+	ExcludedIPv4Subnets []*net.IPNet
+
+	// DisableHostSubnetDiscovery turns off the discovery of host subnets,
+	// so that only ExcludedIPv4Subnets are excluded. It's for hosts where
+	// discovery fails, which stops NewServer, or excludes too much.
+	DisableHostSubnetDiscovery bool
 }
 
 // Server is a packet tunnel server. A packet tunnel server
@@ -265,13 +314,32 @@ type Server struct {
 	runContext          context.Context
 	stopRunning         context.CancelFunc
 	orphanMetrics       *packetMetrics
+
+	// excludedIndexes is set in NewServer and not changed afterwards, so
+	// concurrent ClientConnected calls read it without a lock.
+	excludedIndexes *excludedIndexes
 }
 
 // NewServer initializes a server.
 func NewServer(config *ServerConfig) (*Server, error) {
 
+	// Check the configured subnets before NewServerDevice changes host
+	// network settings, which aren't undone if NewServer then fails.
+	for _, subnet := range config.ExcludedIPv4Subnets {
+		err := ValidateExcludedIPv4Subnet(subnet)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	device, err := NewServerDevice(config)
 	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	excludedIndexes, err := makeExcludedIndexes(config, device.Name())
+	if err != nil {
+		_ = device.Close()
 		return nil, errors.Trace(err)
 	}
 
@@ -285,6 +353,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		runContext:          runContext,
 		stopRunning:         stopRunning,
 		orphanMetrics:       new(packetMetrics),
+		excludedIndexes:     excludedIndexes,
 	}, nil
 }
 
@@ -488,6 +557,9 @@ func (server *Server) ClientConnected(
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		server.resetRouting(
+			clientSession.assignedIPv4Address, clientSession.assignedIPv6Address)
 	}
 
 	// Note: it's possible that a client disconnects (or reconnects before a
@@ -995,16 +1067,28 @@ func (server *Server) allocateIndex(newSession *session) error {
 	// Search is a random index selection followed by a linear probe.
 	// TODO: is this the most effective (fast on average, simple) algorithm?
 
-	max := 0x00FFFFFF
+	excluded := server.excludedIndexes
 
-	randomInt := prng.Intn(max + 1)
+	// With no assignable index, fail without searching. The server logged
+	// a warning at startup; see newServerExcludedIndexes.
+	if excluded.available() == 0 {
+		return errors.TraceNew("no assignable index")
+	}
 
-	index := int32(randomInt)
-	index &= int32(max)
+	// Start at a random index that may be assigned and isn't excluded; see
+	// excludedIndexes.randomIndex.
+	index := excluded.randomIndex()
 
 	idleExpiry := server.sessionIdleExpiry()
 
-	for tries := 0; tries < 100000; index++ {
+	maxTries := excluded.maxAllocateTries()
+
+	// TODO/perf: with every assignable index in use, each call makes maxTries
+	// tries, and each try formats and parses the index's IPv4 and IPv6
+	// addresses before LoadOrStore finds the index in use: 5 allocations per
+	// try, or 500,000 for a failing call with 100,000 tries. Checking
+	// indexToSession with Load before converting the index would avoid them.
+	for tries := 0; tries < maxTries; index++ {
 
 		tries++
 
@@ -1017,11 +1101,18 @@ func (server *Server) allocateIndex(newSession *session) error {
 		// - 2 is reserved as the transparent DNS target
 		//   address (10.0.0.2, and IPv6 equivalent)
 
-		if index <= 2 {
+		if index < firstAssignableIndex {
 			continue
 		}
-		if index == 0x00FFFFFF {
+		if index > lastAssignableIndex {
 			index = 0
+			continue
+		}
+
+		// Skip, in one step, any excluded range containing the index.
+		// Probing an excluded /16 one index at a time would use 65536 tries.
+		if last, ok := excluded.lastExcluded(index); ok {
+			index = last
 			continue
 		}
 
@@ -1058,8 +1149,6 @@ func (server *Server) allocateIndex(newSession *session) error {
 		newSession.assignedIPv4Address = IPv4Address
 		newSession.assignedIPv6Address = IPv6Address
 		server.sessionIDToIndex.Store(newSession.sessionID, index)
-
-		server.resetRouting(newSession.assignedIPv4Address, newSession.assignedIPv6Address)
 
 		return nil
 	}

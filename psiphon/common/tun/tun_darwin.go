@@ -220,6 +220,13 @@ func resetNATTables(_ *ServerConfig, _ net.IP) error {
 	return nil
 }
 
+const hostSubnetDiscoverySupported = false
+
+func getHostIPv4Subnets(_ string) ([]*net.IPNet, error) {
+	// Not supported on Darwin
+	return nil, nil
+}
+
 func configureServerInterface(
 	config *ServerConfig,
 	tunDeviceName string) error {

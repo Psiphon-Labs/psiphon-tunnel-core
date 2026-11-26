@@ -3737,6 +3737,12 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 		sshClient.setPacketTunnelChannel(nil)
+
+		// TODO: the client reopens a closed packet tunnel channel at once, so
+		// if ClientConnected keeps failing, as with no address available, each
+		// client reopens it about once per round trip, logging a warning each
+		// time. Released clients do this until upgraded: should the server
+		// delay closing the channel, or reject it when no address is available?
 	}
 }
 
