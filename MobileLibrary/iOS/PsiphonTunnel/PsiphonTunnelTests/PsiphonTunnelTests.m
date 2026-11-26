@@ -23,13 +23,11 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <net/if_dl.h>
-#import <netdb.h>
 
 #import "DefaultRouteMonitor.h"
 #import "NetworkID.h"
 #import "NetworkInterface.h"
 #import "PsiphonTunnel.h"
-#import "WiFiNetworkInfo.h"
 
 @interface PsiphonTunnel (CallbackTesting)
 - (void)onAccessToken:(NSString *)token;
@@ -243,21 +241,36 @@
 
 @end
 
-/// Returns the address NetworkInterfaceSelectAddress selects for en0, or nil if none is selected.
-static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
-    const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces.list, "en0");
+/// Returns the value getInterfaceAddress reports for the address NetworkInterfaceSelectAddress selects for the named
+/// interface: the IPv4 address, or the IPv6 /32 prefix. Returns nil if none is selected.
+static NSString *_Nullable FormatSelectedAddress(const struct ifaddrs *_Nullable interfaces, const char *name) {
+    const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces, name);
     if (selected == NULL) {
         return nil;
     }
     const struct sockaddr *addr = selected->ifa_addr;
-    const void *src = addr->sa_family == AF_INET ?
-        (const void *)&((const struct sockaddr_in *)addr)->sin_addr :
-        (const void *)&((const struct sockaddr_in6 *)addr)->sin6_addr;
-    char buffer[INET6_ADDRSTRLEN];
-    if (inet_ntop(addr->sa_family, src, buffer, sizeof(buffer)) == NULL) {
+    if (addr->sa_family == AF_INET6) {
+        return NetworkInterfaceFormatIPv6Prefix(&((const struct sockaddr_in6 *)addr)->sin6_addr);
+    }
+    char buffer[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &((const struct sockaddr_in *)addr)->sin_addr, buffer, sizeof(buffer)) == NULL) {
         return nil;
     }
     return @(buffer);
+}
+
+/// Returns FormatSelectedAddress for en0.
+static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
+    return FormatSelectedAddress(interfaces.list, "en0");
+}
+
+/// Returns NetworkInterfaceFormatIPv6Prefix for an IPv6 literal.
+static NSString *FormatIPv6Prefix(const char *address) {
+    struct in6_addr addr;
+    if (inet_pton(AF_INET6, address, &addr) != 1) {
+        [NSException raise:NSInvalidArgumentException format:@"invalid address %s", address];
+    }
+    return NetworkInterfaceFormatIPv6Prefix(&addr);
 }
 
 @interface NetworkInterfaceTests : XCTestCase
@@ -284,6 +297,13 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     [twoIPv4 addInterface:"en0" address:"192.0.2.1"];
     [twoIPv4 addInterface:"en0" address:"192.0.2.2"];
     XCTAssertEqualObjects(SelectedAddress(twoIPv4), @"192.0.2.1");
+
+    // IPv4 is also preferred over a unique local IPv6 address.
+    FakeInterfaceAddresses *withUniqueLocal = [[FakeInterfaceAddresses alloc] init];
+    [withUniqueLocal addInterface:"en0" address:"fd12:3456:789a:1::5"];
+    [withUniqueLocal addInterface:"en0" address:"2001:db8::1"];
+    [withUniqueLocal addInterface:"en0" address:"203.0.113.7"];
+    XCTAssertEqualObjects(SelectedAddress(withUniqueLocal), @"203.0.113.7");
 }
 
 - (void)testSkipsLinkLocal {
@@ -298,7 +318,7 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     [ipv6Only addInterface:"en0" address:"169.254.1.1"];
     [ipv6Only addInterface:"en0" address:"fe80::1"];
     [ipv6Only addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::1");
+    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::/32");
 
     FakeInterfaceAddresses *linkLocalOnly = [[FakeInterfaceAddresses alloc] init];
     [linkLocalOnly addInterface:"en0" address:"169.254.1.1"];
@@ -313,7 +333,7 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     [ipv6Only addInterface:"en0" address:"192.0.0.2"];
     [ipv6Only addInterface:"en0" address:"fe80::1"];
     [ipv6Only addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::1");
+    XCTAssertEqualObjects(SelectedAddress(ipv6Only), @"2001:db8::/32");
 
     FakeInterfaceAddresses *withIPv4 = [[FakeInterfaceAddresses alloc] init];
     [withIPv4 addInterface:"en0" address:"192.0.0.2"];
@@ -336,13 +356,81 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     XCTAssertEqualObjects(SelectedAddress(outsideBelow), @"191.255.255.255");
 }
 
-- (void)testSelectsFirstIPv6WithoutIPv4 {
+- (void)testSelectsLowestIPv6PrefixRegardlessOfOrder {
+    FakeInterfaceAddresses *lowestLast = [[FakeInterfaceAddresses alloc] init];
+    [lowestLast addLinkLayerInterface:"en0"];
+    [lowestLast addInterface:"en0" address:"fe80::1"];
+    [lowestLast addInterface:"en0" address:"2a00:1450::1"];
+    [lowestLast addInterface:"en0" address:"2607:fb90:1234::1"];
+    [lowestLast addInterface:"en0" address:"2001:db8:85a3::1"];
+    XCTAssertEqualObjects(SelectedAddress(lowestLast), @"2001:db8::/32");
+
+    FakeInterfaceAddresses *lowestFirst = [[FakeInterfaceAddresses alloc] init];
+    [lowestFirst addInterface:"en0" address:"2001:db8:85a3::1"];
+    [lowestFirst addInterface:"en0" address:"2607:fb90:1234::1"];
+    [lowestFirst addInterface:"en0" address:"2a00:1450::1"];
+    XCTAssertEqualObjects(SelectedAddress(lowestFirst), @"2001:db8::/32");
+
+    // The same holds within the unique local class.
+    FakeInterfaceAddresses *uniqueLocal = [[FakeInterfaceAddresses alloc] init];
+    [uniqueLocal addInterface:"en0" address:"fdff:ffff::1"];
+    [uniqueLocal addInterface:"en0" address:"fd12:3456:789a:1::5"];
+    [uniqueLocal addInterface:"en0" address:"fc00:1::1"];
+    [uniqueLocal addInterface:"en0" address:"fd12:3455:ffff::1"];
+    XCTAssertEqualObjects(SelectedAddress(uniqueLocal), @"fc00:1::/32");
+}
+
+- (void)testPrefersUniqueLocalIPv6RegardlessOfOrder {
+    FakeInterfaceAddresses *uniqueLocalLast = [[FakeInterfaceAddresses alloc] init];
+    [uniqueLocalLast addInterface:"en0" address:"2001:db8::1"];
+    [uniqueLocalLast addInterface:"en0" address:"2607:fb90:1234::1"];
+    [uniqueLocalLast addInterface:"en0" address:"fd12:3456:789a:1::5"];
+    XCTAssertEqualObjects(SelectedAddress(uniqueLocalLast), @"fd12:3456::/32");
+
+    FakeInterfaceAddresses *uniqueLocalFirst = [[FakeInterfaceAddresses alloc] init];
+    [uniqueLocalFirst addInterface:"en0" address:"fd12:3456:789a:1::5"];
+    [uniqueLocalFirst addInterface:"en0" address:"2001:db8::1"];
+    [uniqueLocalFirst addInterface:"en0" address:"2607:fb90:1234::1"];
+    XCTAssertEqualObjects(SelectedAddress(uniqueLocalFirst), @"fd12:3456::/32");
+}
+
+- (void)testIgnoresIPv6OutsideUniqueLocalAndGlobal {
     FakeInterfaceAddresses *interfaces = [[FakeInterfaceAddresses alloc] init];
-    [interfaces addLinkLayerInterface:"en0"];
+    [interfaces addInterface:"en0" address:"::"];
+    [interfaces addInterface:"en0" address:"::1"];
+    [interfaces addInterface:"en0" address:"::ffff:192.0.2.1"];
+    [interfaces addInterface:"en0" address:"1fff:ffff::1"];
+    [interfaces addInterface:"en0" address:"4000::1"];
+    [interfaces addInterface:"en0" address:"fbff:ffff::1"];
+    [interfaces addInterface:"en0" address:"fe00::1"];
     [interfaces addInterface:"en0" address:"fe80::1"];
-    [interfaces addInterface:"en0" address:"2001:db8::1"];
-    [interfaces addInterface:"en0" address:"2001:db8::2"];
-    XCTAssertEqualObjects(SelectedAddress(interfaces), @"2001:db8::1");
+    [interfaces addInterface:"en0" address:"fec0::1"];
+    [interfaces addInterface:"en0" address:"ff02::1"];
+    XCTAssertNil(SelectedAddress(interfaces));
+
+    // The highest global unicast address qualifies; the out-of-range addresses are still ignored, although
+    // several of them are numerically lower.
+    [interfaces addInterface:"en0" address:"3fff:ffff::1"];
+    XCTAssertEqualObjects(SelectedAddress(interfaces), @"3fff:ffff::/32");
+
+    FakeInterfaceAddresses *lowestGlobal = [[FakeInterfaceAddresses alloc] init];
+    [lowestGlobal addInterface:"en0" address:"1fff:ffff::1"];
+    [lowestGlobal addInterface:"en0" address:"2000::1"];
+    XCTAssertEqualObjects(SelectedAddress(lowestGlobal), @"2000:0::/32");
+
+    FakeInterfaceAddresses *uniqueLocalBounds = [[FakeInterfaceAddresses alloc] init];
+    [uniqueLocalBounds addInterface:"en0" address:"fe00::1"];
+    [uniqueLocalBounds addInterface:"en0" address:"fdff:ffff::1"];
+    XCTAssertEqualObjects(SelectedAddress(uniqueLocalBounds), @"fdff:ffff::/32");
+}
+
+- (void)testFormatIPv6Prefix {
+    XCTAssertEqualObjects(FormatIPv6Prefix("2001:0db8:85a3::1"), @"2001:db8::/32");
+    XCTAssertEqualObjects(FormatIPv6Prefix("fd12:3456:789a:1::5"), @"fd12:3456::/32");
+    XCTAssertEqualObjects(FormatIPv6Prefix("2607:fb90:1234::1"), @"2607:fb90::/32");
+    XCTAssertEqualObjects(FormatIPv6Prefix("2001:0000:1::1"), @"2001:0::/32");
+    XCTAssertEqualObjects(FormatIPv6Prefix("2a00:0001:2:3:4:5:6:7"), @"2a00:1::/32");
+    XCTAssertEqualObjects(FormatIPv6Prefix("FFFF:FFFF:FFFF::"), @"ffff:ffff::/32");
 }
 
 - (void)testSelectsOnlyUpNonLoopbackEntriesOfNamedInterface {
@@ -355,38 +443,45 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
     [interfaces addLinkLayerInterface:"en0"];
     [interfaces addInterface:"en00" address:"192.0.2.5"];
     [interfaces addInterface:"en0" address:"2001:db8::1"];
-    XCTAssertEqualObjects(SelectedAddress(interfaces), @"2001:db8::1");
+    XCTAssertEqualObjects(SelectedAddress(interfaces), @"2001:db8::/32");
 
     XCTAssertTrue(NetworkInterfaceSelectAddress(interfaces.list, NULL) == NULL);
     XCTAssertTrue(NetworkInterfaceSelectAddress(NULL, "en0") == NULL);
 }
 
-// getInterfaceAddress formats the address selected from the live interface list.
+/// Returns FormatSelectedAddress for one live getifaddrs(3) snapshot. Sets outOK to NO if getifaddrs fails.
+static NSString *_Nullable LiveSelectedAddress(NSString *interfaceName, BOOL *outOK) {
+    struct ifaddrs *interfaces;
+    *outOK = getifaddrs(&interfaces) == 0;
+    if (!*outOK) {
+        return nil;
+    }
+    NSString *address = FormatSelectedAddress(interfaces, interfaceName.UTF8String);
+    freeifaddrs(interfaces);
+    return address;
+}
+
+// getInterfaceAddress formats the address selected from the live interface list. The selection is read before and
+// after getInterfaceAddress, and an interface whose selection changed in between is not checked.
 - (void)testGetInterfaceAddressFormatsSelectedAddress {
     NSError *err;
     NSSet<NSString *> *activeInterfaces = [NetworkInterface activeInterfaces:&err];
     XCTAssertNil(err);
 
     for (NSString *interfaceName in activeInterfaces) {
-        struct ifaddrs *interfaces;
-        if (getifaddrs(&interfaces) != 0) {
-            XCTFail(@"getifaddrs error with errno %d", errno);
-            return;
-        }
-        const struct ifaddrs *selected = NetworkInterfaceSelectAddress(interfaces,
-                                                                       interfaceName.UTF8String);
-        NSString *expected = nil;
-        if (selected != NULL) {
-            char buffer[NI_MAXHOST];
-            XCTAssertEqual(getnameinfo(selected->ifa_addr, selected->ifa_addr->sa_len,
-                                       buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST), 0);
-            expected = @(buffer);
-        }
-        freeifaddrs(interfaces);
-
+        BOOL beforeOK, afterOK;
+        NSString *before = LiveSelectedAddress(interfaceName, &beforeOK);
         NSString *address = [NetworkInterface getInterfaceAddress:interfaceName error:&err];
         XCTAssertNil(err);
-        XCTAssertEqualObjects(address, expected, @"%@", interfaceName);
+        NSString *after = LiveSelectedAddress(interfaceName, &afterOK);
+        if (!beforeOK || !afterOK) {
+            XCTFail(@"getifaddrs failed");
+            return;
+        }
+        if (before != after && ![before isEqualToString:after]) {
+            continue;
+        }
+        XCTAssertEqualObjects(address, before, @"%@", interfaceName);
     }
 
     XCTAssertNil([NetworkInterface getInterfaceAddress:@"lo0" error:&err]);
@@ -396,713 +491,17 @@ static NSString *_Nullable SelectedAddress(FakeInterfaceAddresses *interfaces) {
 @end
 
 
-@interface NetworkIDTests : XCTestCase
+@interface NetworkPathState (Testing)
+- (instancetype)initWithNetworkReachability:(NetworkReachability)networkReachability
+                                       path:(nw_path_t _Nullable)path
+                 defaultActiveInterfaceName:(NSString *_Nullable)defaultActiveInterfaceName;
 @end
 
-@implementation NetworkIDTests
-
-static NetworkIDCurrentNetworkInfoBSSIDs CurrentNetworkInfoBSSIDs(NSArray<NSString *> *bssids, BOOL *called) {
-    return ^NSArray<NSString *> *{
-        *called = YES;
-        return bssids;
-    };
-}
-
-static NetworkIDInterfaceAddress InterfaceAddress(NSString *_Nullable address, BOOL *called) {
-    return ^NSString *(NSError *_Nullable *_Nonnull outError) {
-        *called = YES;
-        if (address == nil) {
-            *outError = [NSError errorWithDomain:@"test" code:1 userInfo:@{NSLocalizedDescriptionKey: @"no address"}];
-            return @"";
-        }
-        return address;
-    };
-}
-
-- (void)testWiFiNetworkIDPrefersHotspotBSSID {
-    BOOL currentNetworkInfoCalled = NO, addressCalled = NO;
-    NSError *warn;
-    NSString *networkID = [NetworkID wifiNetworkIDWithBSSID:@"e4:38:83:e6:c0:b1"
-                                   currentNetworkInfoBSSIDs:CurrentNetworkInfoBSSIDs(@[@"0:1a:2b:3c:4d:5e"], &currentNetworkInfoCalled)
-                                           interfaceAddress:InterfaceAddress(@"192.0.2.1", &addressCalled)
-                                                    warning:&warn];
-    XCTAssertEqualObjects(networkID, @"WIFI-e4:38:83:e6:c0:b1");
-    XCTAssertNil(warn);
-    XCTAssertFalse(currentNetworkInfoCalled, @"deprecated API queried although NEHotspotNetwork returned a BSSID");
-    XCTAssertFalse(addressCalled);
-}
-
-- (void)testWiFiNetworkIDFallsBackToCurrentNetworkInfoBSSIDs {
-    for (NSString *hotspotBSSID in @[[NSNull null], @""]) {
-        BOOL currentNetworkInfoCalled = NO, addressCalled = NO;
-        NSError *warn;
-        NSString *networkID = [NetworkID wifiNetworkIDWithBSSID:[hotspotBSSID isKindOfClass:[NSString class]] ? (NSString *)hotspotBSSID : nil
-                                       currentNetworkInfoBSSIDs:CurrentNetworkInfoBSSIDs(@[@"0:1a:2b:3c:4d:5e"], &currentNetworkInfoCalled)
-                                               interfaceAddress:InterfaceAddress(@"192.0.2.1", &addressCalled)
-                                                        warning:&warn];
-        XCTAssertEqualObjects(networkID, @"WIFI-0:1a:2b:3c:4d:5e");
-        XCTAssertNil(warn);
-        XCTAssertTrue(currentNetworkInfoCalled);
-        XCTAssertFalse(addressCalled);
-    }
-
-    // As before, one suffix per interface that reports a BSSID.
-    BOOL currentNetworkInfoCalled = NO, addressCalled = NO;
-    NSError *warn;
-    NSString *networkID = [NetworkID wifiNetworkIDWithBSSID:nil
-                                   currentNetworkInfoBSSIDs:CurrentNetworkInfoBSSIDs(@[@"aa:aa:aa:aa:aa:aa", @"bb:bb:bb:bb:bb:bb"], &currentNetworkInfoCalled)
-                                           interfaceAddress:InterfaceAddress(@"192.0.2.1", &addressCalled)
-                                                    warning:&warn];
-    XCTAssertEqualObjects(networkID, @"WIFI-aa:aa:aa:aa:aa:aa-bb:bb:bb:bb:bb:bb");
-    XCTAssertFalse(addressCalled);
-}
-
-- (void)testWiFiNetworkIDFallsBackToInterfaceAddress {
-    BOOL currentNetworkInfoCalled = NO, addressCalled = NO;
-    NSError *warn;
-    NSString *networkID = [NetworkID wifiNetworkIDWithBSSID:nil
-                                   currentNetworkInfoBSSIDs:CurrentNetworkInfoBSSIDs(@[], &currentNetworkInfoCalled)
-                                           interfaceAddress:InterfaceAddress(@"192.0.2.1", &addressCalled)
-                                                    warning:&warn];
-    XCTAssertEqualObjects(networkID, @"WIFI-192.0.2.1");
-    XCTAssertNil(warn);
-    XCTAssertTrue(currentNetworkInfoCalled);
-    XCTAssertTrue(addressCalled);
-}
-
-- (void)testWiFiNetworkIDWithoutAnySource {
-    BOOL currentNetworkInfoCalled = NO, addressCalled = NO;
-    NSError *warn;
-    NSString *networkID = [NetworkID wifiNetworkIDWithBSSID:nil
-                                   currentNetworkInfoBSSIDs:CurrentNetworkInfoBSSIDs(@[], &currentNetworkInfoCalled)
-                                           interfaceAddress:InterfaceAddress(nil, &addressCalled)
-                                                    warning:&warn];
-    XCTAssertEqualObjects(networkID, @"WIFI");
-    XCTAssertNotNil(warn);
-    XCTAssertTrue([warn.localizedDescription containsString:@"no address"], @"%@", warn.localizedDescription);
-}
-
-#if TARGET_OS_IPHONE
-// On iOS and Mac Catalyst, getNetworkIDWithReachability uses the NEHotspotNetwork BSSID for Wi-Fi only.
-- (void)testGetNetworkIDUsesBSSIDOnlyForWiFi {
-    if (@available(iOS 12.0, macOS 10.14, *)) {
-        DefaultRouteMonitor *reachability = [[DefaultRouteMonitor alloc] init];
-        NSError *warn;
-
-        NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
-                                              andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
-                                                    tunnelWholeDevice:YES
-                                                            wifiBSSID:@"e4:38:83:e6:c0:b1"
-                                                              warning:&warn];
-        XCTAssertEqualObjects(networkID, @"WIFI-e4:38:83:e6:c0:b1");
-        XCTAssertNil(warn);
-
-        networkID = [NetworkID getNetworkIDWithReachability:reachability
-                                    andCurrentNetworkStatus:NetworkReachabilityReachableViaCellular
-                                          tunnelWholeDevice:YES
-                                                  wifiBSSID:@"e4:38:83:e6:c0:b1"
-                                                    warning:&warn];
-        XCTAssertTrue([networkID hasPrefix:@"MOBILE"], @"%@", networkID);
-        XCTAssertFalse([networkID containsString:@"e4:38"], @"%@", networkID);
-
-        // networkIDWithReachability is the same, without the VPN check.
-        networkID = [NetworkID networkIDWithReachability:reachability
-                                 andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
-                                               wifiBSSID:@"e4:38:83:e6:c0:b1"
-                                                 warning:&warn];
-        XCTAssertEqualObjects(networkID, @"WIFI-e4:38:83:e6:c0:b1");
-        XCTAssertNil(warn);
-    }
-}
-#endif
-
-// The VPN check applies only when the library is used in non-VPN mode.
-- (void)testVPNNetworkIDOnlyInNonVPNMode {
-    XCTAssertNil([NetworkID vpnNetworkIDWithTunnelWholeDevice:YES]);
-}
-
-@end
-
-
-/// FakeBSSIDFetcher records fetches so that tests can complete them in any order.
-@interface FakeBSSIDFetcher : NSObject
-@property (nonatomic) BOOL completesImmediately;
-@property (nonatomic, copy, nullable) NSString *immediateBSSID;
-@end
-
-@implementation FakeBSSIDFetcher {
-    NSLock *lock;
-    NSMutableArray<WiFiNetworkInfoFetchCompletion> *completions;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        lock = [[NSLock alloc] init];
-        completions = [NSMutableArray array];
-    }
-    return self;
-}
-
-- (WiFiNetworkInfoFetcher)fetcher {
-    return ^(WiFiNetworkInfoFetchCompletion completion) {
-        [self->lock lock];
-        [self->completions addObject:completion];
-        BOOL completesImmediately = self.completesImmediately;
-        NSString *immediateBSSID = self.immediateBSSID;
-        [self->lock unlock];
-        if (completesImmediately) {
-            completion(immediateBSSID);
-        }
-    };
-}
-
-- (NSUInteger)fetchCount {
-    [lock lock];
-    NSUInteger count = completions.count;
-    [lock unlock];
-    return count;
-}
-
-- (void)completeFetch:(NSUInteger)index withBSSID:(NSString *_Nullable)bssid {
-    [lock lock];
-    WiFiNetworkInfoFetchCompletion completion = completions[index];
-    [lock unlock];
-    completion(bssid);
-}
-
-@end
-
-static NSString *const TestBSSID = @"e4:38:83:e6:c0:b1";
-static NSString *const TestBSSIDNetworkID = @"WIFI-e4:38:83:e6:c0:b1";
-static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
-
-/// FakeNetworkIDBuilder builds network IDs as PsiphonTunnel does, and counts the builds.
-@interface FakeNetworkIDBuilder : NSObject
-/// Built when there is no BSSID. Defaults to TestFallbackNetworkID.
-@property (atomic, copy) NSString *fallbackNetworkID;
-/// Whether fallbackNetworkID may be kept. Defaults to YES.
-@property (atomic) BOOL fallbackStable;
-/// Called on each build, on the building thread.
-@property (atomic, copy, nullable) void (^onBuild)(void);
-@property (readonly) NSUInteger buildCount;
-- (WiFiNetworkIDBuilder)builder;
-@end
-
-@implementation FakeNetworkIDBuilder {
-    NSLock *lock;
-    NSUInteger builds;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        lock = [[NSLock alloc] init];
-        _fallbackNetworkID = TestFallbackNetworkID;
-        _fallbackStable = YES;
-    }
-    return self;
-}
-
-- (NSUInteger)buildCount {
-    [lock lock];
-    NSUInteger count = builds;
-    [lock unlock];
-    return count;
-}
-
-- (WiFiNetworkIDBuilder)builder {
-    return ^NSString *(NSString *_Nullable bssid, BOOL *outStable) {
-        [self->lock lock];
-        self->builds++;
-        [self->lock unlock];
-        void (^onBuild)(void) = self.onBuild;
-        if (onBuild != nil) {
-            onBuild();
-        }
-        if (bssid != nil) {
-            return [@"WIFI-" stringByAppendingString:bssid];
-        }
-        *outStable = self.fallbackStable;
-        return self.fallbackNetworkID;
-    };
-}
-
-@end
-
-@interface WiFiNetworkInfoTests : XCTestCase
-@end
-
-@implementation WiFiNetworkInfoTests {
-    FakeBSSIDFetcher *fetcher;
-    FakeNetworkIDBuilder *builder;
-    WiFiNetworkInfo *wifiNetworkInfo;
-}
-
-- (void)setUp {
-    fetcher = [[FakeBSSIDFetcher alloc] init];
-    builder = [[FakeNetworkIDBuilder alloc] init];
-    // Long enough that tests not about the timeout never reach it.
-    [self useTimeout:5];
-}
-
-- (void)useTimeout:(NSTimeInterval)timeout {
-    wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithFetcher:[fetcher fetcher] timeout:timeout logger:nil];
-}
-
-/// Runs work on a background thread and waits for its result, running action on the calling thread 100 ms after
-/// work starts.
-- (NSString *_Nullable)onBackgroundThreadElapsed:(NSTimeInterval *_Nullable)outElapsed
-                                    whileRunning:(void (^_Nullable)(void))action
-                                             run:(NSString *_Nullable (^)(void))work {
-    __block NSString *result;
-    __block NSTimeInterval elapsed;
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSTimeInterval start = NSProcessInfo.processInfo.systemUptime;
-        result = work();
-        elapsed = NSProcessInfo.processInfo.systemUptime - start;
-        dispatch_semaphore_signal(done);
-    });
-    if (action != nil) {
-        [NSThread sleepForTimeInterval:0.1];
-        action();
-    }
-    XCTAssertEqual(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)), 0);
-    if (outElapsed != NULL) {
-        *outElapsed = elapsed;
-    }
-    return result;
-}
-
-/// Looks up the network ID on a background thread, as tunnel-core does, and waits for the result. XCTest runs tests
-/// on the main thread, where lookups never wait.
-- (NSString *_Nullable)lookupElapsed:(NSTimeInterval *_Nullable)outElapsed {
-    return [self lookupElapsed:outElapsed whileRunning:nil];
-}
-
-/// As lookupElapsed:, running action on the calling thread 100 ms after the lookup starts.
-- (NSString *_Nullable)lookupElapsed:(NSTimeInterval *_Nullable)outElapsed
-                        whileRunning:(void (^_Nullable)(void))action {
-    WiFiNetworkInfo *wifiNetworkInfo = self->wifiNetworkInfo;
-    WiFiNetworkIDBuilder build = [self->builder builder];
-    return [self onBackgroundThreadElapsed:outElapsed whileRunning:action run:^NSString *{
-        return [wifiNetworkInfo networkIDWithBuilder:build];
-    }];
-}
-
-/// Waits for the BSSID on a background thread, as PsiphonTunnel start does, and returns how long that took.
-- (NSTimeInterval)waitForBSSIDWhileRunning:(void (^_Nullable)(void))action {
-    NSTimeInterval elapsed;
-    WiFiNetworkInfo *wifiNetworkInfo = self->wifiNetworkInfo;
-    [self onBackgroundThreadElapsed:&elapsed whileRunning:action run:^NSString *{
-        [wifiNetworkInfo waitForBSSID];
-        return nil;
-    }];
-    return elapsed;
-}
-
-- (void)testNotStartedReturnsNilWithoutFetching {
-    NSTimeInterval elapsed;
-    XCTAssertNil([self lookupElapsed:&elapsed]);
-    XCTAssertLessThan(elapsed, 0.5);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 0);
-    XCTAssertEqual(builder.buildCount, 0);
-}
-
-- (void)testNonWiFiNetworkHasNoNetworkID {
-    [wifiNetworkInfo startUsingWiFi:NO];
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    NSTimeInterval elapsed;
-    XCTAssertNil([self lookupElapsed:&elapsed]);
-    XCTAssertLessThan(elapsed, 0.5);
-    XCTAssertEqual(fetcher.fetchCount, 0);
-    XCTAssertEqual(builder.buildCount, 0);
-}
-
-- (void)testStartHasNoEffectIfStarted {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 1);
-}
-
-- (void)testKeepsBSSIDNetworkID {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 1);
-    XCTAssertTrue([wifiNetworkInfo isBSSIDPending]);
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-    XCTAssertEqualObjects([wifiNetworkInfo networkIDWithBuilder:[builder builder]], TestBSSIDNetworkID,
-                          @"kept network ID not returned on the main thread");
-
-    // The network ID is built once, and kept.
-    XCTAssertEqual(builder.buildCount, 1);
-    XCTAssertEqual(fetcher.fetchCount, 1);
-}
-
-- (void)testSynchronousFetcher {
-    fetcher.completesImmediately = YES;
-    fetcher.immediateBSSID = TestBSSID;
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-}
-
-- (void)testLookupWaitsForPendingBSSID {
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed;
-    NSString *networkID = [self lookupElapsed:&elapsed whileRunning:^{
-        [self->fetcher completeFetch:0 withBSSID:TestBSSID];
-    }];
-    XCTAssertEqualObjects(networkID, TestBSSIDNetworkID);
-    XCTAssertGreaterThan(elapsed, 0.05);
-    XCTAssertLessThan(elapsed, 2);
-}
-
-// A BSSID that is not fetched in time is not used for the network, even once it arrives.
-- (void)testTimeoutKeepsFallbackNetworkID {
-    [self useTimeout:0.2];
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed;
-    XCTAssertEqualObjects([self lookupElapsed:&elapsed], TestFallbackNetworkID);
-    XCTAssertGreaterThanOrEqual(elapsed, 0.15);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:&elapsed], TestFallbackNetworkID);
-    XCTAssertLessThan(elapsed, 0.1);
-    XCTAssertEqual(builder.buildCount, 1);
-}
-
-// The timeout runs from the start of the network's fetch, not from each lookup.
-- (void)testTimeoutIsSharedByLookups {
-    [self useTimeout:0.3];
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [NSThread sleepForTimeInterval:0.35];
-
-    NSTimeInterval elapsed;
-    XCTAssertEqualObjects([self lookupElapsed:&elapsed], TestFallbackNetworkID);
-    XCTAssertLessThan(elapsed, 0.1);
-}
-
-// Until a lookup decides that there is no BSSID, a BSSID fetched after the timeout is still used.
-- (void)testBSSIDFetchedAfterTimeoutBeforeAnyLookupIsUsed {
-    [self useTimeout:0.1];
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [NSThread sleepForTimeInterval:0.2];
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-}
-
-// The BSSID cannot arrive while the main thread waits for it, so a lookup on the main thread decides without it.
-- (void)testMainThreadLookupKeepsFallbackNetworkID {
-    XCTAssertTrue([NSThread isMainThread]);
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval start = NSProcessInfo.processInfo.systemUptime;
-    XCTAssertEqualObjects([wifiNetworkInfo networkIDWithBuilder:[builder builder]], TestFallbackNetworkID);
-    XCTAssertLessThan(NSProcessInfo.processInfo.systemUptime - start, 0.5);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-    XCTAssertEqual(builder.buildCount, 1);
-}
-
-- (void)testWaitForBSSIDWaitsForFetch {
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed = [self waitForBSSIDWhileRunning:^{
-        [self->fetcher completeFetch:0 withBSSID:TestBSSID];
-    }];
-    XCTAssertGreaterThan(elapsed, 0.05);
-    XCTAssertLessThan(elapsed, 2);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-}
-
-- (void)testWaitForBSSIDTimeoutDecidesWithoutBSSID {
-    [self useTimeout:0.2];
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed = [self waitForBSSIDWhileRunning:nil];
-    XCTAssertGreaterThanOrEqual(elapsed, 0.15);
-    XCTAssertLessThan(elapsed, 2);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-}
-
-- (void)testWaitForBSSIDReturnsImmediatelyOnMainThread {
-    XCTAssertTrue([NSThread isMainThread]);
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval start = NSProcessInfo.processInfo.systemUptime;
-    [wifiNetworkInfo waitForBSSID];
-    XCTAssertLessThan(NSProcessInfo.processInfo.systemUptime - start, 0.5);
-
-    // Not waiting on the main thread does not decide the BSSID.
-    XCTAssertTrue([wifiNetworkInfo isBSSIDPending]);
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-}
-
-// If the network changes while start waits for the BSSID, it waits for the BSSID of the new network.
-- (void)testWaitForBSSIDFollowsNetworkChange {
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed = [self waitForBSSIDWhileRunning:^{
-        [self->wifiNetworkInfo networkChangedUsingWiFi:YES];
-        [self->fetcher completeFetch:0 withBSSID:@"aa:aa:aa:aa:aa:aa"];
-        [NSThread sleepForTimeInterval:0.1];
-        [self->fetcher completeFetch:1 withBSSID:@"bb:bb:bb:bb:bb:bb"];
-    }];
-    XCTAssertGreaterThan(elapsed, 0.15);
-    XCTAssertLessThan(elapsed, 2);
-    XCTAssertEqualObjects([self lookupElapsed:nil], @"WIFI-bb:bb:bb:bb:bb:bb");
-}
-
-// Bare "WIFI" identifies no network, so it is not kept, and the next lookup builds again.
-- (void)testUnstableNetworkIDIsNotKept {
-    builder.fallbackNetworkID = @"WIFI";
-    builder.fallbackStable = NO;
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:nil];
-    XCTAssertEqualObjects([self lookupElapsed:nil], @"WIFI");
-
-    builder.fallbackNetworkID = TestFallbackNetworkID;
-    builder.fallbackStable = YES;
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-
-    // A fallback that changes, such as the interface address, does not change the kept network ID.
-    builder.fallbackNetworkID = @"WIFI-192.0.2.2";
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-    XCTAssertEqual(builder.buildCount, 2);
-}
-
-// Concurrent lookups that build different network IDs all return the one that is kept.
-- (void)testConcurrentLookupsAgree {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:nil];
-
-    WiFiNetworkInfo *wifiNetworkInfo = self->wifiNetworkInfo;
-    NSLock *lock = [[NSLock alloc] init];
-    __block int builds = 0;
-    NSMutableArray<NSString *> *results = [NSMutableArray array];
-    dispatch_group_t group = dispatch_group_create();
-    for (int i = 0; i < 8; i++) {
-        dispatch_group_async(group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSString *networkID = [wifiNetworkInfo networkIDWithBuilder:^NSString *(NSString *bssid, BOOL *outStable) {
-                [lock lock];
-                int build = ++builds;
-                [lock unlock];
-                // Overlap the builds.
-                [NSThread sleepForTimeInterval:0.05];
-                return [NSString stringWithFormat:@"WIFI-192.0.2.%d", build];
-            }];
-            [lock lock];
-            [results addObject:networkID];
-            [lock unlock];
-        });
-    }
-    XCTAssertEqual(dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)), 0);
-
-    [lock lock];
-    XCTAssertEqual(results.count, 8U);
-    XCTAssertEqual([NSSet setWithArray:results].count, 1U, @"%@", results);
-    [lock unlock];
-}
-
-- (void)testNetworkChangeChoosesNewNetworkID {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 2);
-    XCTAssertTrue([wifiNetworkInfo isBSSIDPending]);
-
-    NSString *networkID = [self lookupElapsed:nil whileRunning:^{
-        [self->fetcher completeFetch:1 withBSSID:@"bb:bb:bb:bb:bb:bb"];
-    }];
-    XCTAssertEqualObjects(networkID, @"WIFI-bb:bb:bb:bb:bb:bb");
-}
-
-// The fallback is kept only for the network on which the BSSID was too slow.
-- (void)testNetworkChangeAfterTimeoutUsesBSSID {
-    [self useTimeout:0.1];
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    [fetcher completeFetch:1 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-}
-
-- (void)testStaleResultIsDiscarded {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 2);
-
-    // A late result of the fetch for the previous network must not be used.
-    [fetcher completeFetch:0 withBSSID:@"aa:aa:aa:aa:aa:aa"];
-    XCTAssertTrue([wifiNetworkInfo isBSSIDPending]);
-
-    NSString *networkID = [self lookupElapsed:nil whileRunning:^{
-        [self->fetcher completeFetch:1 withBSSID:@"bb:bb:bb:bb:bb:bb"];
-    }];
-    XCTAssertEqualObjects(networkID, @"WIFI-bb:bb:bb:bb:bb:bb");
-}
-
-- (void)testNetworkChangeToNonWiFi {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-
-    [wifiNetworkInfo networkChangedUsingWiFi:NO];
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-    NSTimeInterval elapsed;
-    XCTAssertNil([self lookupElapsed:&elapsed]);
-    XCTAssertLessThan(elapsed, 0.5);
-    XCTAssertEqual(fetcher.fetchCount, 1);
-}
-
-// A network ID built for a network that changed during the build is returned, but not kept for the new network.
-- (void)testNetworkIDBuiltAcrossNetworkChangeIsNotKept {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-
-    WiFiNetworkInfo *wifiNetworkInfo = self->wifiNetworkInfo;
-    __block BOOL changed = NO;
-    builder.onBuild = ^{
-        if (!changed) {
-            changed = YES;
-            [wifiNetworkInfo networkChangedUsingWiFi:YES];
-        }
-    };
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-    builder.onBuild = nil;
-    XCTAssertTrue([wifiNetworkInfo isBSSIDPending]);
-
-    NSString *networkID = [self lookupElapsed:nil whileRunning:^{
-        [self->fetcher completeFetch:1 withBSSID:@"bb:bb:bb:bb:bb:bb"];
-    }];
-    XCTAssertEqualObjects(networkID, @"WIFI-bb:bb:bb:bb:bb:bb");
-}
-
-- (void)testPlaceholderBSSIDIsRejected {
-    [wifiNetworkInfo startUsingWiFi:YES];
-    [fetcher completeFetch:0 withBSSID:@"02:00:00:00:00:00"];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-}
-
-- (void)testAcceptedBSSID {
-    XCTAssertNil([WiFiNetworkInfo acceptedBSSID:nil]);
-    XCTAssertNil([WiFiNetworkInfo acceptedBSSID:@""]);
-    for (NSString *placeholder in @[@"00:00:00:00:00:00", @"0:0:0:0:0:0", @"02:00:00:00:00:00", @"2:0:0:0:0:0"]) {
-        XCTAssertNil([WiFiNetworkInfo acceptedBSSID:placeholder], @"%@", placeholder);
-    }
-
-    // Accepted BSSIDs are returned exactly as reported.
-    for (NSString *bssid in @[TestBSSID, @"E4:38:83:E6:C0:B1", @"0:1a:2b:3c:4d:5e"]) {
-        XCTAssertEqualObjects([WiFiNetworkInfo acceptedBSSID:bssid], bssid);
-    }
-}
-
-- (void)testStopReleasesWaitersAndDiscardsResults {
-    [wifiNetworkInfo startUsingWiFi:YES];
-
-    NSTimeInterval elapsed;
-    XCTAssertNil([self lookupElapsed:&elapsed whileRunning:^{
-        [self->wifiNetworkInfo stop];
-    }]);
-    XCTAssertLessThan(elapsed, 2);
-    XCTAssertFalse([wifiNetworkInfo isBSSIDPending]);
-
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertNil([self lookupElapsed:nil]);
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    XCTAssertEqual(fetcher.fetchCount, 1);
-
-    // Restarting begins a new network.
-    fetcher.completesImmediately = YES;
-    fetcher.immediateBSSID = TestBSSID;
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestBSSIDNetworkID);
-    XCTAssertEqual(builder.buildCount, 1);
-}
-
-- (void)testLogsNeverContainBSSID {
-    NSMutableArray<NSString *> *messages = [NSMutableArray array];
-    NSLock *messagesLock = [[NSLock alloc] init];
-    dispatch_semaphore_t logged = dispatch_semaphore_create(0);
-    wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithFetcher:[fetcher fetcher]
-                                                       timeout:0.1
-                                                        logger:^(NSString * _Nonnull message) {
-        [messagesLock lock];
-        [messages addObject:message];
-        [messagesLock unlock];
-        dispatch_semaphore_signal(logged);
-    }];
-
-    // One message each for: the timeout; the late BSSID; a fetched BSSID; and a lookup on the main thread.
-    [wifiNetworkInfo startUsingWiFi:YES];
-    XCTAssertEqualObjects([self lookupElapsed:nil], TestFallbackNetworkID);
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    [fetcher completeFetch:1 withBSSID:TestBSSID];
-
-    [wifiNetworkInfo networkChangedUsingWiFi:YES];
-    XCTAssertEqualObjects([wifiNetworkInfo networkIDWithBuilder:[builder builder]], TestFallbackNetworkID);
-
-    for (int i = 0; i < 4; i++) {
-        XCTAssertEqual(dispatch_semaphore_wait(logged, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)), 0);
-    }
-    [messagesLock lock];
-    XCTAssertEqual(messages.count, 4U, @"%@", messages);
-    for (NSString *message in messages) {
-        XCTAssertFalse([message.lowercaseString containsString:@"e4:38"], @"%@", message);
-    }
-    [messagesLock unlock];
-}
-
-// The default fetcher must complete, with or without a Wi-Fi network, entitlement or permission. The XCTest host
-// has no wifi-info entitlement, so NEHotspotNetwork returns nil here.
-- (void)testDefaultFetcherCompletes {
-    XCTestExpectation *completed = [self expectationWithDescription:@"completed"];
-    [WiFiNetworkInfo defaultFetcher](^(NSString *_Nullable bssid) {
-        [completed fulfill];
-    });
-    [self waitForExpectations:@[completed] timeout:10];
-}
-
-@end
-
-
-#if TARGET_OS_IPHONE
-@interface PsiphonTunnel (StartTesting)
-- (NSString *)getConfig:(BOOL *)usingNoticeFiles error:(NSError **)err;
-- (void)logMessage:(NSString *)message;
-- (BOOL)startPsiphonLibraryWithConfig:(NSString *)configStr
-                embeddedServerEntries:(NSString *)embeddedServerEntries
-            embeddedServerEntriesPath:(NSString *)embeddedServerEntriesPath
-                     usingNoticeFiles:(BOOL)usingNoticeFiles;
-- (NSString *)getNetworkID;
-@end
-
+/// WiFiReachability reports Wi-Fi as its reachabilityStatus, with the given path state. NetworkID treats the
+/// reachability as a DefaultRouteMonitor, so with a nil path state there is no active interface address, and with a
+/// non-nil one the network type is the path state's status.
 @interface WiFiReachability : NSObject <ReachabilityProtocol>
+@property (atomic, nullable) NetworkPathState *pathState;
 @end
 
 @implementation WiFiReachability
@@ -1120,11 +519,288 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
 - (NSString *)reachabilityStatusDebugInfo {
     return @"Wi-Fi";
 }
-// NetworkInterface treats the reachability as a DefaultRouteMonitor. Without a path state, the fallback network ID
-// has no interface address.
+@end
+
+/// PathStateSequenceReachability returns the next of pathStates on each read of pathState, repeating the last one,
+/// and counts the reads.
+@interface PathStateSequenceReachability : WiFiReachability
+@property (atomic, copy) NSArray<NetworkPathState *> *pathStates;
+@property (atomic) NSUInteger pathStateReads;
+@end
+
+@implementation PathStateSequenceReachability
 - (NetworkPathState *)pathState {
+    NSArray<NetworkPathState *> *states = self.pathStates;
+    NSUInteger reads = self.pathStateReads;
+    self.pathStateReads = reads + 1;
+    return states[MIN(reads, states.count - 1)];
+}
+@end
+
+/// Returns YES if NetworkID takes the network type and active interface from the reachability's path state, as on
+/// iOS 12 and later. Before iOS 12, NetworkID ignores the path state and uses the status argument and the live
+/// interfaces.
+static BOOL NetworkIDUsesPathState(void) {
+    if (@available(iOS 12.0, *)) {
+        return YES;
+    }
+    return NO;
+}
+
+static NSString *const NetworkIDUsesPathStateSkipReason =
+    @"the network type and active interface come from the path state only on iOS 12 and later";
+
+@interface NetworkIDTests : XCTestCase
+@end
+
+@implementation NetworkIDTests
+
+// tunnelWholeDevice is YES in these tests to skip the VPN network ID check, which depends on the test host.
+
+- (void)testWiFiNetworkIDWithoutActiveInterfaceIsBareWiFi {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:[[WiFiReachability alloc] init]
+                                          andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
+                                                tunnelWholeDevice:YES
+                                                          warning:&warn];
+    XCTAssertEqualObjects(networkID, @"WIFI");
+    XCTAssertNotNil(warn);
+    XCTAssertTrue([warn.localizedDescription containsString:@"network path state nil"], @"%@", warn.localizedDescription);
+}
+
+- (void)testWiFiNetworkIDWithoutInterfaceAddressIsBareWiFi {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    WiFiReachability *reachability = [[WiFiReachability alloc] init];
+    // No interface has this name, so the active interface has no address.
+    reachability.pathState = [[NetworkPathState alloc] initWithNetworkReachability:NetworkReachabilityReachableViaWiFi
+                                                                              path:nil
+                                                        defaultActiveInterfaceName:@"psiphontest0"];
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
+                                          andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
+                                                tunnelWholeDevice:YES
+                                                          warning:&warn];
+    XCTAssertEqualObjects(networkID, @"WIFI");
+    XCTAssertNotNil(warn);
+    XCTAssertTrue([warn.localizedDescription containsString:@"interface address nil"], @"%@", warn.localizedDescription);
+}
+
+/// Returns the first live interface, by name, with an address that getInterfaceAddress selects, and sets outAddress
+/// to the value getInterfaceAddress returns for it: an IPv4 address or an IPv6 /32 prefix. Returns nil if no
+/// interface qualifies.
+- (NSString *_Nullable)addressedInterface:(NSString **)outAddress {
+    NSError *err;
+    NSSet<NSString *> *activeInterfaces = [NetworkInterface activeInterfaces:&err];
+    XCTAssertNil(err);
+
+    NSArray<NSString *> *names = [activeInterfaces.allObjects sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *interfaceName in names) {
+        NSString *address = [NetworkInterface getInterfaceAddress:interfaceName error:&err];
+        XCTAssertNil(err);
+        if (address != nil) {
+            // tunnel-core treats everything after the first "-" in a network ID as private.
+            XCTAssertFalse([address containsString:@"-"], @"%@", address);
+            *outAddress = address;
+            return interfaceName;
+        }
+    }
     return nil;
 }
+
+/// Returns a fake reachability whose path state has the given status and, as its active interface,
+/// addressedInterface. Returns nil if no interface qualifies.
+- (WiFiReachability *_Nullable)reachabilityWithStatus:(NetworkReachability)status
+                                   addressedInterface:(NSString **)outAddress {
+    NSString *interfaceName = [self addressedInterface:outAddress];
+    if (interfaceName == nil) {
+        return nil;
+    }
+    WiFiReachability *reachability = [[WiFiReachability alloc] init];
+    reachability.pathState = [[NetworkPathState alloc] initWithNetworkReachability:status
+                                                                              path:nil
+                                                        defaultActiveInterfaceName:interfaceName];
+    return reachability;
+}
+
+/// Checks that the network ID for a path state with the given status and an addressed interface is the type followed
+/// by the interface's address. A mismatch is tolerated only if the interface's address has since changed.
+- (void)assertNetworkIDWithStatus:(NetworkReachability)status includesActiveInterfaceAddressAfterType:(NSString *)type {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    NSString *address;
+    WiFiReachability *reachability = [self reachabilityWithStatus:status addressedInterface:&address];
+    if (reachability == nil) {
+        XCTSkip(@"no interface with a selectable address");
+    }
+
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
+                                          andCurrentNetworkStatus:status
+                                                tunnelWholeDevice:YES
+                                                          warning:&warn];
+    NSString *expected = [NSString stringWithFormat:@"%@-%@", type, address];
+    if (![networkID isEqualToString:expected]) {
+        NSString *interfaceName = reachability.pathState.defaultActiveInterfaceName;
+        NSError *err;
+        NSString *currentAddress = [NetworkInterface getInterfaceAddress:interfaceName error:&err];
+        XCTAssertNil(err);
+        if (![currentAddress isEqualToString:address]) {
+            XCTSkip(@"%@ address changed during the test", interfaceName);
+        }
+    }
+    XCTAssertEqualObjects(networkID, expected);
+    XCTAssertNil(warn);
+}
+
+- (void)testWiFiNetworkIDIncludesActiveInterfaceAddress {
+    [self assertNetworkIDWithStatus:NetworkReachabilityReachableViaWiFi includesActiveInterfaceAddressAfterType:@"WIFI"];
+}
+
+- (void)testWiredNetworkIDIncludesActiveInterfaceAddress {
+    [self assertNetworkIDWithStatus:NetworkReachabilityReachableViaWired
+        includesActiveInterfaceAddressAfterType:@"WIRED"];
+}
+
+// The tests below construct their path states, so they do not depend on the host's interfaces. No interface has the
+// name psiphontest0, so an address-based network ID for it is the bare type with an "interface address nil"
+// warning; a nil interface name gives a "no active interface" warning instead.
+
+/// Returns a fake reachability whose path state has the given status and active interface name.
+static WiFiReachability *ReachabilityWithPathState(NetworkReachability status, NSString *_Nullable interfaceName) {
+    WiFiReachability *reachability = [[WiFiReachability alloc] init];
+    reachability.pathState = [[NetworkPathState alloc] initWithNetworkReachability:status
+                                                                              path:nil
+                                                        defaultActiveInterfaceName:interfaceName];
+    return reachability;
+}
+
+// The network type comes from the path state, not from a status argument that lags it during a handoff.
+- (void)testNetworkIDTypeComesFromPathStateNotStaleStatus {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    NSError *warn;
+    NSString *networkID =
+        [NetworkID getNetworkIDWithReachability:ReachabilityWithPathState(NetworkReachabilityReachableViaWired, @"psiphontest0")
+                        andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
+                              tunnelWholeDevice:YES
+                                        warning:&warn];
+    XCTAssertEqualObjects(networkID, @"WIRED");
+    XCTAssertTrue([warn.localizedDescription containsString:@"interface address nil"], @"%@", warn.localizedDescription);
+
+    networkID =
+        [NetworkID getNetworkIDWithReachability:ReachabilityWithPathState(NetworkReachabilityReachableViaWiFi, @"psiphontest0")
+                        andCurrentNetworkStatus:NetworkReachabilityReachableViaWired
+                              tunnelWholeDevice:YES
+                                        warning:&warn];
+    XCTAssertEqualObjects(networkID, @"WIFI");
+    XCTAssertTrue([warn.localizedDescription containsString:@"interface address nil"], @"%@", warn.localizedDescription);
+}
+
+- (void)testNotReachablePathStateIsUnknown {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    NetworkReachability statuses[] = {
+        NetworkReachabilityNotReachable,
+        NetworkReachabilityReachableViaWiFi,
+        NetworkReachabilityReachableViaCellular,
+        NetworkReachabilityReachableViaWired,
+        NetworkReachabilityReachableViaLoopback,
+        NetworkReachabilityReachableViaUnknown,
+    };
+    NSArray *interfaceNames = @[@"psiphontest0", [NSNull null]];
+    for (id interfaceName in interfaceNames) {
+        WiFiReachability *reachability =
+            ReachabilityWithPathState(NetworkReachabilityNotReachable, interfaceName == [NSNull null] ? nil : interfaceName);
+        for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+            NSError *warn;
+            NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
+                                                  andCurrentNetworkStatus:statuses[i]
+                                                        tunnelWholeDevice:YES
+                                                                  warning:&warn];
+            XCTAssertEqualObjects(networkID, @"UNKNOWN", @"%@, status %ld", interfaceName, (long)statuses[i]);
+            XCTAssertNil(warn, @"%@, status %ld", interfaceName, (long)statuses[i]);
+        }
+    }
+}
+
+// One lookup reads the path state once, so the type and the interface name come from the same observation even if
+// the monitor's state changes during the lookup.
+- (void)testNetworkIDReadsPathStateOnce {
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
+    PathStateSequenceReachability *reachability = [[PathStateSequenceReachability alloc] init];
+    // The two states give different types and different warnings, so a second read for the interface would show.
+    reachability.pathStates = @[
+        [[NetworkPathState alloc] initWithNetworkReachability:NetworkReachabilityReachableViaWired
+                                                         path:nil
+                                   defaultActiveInterfaceName:nil],
+        [[NetworkPathState alloc] initWithNetworkReachability:NetworkReachabilityReachableViaWiFi
+                                                         path:nil
+                                   defaultActiveInterfaceName:@"psiphontest0"],
+    ];
+
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
+                                          andCurrentNetworkStatus:NetworkReachabilityReachableViaWiFi
+                                                tunnelWholeDevice:YES
+                                                          warning:&warn];
+    XCTAssertEqualObjects(networkID, @"WIRED");
+    XCTAssertTrue([warn.localizedDescription containsString:@"no active interface"], @"%@", warn.localizedDescription);
+    XCTAssertFalse([warn.localizedDescription containsString:@"interface address nil"], @"%@", warn.localizedDescription);
+    XCTAssertEqual(reachability.pathStateReads, 1U);
+}
+
+// Before iOS 12, the network type comes from the status argument, and the path state is not read even if it
+// conflicts with the status.
+- (void)testLegacyNetworkIDIgnoresPathState {
+    if (NetworkIDUsesPathState()) {
+        XCTSkip(@"the path state is ignored only before iOS 12");
+    }
+
+    PathStateSequenceReachability *reachability = [[PathStateSequenceReachability alloc] init];
+    reachability.pathStates = @[
+        [[NetworkPathState alloc] initWithNetworkReachability:NetworkReachabilityReachableViaWiFi
+                                                         path:nil
+                                   defaultActiveInterfaceName:@"psiphontest0"],
+    ];
+
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:reachability
+                                          andCurrentNetworkStatus:NetworkReachabilityNotReachable
+                                                tunnelWholeDevice:YES
+                                                          warning:&warn];
+    XCTAssertEqualObjects(networkID, @"UNKNOWN");
+    XCTAssertNil(warn);
+    XCTAssertEqual(reachability.pathStateReads, 0U);
+}
+
+@end
+
+
+#if TARGET_OS_IPHONE
+@interface PsiphonTunnel (StartTesting)
+- (NSString *)getConfig:(BOOL *)usingNoticeFiles error:(NSError **)err;
+- (void)logMessage:(NSString *)message;
+- (BOOL)startPsiphonLibraryWithConfig:(NSString *)configStr
+                embeddedServerEntries:(NSString *)embeddedServerEntries
+            embeddedServerEntriesPath:(NSString *)embeddedServerEntriesPath
+                     usingNoticeFiles:(BOOL)usingNoticeFiles;
+- (NSString *)getNetworkID;
 @end
 
 /// StartTestTunnel replaces only GoPsiStart. In its place, it requests the network ID as tunnel-core first does
@@ -1133,9 +809,7 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
 @property (atomic) BOOL startSucceeds;
 @property (atomic) NSUInteger libraryStarts;
 @property (atomic) BOOL libraryStartedOnMainThread;
-@property (atomic) BOOL bssidPendingAtLibraryStart;
 @property (atomic, copy) NSString *networkIDAtLibraryStart;
-@property (atomic, weak) WiFiNetworkInfo *wifiNetworkInfoForTest;
 @property (atomic, copy) void (^onNetworkIDWarning)(NSString *message);
 @end
 
@@ -1160,7 +834,6 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
             embeddedServerEntriesPath:(NSString *)embeddedServerEntriesPath
                      usingNoticeFiles:(BOOL)usingNoticeFiles {
     self.libraryStartedOnMainThread = [NSThread isMainThread];
-    self.bssidPendingAtLibraryStart = [self.wifiNetworkInfoForTest isBSSIDPending];
     self.networkIDAtLibraryStart = [self getNetworkID];
     self.libraryStarts++;
     return self.startSucceeds;
@@ -1172,8 +845,6 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
 
 @implementation PsiphonTunnelStartTests {
     StartTestTunnel *tunnel;
-    FakeBSSIDFetcher *fetcher;
-    XCTestExpectation *_Nullable fetchStarted;
 }
 
 - (void)setUp {
@@ -1181,23 +852,6 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
     XCTAssertTrue([NSThread isMainThread]);
     tunnel = [[StartTestTunnel alloc] init];
     tunnel.startSucceeds = YES;
-    fetcher = [[FakeBSSIDFetcher alloc] init];
-    WiFiNetworkInfoFetcher fakeFetcher = [fetcher fetcher];
-    __weak PsiphonTunnelStartTests *weakSelf = self;
-    // The fetch is completed explicitly by each test, well before this timeout, so a start that waited for the
-    // timeout would fail the test rather than pass slowly.
-    WiFiNetworkInfo *wifiNetworkInfo = [[WiFiNetworkInfo alloc] initWithFetcher:^(WiFiNetworkInfoFetchCompletion completion) {
-        fakeFetcher(completion);
-        PsiphonTunnelStartTests *strongSelf = weakSelf;
-        XCTestExpectation *started;
-        @synchronized (strongSelf) {
-            started = strongSelf->fetchStarted;
-            strongSelf->fetchStarted = nil;
-        }
-        [started fulfill];
-    } timeout:30 logger:nil];
-    tunnel.wifiNetworkInfoForTest = wifiNetworkInfo;
-    [tunnel setValue:wifiNetworkInfo forKey:@"wifiNetworkInfo"];
     [tunnel setValue:[[WiFiReachability alloc] init] forKey:@"reachability"];
     // Skip the VPN network ID check, which depends on the test host.
     [tunnel setValue:@YES forKey:@"tunnelWholeDevice"];
@@ -1208,24 +862,23 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
     [super tearDown];
 }
 
-// On the main thread, the BSSID cannot arrive while start: blocks, so start: does not wait for it. It starts the
-// library before returning, and tunnel-core's first network ID request, on the main thread, chooses the fallback
-// network ID, which is kept when the BSSID arrives.
-- (void)testMainThreadStartIsSynchronousWithoutBSSID {
+// start: on the main thread starts the library before returning, and tunnel-core's first network ID request, on
+// the main thread, gets the Wi-Fi network ID. WiFiReachability has no path state, so from iOS 12 it is bare "WIFI";
+// before iOS 12 the live interfaces are used, so it can also be "WIFI-" followed by an address.
+- (void)testMainThreadStartIsSynchronous {
     XCTAssertTrue([tunnel start:NO]);
 
     XCTAssertEqual(tunnel.libraryStarts, 1U);
     XCTAssertTrue(tunnel.libraryStartedOnMainThread);
-    XCTAssertTrue(tunnel.bssidPendingAtLibraryStart, @"start: waited for the BSSID on the main thread");
     XCTAssertEqual([tunnel getConnectionState], PsiphonConnectionStateConnecting);
     NSString *networkID = tunnel.networkIDAtLibraryStart;
-    XCTAssertNotNil(networkID);
-    XCTAssertFalse([networkID containsString:TestBSSID], @"%@", networkID);
-
-    // The BSSID arrives on the main queue once start: has returned.
-    XCTAssertEqual([fetcher fetchCount], 1U);
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    XCTAssertEqualObjects([tunnel getNetworkID], networkID);
+    if (NetworkIDUsesPathState()) {
+        XCTAssertEqualObjects(networkID, @"WIFI");
+    } else {
+        BOOL isWiFi = [networkID isEqualToString:@"WIFI"] ||
+            ([networkID hasPrefix:@"WIFI-"] && networkID.length > @"WIFI-".length);
+        XCTAssertTrue(isWiFi, @"%@", networkID);
+    }
 }
 
 // start: on the main thread returns the result of starting the library.
@@ -1239,6 +892,11 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
 }
 
 - (void)testNetworkIDWarningDoesNotBlockLookup {
+    // Before iOS 12 the lookup uses the live interfaces, so it may not warn.
+    if (!NetworkIDUsesPathState()) {
+        XCTSkip(@"%@", NetworkIDUsesPathStateSkipReason);
+    }
+
     XCTestExpectation *logged = [self expectationWithDescription:@"network ID warning delivered"];
     NSLock *providerLock = [[NSLock alloc] init];
     tunnel.onNetworkIDWarning = ^(NSString *message) {
@@ -1260,33 +918,6 @@ static NSString *const TestFallbackNetworkID = @"WIFI-192.0.2.1";
     XCTAssertTrue(started);
     XCTAssertEqualObjects(tunnel.networkIDAtLibraryStart, @"WIFI");
     [self waitForExpectations:@[logged] timeout:5];
-}
-
-// Off the main thread, start: waits for the BSSID before starting the library, so tunnel-core's first network ID
-// request gets the BSSID network ID.
-- (void)testBackgroundStartWaitsForBSSID {
-    XCTestExpectation *started = [self expectationWithDescription:@"BSSID fetch started"];
-    @synchronized (self) {
-        fetchStarted = started;
-    }
-    XCTestExpectation *returned = [self expectationWithDescription:@"start: returned"];
-    __block BOOL result = NO;
-    StartTestTunnel *startTunnel = tunnel;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        result = [startTunnel start:NO];
-        [returned fulfill];
-    });
-
-    [self waitForExpectations:@[started] timeout:5];
-    XCTAssertEqual(tunnel.libraryStarts, 0U, @"library started before the BSSID was decided");
-    [fetcher completeFetch:0 withBSSID:TestBSSID];
-    [self waitForExpectations:@[returned] timeout:5];
-
-    XCTAssertTrue(result);
-    XCTAssertEqual(tunnel.libraryStarts, 1U);
-    XCTAssertFalse(tunnel.libraryStartedOnMainThread);
-    XCTAssertFalse(tunnel.bssidPendingAtLibraryStart);
-    XCTAssertEqualObjects(tunnel.networkIDAtLibraryStart, TestBSSIDNetworkID);
 }
 
 @end

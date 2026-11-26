@@ -26,6 +26,17 @@
 #import <Network/Network.h>
 #import "DefaultRouteMonitor.h"
 
+static uint32_t IPv6First32Bits(const struct in6_addr *addr) {
+    const uint8_t *b = addr->s6_addr;
+    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
+}
+
+// See comment in header.
+NSString *NetworkInterfaceFormatIPv6Prefix(const struct in6_addr *addr) {
+    uint32_t prefix = IPv6First32Bits(addr);
+    return [NSString stringWithFormat:@"%x:%x::/32", (unsigned int)(prefix >> 16), (unsigned int)(prefix & 0xffff)];
+}
+
 // See comment in header.
 const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifaddrs *_Nullable interfaces,
                                                               const char *_Nullable interfaceName) {
@@ -33,7 +44,9 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
         return NULL;
     }
 
-    const struct ifaddrs *firstIPv6 = NULL;
+    const struct ifaddrs *bestIPv6 = NULL;
+    BOOL bestIsUniqueLocal = NO;
+    uint32_t bestPrefix = 0;
 
     for (const struct ifaddrs *interface = interfaces; interface != NULL; interface = interface->ifa_next) {
 
@@ -53,15 +66,6 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
             continue;
         }
 
-        if (addr->sa_family == AF_INET6) {
-            // Ignore IPv6 link-local addresses https://developer.apple.com/forums/thread/128215?answerId=403310022#403310022
-            // TODO: consider excluding other IP ranges
-            const struct sockaddr_in6 *addr6 = (const struct sockaddr_in6 *)addr;
-            if (IN6_IS_ADDR_LINKLOCAL(&addr6->sin6_addr)) {
-                continue;
-            }
-        }
-
         if (addr->sa_family == AF_INET) {
             // Skip IPv4 addresses that do not identify the network:
             // - self-assigned link-local, 169.254.0.0/16
@@ -74,12 +78,27 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
             return interface;
         }
 
-        if (firstIPv6 == NULL) {
-            firstIPv6 = interface;
+        // Only the first 32 bits of an IPv6 address are used in the network ID: a coarse value that stays the
+        // same on a network is preferred over a precise one that changes on it, as full addresses do with the
+        // delegated prefix and privacy address rotation. Unique local (fc00::/7) is preferred over global
+        // unicast (2000::/3) because the local router chooses it, so it survives ISP prefix changes. Taking
+        // the lowest prefix makes the result independent of list order. Other ranges are ignored.
+        uint32_t prefix = IPv6First32Bits(&((const struct sockaddr_in6 *)addr)->sin6_addr);
+        BOOL isUniqueLocal = (prefix & 0xfe000000) == 0xfc000000;
+        BOOL isGlobal = (prefix & 0xe0000000) == 0x20000000;
+        if (!isUniqueLocal && !isGlobal) {
+            continue;
+        }
+        if (bestIPv6 == NULL ||
+            (isUniqueLocal && !bestIsUniqueLocal) ||
+            (isUniqueLocal == bestIsUniqueLocal && prefix < bestPrefix)) {
+            bestIPv6 = interface;
+            bestIsUniqueLocal = isUniqueLocal;
+            bestPrefix = prefix;
         }
     }
 
-    return firstIPv6;
+    return bestIPv6;
 }
 
 @implementation NetworkInterface
@@ -102,6 +121,13 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
     if (interface == NULL) {
         freeifaddrs(interfaces);
         return nil;
+    }
+
+    if (interface->ifa_addr->sa_family == AF_INET6) {
+        NSString *prefix =
+            NetworkInterfaceFormatIPv6Prefix(&((const struct sockaddr_in6 *)interface->ifa_addr)->sin6_addr);
+        freeifaddrs(interfaces);
+        return prefix;
     }
 
     char addr[NI_MAXHOST];
@@ -190,50 +216,36 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
     return nil;
 }
 
-+ (NSString*)getActiveInterfaceWithReachability:(id<ReachabilityProtocol>)reachability
-                        andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                                          error:(NSError *_Nullable *_Nonnull)outError {
++ (NSString*)getActiveInterfaceWithPathState:(NetworkPathState *_Nullable)pathState
+                     andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                       error:(NSError *_Nullable *_Nonnull)outError {
 
     *outError = nil;
 
     NSString *activeInterface;
 
     if (@available(iOS 12.0, *)) {
-        // Note: it is hypothetically possible that NWPathMonitor emits a new path after
-        // getActiveInterfaceWithReachability is called. This creates a race between
-        // DefaultRouteMonitor updating its internal state and getActiveInterfaceWithReachability
-        // retrieving the active interface from that internal state.
-        // Therefore the following sequence of events is possible:
-        // - NWPathMonitor emits path that is satisfied or satisfiable
-        // - ReachabilityProtocol consumer sees there is connectivity and calls
-        //   getActiveInterfaceWithReachability
-        // - NWPathMonitor emits path that is unsatisfied or invalid
-        // - getActiveInterfaceWithReachability either: a) does not observe update and returns the
-        //   previously active interface; or b) observes update and cannot find active interface.
-        // In both scenarios the reachability state will change to unreachable and it is up to the
-        // consumer to call getActiveInterfaceWithReachability again once it becomes reachable again.
-        DefaultRouteMonitor *gwMonitor = (DefaultRouteMonitor*)reachability;
-        if (gwMonitor == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: DefaultRouteMonitor nil"}];
-            return @"";
-        }
-        NetworkPathState *state = [gwMonitor pathState];
-        if (state == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: network path state nil"}];
+        // Note: pathState is a snapshot, and DefaultRouteMonitor may observe a new path after it was taken.
+        // The interface returned may then no longer be active, and its address, read later, may have changed
+        // or be missing.
+        if (pathState == nil) {
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithPathState: network path state nil"}];
             return @"";
         }
         // Note: could fallback on heuristic for iOS <12.0 if nil
-        activeInterface = state.defaultActiveInterfaceName;
+        activeInterface = pathState.defaultActiveInterfaceName;
     } else {
+        // Limitation: currentNetworkStatus and the interface heuristic below are not taken from one observation,
+        // so during a handoff the network ID can briefly pair the type of one network with the address of another.
         NSError *err;
         NSSet<NSString*>* upIffList = [NetworkInterface activeInterfaces:&err];
         if (err != nil) {
-            NSString *localizedDescription = [NSString stringWithFormat:@"getActiveInterfaceWithReachability: error getting active interfaces %@", err.localizedDescription];
+            NSString *localizedDescription = [NSString stringWithFormat:@"getActiveInterfaceWithPathState: error getting active interfaces %@", err.localizedDescription];
             *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: localizedDescription}];
             return @"";
         }
         if (upIffList == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: no active interfaces"}];
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithPathState: no active interfaces"}];
             return @"";
         }
         activeInterface = [NetworkInterface getActiveInterface:upIffList
@@ -241,24 +253,24 @@ const struct ifaddrs *_Nullable NetworkInterfaceSelectAddress(const struct ifadd
     }
 
     if (activeInterface == nil) {
-        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: no active interface"}];
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithPathState: no active interface"}];
         return @"";
     }
 
     return activeInterface;
 }
 
-+ (NSString*)getActiveInterfaceAddressWithReachability:(id<ReachabilityProtocol>)reachability
-                               andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
-                                                 error:(NSError *_Nullable *_Nonnull)outError {
++ (NSString*)getActiveInterfaceAddressWithPathState:(NetworkPathState *_Nullable)pathState
+                            andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                              error:(NSError *_Nullable *_Nonnull)outError {
 
     *outError = nil;
 
     NSError *err;
     NSString *activeInterface =
-        [NetworkInterface getActiveInterfaceWithReachability:reachability
-                                     andCurrentNetworkStatus:currentNetworkStatus
-                                                       error:&err];
+        [NetworkInterface getActiveInterfaceWithPathState:pathState
+                                  andCurrentNetworkStatus:currentNetworkStatus
+                                                    error:&err];
     if (err != nil) {
         NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface %@", err.localizedDescription];
         *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"

@@ -21,6 +21,7 @@ package ca.psiphon;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -528,7 +529,7 @@ public class PsiphonTunnel {
                                         // to set isVpnMode = false and store fetched tactics under a distinct
                                         // Network ID ("VPN").
 
-                                        return PsiphonTunnel.getNetworkID(context, false);
+                                        return PsiphonTunnel.getNetworkID(context, false, null);
                                     }
 
                                     @Override
@@ -641,7 +642,8 @@ public class PsiphonTunnel {
 
         @Override
         public String getNetworkID() {
-            return PsiphonTunnel.getNetworkID(mHostService.getContext(), mPsiphonTunnel.isVpnMode());
+            return PsiphonTunnel.getNetworkID(mHostService.getContext(), mPsiphonTunnel.isVpnMode(),
+                    mNetworkMonitor.getActiveNetworkHolder());
         }
     }
 
@@ -715,7 +717,7 @@ public class PsiphonTunnel {
         return hasRoute ? 1 : 0;
     }
 
-    private static String getNetworkID(Context context, boolean isVpnMode) {
+    private static String getNetworkID(Context context, boolean isVpnMode, AtomicReference<Network> monitoredNetwork) {
         // TODO: getActiveNetworkInfo is deprecated in API 29; once
         // getActiveNetworkInfo is no longer available, use
         // mActiveNetworkType which is updated by mNetworkMonitor.
@@ -768,22 +770,34 @@ public class PsiphonTunnel {
                 // memory leaks on devices running Android versions earlier than N."
                 WifiManager wifiManager = (WifiManager) context.getApplicationContext()
                         .getSystemService(Context.WIFI_SERVICE);
+                // Limitation: getConnectionInfo is not tied to the active or monitored network.
+                // On API 31+ devices that support concurrent Wi-Fi connections, an app that
+                // itself creates a second connection, e.g. with WifiNetworkSpecifier, is given
+                // that connection's WifiInfo, so while it is up the network ID uses its IPv4
+                // address and not the internet network's. The IPv4 source is left unchanged
+                // because existing clients' stored state is keyed by its value.
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
-                    String wifiNetworkID = wifiInfo.getBSSID();
-                    if (wifiNetworkID == null) {
-                        // Per
-                        // https://developer.android.com/reference/android/net/wifi/WifiInfo#getBSSID()
-                        // "The BSSID may be null, if there is no network currently connected."
-                        wifiNetworkID = "NOT_CONNECTED";
-                    } else if (wifiNetworkID.equals("02:00:00:00:00:00")) {
-                        // "02:00:00:00:00:00" is reported when the app does not have the ACCESS_COARSE_LOCATION permission:
-                        // https://developer.android.com/about/versions/marshmallow/android-6.0-changes#behavior-hardware-id
-                        // The Psiphon client should allow the user to opt-in to this permission. If they decline, fail over
-                        // to using the WiFi IP address.
-                        wifiNetworkID = String.valueOf(wifiInfo.getIpAddress());
+                    // The BSSID is deliberately not used: it identifies a single access point
+                    // radio rather than the network, and reading it requires location permission.
+                    //
+                    // Limitation: getIpAddress is IPv4-only and returns 0 when there is no IPv4
+                    // address. In that case a coarse IPv6 prefix is used instead, when one is
+                    // available; otherwise, including before API 21, all such networks share
+                    // "WIFI-0". The IPv6 value is deliberately only the first 32 bits: a full
+                    // address changes with the delegated prefix and with privacy addresses, and
+                    // a network ID that is too coarse is preferred over one that changes on the
+                    // same network.
+                    int ipAddress = wifiInfo.getIpAddress();
+                    String ipv6Prefix = null;
+                    if (ipAddress == 0) {
+                        ipv6Prefix = getWifiIPv6NetworkIDPrefix(connectivityManager, monitoredNetwork);
                     }
-                    networkID += "-" + wifiNetworkID;
+                    // ipAddress is a signed little-endian int, so it is negative when the last
+                    // octet is 128 or more: 192.168.1.200 gives "WIFI--939415360". This is
+                    // harmless, as only the text before the first "-" is interpreted, and the
+                    // format is kept because existing clients' stored state is keyed by it.
+                    networkID += "-" + (ipv6Prefix != null ? ipv6Prefix : String.valueOf(ipAddress));
                 }
             } catch (java.lang.Exception e) {
                 // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
@@ -804,6 +818,111 @@ public class PsiphonTunnel {
         }
 
         return networkID;
+    }
+
+    // Returns the IPv6 network ID prefix, see selectIPv6NetworkIDPrefix, or null when
+    // there is none or it cannot be determined. So that the result does not depend on
+    // other connected Wi-Fi networks, a single non-VPN Wi-Fi network is used when
+    // possible: first, from API 23, the active network, which when it is not a VPN is
+    // this app's default network; then the network mNetworkMonitor's request tracks,
+    // validated or not, which matters when the active network is a VPN that hides the
+    // underlying network. Otherwise all non-VPN Wi-Fi networks with internet capability
+    // are pooled.
+    //
+    // Limitations: when pooled, two connected Wi-Fi networks may give either's prefix.
+    // The monitored network is assumed to be the one the tunnel uses, which holds when
+    // the host's bindToDevice only calls VpnService.protect and Android matches the
+    // request to the default network; a host that binds its sockets to another network
+    // gets the prefix of the network Android ranks best. The monitor's DNS servers and
+    // change detection rest on the same assumption.
+    //
+    // monitoredNetwork is passed as its holder because passing the Network itself would
+    // put a cast to Network, an API 21 class, in the callers, which run at every API level.
+    private static String getWifiIPv6NetworkIDPrefix(
+            ConnectivityManager connectivityManager, AtomicReference<Network> monitoredNetwork) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return null;
+        }
+        try {
+            Network selected = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Network activeNetwork = connectivityManager.getActiveNetwork();
+                NetworkCapabilities activeCapabilities = activeNetwork == null ?
+                        null : connectivityManager.getNetworkCapabilities(activeNetwork);
+                if (activeCapabilities != null &&
+                        activeCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                        !activeCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    selected = activeNetwork;
+                }
+            }
+            if (selected == null) {
+                Network monitored = monitoredNetwork == null ? null : monitoredNetwork.get();
+                NetworkCapabilities monitoredCapabilities = monitored == null ?
+                        null : connectivityManager.getNetworkCapabilities(monitored);
+                if (monitoredCapabilities != null &&
+                        monitoredCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                        !monitoredCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    selected = monitored;
+                }
+            }
+            Network[] networks = selected != null ?
+                    new Network[] {selected} : connectivityManager.getAllNetworks();
+            List<InetAddress> addresses = new ArrayList<>();
+            for (Network network : networks) {
+                NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
+                if (capabilities == null ||
+                        !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                        !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    continue;
+                }
+                LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
+                if (linkProperties == null) {
+                    continue;
+                }
+                for (LinkAddress linkAddress : linkProperties.getLinkAddresses()) {
+                    addresses.add(linkAddress.getAddress());
+                }
+            }
+            return selectIPv6NetworkIDPrefix(addresses);
+        } catch (java.lang.Exception | LinkageError e) {
+            // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE,
+            // or a LinkageError such as NoSuchMethodError on a ROM with a broken platform API.
+            return null;
+        }
+    }
+
+    // Selects a deterministic IPv6 value for the network ID from addresses: only unique local
+    // (fc00::/7) and global unicast (2000::/3) addresses are considered, unique local is
+    // preferred, and within that class the address with the numerically lowest first 32
+    // bits is chosen. Returns those 32 bits formatted as, e.g., "fd12:3456::/32", or null
+    // when no address qualifies. Integer.toHexString is used as it is locale-independent.
+    private static String selectIPv6NetworkIDPrefix(Collection<InetAddress> addresses) {
+        long selectedPrefix = -1;
+        boolean selectedIsUniqueLocal = false;
+        for (InetAddress address : addresses) {
+            if (!(address instanceof Inet6Address)) {
+                continue;
+            }
+            byte[] b = address.getAddress();
+            boolean isUniqueLocal = (b[0] & 0xfe) == 0xfc;
+            boolean isGlobal = (b[0] & 0xe0) == 0x20;
+            if (!isUniqueLocal && !isGlobal) {
+                continue;
+            }
+            long prefix = ((b[0] & 0xffL) << 24) | ((b[1] & 0xff) << 16) | ((b[2] & 0xff) << 8) | (b[3] & 0xff);
+            if (selectedPrefix == -1 ||
+                    (isUniqueLocal && !selectedIsUniqueLocal) ||
+                    (isUniqueLocal == selectedIsUniqueLocal && prefix < selectedPrefix)) {
+                selectedPrefix = prefix;
+                selectedIsUniqueLocal = isUniqueLocal;
+            }
+        }
+        if (selectedPrefix == -1) {
+            return null;
+        }
+        return Integer.toHexString((int) (selectedPrefix >>> 16)) + ":" +
+                Integer.toHexString((int) (selectedPrefix & 0xffff)) + "::/32";
     }
 
     //----------------------------------------------------------------------------------------------
@@ -1416,9 +1535,18 @@ public class PsiphonTunnel {
     private static class NetworkMonitor {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
+        // Holds the network the current registration's request tracks. Null when the monitor
+        // is stopped or registering reported a failure. Each registration has its own holder,
+        // so that a callback delivered after its registration is stopped only writes to a
+        // holder that no later lookup reads; a lookup already in progress may still read it.
+        private volatile AtomicReference<Network> activeNetworkHolder;
         public NetworkMonitor(
                 NetworkChangeListener listener) {
             this.listener = listener;
+        }
+
+        private AtomicReference<Network> getActiveNetworkHolder() {
+            return activeNetworkHolder;
         }
 
         private void start(Context context) throws InterruptedException {
@@ -1433,6 +1561,7 @@ public class PsiphonTunnel {
             if (connectivityManager == null) {
                 return;
             }
+            final AtomicReference<Network> holder = new AtomicReference<>(null);
             networkCallback = new ConnectivityManager.NetworkCallback() {
                 private boolean isInitialState = true;
                 private Network currentActiveNetwork;
@@ -1543,6 +1672,12 @@ public class PsiphonTunnel {
                 public void onAvailable(Network network) {
                     super.onAvailable(network);
 
+                    // holder follows the network this request tracks, validated or
+                    // not, as the IPv6 network ID must come from that network's own
+                    // addresses. Only the change notification and the type and DNS servers
+                    // wait for validation, on API 26(O)+.
+                    holder.set(network);
+
                     // Skip on API 26(O)+ because onAvailable is guaranteed to be followed by
                     // onCapabilitiesChanged
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1554,6 +1689,10 @@ public class PsiphonTunnel {
                 @Override
                 public void onLost(Network network) {
                     super.onLost(network);
+                    Network published = holder.get();
+                    if (network.equals(published)) {
+                        holder.compareAndSet(published, null);
+                    }
                     consumeLostNetwork(network);
                 }
             };
@@ -1600,9 +1739,11 @@ public class PsiphonTunnel {
                 // would be registerDefaultNetworkCallback but a) it needs API >= 24 and b) doesn't
                 // provide a way to set up monitoring of underlying networks only when VPN transport
                 // is also active.
+                activeNetworkHolder = holder;
                 connectivityManager.requestNetwork(networkRequest, networkCallback);
             } catch (RuntimeException ignored) {
                 // Could be a security exception or any other runtime exception on customized firmwares.
+                activeNetworkHolder = null;
                 networkCallback = null;
             }
             // We are going to wait up to one second for the network callback to populate
@@ -1611,6 +1752,7 @@ public class PsiphonTunnel {
         }
 
         private void stop(Context context) {
+            activeNetworkHolder = null;
             if (networkCallback == null) {
                 return;
             }
