@@ -25,6 +25,11 @@
 //
 //	https://github.com/tailscale/tailscale/tree/v1.98.5/net/portmapper
 //
+// It also carries these later upstream fixes: 91d10d38 (query the UPnP
+// external IP before creating a mapping), 7f9de91e, 8b3b8f12, 2578d08e and
+// b7a3b1b2 (PCP nonces and releases), and bbc09979 (UPnP root device fetch
+// timeout).
+//
 // The fork exists so that Psiphon can:
 //
 //   - Bind the port mapping client's UPnP/NAT-PMP/PCP discovery and control
@@ -37,6 +42,15 @@
 //   - Probe the network for port mapping services once and then create many
 //     independent port mappings that reuse the probe result, via Client.Clone,
 //     rather than re-probing for every mapping.
+//
+//   - Create a mapping by trying every protocol in turn, starting with the
+//     ones the probe found, and report the outcome of every attempt (see
+//     Config.OnMappingOutcome). The upstream client chooses one path from the
+//     age of its last probe, which suits a caller that probes continuously.
+//
+//   - Keep what a probe learned until the network changes, rather than for
+//     a fixed time, and find out whether the network actually grants
+//     mappings by asking for a trial one (see Client.Verify).
 //
 //   - Unlink the code from Tailscale-internal boilerplate dependencies
 //     (netns, netmon, eventbus, clientmetric, logger, and others), copying
@@ -51,6 +65,7 @@ package portmapper
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -77,6 +92,11 @@ var (
 // gateway change, while a create was in flight. A mapping the gateway did
 // create is released rather than published.
 var errMappingInvalidated = errors.New("port mapping invalidated during creation")
+
+// errProbeInvalidated is returned by Probe when the discovery state was
+// reset, by Close or by a gateway or address change, while the probe was in
+// flight. Its result describes a network the client is no longer on.
+var errProbeInvalidated = errors.New("port mapping discovery invalidated during probe")
 
 // ProbeResult is the result of a portmapper probe, saying which port mapping
 // protocols were discovered. It replaces tailscale.com/net/portmapper/
@@ -163,16 +183,37 @@ func (k *DebugKnobs) disableAll() bool {
 //
 // NAT-PMP: https://tools.ietf.org/html/rfc6886
 
-// portMapServiceTimeout is the time we wait for port mapping
-// services (UPnP, NAT-PMP, PCP) to respond before we give up and
-// decide that they're not there. Since these services are on the
-// same LAN as this machine and a single L3 hop away, we don't
-// give them much time to respond.
-const portMapServiceTimeout = 250 * time.Millisecond
+// The port mapper waits in three places, each for a different reason.
+const (
+	// discoveryWindow is how long Probe listens for port mapping services
+	// (UPnP, NAT-PMP, PCP) to announce themselves. These services are on
+	// the same LAN as this machine and a single L3 hop away, so they don't
+	// get much time to respond.
+	discoveryWindow = 250 * time.Millisecond
 
-// trustServiceStillAvailableDuration is how often we re-verify a port
-// mapping service is available.
-const trustServiceStillAvailableDuration = 10 * time.Minute
+	// knownRequestTimeout bounds a mapping request to a NAT-PMP or PCP
+	// service that discovery saw. Such a service is expected to answer, and
+	// the request is sent again meanwhile, so this only detects a service
+	// that has stopped answering. A caller may await the mapping for no
+	// more than a couple of seconds, which must leave time for the next
+	// protocol to be tried.
+	knownRequestTimeout = 1 * time.Second
+
+	// silenceDeadline is how long a mapping request to a NAT-PMP or PCP
+	// service that discovery did not see waits before the service is taken
+	// to be absent. These protocols have no negative reply of their own, so
+	// absence can only be inferred from silence.
+	silenceDeadline = 250 * time.Millisecond
+
+	// pxpRetransmitInterval is the first retransmission interval of a
+	// request to a known NAT-PMP or PCP service. It doubles after each
+	// retransmission, as in RFC 6886 section 3.1.
+	pxpRetransmitInterval = 250 * time.Millisecond
+
+	// mappingCreateTimeout bounds one background attempt to create a
+	// mapping, across every protocol it tries.
+	mappingCreateTimeout = 5 * time.Second
+)
 
 // Client is a port mapping client.
 type Client struct {
@@ -186,10 +227,20 @@ type Client struct {
 	control func(network, address string, c syscall.RawConn) error
 
 	ipAndGateway func() (gw, ip netip.Addr, ok bool)
-	onChange     func() // or nil
+	onChange     func()               // or nil
+	onOutcome    func(MappingOutcome) // or nil
 	debug        DebugKnobs
 	testPxPPort  uint16 // if non-zero, pxpPort to use for tests
 	testUPnPPort uint16 // if non-zero, uPnPPort to use for tests
+
+	// now is the clock; tests replace it.
+	now func() time.Time
+
+	// The waits default to the package constants of the same names; tests
+	// shorten them.
+	discoveryWindow     time.Duration
+	knownRequestTimeout time.Duration
+	silenceDeadline     time.Duration
 
 	mu sync.Mutex // guards following, and all fields thereof
 
@@ -207,18 +258,25 @@ type Client struct {
 	lastGW   netip.Addr
 	closed   bool
 
-	lastProbe time.Time
+	// The discovery state describes the network the client is on. It is kept
+	// until the gateway or this machine's address changes, however long ago
+	// it was learned; see invalidateMappingsLocked.
 
-	// The following PMP fields are populated during Probe
-	pmpPubIP     netip.Addr // non-zero if known
-	pmpPubIPTime time.Time  // time pmpPubIP last verified
+	// discoveryGeneration counts resets of the discovery state. A probe
+	// keeps what it learned only if the generation it started under is
+	// still current.
+	discoveryGeneration uint64
+
+	// probed is whether Probe has completed on this network.
+	probed bool
+
+	// services is what is known about each port mapping service, indexed by
+	// mappingProtocol.
+	services [3]ServiceState
+
 	pmpLastEpoch uint32
-
-	// The following PCP fields are populated during Probe
-	pcpSawTime   time.Time // time we last saw PCP was available
 	pcpLastEpoch uint32
 
-	uPnPSawTime    time.Time           // time we last saw UPnP was available
 	uPnPMetas      []uPnPDiscoResponse // UPnP UDP discovery responses
 	uPnPHTTPClient *http.Client        // Control-configured HTTP client for UPnP; nil until needed
 
@@ -268,7 +326,15 @@ type mapping interface {
 func (c *Client) HaveMapping() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.mapping != nil && c.mapping.GoodUntil().After(time.Now())
+	return c.mapping != nil && c.mapping.GoodUntil().After(c.clock())
+}
+
+// clock returns the current time.
+func (c *Client) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // pmpMapping is an already-created PMP mapping.
@@ -352,6 +418,13 @@ type Config struct {
 	// OnChange is called to run in a new goroutine whenever the port mapping
 	// status has changed. If nil, no callback is issued.
 	OnChange func()
+
+	// OnMappingOutcome is called to run in a new goroutine with the result
+	// of every attempt to create or renew a mapping that
+	// GetCachedMappingOrStartCreatingOne starts, whether or not it produced
+	// a mapping. It is not called for an attempt that was overtaken by
+	// Close or by a reconfiguration. If nil, no callback is issued.
+	OnMappingOutcome func(MappingOutcome)
 }
 
 // NewClient constructs a new portmapping [Client] from c. It will panic if any
@@ -362,6 +435,12 @@ func NewClient(c Config) *Client {
 		control:      bindToDeviceControl(c.BindToDevice),
 		ipAndGateway: c.GatewayLookupFunc,
 		onChange:     c.OnChange,
+		onOutcome:    c.OnMappingOutcome,
+
+		now:                 time.Now,
+		discoveryWindow:     discoveryWindow,
+		knownRequestTimeout: knownRequestTimeout,
+		silenceDeadline:     silenceDeadline,
 	}
 	if ret.logf == nil {
 		ret.logf = discardLogf
@@ -390,6 +469,12 @@ func bindToDeviceControl(bind func(fd int) error) func(network, address string, 
 	}
 }
 
+// SetOnMappingOutcome sets the callback described at Config.OnMappingOutcome.
+// It must be called before the client is used.
+func (c *Client) SetOnMappingOutcome(f func(MappingOutcome)) {
+	c.onOutcome = f
+}
+
 // SetGatewayLookupFunc sets the func that returns the machine's gateway IP and
 // the primary IP address for that gateway, overriding Config.GatewayLookupFunc.
 // It must be called before the client is used.
@@ -404,7 +489,8 @@ func (c *Client) SetGatewayLookupFunc(f func() (gw, myIP netip.Addr, ok bool)) {
 //
 // The returned Client has no active mapping of its own. It inherits c's logf,
 // Control (BindToDevice) hook, gateway lookup, and debug knobs, and uses the
-// supplied onChange callback (which may be nil). The caller should set the
+// supplied onChange callback (which may be nil). It has no mapping outcome
+// callback until SetOnMappingOutcome is called. The caller should set the
 // local port with SetLocalPort before creating a mapping.
 //
 // c must have completed a Probe and be otherwise idle when Clone is called;
@@ -422,19 +508,20 @@ func (c *Client) Clone(onChange func()) *Client {
 		debug:                 c.debug,
 		testPxPPort:           c.testPxPPort,
 		testUPnPPort:          c.testUPnPPort,
+		now:                   c.now,
+		discoveryWindow:       c.discoveryWindow,
+		knownRequestTimeout:   c.knownRequestTimeout,
+		silenceDeadline:       c.silenceDeadline,
 		protocol:              c.protocol,
 		preferredExternalPort: c.preferredExternalPort,
 
 		// Probe-result fields: the port mapping service discovery state.
 		lastMyIP:     c.lastMyIP,
 		lastGW:       c.lastGW,
-		lastProbe:    c.lastProbe,
-		pmpPubIP:     c.pmpPubIP,
-		pmpPubIPTime: c.pmpPubIPTime,
+		probed:       c.probed,
+		services:     c.services,
 		pmpLastEpoch: c.pmpLastEpoch,
-		pcpSawTime:   c.pcpSawTime,
 		pcpLastEpoch: c.pcpLastEpoch,
-		uPnPSawTime:  c.uPnPSawTime,
 		uPnPMetas:    c.uPnPMetas,
 	}
 }
@@ -563,15 +650,19 @@ func (c *Client) listenPacket(ctx context.Context, network, addr string) (packet
 
 func (c *Client) invalidateMappingsLocked(releaseOld bool) {
 	c.invalidateMappingLocked(releaseOld)
+	c.resetDiscoveryLocked()
+}
 
-	c.pmpPubIP = netip.Addr{}
-	c.pmpPubIPTime = time.Time{}
+// resetDiscoveryLocked discards what is known about the port mapping
+// services on the network.
+//
+// c.mu must be held.
+func (c *Client) resetDiscoveryLocked() {
+	c.discoveryGeneration++
+	c.probed = false
+	c.services = [3]ServiceState{}
 	c.pmpLastEpoch = 0
-
-	c.pcpSawTime = time.Time{}
 	c.pcpLastEpoch = 0
-
-	c.uPnPSawTime = time.Time{}
 	c.uPnPMetas = nil
 }
 
@@ -582,6 +673,7 @@ func (c *Client) invalidateMappingLocked(releaseOld bool) {
 	c.mappingGeneration++
 	if c.mapping != nil {
 		if releaseOld {
+			c.vlogf("releasing %s mapping", c.mapping.MappingType())
 			releaseMapping(c.mapping)
 		}
 		c.mapping = nil
@@ -598,46 +690,45 @@ func releaseMapping(m mapping) {
 	m.Release(ctx)
 }
 
-func (c *Client) sawPMPRecently() bool {
+// noteServiceSeenLocked records that the service answered discovery.
+//
+// c.mu must be held.
+func (c *Client) noteServiceSeenLocked(p mappingProtocol) {
+	if c.services[p] == ServiceNotSeen {
+		c.services[p] = ServiceSeen
+	}
+}
+
+// noteService records that the service refused discovery.
+func (c *Client) noteService(p mappingProtocol, state ServiceState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sawPMPRecentlyLocked()
+	c.services[p] = state
 }
 
-func (c *Client) sawPMPRecentlyLocked() bool {
-	return c.pmpPubIP.IsValid() && c.pmpPubIPTime.After(time.Now().Add(-trustServiceStillAvailableDuration))
-}
-
-func (c *Client) sawPCPRecently() bool {
+// noteAttempt records that the service granted or refused a mapping to a
+// create that began under generation. It records nothing when the mapping
+// was invalidated meanwhile, since the client may be on another network.
+func (c *Client) noteAttempt(p mappingProtocol, state ServiceState, generation uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sawPCPRecentlyLocked()
-}
-
-func (c *Client) sawPCPRecentlyLocked() bool {
-	return c.pcpSawTime.After(time.Now().Add(-trustServiceStillAvailableDuration))
-}
-
-func (c *Client) sawUPnPRecently() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sawUPnPRecentlyLocked()
-}
-
-func (c *Client) sawUPnPRecentlyLocked() bool {
-	return c.uPnPSawTime.After(time.Now().Add(-trustServiceStillAvailableDuration))
+	if c.mappingGeneration == generation {
+		c.services[p] = state
+	}
 }
 
 // RespondingPortMappingTypes reports which port mapping protocols have
-// responded recently (within trustServiceStillAvailableDuration) for this
-// Client's current network, based on the discovery state gathered by Probe and
-// by mapping attempts. Because probe state is shared by Clone, a Client cloned
-// from a probed Client reports the probe's responding types until it makes its
-// own observations.
+// responded on this Client's current network, to Probe or to a mapping
+// request. A protocol that responded only to refuse a mapping is included.
+// Because discovery state is shared by Clone, a Client cloned from a probed
+// Client reports the probe's responding types until it makes its own
+// observations.
 func (c *Client) RespondingPortMappingTypes() (upnp, pmp, pcp bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sawUPnPRecentlyLocked(), c.sawPMPRecentlyLocked(), c.sawPCPRecentlyLocked()
+	return c.services[protocolUPnP] != ServiceNotSeen,
+		c.services[protocolPMP] != ServiceNotSeen,
+		c.services[protocolPCP] != ServiceNotSeen
 }
 
 // closeCloserOnContextDone starts a new goroutine to call c.Close
@@ -677,13 +768,14 @@ func IsNoMappingError(err error) bool {
 // GetCachedMappingOrStartCreatingOne quickly returns with our current cached portmapping, if any.
 // If there's not one, it starts up a background goroutine to create one.
 // If the background goroutine ends up creating one, the onChange hook registered with the
-// NewClient constructor (if any) will fire.
+// NewClient constructor (if any) will fire. Whether or not it creates one, the
+// mapping outcome callback (if any) fires with the result.
 func (c *Client) GetCachedMappingOrStartCreatingOne() (external netip.AddrPort, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Do we have an existing mapping that's valid?
-	now := time.Now()
+	now := c.clock()
 	if m := c.mapping; m != nil {
 		if now.Before(m.GoodUntil()) {
 			if now.After(m.RenewAfter()) {
@@ -697,6 +789,18 @@ func (c *Client) GetCachedMappingOrStartCreatingOne() (external netip.AddrPort, 
 	return netip.AddrPort{}, false
 }
 
+// needsProbe reports whether a create at time now should probe first: the
+// client has no discovery state for this network, and no mapping it can
+// simply reuse.
+func (c *Client) needsProbe(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.probed || c.closed {
+		return false
+	}
+	return c.mapping == nil || !now.Before(c.mapping.RenewAfter())
+}
+
 // maybeStartMappingLocked starts a createMapping goroutine up, if one isn't already running.
 //
 // c.mu must be held.
@@ -708,7 +812,7 @@ func (c *Client) maybeStartMappingLocked() {
 }
 
 func (c *Client) createMapping() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mappingCreateTimeout)
 	defer cancel()
 
 	defer func() {
@@ -718,6 +822,7 @@ func (c *Client) createMapping() {
 	}()
 
 	mapping, _, err := c.createOrGetMapping(ctx)
+	c.reportOutcome(mapping, err)
 	if err != nil {
 		if !IsNoMappingError(err) {
 			c.logf("createOrGetMapping: %v", err)
@@ -740,10 +845,13 @@ func (c *Client) createMapping() {
 var wildcardIP = netip.MustParseAddr("0.0.0.0")
 
 // createOrGetMapping either creates a new mapping or returns a cached
-// valid one.
+// valid one. To create one it asks every enabled protocol in turn, in the
+// order given by attemptPlanLocked, until one grants a mapping.
 //
 // If no mapping is available, the error will be of type
-// NoMappingError; see IsNoMappingError.
+// NoMappingError; see IsNoMappingError. It wraps ErrPortMappingRefused when
+// a gateway answered without granting a mapping, and
+// ErrNoPortMappingServices when nothing answered.
 func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, external netip.AddrPort, err error) {
 	if c.debug.disableAll() {
 		return nil, netip.AddrPort{}, NoMappingError{ErrPortMappingDisabled}
@@ -759,7 +867,7 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 		return nil, netip.AddrPort{}, NoMappingError{ErrGatewayIPv6}
 	}
 
-	now := time.Now()
+	now := c.clock()
 
 	// Log what kind of portmap we obtained
 	reusedExisting := false
@@ -808,6 +916,27 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 			c.mapping.GoodUntil().Unix(), c.mapping.RenewAfter().Unix())
 	}()
 
+	// A client that knows nothing about this network, because it was never
+	// probed or because the gateway or its own address has changed since,
+	// probes before it asks for a mapping. UPnP in particular cannot be
+	// asked without what discovery learns.
+	if c.needsProbe(now) {
+		if _, err := c.Probe(ctx); err != nil {
+			c.vlogf("probe before mapping failed: %v", err)
+		}
+
+		// The probe looked the gateway up for itself. Ask for the mapping
+		// on the network that it probed, which may no longer be the one
+		// found above.
+		gw, myIP, ok = c.gatewayAndSelfIP()
+		if !ok {
+			return nil, netip.AddrPort{}, NoMappingError{ErrGatewayRange}
+		}
+		if gw.Is6() {
+			return nil, netip.AddrPort{}, NoMappingError{ErrGatewayIPv6}
+		}
+	}
+
 	c.mu.Lock()
 	localPort := c.localPort
 	protocol := c.protocol
@@ -845,174 +974,71 @@ func (c *Client) createOrGetMapping(ctx context.Context) (mapping mapping, exter
 		prevPort = c.preferredExternalPort
 	}
 
-	if c.debug.DisablePCP() && c.debug.DisablePMP() {
-		c.mu.Unlock()
-		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
-			return nil, external, nil
+	req := mappingRequest{
+		gw:         gw,
+		internal:   internalAddr,
+		protocol:   protocol,
+		prevPort:   prevPort,
+		generation: generation,
+	}
+	if m, ok := c.mapping.(*pcpMapping); ok {
+		// Reuse the existing mapping's nonce so renewals target the same mapping.
+		req.pcpNonce = m.nonce
+	} else {
+		// New mappings need a random nonce.
+		rand.Read(req.pcpNonce[:])
+	}
+	plan := c.attemptPlanLocked()
+	c.mu.Unlock()
+
+	// Try every step of the plan until one is granted a mapping.
+	refused := false
+	for i, step := range plan {
+		if ctx.Err() == context.Canceled {
+			return nil, netip.AddrPort{}, ctx.Err()
 		}
-		c.vlogf("fallback to UPnP due to PCP and PMP being disabled failed")
-		return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
+		if c.mappingInvalidated(generation) {
+			return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
+		}
+
+		var outcome attemptOutcome
+		if step.upnp {
+			stepCtx, cancel := c.upnpStepContext(ctx, plan[i+1:])
+			external, outcome = c.tryUPnP(stepCtx, req)
+			cancel()
+		} else {
+			external, outcome = c.tryPxP(ctx, req, step)
+		}
+		switch outcome {
+		case attemptGranted:
+			return nil, external, nil
+		case attemptAbandoned:
+			if ctx.Err() == context.Canceled {
+				return nil, netip.AddrPort{}, ctx.Err()
+			}
+			return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
+		case attemptRefused:
+			refused = true
+		}
+	}
+	if c.mappingInvalidated(generation) {
+		return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
 	}
 
-	// If we just did a Probe (e.g. via netchecker) but didn't
-	// find a PMP service, bail out early rather than probing
-	// again. Cuts down latency for most clients.
-	haveRecentPMP := c.sawPMPRecentlyLocked()
-	haveRecentPCP := c.sawPCPRecentlyLocked()
-
-	// Since PMP mapping may require multiple calls, and it's not clear from the outset
-	// whether we're doing a PCP or PMP call, initialize the PMP mapping here,
-	// and only return it once completed.
-	//
-	// PCP returns all the information necessary for a mapping in a single packet, so we can
-	// construct it upon receiving that packet.
-	m := &pmpMapping{
-		c:        c,
-		gw:       netip.AddrPortFrom(gw, c.pxpPort()),
-		internal: internalAddr,
-		protocol: protocol,
-	}
-	if haveRecentPMP {
-		m.external = netip.AddrPortFrom(c.pmpPubIP, m.external.Port())
-	}
-	if c.lastProbe.After(now.Add(-5*time.Second)) && !haveRecentPMP && !haveRecentPCP {
-		c.mu.Unlock()
-		// fallback to UPnP portmapping
-		if external, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
-			return nil, external, nil
-		}
-		c.vlogf("fallback to UPnP due to no PCP and PMP failed")
-		return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
+	// No protocol granted a mapping, so what is known about the network may
+	// be incomplete or out of date: the probe may have missed a service, or
+	// one may since have moved or gone. The next create probes again before
+	// it asks.
+	c.mu.Lock()
+	if c.mappingGeneration == generation {
+		c.probed = false
 	}
 	c.mu.Unlock()
 
-	uc, err := c.listenPacket(ctx, "udp4", ":0")
-	if err != nil {
-		return nil, netip.AddrPort{}, err
+	if refused {
+		return nil, netip.AddrPort{}, NoMappingError{ErrPortMappingRefused}
 	}
-	defer uc.Close()
-
-	uc.SetReadDeadline(time.Now().Add(portMapServiceTimeout))
-	defer closeCloserOnContextDone(ctx, uc)()
-
-	pxpAddr := netip.AddrPortFrom(gw, c.pxpPort())
-
-	preferPCP := !c.debug.DisablePCP() && (c.debug.DisablePMP() || (!haveRecentPMP && haveRecentPCP))
-
-	// Create a mapping, defaulting to PMP unless only PCP was seen recently.
-	if preferPCP {
-		// TODO replace wildcardIP here with previous external if known.
-		// Only do PCP mapping in the case when PMP did not appear to be available recently.
-		pkt := buildPCPRequestMappingPacket(myIP, localPort, prevPort, pcpMapLifetimeSec, wildcardIP, protocol)
-		if _, err := uc.WriteToUDPAddrPort(pkt, pxpAddr); err != nil {
-			if treatAsLostUDP(err) {
-				err = NoMappingError{ErrNoPortMappingServices}
-			}
-			return nil, netip.AddrPort{}, err
-		}
-	} else {
-		// Ask for our external address if needed.
-		if !m.external.Addr().IsValid() {
-			if _, err := uc.WriteToUDPAddrPort(pmpReqExternalAddrPacket, pxpAddr); err != nil {
-				if treatAsLostUDP(err) {
-					err = NoMappingError{ErrNoPortMappingServices}
-				}
-				return nil, netip.AddrPort{}, err
-			}
-		}
-
-		pkt := buildPMPRequestMappingPacket(localPort, prevPort, pmpMapLifetimeSec, protocol)
-		if _, err := uc.WriteToUDPAddrPort(pkt, pxpAddr); err != nil {
-			if treatAsLostUDP(err) {
-				err = NoMappingError{ErrNoPortMappingServices}
-			}
-			return nil, netip.AddrPort{}, err
-		}
-	}
-
-	res := make([]byte, 1500)
-	for {
-		n, src, err := uc.ReadFromUDPAddrPort(res)
-		if err != nil {
-			if ctx.Err() == context.Canceled {
-				return nil, netip.AddrPort{}, err
-			}
-			// fallback to UPnP portmapping
-			if mapping, ok := c.getUPnPPortMapping(ctx, gw, internalAddr, prevPort, generation); ok {
-				return nil, mapping, nil
-			}
-			return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
-		}
-		src = netaddrUnmap(src)
-		if !src.IsValid() {
-			continue
-		}
-		if src == pxpAddr {
-			version := res[0]
-			switch version {
-			case pmpVersion:
-				pres, ok := parsePMPResponse(res[:n])
-				if !ok {
-					c.logf("unexpected PMP response: % 02x", res[:n])
-					continue
-				}
-				if pres.ResultCode != 0 {
-					return nil, netip.AddrPort{}, NoMappingError{fmt.Errorf("PMP response Op=0x%x,Res=0x%x", pres.OpCode, pres.ResultCode)}
-				}
-				if pres.OpCode == pmpOpReply|pmpOpMapPublicAddr {
-					m.external = netip.AddrPortFrom(pres.PublicAddr, m.external.Port())
-				}
-				if pres.OpCode == pmpOpReply|pmpMapOp(protocol) {
-					m.external = netip.AddrPortFrom(m.external.Addr(), pres.ExternalPort)
-					d := time.Duration(pres.MappingValidSeconds) * time.Second
-					now := time.Now()
-					m.goodUntil = now.Add(d)
-					m.renewAfter = now.Add(d / 2) // renew in half the time
-					m.epoch = pres.SecondsSinceEpoch
-				}
-			case pcpVersion:
-				pcpMapping, err := parsePCPMapResponse(res[:n], protocol)
-				if err != nil {
-					c.logf("failed to get PCP mapping: %v", err)
-					// PCP should only have a single packet response
-					return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
-				}
-				pcpMapping.c = c
-				pcpMapping.internal = m.internal
-				pcpMapping.gw = netip.AddrPortFrom(gw, c.pxpPort())
-				c.mu.Lock()
-				// The mapping exists on the gateway. If the client was closed
-				// or the mapping invalidated meanwhile, release it -- without
-				// holding c.mu -- rather than leak it until lease expiry.
-				if c.closed || c.mappingGeneration != generation {
-					c.mu.Unlock()
-					releaseMapping(pcpMapping)
-					return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
-				}
-				c.mapping = pcpMapping
-				c.mu.Unlock()
-				return pcpMapping, pcpMapping.external, nil
-			default:
-				c.logf("unknown PMP/PCP version number: %d %v", version, res[:n])
-				return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
-			}
-		}
-
-		if m.externalValid() {
-			c.mu.Lock()
-			// The mapping exists on the gateway. If the client was closed or
-			// the mapping invalidated meanwhile, release it -- without holding
-			// c.mu -- rather than leak it until lease expiry.
-			if c.closed || c.mappingGeneration != generation {
-				c.mu.Unlock()
-				releaseMapping(m)
-				return nil, netip.AddrPort{}, NoMappingError{errMappingInvalidated}
-			}
-			c.mapping = m
-			c.mu.Unlock()
-			return nil, m.external, nil
-		}
-	}
+	return nil, netip.AddrPort{}, NoMappingError{ErrNoPortMappingServices}
 }
 
 // pmpresultcode_string.go is generated from pmpResultCode with
@@ -1118,9 +1144,9 @@ func parsePMPResponse(pkt []byte) (res pmpResponse, ok bool) {
 // Probe returns a summary of which port mapping services are
 // available on the network.
 //
-// If a probe has run recently and there haven't been any network changes since,
-// the returned result might be server from the Client's cache, without
-// sending any network traffic.
+// What Probe learns is kept until the gateway or this machine's address
+// changes. If that change happens while Probe runs, Probe returns an error
+// and keeps nothing.
 func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 	if c.debug.disableAll() {
 		return res, ErrPortMappingDisabled
@@ -1129,11 +1155,25 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 	if !ok {
 		return res, ErrGatewayRange
 	}
+
+	// What the probe learns describes the network it started on. That is
+	// kept for as long as the client stays on that network, so it must not
+	// be recorded against another one: if the gateway or this machine's
+	// address changed while the probe ran, everything is discarded, and
+	// the next mapping request probes again.
+	c.mu.Lock()
+	discoveryGeneration := c.discoveryGeneration
+	c.mu.Unlock()
 	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.discoveryGeneration != discoveryGeneration || c.lastGW != gw || c.lastMyIP != myIP {
+			c.resetDiscoveryLocked()
+			res, err = ProbeResult{}, errProbeInvalidated
+			return
+		}
 		if err == nil {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			c.lastProbe = time.Now()
+			c.probed = true
 		}
 	}()
 
@@ -1143,7 +1183,7 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 		return res, err
 	}
 	defer uc.Close()
-	ctx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, c.discoveryWindow)
 	defer cancel()
 	defer closeCloserOnContextDone(ctx, uc)()
 
@@ -1151,24 +1191,19 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 	upnpAddr := netip.AddrPortFrom(gw, c.upnpPort())
 	upnpMulticastAddr := netip.AddrPortFrom(netaddrIPv4(239, 255, 255, 250), c.upnpPort())
 
-	// Don't send probes to services that we recently learned (for
-	// the same gw/myIP) are available. See
-	// https://github.com/tailscale/tailscale/issues/1001
-	if c.sawPMPRecently() {
-		res.PMP = true
-	} else if !c.debug.DisablePMP() {
+	// Every enabled service is asked, including one already known on this
+	// network: what is known is kept for as long as the client stays on the
+	// network, and a probe is the only thing that refreshes it, for example
+	// after the gateway restarted its UPnP service at another address.
+	if !c.debug.DisablePMP() {
 		metricPMPSent.Add(1)
 		uc.WriteToUDPAddrPort(pmpReqExternalAddrPacket, pxpAddr)
 	}
-	if c.sawPCPRecently() {
-		res.PCP = true
-	} else if !c.debug.DisablePCP() {
+	if !c.debug.DisablePCP() {
 		metricPCPSent.Add(1)
 		uc.WriteToUDPAddrPort(pcpAnnounceRequest(myIP), pxpAddr)
 	}
-	if c.sawUPnPRecently() {
-		res.UPnP = true
-	} else if !c.debug.DisableUPnP() {
+	if !c.debug.DisableUPnP() {
 		// Strictly speaking, you discover UPnP services by sending an
 		// SSDP query (which uPnPPacket is) to udp/1900 on the SSDP
 		// multicast address, and then get a flood of responses back
@@ -1251,8 +1286,8 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 	var upnpResponses []uPnPDiscoResponse
 	defer func() {
 		if !res.UPnP || len(upnpResponses) == 0 {
-			// Either we didn't discover any UPnP responses or
-			// c.sawUPnPRecently() is true; don't change anything.
+			// We didn't discover any UPnP responses; don't change
+			// anything.
 			return
 		}
 
@@ -1260,7 +1295,7 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 		upnpResponses = processUPnPResponses(upnpResponses)
 
 		c.mu.Lock()
-		c.uPnPSawTime = time.Now()
+		c.noteServiceSeenLocked(protocolUPnP)
 		if !slices.Equal(c.uPnPMetas, upnpResponses) {
 			c.logf("UPnP meta changed: %+v", upnpResponses)
 			c.uPnPMetas = upnpResponses
@@ -1345,7 +1380,6 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 					pcpHeard = true
 					c.mu.Lock()
 					c.maybeInvalidatePCPMappingLocked(pres.Epoch) // must be before we write to c.pcp*
-					c.pcpSawTime = time.Now()
 					c.pcpLastEpoch = pres.Epoch
 					c.mu.Unlock()
 					switch pres.ResultCode {
@@ -1353,17 +1387,22 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 						c.logf("[v1] Got PCP response: epoch: %v", pres.Epoch)
 						res.PCP = true
 						metricPCPOK.Add(1)
+						c.mu.Lock()
+						c.noteServiceSeenLocked(protocolPCP)
+						c.mu.Unlock()
 						continue
 					case pcpCodeNotAuthorized:
 						// A PCP service is running, but refuses to
 						// provide port mapping services.
 						res.PCP = false
 						metricPCPNotAuthorized.Add(1)
+						c.noteService(protocolPCP, ServiceRefused)
 						continue
 					case pcpCodeAddressMismatch:
 						// A PCP service is running, but it is behind a NAT, so it can't help us.
 						res.PCP = false
 						metricPCPAddressMismatch.Add(1)
+						c.noteService(protocolPCP, ServiceRefused)
 						continue
 					default:
 						// Fall through to unexpected log line.
@@ -1385,22 +1424,24 @@ func (c *Client) Probe(ctx context.Context) (res ProbeResult, err error) {
 					res.PMP = true
 					c.mu.Lock()
 					c.maybeInvalidatePMPMappingLocked(pres.SecondsSinceEpoch) // must be before we write to c.pmp*
-					c.pmpPubIP = pres.PublicAddr
-					c.pmpPubIPTime = time.Now()
+					c.noteServiceSeenLocked(protocolPMP)
 					c.pmpLastEpoch = pres.SecondsSinceEpoch
 					c.mu.Unlock()
 					continue
 				case pmpCodeNotAuthorized:
 					metricPMPNotAuthorized.Add(1)
 					c.logf("PMP probe failed due result code: %+v", pres)
+					c.noteService(protocolPMP, ServiceRefused)
 					continue
 				case pmpCodeNetworkFailure:
 					metricPMPNetworkFailure.Add(1)
 					c.logf("PMP probe failed due result code: %+v", pres)
+					c.noteService(protocolPMP, ServiceRefused)
 					continue
 				case pmpCodeOutOfResources:
 					metricPMPOutOfResources.Add(1)
 					c.logf("PMP probe failed due result code: %+v", pres)
+					c.noteService(protocolPMP, ServiceRefused)
 					continue
 				}
 				metricPMPUnhandledResponseCode.Add(1)
@@ -1431,8 +1472,7 @@ func (c *Client) maybeInvalidatePMPMappingLocked(epoch uint32) {
 	// Epoch decreased, so invalidate the mapping and clear PMP fields.
 	c.logf("invalidating PMP mappings since returned epoch %d < stored epoch %d", epoch, m.epoch)
 	c.mapping = nil
-	c.pmpPubIP = netip.Addr{}
-	c.pmpPubIPTime = time.Time{}
+	c.services[protocolPMP] = ServiceNotSeen
 	c.pmpLastEpoch = 0
 }
 
@@ -1457,7 +1497,7 @@ func (c *Client) maybeInvalidatePCPMappingLocked(epoch uint32) {
 	// Epoch decreased, so invalidate the mapping and clear PCP fields.
 	c.logf("invalidating PCP mappings since returned epoch %d < stored epoch %d", epoch, m.epoch)
 	c.mapping = nil
-	c.pcpSawTime = time.Time{}
+	c.services[protocolPCP] = ServiceNotSeen
 	c.pcpLastEpoch = 0
 }
 

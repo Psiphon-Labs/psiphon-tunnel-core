@@ -26,7 +26,6 @@
 //   - logf:        tailscale.com/types/logger.Logf / logger.Discard
 //   - packetConn:  tailscale.com/types/nettype.PacketConn
 //   - netaddr*:    tailscale.com/net/netaddr (IPv4, Unmap)
-//   - treatAsLostUDP: tailscale.com/net/neterror.TreatAsLostUDP
 //   - makSet:      tailscale.com/util/mak.Set
 //   - registerBoolEnv: tailscale.com/envknob.RegisterBool
 //   - ctxKey:      tailscale.com/util/ctxkey
@@ -41,16 +40,13 @@ package portmapper
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/netip"
 	"os"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -84,23 +80,6 @@ func netaddrIPv4(a, b, c, d byte) netip.Addr {
 // representation. It replaces tailscale.com/net/netaddr.Unmap.
 func netaddrUnmap(ap netip.AddrPort) netip.AddrPort {
 	return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
-}
-
-// treatAsLostUDP reports whether err is the kind of write error that indicates
-// a UDP packet was silently dropped (rather than a fatal socket error). It
-// replaces tailscale.com/net/neterror.TreatAsLostUDP.
-//
-// On Linux, an OUTPUT firewall rule with -j DROP/REJECT surfaces as EPERM on
-// the sendto syscall; we treat that as a lost packet. This is only done on
-// Linux, matching the upstream behaviour.
-func treatAsLostUDP(err error) bool {
-	if err == nil {
-		return false
-	}
-	if runtime.GOOS == "linux" {
-		return errors.Is(err, syscall.EPERM)
-	}
-	return false
 }
 
 // makSet assigns m[k] = v, allocating the map through the pointer if it is nil.

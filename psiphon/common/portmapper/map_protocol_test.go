@@ -121,11 +121,11 @@ func TestParsePMPResponseTCP(t *testing.T) {
 func TestBuildPCPRequestMappingPacketProtocol(t *testing.T) {
 	myIP := netip.MustParseAddr("192.168.1.2")
 
-	udp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, MapProtocolUDP)
+	udp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, pcpNonce{}, MapProtocolUDP)
 	if got := udp[24:][12]; got != pcpUDPMapping {
 		t.Errorf("UDP PCP protocol = %d, want %d", got, pcpUDPMapping)
 	}
-	tcp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, MapProtocolTCP)
+	tcp := buildPCPRequestMappingPacket(myIP, 1234, 0, 7200, wildcardIP, pcpNonce{}, MapProtocolTCP)
 	if got := tcp[24:][12]; got != pcpTCPMapping {
 		t.Errorf("TCP PCP protocol = %d, want %d", got, pcpTCPMapping)
 	}
@@ -151,7 +151,7 @@ func TestParsePCPMapResponseProtocol(t *testing.T) {
 	}
 
 	// TCP response, TCP requested: accepted, recorded as TCP.
-	m, err := parsePCPMapResponse(build(pcpTCPMapping), MapProtocolTCP)
+	m, err := parsePCPMapResponse(build(pcpTCPMapping), MapProtocolTCP, time.Now())
 	if err != nil {
 		t.Fatalf("TCP response/expect TCP: unexpected error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestParsePCPMapResponseProtocol(t *testing.T) {
 	}
 
 	// UDP response, UDP requested: accepted, recorded as UDP.
-	m, err = parsePCPMapResponse(build(pcpUDPMapping), MapProtocolUDP)
+	m, err = parsePCPMapResponse(build(pcpUDPMapping), MapProtocolUDP, time.Now())
 	if err != nil {
 		t.Fatalf("UDP response/expect UDP: unexpected error: %v", err)
 	}
@@ -169,12 +169,12 @@ func TestParsePCPMapResponseProtocol(t *testing.T) {
 	}
 
 	// UDP response when TCP was requested: rejected.
-	if _, err := parsePCPMapResponse(build(pcpUDPMapping), MapProtocolTCP); err == nil {
+	if _, err := parsePCPMapResponse(build(pcpUDPMapping), MapProtocolTCP, time.Now()); err == nil {
 		t.Error("expected error for UDP MAP response when TCP was requested, got nil")
 	}
 
 	// Unknown protocol number: rejected.
-	if _, err := parsePCPMapResponse(build(99), MapProtocolTCP); err == nil {
+	if _, err := parsePCPMapResponse(build(99), MapProtocolTCP, time.Now()); err == nil {
 		t.Error("expected error for unknown response protocol, got nil")
 	}
 }
@@ -320,14 +320,18 @@ func TestInvalidateDuringUPnPMapping(t *testing.T) {
 // mapping that UPnP then creates for the superseded local port is released,
 // not published. The generation must be the one captured when the local port
 // was read, not one re-read at the UPnP step.
-func TestInvalidateDuringPxPWaitBeforeUPnP(t *testing.T) {
+// TestInvalidateBetweenAttempts checks that a create whose mapping was
+// invalidated while one protocol was being asked does not go on to ask the
+// next one, which would create a mapping only to release it.
+func TestInvalidateBetweenAttempts(t *testing.T) {
 	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer igd.Close()
 	c := newTestClient(t, igd)
-	var added, deleted atomic.Bool
+	c.knownRequestTimeout = 100 * time.Millisecond
+	var added atomic.Bool
 	handlers := map[string]any{
 		"AddPortMapping": func([]byte) (int, string) {
 			added.Store(true)
@@ -335,10 +339,7 @@ func TestInvalidateDuringPxPWaitBeforeUPnP(t *testing.T) {
 		},
 		"GetExternalIPAddress": testGetExternalIPAddressResponse,
 		"GetStatusInfo":        testGetStatusInfoResponse,
-		"DeletePortMapping": func([]byte) (int, string) {
-			deleted.Store(true)
-			return http.StatusOK, ""
-		},
+		"DeletePortMapping":    "",
 	}
 	igd.SetUPnPHandler(&upnpServer{t: t, Desc: testRootDesc,
 		Control: map[string]map[string]any{"/ctl/IPConn": handlers}})
@@ -346,28 +347,23 @@ func TestInvalidateDuringPxPWaitBeforeUPnP(t *testing.T) {
 	mustProbeUPnP(t, ctx, c)
 	c.SetLocalPort(12345)
 
-	// The IGD answers no NAT-PMP/PCP request, so the create waits out
-	// portMapServiceTimeout before falling back to UPnP. Change the local
-	// port while that wait is pending.
+	// Make PCP a known service, so that it is asked before UPnP. The IGD
+	// answers no PCP request; change the local port while the create waits
+	// for it.
+	c.mu.Lock()
+	c.services[protocolPCP] = ServiceSeen
+	c.mu.Unlock()
 	var reconfigured sync.Once
 	igd.SetPxPHook(func() {
 		reconfigured.Do(func() { c.SetLocalPort(23456) })
 	})
-	// Age the probe past the recent-PMP/PCP window so the create sends the
-	// NAT-PMP/PCP requests instead of going straight to UPnP.
-	c.mu.Lock()
-	c.lastProbe = time.Time{}
-	c.mu.Unlock()
 
 	_, _, err = c.createOrGetMapping(ctx)
 	if !IsNoMappingError(err) {
 		t.Fatalf("createOrGetMapping returned %v, want no mapping", err)
 	}
-	if !added.Load() {
-		t.Fatal("test did not reach the UPnP fallback")
-	}
-	if !deleted.Load() {
-		t.Fatal("stale mapping was not released")
+	if added.Load() {
+		t.Fatal("asked UPnP for a mapping after the create was invalidated")
 	}
 	c.mu.Lock()
 	mapping := c.mapping
@@ -377,8 +373,6 @@ func TestInvalidateDuringPxPWaitBeforeUPnP(t *testing.T) {
 	}
 }
 
-// TestNoCreateAfterClose verifies that a closed client does not start a
-// mapping create.
 func TestNoCreateAfterClose(t *testing.T) {
 	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
 	if err != nil {

@@ -64,6 +64,8 @@ import (
 const (
 	portMappingAwaitTimeout = 2 * time.Second
 
+	iceGatheringAwaitTimeout = 1 * time.Second
+
 	readyToProxyAwaitTimeout = 20 * time.Second
 
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
@@ -968,6 +970,35 @@ func newWebRTCConn(
 			return nil, nil, nil, errors.Trace(ctx.Err())
 		}
 
+		// When the port mapping is obtained first and STUN candidates are
+		// expected, also await ICE completion for a short period, so that
+		// the SDP has both the port mapping candidate and any
+		// server-reflexive candidates. A router may grant a port mapping
+		// that doesn't forward traffic, in which case the port mapping
+		// candidate alone is of no use to the peer.
+		//
+		// The peer is waiting for this SDP, so the await timeout should be
+		// short.
+
+		if !iceCompleted && portMappingExternalAddr != "" && doSTUN {
+
+			timer := time.NewTimer(
+				common.ValueOrDefault(
+					config.WebRTCDialCoordinator.WebRTCAwaitICEGatheringTimeout(),
+					iceGatheringAwaitTimeout))
+			defer timer.Stop()
+
+			select {
+			case <-iceComplete:
+				iceCompleted = true
+			case <-timer.C:
+				// Continue without ICE completion
+			case <-ctx.Done():
+				return nil, nil, nil, errors.Trace(ctx.Err())
+			}
+			timer.Stop()
+		}
+
 		// When STUN is skipped and a port mapping is expected to be
 		// available, await a port mapping for a short period. In this
 		// scenario, pion ICE gathering may complete first, since it's only
@@ -986,7 +1017,10 @@ func newWebRTCConn(
 		//
 		// When the local NAT is known to be strictly limited, any STUN candidate
 		// is unlikely to work unless the peer's NAT is unlimited, so also await
-		// a port mapping in this case.
+		// a port mapping in this case. This applies even when the trial port
+		// mapping was not granted: that may have been a temporary condition, a
+		// port mapping is still attempted, and the await ends as soon as the
+		// attempt fails.
 		//
 		// Unknown is classified as strictly limited, but is excluded here; this
 		// case only applies when NAT discovery has run.
@@ -995,7 +1029,21 @@ func newWebRTCConn(
 		hasStrictlyLimitedNAT := natType != NATTypeUnknown &&
 			natType.Traversal() == NATTraversalStrictlyLimited
 
-		awaitPortMapping := !doSTUN || hasStrictlyLimitedNAT
+		// When this network granted a trial port mapping, a port mapping is
+		// expected, and port mapping types are reported to the broker, which
+		// may then match a peer that depends on a port mapping. Also await a
+		// port mapping in this case, including when the NAT type is unknown,
+		// unless the local NAT is known to be unlimited and any STUN
+		// candidate should work with any peer.
+		//
+		// In all cases, the await ends as soon as the port mapping attempt
+		// fails.
+
+		hasUnlimitedNAT := natType != NATTypeUnknown &&
+			natType.Traversal() == NATTraversalUnlimited
+
+		awaitPortMapping := !doSTUN || hasStrictlyLimitedNAT ||
+			(portMappingProbe.verified && !hasUnlimitedNAT)
 		if iceCompleted && portMappingExternalAddr == "" && doPortMapping && !awaitPortMapping {
 
 			// Check for no STUN candidates. This prepareSDPAddresses call is
@@ -1030,6 +1078,8 @@ func newWebRTCConn(
 
 			select {
 			case portMappingExternalAddr = <-portMapper.portMappingExternalAddress():
+			case <-portMapper.portMappingAttemptFailed():
+				// Continue without port mapping
 			case <-timer.C:
 				// Continue without port mapping
 			case <-ctx.Done():
@@ -1043,15 +1093,6 @@ func newWebRTCConn(
 			// Release any port mapping resources when not using it.
 			portMapper.close()
 			conn.portMapper = nil
-
-		} else if portMappingExternalAddr != "" {
-
-			// Update responding port mapping types for metrics.
-			//
-			// Limitation: if there are multiple responding protocol types, it's
-			// not known here which was used for this dial.
-			config.WebRTCDialCoordinator.SetPortMappingTypes(
-				portMapper.respondingPortMappingTypes())
 
 		}
 	}
@@ -2979,7 +3020,7 @@ func processSDPAddresses(
 		// be a common LAN address that could be used in personal pairing mode.
 
 		hostIP := net.ParseIP(host)
-		if hostIP != nil && hostIP.To4() != nil && !common.IsBogon(hostIP) {
+		if isUsablePortMappingIP(hostIP) {
 
 			for _, component := range []webrtc.ICEComponent{webrtc.ICEComponentRTP, webrtc.ICEComponentRTCP} {
 

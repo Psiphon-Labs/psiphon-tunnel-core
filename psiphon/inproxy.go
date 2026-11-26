@@ -2855,6 +2855,7 @@ type InproxyWebRTCDialInstance struct {
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitPortMappingTimeout   time.Duration
+	webRTCAwaitICEGatheringTimeout  time.Duration
 	awaitReadyToProxyTimeout        time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
@@ -2973,6 +2974,7 @@ func NewInproxyWebRTCDialInstance(
 		discoverNATTimeout:              discoverNATTimeout,
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
 		webRTCAwaitPortMappingTimeout:   p.Duration(parameters.InproxyWebRTCAwaitPortMappingTimeout),
+		webRTCAwaitICEGatheringTimeout:  p.Duration(parameters.InproxyWebRTCAwaitICEGatheringTimeout),
 		awaitReadyToProxyTimeout:        awaitReadyToProxyTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),
 		proxyRelayInactivityTimeout:     p.Duration(parameters.InproxyProxyRelayInactivityTimeout),
@@ -3338,6 +3340,11 @@ func (w *InproxyWebRTCDialInstance) WebRTCAnswerTimeout() time.Duration {
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) WebRTCAwaitPortMappingTimeout() time.Duration {
 	return w.webRTCAwaitPortMappingTimeout
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) WebRTCAwaitICEGatheringTimeout() time.Duration {
+	return w.webRTCAwaitICEGatheringTimeout
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.

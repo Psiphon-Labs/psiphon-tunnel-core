@@ -43,8 +43,11 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 // Google Wifi
@@ -542,7 +545,7 @@ func TestGetUPnPClient(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			c, err := selectBestService(ctx, logBuf.Logf, dev, loc)
+			c, _, err := selectBestService(ctx, logBuf.Logf, dev, loc)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -555,6 +558,94 @@ func TestGetUPnPClient(t *testing.T) {
 				t.Errorf("logged %q; want %q", gotLog, tt.wantLog)
 			}
 		})
+	}
+}
+
+// TestGetUPnPRootDeviceSlowResponse verifies that a router whose HTTP
+// server takes over a second to answer the root device fetch (as the
+// NETGEAR RS700 firmware does) still yields a root device, instead of
+// failing with a context deadline error.
+func TestGetUPnPRootDeviceSlowResponse(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		slowRT := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			select {
+			case <-time.After(1500 * time.Millisecond):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"text/xml"},
+				},
+				Body:    io.NopCloser(strings.NewReader(pfSenseRootDescXML)),
+				Request: req,
+			}, nil
+		})
+		ctx := upnpHTTPClientKey.WithValue(t.Context(), &http.Client{Transport: slowRT})
+
+		var logBuf memLogger
+		dev, _, err := getUPnPRootDevice(ctx, logBuf.Logf, DebugKnobs{}, netip.MustParseAddr("192.168.1.1"), uPnPDiscoResponse{
+			Location: "http://192.168.1.1:5000/rootDesc.xml",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dev == nil {
+			t.Fatal("got nil root device")
+		}
+	})
+}
+
+// TestUPnPControlRequestsUseClientHTTPClient checks that the UPnP control
+// requests, and not only the root device fetch, are sent through the
+// Client's own HTTP client, which is the one bound to the Client's device.
+func TestUPnPControlRequestsUseClientHTTPClient(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+	igd.SetUPnPHandler(&upnpServer{
+		t:    t,
+		Desc: testRootDesc,
+		Control: map[string]map[string]any{
+			"/ctl/IPConn": {
+				"AddPortMapping":       testAddPortMappingResponse,
+				"GetExternalIPAddress": testGetExternalIPAddressResponse,
+				"GetStatusInfo":        testGetStatusInfoResponse,
+				"DeletePortMapping":    "",
+			},
+		},
+	})
+
+	c := newTestClient(t, igd)
+	var actions []string
+	c.mu.Lock()
+	c.uPnPHTTPClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method == http.MethodPost {
+				// goupnp sets this header under a non-canonical key.
+				actions = append(actions, req.Header["SOAPACTION"]...)
+			}
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+	c.mu.Unlock()
+
+	ctx := context.Background()
+	mustProbeUPnP(t, ctx, c)
+	c.SetLocalPort(12345)
+	if _, _, err := c.createOrGetMapping(ctx); err != nil {
+		t.Fatalf("createOrGetMapping: %v", err)
+	}
+	c.Close()
+
+	for _, action := range []string{"GetExternalIPAddress", "AddPortMapping", "DeletePortMapping"} {
+		if !slices.ContainsFunc(actions, func(a string) bool { return strings.Contains(a, "#"+action) }) {
+			t.Errorf("%s was not sent through the Client's HTTP client; saw %q", action, actions)
+		}
 	}
 }
 
@@ -739,6 +830,61 @@ func TestGetUPnPPortMapping_LeaseDuration(t *testing.T) {
 			}
 			t.Logf("external IP: %v", ext)
 		})
+	}
+}
+
+func TestGetUPnPPortMapping_MikroTikDoesNotQueryExternalIPAfterMapping(t *testing.T) {
+	igd, err := NewTestIGD(t, TestIGDOptions{UPnP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer igd.Close()
+
+	var externalIPRequests atomic.Int32
+	handlers := map[string]any{
+		"AddPortMapping": func(body []byte) (int, string) {
+			var req struct {
+				LeaseDuration string `xml:"NewLeaseDuration"`
+			}
+			if err := xml.Unmarshal(body, &req); err != nil {
+				t.Errorf("bad request: %v", err)
+				return http.StatusBadRequest, "bad request"
+			}
+			if req.LeaseDuration != "0" {
+				return http.StatusOK, testAddPortMappingPermanentLease
+			}
+			return http.StatusOK, testAddPortMappingResponse
+		},
+		"GetExternalIPAddress": func([]byte) (int, string) {
+			if externalIPRequests.Add(1) > 1 {
+				return http.StatusInternalServerError, "too many requests"
+			}
+			return http.StatusOK, testGetExternalIPAddressResponse
+		},
+		"GetStatusInfo":     testGetStatusInfoResponse,
+		"DeletePortMapping": "",
+	}
+	igd.SetUPnPHandler(&upnpServer{
+		t:    t,
+		Desc: mikrotikRootDescXML,
+		Control: map[string]map[string]any{
+			"/upnp/control/yomkmsnooi/wanipconn-1": handlers,
+		},
+	})
+
+	ctx := context.Background()
+	c := newTestClient(t, igd)
+	mustProbeUPnP(t, ctx, c)
+
+	gw, myIP, ok := c.gatewayAndSelfIP()
+	if !ok {
+		t.Fatal("could not get gateway and self IP")
+	}
+	if _, ok := c.getUPnPPortMapping(ctx, gw, netip.AddrPortFrom(myIP, 12345), 0, c.currentGeneration()); !ok {
+		t.Fatal("could not get UPnP port mapping")
+	}
+	if got := externalIPRequests.Load(); got != 1 {
+		t.Fatalf("GetExternalIPAddress requests = %d, want 1", got)
 	}
 }
 
@@ -945,8 +1091,12 @@ func TestGetUPnPPortMapping_Invalid(t *testing.T) {
 			defer igd.Close()
 
 			// This is a very basic fake UPnP server handler.
+			var addPortMappingRequests atomic.Int32
 			handlers := map[string]any{
-				"AddPortMapping":       testAddPortMappingResponse,
+				"AddPortMapping": func([]byte) (int, string) {
+					addPortMappingRequests.Add(1)
+					return http.StatusOK, testAddPortMappingResponse
+				},
 				"GetExternalIPAddress": makeGetExternalIPAddressResponse(responseAddr),
 				"GetStatusInfo":        testGetStatusInfoResponse,
 				"DeletePortMapping":    "", // Do nothing for test
@@ -977,6 +1127,9 @@ func TestGetUPnPPortMapping_Invalid(t *testing.T) {
 			}
 			if ext.IsValid() {
 				t.Fatalf("expected no external address; got %v", ext)
+			}
+			if got := addPortMappingRequests.Load(); got != 0 {
+				t.Fatalf("AddPortMapping requests = %d, want 0", got)
 			}
 		})
 	}
