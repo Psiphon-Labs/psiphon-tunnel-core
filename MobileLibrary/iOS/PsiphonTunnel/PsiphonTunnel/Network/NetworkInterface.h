@@ -41,6 +41,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// address rotation, so the network ID trades precision for stability: two networks may share an ID, but one
 /// network should keep its ID. This does not guarantee a stable or unique network ID.
 ///
+/// For the addresses of an up, non-loopback interface, this selects the same value as selectInterfaceAddress in
+/// psiphon/common/networkid/networkid_posix.go, except that 192.0.0.0/29 is also skipped here.
+///
 /// @param interfaces getifaddrs(3) list. May be NULL.
 /// @param interfaceName Interface name. E.g. "en0".
 /// @return The selected list entry, or NULL if no address qualifies.
