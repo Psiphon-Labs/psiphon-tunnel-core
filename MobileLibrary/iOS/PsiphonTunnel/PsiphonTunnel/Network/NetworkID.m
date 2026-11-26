@@ -38,7 +38,7 @@
     // This method is not exact and relies on CFNetworkCopySystemProxySettings,
     // specifically it may not return tun interfaces for some VPNs on macOS.
     if (!tunnelWholeDevice) {
-        NSDictionary *_Nullable proxies = (__bridge NSDictionary *) CFNetworkCopySystemProxySettings();
+        NSDictionary *_Nullable proxies = (__bridge_transfer NSDictionary *) CFNetworkCopySystemProxySettings();
         for (NSString *interface in [proxies[@"__SCOPED__"] allKeys]) {
             if ([interface containsString:@"tun"] || [interface containsString:@"tap"] || [interface containsString:@"ppp"] || [interface containsString:@"ipsec"]) {
                 return @"VPN";
