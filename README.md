@@ -17,13 +17,23 @@ For more information about Psiphon Inc., please visit our web site at [www.psiph
 
 ```
 psiphon-tunnel-core
-  └── ClientLibrary  General client libraries
-  └── ConsoleClient  CLI client program
-  └── MobileLibrary  Android/iOS client libraries
-  └── Server         Server program
-  └── psiphon        Client code package
-    └── common\...   Common code packages
-    └── server       Server code package
+  └── ClientLibrary      General client libraries
+    └── PsiphonTunnel.go C client library (cgo)
+    └── clientlib        Go client library
+  └── ConsoleClient      CLI client program
+  └── MobileLibrary      Android/iOS client libraries
+    └── go-mobile        Pinned gomobile version with Psiphon patches (git subtree)
+    └── psi              gomobile library
+  └── Server             Server program
+  └── psiphon            Client code package
+    └── common\...       Common code packages
+    └── internal         Internal packages
+      └── testutils      Test utilities
+    └── server           Server code package
+      └── proto          Protobuf sources
+      └── pb             Generated protobuf code
+  └── replace            Dependencies with Psiphon patches (go.mod replace directive)
+  └── vendor             Vendored dependencies
 ```
 
 
