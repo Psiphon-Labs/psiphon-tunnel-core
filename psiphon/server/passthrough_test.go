@@ -57,7 +57,7 @@ func testPassthrough(t *testing.T, legacy bool) {
 
 	// Run passthrough web server
 
-	webServerCertificate, webServerPrivateKey, _, err := common.GenerateWebServerCertificate("example.org")
+	webServerCertificate, webServerPrivateKey, _, err := common.GenerateWebServerCertificate("example.org", false)
 	if err != nil {
 		t.Fatalf("common.GenerateWebServerCertificate failed: %s", err)
 	}

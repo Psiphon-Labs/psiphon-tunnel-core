@@ -98,7 +98,14 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig(sessionTicketKey string) (*tl
 
 	// Limitation: certificate value changes on restart.
 
-	certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName())
+	// See the obfuscated session ticket comment in makeDirectMeekTLSConfig.
+	// This case applies when session ticket meek is demuxed with TLS-OSSH.
+	useECDSA := server.support.Config.UseECDSAWebServerCertificates &&
+		!protocol.TunnelProtocolUsesObfuscatedSessionTickets(
+			server.listenerTunnelProtocol)
+
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(
+		values.GetHostName(), useECDSA)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -153,6 +160,28 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig(sessionTicketKey string) (*tl
 		config.SetSessionTicketKeys([][32]byte{
 			standardSessionTicketKey,
 			obfuscatedSessionTicketKey})
+
+		// TLS 1.2 obfuscated session tickets are supported only for
+		// UNFRONTED-MEEK-SESSION-TICKET-OSSH. For other protocols,
+		// regardless of UseECDSAWebServerCertificates, accept only standard
+		// TLS 1.2 tickets and TLS 1.3 tickets, including obfuscated PSKs.
+		if !protocol.TunnelProtocolUsesObfuscatedSessionTickets(
+			server.listenerTunnelProtocol) {
+
+			standardConfig := &tls.Config{}
+			standardConfig.SetSessionTicketKeys(
+				[][32]byte{standardSessionTicketKey})
+
+			config.UnwrapSession = func(
+				identity []byte,
+				cs tls.ConnectionState) (*tls.SessionState, error) {
+
+				if cs.Version == tls.VersionTLS13 {
+					return config.DecryptTicket(identity, cs)
+				}
+				return standardConfig.DecryptTicket(identity, cs)
+			}
+		}
 	}
 
 	// When configured, initialize passthrough mode, an anti-probing defense.

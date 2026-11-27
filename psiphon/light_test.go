@@ -293,7 +293,7 @@ func runTestControllerLightProxy(importPushPayload bool) (retErr error) {
 
 func startLightTestWebServer(ctx context.Context) (string, func(), error) {
 
-	certificate, privateKey, _, err := common.GenerateWebServerCertificate("localhost")
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate("localhost", false)
 	if err != nil {
 		return "", nil, errors.Trace(err)
 	}

@@ -20,6 +20,9 @@
 package common
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -46,22 +49,42 @@ import (
 // certificates may be a fingerprint used to detect Psiphon servers or traffic.
 // TODO: more effort to mitigate fingerprinting these certificates.
 //
-// In addition, GenerateWebServerCertificate is used by GenerateConfig to create
-// Psiphon web server certificates for test/example configurations. If these Psiphon
-// web server certificates are used in production, the same caveats about
-// fingerprints apply.
+// When useECDSA is set, the certificate uses an ECDSA P-256 key; otherwise,
+// an RSA 2048 key.
 //
 // The verification pin return value is a hash of the certificate public key
 // which is compatible with FrontingSpec.VerifyPins, and is intended for use
 // in testing.
-func GenerateWebServerCertificate(hostname string) (string, string, string, error) {
+func GenerateWebServerCertificate(
+	hostname string, useECDSA bool) (string, string, string, error) {
 
 	// Based on https://golang.org/src/crypto/tls/generate_cert.go
 	// TODO: use other key types: anti-fingerprint by varying params
 
-	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return "", "", "", errors.Trace(err)
+	var privateKey crypto.Signer
+	var privateKeyPEM *pem.Block
+	keyUsage := x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign
+
+	if useECDSA {
+		ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return "", "", "", errors.Trace(err)
+		}
+		keyBytes, err := x509.MarshalECPrivateKey(ecdsaKey)
+		if err != nil {
+			return "", "", "", errors.Trace(err)
+		}
+		privateKey = ecdsaKey
+		privateKeyPEM = &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}
+	} else {
+		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return "", "", "", errors.Trace(err)
+		}
+		privateKey = rsaKey
+		privateKeyPEM = &pem.Block{
+			Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(rsaKey)}
+		keyUsage |= x509.KeyUsageKeyEncipherment
 	}
 
 	// Validity period is 1 or 2 years, starting 1 to 6 months ago.
@@ -86,7 +109,7 @@ func GenerateWebServerCertificate(hostname string) (string, string, string, erro
 		return "", "", "", errors.Trace(err)
 	}
 
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(rsaKey.Public())
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(privateKey.Public())
 	if err != nil {
 		return "", "", "", errors.Trace(err)
 	}
@@ -106,7 +129,7 @@ func GenerateWebServerCertificate(hostname string) (string, string, string, erro
 		DNSNames:              dnsNames,
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              keyUsage,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
@@ -119,8 +142,8 @@ func GenerateWebServerCertificate(hostname string) (string, string, string, erro
 		rand.Reader,
 		&template,
 		&template,
-		rsaKey.Public(),
-		rsaKey)
+		privateKey.Public(),
+		privateKey)
 	if err != nil {
 		return "", "", "", errors.Trace(err)
 	}
@@ -139,12 +162,7 @@ func GenerateWebServerCertificate(hostname string) (string, string, string, erro
 		},
 	)
 
-	webServerPrivateKey := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "RSA PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(rsaKey),
-		},
-	)
+	webServerPrivateKey := pem.EncodeToMemory(privateKeyPEM)
 
 	return string(webServerCertificate), string(webServerPrivateKey), pin, nil
 }

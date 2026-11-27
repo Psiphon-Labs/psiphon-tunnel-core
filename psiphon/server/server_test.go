@@ -260,6 +260,7 @@ func TestTLSOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -314,6 +315,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -343,6 +345,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -357,6 +360,23 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
+		})
+}
+
+func TestUnfrontedMeekSessionTicketDemux(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			passthrough:          true,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_58,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -387,6 +407,7 @@ func TestTLSOSSHOverUnfrontedMeekHTTPSDemux(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -402,6 +423,7 @@ func TestTLSOSSHOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -417,6 +439,7 @@ func TestQUICOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -433,6 +456,7 @@ func TestLimitedQUICOSSH(t *testing.T) {
 			limitQUICVersions:    true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
+			useECDSACerts:        true,
 		})
 }
 
@@ -932,6 +956,7 @@ type runServerConfig struct {
 	doReplaceProxyProtocolHeader bool
 	usePersonalLightProxyTunnel  bool
 	testDSLAccessToken           bool
+	useECDSACerts                bool
 }
 
 var (
@@ -1336,6 +1361,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// Enable legacy QUIC version support.
 		serverConfig["EnableGQUIC"] = true
 	}
+
+	serverConfig["UseECDSAWebServerCertificates"] = runConfig.useECDSACerts
 
 	if runConfig.doLogHostProvider {
 		serverConfig["HostProvider"] = "example-host-provider"
@@ -3765,6 +3792,14 @@ func checkExpectedServerTunnelLogFields(
 			!strings.HasPrefix(tlsVersion, protocol.TLS_VERSION_13) {
 			return fmt.Errorf("unexpected tls_version '%s'", fields["tls_version"])
 		}
+
+		// The server must retain its RSA certificate and resume TLS 1.2
+		// obfuscated session tickets.
+		if runConfig.useECDSACerts &&
+			protocol.TunnelProtocolUsesObfuscatedSessionTickets(clientTunnelProtocol) &&
+			fmt.Sprintf("%v", fields["tls_did_resume"]) != "true" {
+			return fmt.Errorf("unexpected tls_did_resume '%v'", fields["tls_did_resume"])
+		}
 	}
 
 	if protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) {
@@ -5256,7 +5291,7 @@ func generateInproxyTestConfig(
 	brokerFrontingHostName := values.GetHostName()
 
 	brokerServerCertificate, brokerServerPrivateKey, brokerVerifyPin, err :=
-		common.GenerateWebServerCertificate(brokerFrontingHostName)
+		common.GenerateWebServerCertificate(brokerFrontingHostName, false)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

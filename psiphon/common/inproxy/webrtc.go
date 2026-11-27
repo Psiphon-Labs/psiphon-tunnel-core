@@ -2412,9 +2412,9 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 	mediaTrackPacketConn := newMediaTrackPacketConn(conn)
 
 	// Use the Psiphon QUIC obfuscated PSK mechanism to facilitate a faster
-	// QUIC TLS handshake. QUIC client hello randomization is also
-	// initialized, as it will vary the QUIC handshake traffic shape within
-	// the SRTP packet flow.
+	// QUIC TLS handshake. QUIC client hello randomization is not used: it
+	// may omit the PSK cipher suite, causing the proxy to reject the PSK
+	// and perform a full handshake.
 
 	var obfuscatedPSKKey [32]byte
 	obfuscationSecret, err := deriveObfuscationSecret(
@@ -2441,14 +2441,17 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 		// The client is a QUIC client.
 
 		// Initialize the obfuscated PSK.
-		sessionCache := common.WrapClientSessionCache(tls.NewLRUClientSessionCache(1), "")
+		// The cache key must not be common.TLS_NULL_SESSION_KEY.
+		sessionCacheKey := "obfuscated-psk"
+		sessionCache := common.WrapClientSessionCache(
+			tls.NewLRUClientSessionCache(1), sessionCacheKey)
 		obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
 			obfuscatedPSKKey, true, false)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		sessionCache.Put(
-			"", tls.MakeClientSessionState(
+			sessionCacheKey, tls.MakeClientSessionState(
 				obfuscatedSessionState.SessionTicket,
 				obfuscatedSessionState.Vers,
 				obfuscatedSessionState.CipherSuite,
@@ -2457,12 +2460,16 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 				obfuscatedSessionState.AgeAdd,
 				obfuscatedSessionState.UseBy))
 
+		// Offer only X25519. The default curve preferences include
+		// X25519MLKEM768, and its key share makes the ClientHello larger
+		// than necessary, given the prearranged PSK.
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify:     true,
 			InsecureSkipTimeVerify: true,
 			NextProtos:             []string{"h3"},
 			ServerName:             values.GetHostName(),
 			ClientSessionCache:     sessionCache,
+			CurvePreferences:       []tls.CurveID{tls.X25519},
 		}
 
 		maxPacketSizeAdjustment := GetQUICMaxPacketSizeAdjustment()
@@ -2475,7 +2482,6 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 			MaxIdleTimeout:                maxDuration,
 			KeepAlivePeriod:               maxDuration,
 			Versions:                      []quic_go.Version{0x1},
-			ClientHelloSeed:               &obfuscationSeed,
 			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
 			DisablePathMTUDiscovery:       true,
 		}
@@ -2488,12 +2494,14 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 		// Establish the QUIC connection with the server and open a single
 		// data stream for relaying traffic.
 		//
-		// Use DialEarly, in combination with the "established" PSK, for
-		// 0-RTT, which potentially allows data to be sent with the
-		// handshake; this could include the open stream message from the
-		// following OpenStreamSync call. There is no replay concern with
-		// 0-RTT here, as the QUIC traffic is encapsualted in the secure SRTP
-		// flow.
+		// Limitation: although DialEarly is used, 0-RTT is not in effect.
+		// The obfuscated PSK session state doesn't enable early data, so
+		// the open stream message from the following OpenStreamSync call is
+		// sent after the handshake completes.
+		//
+		// TODO: enable early data for the obfuscated PSK. There is no
+		// replay concern with 0-RTT here, as the QUIC traffic is
+		// encapsulated in the secure SRTP flow.
 
 		quicConn, err := quic_go.DialEarly(
 			ctx,
@@ -2524,20 +2532,25 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 
 		// The proxy is a QUIC server.
 
-		// Use an ephemeral, self-signed certificate.
-		certificate, privateKey, _, err := common.GenerateWebServerCertificate(
-			values.GetHostName())
-		if err != nil {
-			return errors.Trace(err)
-		}
-		tlsCertificate, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
-		if err != nil {
-			return errors.Trace(err)
-		}
-
+		// The certificate is used only when the client doesn't resume with
+		// the obfuscated PSK, so it's generated on demand. It's not cached:
+		// a client can force a full handshake, and a reused certificate
+		// would let clients identify this proxy across connections.
 		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{tlsCertificate},
-			NextProtos:   []string{"h3"},
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				certificate, privateKey, _, err := common.GenerateWebServerCertificate(
+					values.GetHostName(), true)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				tlsCertificate, err := tls.X509KeyPair(
+					[]byte(certificate), []byte(privateKey))
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				return &tlsCertificate, nil
+			},
+			NextProtos: []string{"h3"},
 		}
 		tlsConfig.SetSessionTicketKeys([][32]byte{
 			obfuscatedPSKKey,
