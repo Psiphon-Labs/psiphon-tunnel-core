@@ -302,7 +302,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 		// Same tls config as psiphon/server/meek.go
 
-		certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName())
+		certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName(), false)
 		if err != nil {
 			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}

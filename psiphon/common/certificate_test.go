@@ -20,6 +20,7 @@
 package common
 
 import (
+	"crypto/ecdsa"
 	"crypto/tls"
 	"testing"
 )
@@ -28,13 +29,22 @@ func TestGenerateWebServerCertificate(t *testing.T) {
 
 	// Note: pin is tested in psiphon.testTLSDialerCompatibility
 
-	certificate, privateKey, _, err := GenerateWebServerCertificate("www.example.com")
-	if err != nil {
-		t.Errorf("GenerateWebServerCertificate failed: %s", err)
-	}
+	for _, useECDSA := range []bool{false, true} {
 
-	_, err = tls.X509KeyPair([]byte(certificate), []byte(privateKey))
-	if err != nil {
-		t.Errorf("tls.X509KeyPair failed: %s", err)
+		certificate, privateKey, _, err := GenerateWebServerCertificate(
+			"www.example.com", useECDSA)
+		if err != nil {
+			t.Errorf("GenerateWebServerCertificate failed: %s", err)
+		}
+
+		keyPair, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
+		if err != nil {
+			t.Errorf("tls.X509KeyPair failed: %s", err)
+		}
+
+		_, isECDSA := keyPair.PrivateKey.(*ecdsa.PrivateKey)
+		if isECDSA != useECDSA {
+			t.Errorf("unexpected key type: %T", keyPair.PrivateKey)
+		}
 	}
 }

@@ -58,6 +58,7 @@ func Listen(
 	_ bool,
 	_ int,
 	_ string,
+	_ bool,
 	_ bool) (net.Listener, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")

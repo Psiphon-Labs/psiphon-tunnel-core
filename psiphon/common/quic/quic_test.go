@@ -140,7 +140,8 @@ func runQUIC(
 		disablePathMTUDiscovery,
 		0,
 		obfuscationKey,
-		enableGQUIC)
+		enableGQUIC,
+		false)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
@@ -625,6 +626,7 @@ func TestQUICPeerLimits(t *testing.T) {
 		false,
 		0,
 		obfuscationKey,
+		false,
 		false)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
@@ -989,6 +991,7 @@ func TestQUICInitialWithoutClientHello(t *testing.T) {
 		false,
 		0,
 		obfuscationKey,
+		false,
 		false)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)

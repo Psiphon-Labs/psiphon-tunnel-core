@@ -1645,7 +1645,8 @@ func (server *MeekServer) getMeekCookiePayload(
 	return payload, nil
 }
 
-func (server *MeekServer) getWebServerCertificate() ([]byte, []byte, error) {
+func (server *MeekServer) getWebServerCertificate(
+	useECDSA bool) ([]byte, []byte, error) {
 
 	var certificate, privateKey string
 
@@ -1655,7 +1656,8 @@ func (server *MeekServer) getWebServerCertificate() ([]byte, []byte, error) {
 
 	} else {
 		var err error
-		certificate, privateKey, _, err = common.GenerateWebServerCertificate(values.GetHostName())
+		certificate, privateKey, _, err = common.GenerateWebServerCertificate(
+			values.GetHostName(), useECDSA)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -1668,7 +1670,8 @@ func (server *MeekServer) getWebServerCertificate() ([]byte, []byte, error) {
 // listener.
 func (server *MeekServer) makeFrontedMeekTLSConfig() (*tls.Config, error) {
 
-	certificate, privateKey, err := server.getWebServerCertificate()
+	certificate, privateKey, err := server.getWebServerCertificate(
+		server.support.Config.UseECDSAWebServerCertificates)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1726,7 +1729,14 @@ func (server *MeekServer) makeFrontedMeekTLSConfig() (*tls.Config, error) {
 func (server *MeekServer) makeDirectMeekTLSConfig(
 	useObfuscatedSessionTickets bool) (*psiphon_tls.Config, error) {
 
-	certificate, privateKey, err := server.getWebServerCertificate()
+	// TLS 1.2 obfuscated session tickets specify an ECDHE-RSA cipher suite,
+	// which is hardcoded in existing clients. With an ECDSA certificate, the
+	// server rejects the ticket and performs a full handshake, so always use
+	// RSA.
+	useECDSA := server.support.Config.UseECDSAWebServerCertificates &&
+		!useObfuscatedSessionTickets
+
+	certificate, privateKey, err := server.getWebServerCertificate(useECDSA)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

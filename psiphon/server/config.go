@@ -264,6 +264,12 @@ type Config struct {
 	// MeekServerCertificate parameter.
 	MeekServerPrivateKey string `json:",omitempty"`
 
+	// UseECDSAWebServerCertificates specifies that generated, self-signed
+	// TLS certificates for meek, TLS-OSSH, and IETF QUIC use ECDSA P-256
+	// keys instead of RSA. gQUIC and UNFRONTED-MEEK-SESSION-TICKET-OSSH
+	// always use RSA.
+	UseECDSAWebServerCertificates bool `json:",omitempty"`
+
 	// MeekProxyForwardedForHeaders is a list of HTTP headers which
 	// may be added by downstream HTTP proxies or CDNs in front
 	// of clients. These headers supply the original client IP

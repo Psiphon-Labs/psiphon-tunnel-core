@@ -237,7 +237,8 @@ func (server *TunnelServer) Run() error {
 				disablePathMTUDiscovery,
 				maxPacketSizeAdjustment,
 				support.Config.ObfuscatedSSHKey,
-				enableGQUIC)
+				enableGQUIC,
+				support.Config.UseECDSAWebServerCertificates)
 			if err != nil {
 				return errors.Trace(err)
 			}

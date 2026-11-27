@@ -153,7 +153,7 @@ func runTestFeedbackUploadLocal(t *testing.T, useFrontingSpecs bool) {
 	})
 
 	host := values.GetHostName()
-	certificate, privateKey, _, err := common.GenerateWebServerCertificate(host)
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(host, false)
 	if err != nil {
 		t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 	}

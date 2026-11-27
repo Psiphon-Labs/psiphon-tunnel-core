@@ -145,18 +145,21 @@ func Listen(
 	disablePathMTUDiscovery bool,
 	additionalMaxPacketSizeAdjustment int,
 	obfuscationKey string,
-	enableGQUIC bool) (net.Listener, error) {
+	enableGQUIC bool,
+	useECDSACertificate bool) (net.Listener, error) {
 
-	certificate, privateKey, _, err := common.GenerateWebServerCertificate(
-		values.GetHostName())
+	tlsCertificate, err := generateCertificate(useECDSACertificate)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	tlsCertificate, err := tls.X509KeyPair(
-		[]byte(certificate), []byte(privateKey))
-	if err != nil {
-		return nil, errors.Trace(err)
+	// gQUIC always uses an RSA certificate.
+	gQUICCertificate := tlsCertificate
+	if enableGQUIC && useECDSACertificate {
+		gQUICCertificate, err = generateCertificate(false)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", address)
@@ -310,6 +313,7 @@ func Listen(
 			additionalMaxPacketSizeAdjustment,
 			verifyClientHelloRandom,
 			tlsCertificate,
+			gQUICCertificate,
 			obfuscationKey)
 		if err != nil {
 			obfuscatedOOBPacketConn.Close()
@@ -324,6 +328,23 @@ func Listen(
 		packetConn:          obfuscatedOOBPacketConn,
 		clientRandomHistory: clientRandomHistory,
 	}, nil
+}
+
+func generateCertificate(useECDSA bool) (tls.Certificate, error) {
+
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(
+		values.GetHostName(), useECDSA)
+	if err != nil {
+		return tls.Certificate{}, errors.Trace(err)
+	}
+
+	tlsCertificate, err := tls.X509KeyPair(
+		[]byte(certificate), []byte(privateKey))
+	if err != nil {
+		return tls.Certificate{}, errors.Trace(err)
+	}
+
+	return tlsCertificate, nil
 }
 
 // Accept returns a net.Conn that wraps a single QUIC connection and stream.
@@ -1275,6 +1296,12 @@ func dialQUIC(
 
 		// Creating a session state and storing it in the TLS cache to be used
 		// for PSK (Pre-Shared Key) resumption.
+		//
+		// Limitation: when clientHelloSeed is set, the randomized ClientHello
+		// may offer TLS_AES_256_GCM_SHA384 without TLS_AES_128_GCM_SHA256.
+		// In that case, the server may select a cipher suite with a hash
+		// that doesn't match the obfuscated PSK, reject the PSK, and perform
+		// a full handshake.
 		if obfuscatedPSKKey != "" {
 			var sharedSecret [32]byte
 			key, err := hex.DecodeString(obfuscatedPSKKey)
@@ -1481,6 +1508,7 @@ func newMuxListener(
 	additionalMaxPacketSizeAdjustment int,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate,
+	gQUICCertificate tls.Certificate,
 	sharedSecret string) (*muxListener, error) {
 
 	listener := &muxListener{
@@ -1527,7 +1555,7 @@ func newMuxListener(
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	gl, err := gQUICListen(listener.gQUICConn, tlsCertificate, serverIdleTimeout)
+	gl, err := gQUICListen(listener.gQUICConn, gQUICCertificate, serverIdleTimeout)
 	if err != nil {
 		listener.ietfQUICListener.Close()
 		return nil, errors.Trace(err)

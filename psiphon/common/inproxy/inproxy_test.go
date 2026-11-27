@@ -1281,7 +1281,7 @@ func runHTTPServer(listener net.Listener, broker *Broker) error {
 		Handler:      handler,
 	}
 
-	certificate, privateKey, _, err := common.GenerateWebServerCertificate("www.example.com")
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate("www.example.com", false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1406,6 +1406,7 @@ func newQuicEchoServer() (*quicEchoServer, error) {
 		true,
 		GetQUICMaxPacketSizeAdjustment(),
 		obfuscationKey,
+		false,
 		false)
 	if err != nil {
 		return nil, errors.Trace(err)
