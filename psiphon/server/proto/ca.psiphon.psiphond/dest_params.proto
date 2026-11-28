@@ -10,4 +10,5 @@ message DestParams {
     optional string client_region = 3;
     optional string device_region = 4;
     optional string sponsor_id = 5;
+    optional bool is_untrusted_client_geoip = 6;
 }

@@ -3118,7 +3118,7 @@ func processSDPAddresses(
 				// In personal pairing mode, mismatching GeoIP candidates are
 				// allowed and peers are trusted to not misdirect each other
 				// to arbitrary destinations. This enables modes such as
-				// InproxyProxySplitUpstreamInterfaceName and broker
+				// ProxySplitUpstreamInterfaceName and broker
 				// tunneling that cannot relay the original client IP.
 
 				if lookupGeoIP != nil {

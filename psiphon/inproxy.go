@@ -71,8 +71,9 @@ import (
 // Network changes, tactics updates and controller shutdown close all broker
 // clients.
 type InproxyBrokerClientManager struct {
-	config  *Config
-	isProxy bool
+	config                 *Config
+	isProxy                bool
+	proxySessionPrivateKey inproxy.SessionPrivateKey
 
 	tlsCache utls.ClientSessionCache
 
@@ -91,22 +92,28 @@ type InproxyBrokerClientManager struct {
 	selector                    inproxyBrokerSelector
 	createdBrokerClients        int
 	peakConcurrentBrokerClients int
-	proxyKeyOnce                sync.Once
-	proxyKey                    inproxy.SessionPrivateKey
-	proxyKeyErr                 error
 }
 
 // NewInproxyBrokerClientManager creates a new InproxyBrokerClientManager.
 // NewInproxyBrokerClientManager does not perform any network operations; the
 // managed InproxyBrokerClientInstance values are initialized when used for a
 // round trip.
+//
+// When isProxy is true, proxySessionPrivateKey must be nonzero. The controller
+// supplies the same key for all proxy broker clients throughout its lifetime.
+// Otherwise, proxySessionPrivateKey is ignored and each broker client instance
+// generates a fresh ephemeral key.
 func NewInproxyBrokerClientManager(
-	config *Config, isProxy bool, tlsCache utls.ClientSessionCache) *InproxyBrokerClientManager {
+	config *Config,
+	isProxy bool,
+	tlsCache utls.ClientSessionCache,
+	proxySessionPrivateKey inproxy.SessionPrivateKey) *InproxyBrokerClientManager {
 
 	b := &InproxyBrokerClientManager{
-		config:   config,
-		isProxy:  isProxy,
-		tlsCache: tlsCache,
+		config:                 config,
+		isProxy:                isProxy,
+		proxySessionPrivateKey: proxySessionPrivateKey,
+		tlsCache:               tlsCache,
 	}
 
 	// b.clients is initialized on demand, when GetBrokerClient is called.
@@ -369,23 +376,6 @@ func (b *InproxyBrokerClientManager) takeBrokerClientCounts() (created, peakConc
 	created, peakConcurrent = b.createdBrokerClients, b.peakConcurrentBrokerClients
 	b.createdBrokerClients, b.peakConcurrentBrokerClients = 0, len(b.clients)
 	return created, peakConcurrent
-}
-
-// brokerClientPrivateKey returns the configured proxy key, or generates an
-// ephemeral proxy key on first use and retains it for future calls.
-// Clients get a new ephemeral key on each call.
-func (b *InproxyBrokerClientManager) brokerClientPrivateKey() (inproxy.SessionPrivateKey, error) {
-	if !b.isProxy {
-		return inproxy.GenerateSessionPrivateKey()
-	}
-	b.proxyKeyOnce.Do(func() {
-		if b.config.InproxyProxySessionPrivateKey != "" {
-			b.proxyKey, b.proxyKeyErr = inproxy.SessionPrivateKeyFromString(b.config.InproxyProxySessionPrivateKey)
-		} else {
-			b.proxyKey, b.proxyKeyErr = inproxy.GenerateSessionPrivateKey()
-		}
-	})
-	return b.proxyKey, b.proxyKeyErr
 }
 
 // waitLocked returns the channel broker client acquisition waits on in the
@@ -1474,9 +1464,14 @@ func newInproxyBrokerClientInstance(
 		return nil, errors.Trace(err)
 	}
 
-	brokerClientPrivateKey, err := brokerClientManager.brokerClientPrivateKey()
-	if err != nil {
-		return nil, errors.Trace(err)
+	brokerClientPrivateKey := brokerClientManager.proxySessionPrivateKey
+	if !isProxy {
+		brokerClientPrivateKey, err = inproxy.GenerateSessionPrivateKey()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	} else if brokerClientPrivateKey.IsZero() {
+		return nil, errors.TraceNew("missing proxy session private key")
 	}
 
 	// Load broker key material.
@@ -1731,8 +1726,8 @@ func prepareInproxyCompartmentIDs(
 	//   compartment ID
 
 	var configPersonalCompartmentIDs []string
-	if isProxy && len(config.InproxyProxyPersonalCompartmentID) > 0 {
-		configPersonalCompartmentIDs = []string{config.InproxyProxyPersonalCompartmentID}
+	if isProxy && len(config.ProxyPersonalCompartmentID) > 0 {
+		configPersonalCompartmentIDs = []string{config.ProxyPersonalCompartmentID}
 	} else if !isProxy && len(config.InproxyClientPersonalCompartmentID) > 0 {
 		configPersonalCompartmentIDs = []string{config.InproxyClientPersonalCompartmentID}
 	}

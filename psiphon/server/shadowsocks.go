@@ -28,6 +28,7 @@ import (
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 // ShadowsocksServer tunnels TCP traffic (in the case of Psiphon, SSH traffic)
@@ -116,7 +117,8 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 	return NewShadowsocksConn(conn, ssr, ssw), nil
 }
 
-// ShadowsocksConn implements the net.Conn and common.MetricsSource interfaces.
+// ShadowsocksConn implements net.Conn, common.MetricsSource, and
+// common.FragmentorAccessor.
 type ShadowsocksConn struct {
 	net.Conn
 	ssr io.Reader
@@ -158,6 +160,28 @@ func (conn *ShadowsocksConn) GetMetrics() common.LogFields {
 	}
 
 	return logFields
+}
+
+// SetReplay implements common.FragmentorAccessor.
+func (conn *ShadowsocksConn) SetReplay(PRNG *prng.PRNG) {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		fragmentor.SetReplay(PRNG)
+	}
+}
+
+// GetReplay implements common.FragmentorAccessor.
+func (conn *ShadowsocksConn) GetReplay() (*prng.Seed, bool) {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		return fragmentor.GetReplay()
+	}
+	return nil, false
+}
+
+// StopFragmenting implements common.FragmentorAccessor.
+func (conn *ShadowsocksConn) StopFragmenting() {
+	if fragmentor, ok := conn.Conn.(common.FragmentorAccessor); ok {
+		fragmentor.StopFragmenting()
+	}
 }
 
 // Not safe for concurrent use.
@@ -215,7 +239,8 @@ func (conn *saltReader) init() error {
 			err = errors.TraceNew("client replay detected")
 		}
 
-		conn.server.irregularTunnelLogger(conn.RemoteAddr().String(), err, nil)
+		conn.server.irregularTunnelLogger(
+			common.IPAddressFromAddr(conn.RemoteAddr()), err, nil)
 
 		return err
 	}

@@ -51,12 +51,13 @@ type destBytesLogger struct {
 }
 
 type destBytesBucket struct {
-	destination    string
-	clientRegion   string
-	clientASN      string
-	sponsorID      string
-	clientPlatform string
-	deviceRegion   string
+	destination            string
+	clientRegion           string
+	clientASN              string
+	isUntrustedClientGeoIP bool
+	sponsorID              string
+	clientPlatform         string
+	deviceRegion           string
 }
 
 type destBytesCounters struct {
@@ -119,6 +120,7 @@ func (d *destBytesLogger) Stop() {
 func (d *destBytesLogger) AddASNBytes(
 	destination string,
 	clientGeoIPData GeoIPData,
+	isUntrustedClientGeoIP bool,
 	apiParams common.APIParameters,
 	bytesTCP int64,
 	bytesUDP int64) {
@@ -131,6 +133,7 @@ func (d *destBytesLogger) AddASNBytes(
 	d.addBytes(
 		destination,
 		clientGeoIPData,
+		isUntrustedClientGeoIP,
 		apiParams,
 		bytesTCP,
 		bytesUDP)
@@ -185,6 +188,9 @@ func (d *destBytesLogger) addLogFields(
 
 	logFields["client_region"] = bucket.clientRegion
 	logFields["client_asn"] = bucket.clientASN
+	if bucket.isUntrustedClientGeoIP {
+		logFields["is_untrusted_client_geoip"] = true
+	}
 	logFields["sponsor_id"] = common.TruncateUTF8String(bucket.sponsorID, MAX_API_PARAM_STRING_LENGTH)
 	logFields["client_platform"] = common.TruncateUTF8String(bucket.clientPlatform, MAX_API_PARAM_STRING_LENGTH)
 	logFields["device_region"] = common.TruncateUTF8String(bucket.deviceRegion, MAX_API_PARAM_STRING_LENGTH)
@@ -197,6 +203,7 @@ func (d *destBytesLogger) addLogFields(
 func (d *destBytesLogger) addBytes(
 	destination string,
 	clientGeoIPData GeoIPData,
+	isUntrustedClientGeoIP bool,
 	apiParams common.APIParameters,
 	bytesTCP int64,
 	bytesUDP int64) {
@@ -210,12 +217,13 @@ func (d *destBytesLogger) addBytes(
 	deviceRegion, _ := getOptionalStringRequestParam(apiParams, "device_region")
 
 	bucket := destBytesBucket{
-		destination:    destination,
-		clientRegion:   clientGeoIPData.Country,
-		clientASN:      clientGeoIPData.ASN,
-		sponsorID:      sponsorID,
-		clientPlatform: normalizeClientPlatform(clientPlatform),
-		deviceRegion:   deviceRegion,
+		destination:            destination,
+		clientRegion:           clientGeoIPData.Country,
+		clientASN:              clientGeoIPData.ASN,
+		isUntrustedClientGeoIP: isUntrustedClientGeoIP,
+		sponsorID:              sponsorID,
+		clientPlatform:         normalizeClientPlatform(clientPlatform),
+		deviceRegion:           deviceRegion,
 	}
 
 	// The map key is a comparable struct of strings. The non-pointer struct

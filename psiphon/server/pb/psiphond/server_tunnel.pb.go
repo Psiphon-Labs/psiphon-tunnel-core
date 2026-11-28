@@ -111,15 +111,41 @@ type ServerTunnel struct {
 	ProxyProtocolHeaderAdded                      *int64                 `protobuf:"varint,188,opt,name=proxy_protocol_header_added,json=proxyProtocolHeaderAdded,proto3,oneof" json:"proxy_protocol_header_added,omitempty"`
 	ProxyProtocolHeaderReplaced                   *int64                 `protobuf:"varint,189,opt,name=proxy_protocol_header_replaced,json=proxyProtocolHeaderReplaced,proto3,oneof" json:"proxy_protocol_header_replaced,omitempty"`
 	ProxyProtocolHeaderFailed                     *int64                 `protobuf:"varint,190,opt,name=proxy_protocol_header_failed,json=proxyProtocolHeaderFailed,proto3,oneof" json:"proxy_protocol_header_failed,omitempty"`
-	LightProxyId                                  *string                `protobuf:"bytes,191,opt,name=light_proxy_id,json=lightProxyId,proto3,oneof" json:"light_proxy_id,omitempty"`
-	LightProxyEntryTracker                        *int64                 `protobuf:"varint,192,opt,name=light_proxy_entry_tracker,json=lightProxyEntryTracker,proto3,oneof" json:"light_proxy_entry_tracker,omitempty"`
-	LightProxyDial_IPv4                           *int64                 `protobuf:"varint,193,opt,name=light_proxy_dial_IPv4,json=lightProxyDialIPv4,proto3,oneof" json:"light_proxy_dial_IPv4,omitempty"`
-	LightProxyDial_IPv6                           *int64                 `protobuf:"varint,194,opt,name=light_proxy_dial_IPv6,json=lightProxyDialIPv6,proto3,oneof" json:"light_proxy_dial_IPv6,omitempty"`
-	LightProxyDialFailed                          *int64                 `protobuf:"varint,195,opt,name=light_proxy_dial_failed,json=lightProxyDialFailed,proto3,oneof" json:"light_proxy_dial_failed,omitempty"`
+	LightFallbackProxyId                          *string                `protobuf:"bytes,191,opt,name=light_fallback_proxy_id,json=lightFallbackProxyId,proto3,oneof" json:"light_fallback_proxy_id,omitempty"`
+	LightFallbackProxyEntryTracker                *int64                 `protobuf:"varint,192,opt,name=light_fallback_proxy_entry_tracker,json=lightFallbackProxyEntryTracker,proto3,oneof" json:"light_fallback_proxy_entry_tracker,omitempty"`
+	LightFallbackProxyDial_IPv4                   *int64                 `protobuf:"varint,193,opt,name=light_fallback_proxy_dial_IPv4,json=lightFallbackProxyDialIPv4,proto3,oneof" json:"light_fallback_proxy_dial_IPv4,omitempty"`
+	LightFallbackProxyDial_IPv6                   *int64                 `protobuf:"varint,194,opt,name=light_fallback_proxy_dial_IPv6,json=lightFallbackProxyDialIPv6,proto3,oneof" json:"light_fallback_proxy_dial_IPv6,omitempty"`
+	LightFallbackProxyDialFailed                  *int64                 `protobuf:"varint,195,opt,name=light_fallback_proxy_dial_failed,json=lightFallbackProxyDialFailed,proto3,oneof" json:"light_fallback_proxy_dial_failed,omitempty"`
 	TotalDomainPortForwardCountTcp                *int64                 `protobuf:"varint,196,opt,name=total_domain_port_forward_count_tcp,json=totalDomainPortForwardCountTcp,proto3,oneof" json:"total_domain_port_forward_count_tcp,omitempty"`
-	LightProxyDialCanceled                        *int64                 `protobuf:"varint,197,opt,name=light_proxy_dial_canceled,json=lightProxyDialCanceled,proto3,oneof" json:"light_proxy_dial_canceled,omitempty"`
+	LightFallbackProxyDialCanceled                *int64                 `protobuf:"varint,197,opt,name=light_fallback_proxy_dial_canceled,json=lightFallbackProxyDialCanceled,proto3,oneof" json:"light_fallback_proxy_dial_canceled,omitempty"`
 	ClientEvents                                  []string               `protobuf:"bytes,198,rep,name=client_events,json=clientEvents,proto3" json:"client_events,omitempty"`
-	LightProxyClientEvents                        []string               `protobuf:"bytes,199,rep,name=light_proxy_client_events,json=lightProxyClientEvents,proto3" json:"light_proxy_client_events,omitempty"`
+	LightFallbackProxyClientEvents                []string               `protobuf:"bytes,199,rep,name=light_fallback_proxy_client_events,json=lightFallbackProxyClientEvents,proto3" json:"light_fallback_proxy_client_events,omitempty"`
+	LightProxyPlatform                            *string                `protobuf:"bytes,200,opt,name=light_proxy_platform,json=lightProxyPlatform,proto3,oneof" json:"light_proxy_platform,omitempty"`
+	LightProxyVersion                             *int64                 `protobuf:"varint,201,opt,name=light_proxy_version,json=lightProxyVersion,proto3,oneof" json:"light_proxy_version,omitempty"`
+	LightProxyBuildRev                            *string                `protobuf:"bytes,202,opt,name=light_proxy_build_rev,json=lightProxyBuildRev,proto3,oneof" json:"light_proxy_build_rev,omitempty"`
+	LightProxySni                                 *string                `protobuf:"bytes,203,opt,name=light_proxy_sni,json=lightProxySni,proto3,oneof" json:"light_proxy_sni,omitempty"`
+	LightProxyTlsProfile                          *string                `protobuf:"bytes,204,opt,name=light_proxy_tls_profile,json=lightProxyTlsProfile,proto3,oneof" json:"light_proxy_tls_profile,omitempty"`
+	LightProxyTlsFragmented                       *bool                  `protobuf:"varint,205,opt,name=light_proxy_tls_fragmented,json=lightProxyTlsFragmented,proto3,oneof" json:"light_proxy_tls_fragmented,omitempty"`
+	LightProxyTlsPadding                          *int64                 `protobuf:"varint,206,opt,name=light_proxy_tls_padding,json=lightProxyTlsPadding,proto3,oneof" json:"light_proxy_tls_padding,omitempty"`
+	LightProxyTlsDidResume                        *bool                  `protobuf:"varint,207,opt,name=light_proxy_tls_did_resume,json=lightProxyTlsDidResume,proto3,oneof" json:"light_proxy_tls_did_resume,omitempty"`
+	LightProxyQuicVersion                         *string                `protobuf:"bytes,208,opt,name=light_proxy_quic_version,json=lightProxyQuicVersion,proto3,oneof" json:"light_proxy_quic_version,omitempty"`
+	LightProxyQuicDidResume                       *bool                  `protobuf:"varint,209,opt,name=light_proxy_quic_did_resume,json=lightProxyQuicDidResume,proto3,oneof" json:"light_proxy_quic_did_resume,omitempty"`
+	LightProxyEgressTlsProfile                    *string                `protobuf:"bytes,210,opt,name=light_proxy_egress_tls_profile,json=lightProxyEgressTlsProfile,proto3,oneof" json:"light_proxy_egress_tls_profile,omitempty"`
+	LightProxyEgressQuicVersion                   *string                `protobuf:"bytes,211,opt,name=light_proxy_egress_quic_version,json=lightProxyEgressQuicVersion,proto3,oneof" json:"light_proxy_egress_quic_version,omitempty"`
+	LightProxyIsTrusted                           *bool                  `protobuf:"varint,212,opt,name=light_proxy_is_trusted,json=lightProxyIsTrusted,proto3,oneof" json:"light_proxy_is_trusted,omitempty"`
+	LightProxyRegion                              *string                `protobuf:"bytes,213,opt,name=light_proxy_region,json=lightProxyRegion,proto3,oneof" json:"light_proxy_region,omitempty"`
+	LightProxyCity                                *string                `protobuf:"bytes,214,opt,name=light_proxy_city,json=lightProxyCity,proto3,oneof" json:"light_proxy_city,omitempty"`
+	LightProxyIsp                                 *string                `protobuf:"bytes,215,opt,name=light_proxy_isp,json=lightProxyIsp,proto3,oneof" json:"light_proxy_isp,omitempty"`
+	LightProxyAsn                                 *string                `protobuf:"bytes,216,opt,name=light_proxy_asn,json=lightProxyAsn,proto3,oneof" json:"light_proxy_asn,omitempty"`
+	LightProxyAso                                 *string                `protobuf:"bytes,217,opt,name=light_proxy_aso,json=lightProxyAso,proto3,oneof" json:"light_proxy_aso,omitempty"`
+	LightEgressTlsSni                             *string                `protobuf:"bytes,223,opt,name=light_egress_tls_sni,json=lightEgressTlsSni,proto3,oneof" json:"light_egress_tls_sni,omitempty"`
+	LightEgressTlsFragmented                      *bool                  `protobuf:"varint,224,opt,name=light_egress_tls_fragmented,json=lightEgressTlsFragmented,proto3,oneof" json:"light_egress_tls_fragmented,omitempty"`
+	LightEgressTlsPadding                         *int64                 `protobuf:"varint,225,opt,name=light_egress_tls_padding,json=lightEgressTlsPadding,proto3,oneof" json:"light_egress_tls_padding,omitempty"`
+	LightEgressTlsDidResume                       *bool                  `protobuf:"varint,226,opt,name=light_egress_tls_did_resume,json=lightEgressTlsDidResume,proto3,oneof" json:"light_egress_tls_did_resume,omitempty"`
+	LightEgressQuicSni                            *string                `protobuf:"bytes,227,opt,name=light_egress_quic_sni,json=lightEgressQuicSni,proto3,oneof" json:"light_egress_quic_sni,omitempty"`
+	LightEgressQuicDidResume                      *bool                  `protobuf:"varint,228,opt,name=light_egress_quic_did_resume,json=lightEgressQuicDidResume,proto3,oneof" json:"light_egress_quic_did_resume,omitempty"`
+	LightMatchedPersonalCompartments              *bool                  `protobuf:"varint,229,opt,name=light_matched_personal_compartments,json=lightMatchedPersonalCompartments,proto3,oneof" json:"light_matched_personal_compartments,omitempty"`
+	LightProxyId                                  *string                `protobuf:"bytes,230,opt,name=light_proxy_id,json=lightProxyId,proto3,oneof" json:"light_proxy_id,omitempty"`
 	unknownFields                                 protoimpl.UnknownFields
 	sizeCache                                     protoimpl.SizeCache
 }
@@ -763,37 +789,37 @@ func (x *ServerTunnel) GetProxyProtocolHeaderFailed() int64 {
 	return 0
 }
 
-func (x *ServerTunnel) GetLightProxyId() string {
-	if x != nil && x.LightProxyId != nil {
-		return *x.LightProxyId
+func (x *ServerTunnel) GetLightFallbackProxyId() string {
+	if x != nil && x.LightFallbackProxyId != nil {
+		return *x.LightFallbackProxyId
 	}
 	return ""
 }
 
-func (x *ServerTunnel) GetLightProxyEntryTracker() int64 {
-	if x != nil && x.LightProxyEntryTracker != nil {
-		return *x.LightProxyEntryTracker
+func (x *ServerTunnel) GetLightFallbackProxyEntryTracker() int64 {
+	if x != nil && x.LightFallbackProxyEntryTracker != nil {
+		return *x.LightFallbackProxyEntryTracker
 	}
 	return 0
 }
 
-func (x *ServerTunnel) GetLightProxyDial_IPv4() int64 {
-	if x != nil && x.LightProxyDial_IPv4 != nil {
-		return *x.LightProxyDial_IPv4
+func (x *ServerTunnel) GetLightFallbackProxyDial_IPv4() int64 {
+	if x != nil && x.LightFallbackProxyDial_IPv4 != nil {
+		return *x.LightFallbackProxyDial_IPv4
 	}
 	return 0
 }
 
-func (x *ServerTunnel) GetLightProxyDial_IPv6() int64 {
-	if x != nil && x.LightProxyDial_IPv6 != nil {
-		return *x.LightProxyDial_IPv6
+func (x *ServerTunnel) GetLightFallbackProxyDial_IPv6() int64 {
+	if x != nil && x.LightFallbackProxyDial_IPv6 != nil {
+		return *x.LightFallbackProxyDial_IPv6
 	}
 	return 0
 }
 
-func (x *ServerTunnel) GetLightProxyDialFailed() int64 {
-	if x != nil && x.LightProxyDialFailed != nil {
-		return *x.LightProxyDialFailed
+func (x *ServerTunnel) GetLightFallbackProxyDialFailed() int64 {
+	if x != nil && x.LightFallbackProxyDialFailed != nil {
+		return *x.LightFallbackProxyDialFailed
 	}
 	return 0
 }
@@ -805,9 +831,9 @@ func (x *ServerTunnel) GetTotalDomainPortForwardCountTcp() int64 {
 	return 0
 }
 
-func (x *ServerTunnel) GetLightProxyDialCanceled() int64 {
-	if x != nil && x.LightProxyDialCanceled != nil {
-		return *x.LightProxyDialCanceled
+func (x *ServerTunnel) GetLightFallbackProxyDialCanceled() int64 {
+	if x != nil && x.LightFallbackProxyDialCanceled != nil {
+		return *x.LightFallbackProxyDialCanceled
 	}
 	return 0
 }
@@ -819,18 +845,200 @@ func (x *ServerTunnel) GetClientEvents() []string {
 	return nil
 }
 
-func (x *ServerTunnel) GetLightProxyClientEvents() []string {
+func (x *ServerTunnel) GetLightFallbackProxyClientEvents() []string {
 	if x != nil {
-		return x.LightProxyClientEvents
+		return x.LightFallbackProxyClientEvents
 	}
 	return nil
+}
+
+func (x *ServerTunnel) GetLightProxyPlatform() string {
+	if x != nil && x.LightProxyPlatform != nil {
+		return *x.LightProxyPlatform
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyVersion() int64 {
+	if x != nil && x.LightProxyVersion != nil {
+		return *x.LightProxyVersion
+	}
+	return 0
+}
+
+func (x *ServerTunnel) GetLightProxyBuildRev() string {
+	if x != nil && x.LightProxyBuildRev != nil {
+		return *x.LightProxyBuildRev
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxySni() string {
+	if x != nil && x.LightProxySni != nil {
+		return *x.LightProxySni
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyTlsProfile() string {
+	if x != nil && x.LightProxyTlsProfile != nil {
+		return *x.LightProxyTlsProfile
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyTlsFragmented() bool {
+	if x != nil && x.LightProxyTlsFragmented != nil {
+		return *x.LightProxyTlsFragmented
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightProxyTlsPadding() int64 {
+	if x != nil && x.LightProxyTlsPadding != nil {
+		return *x.LightProxyTlsPadding
+	}
+	return 0
+}
+
+func (x *ServerTunnel) GetLightProxyTlsDidResume() bool {
+	if x != nil && x.LightProxyTlsDidResume != nil {
+		return *x.LightProxyTlsDidResume
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightProxyQuicVersion() string {
+	if x != nil && x.LightProxyQuicVersion != nil {
+		return *x.LightProxyQuicVersion
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyQuicDidResume() bool {
+	if x != nil && x.LightProxyQuicDidResume != nil {
+		return *x.LightProxyQuicDidResume
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightProxyEgressTlsProfile() string {
+	if x != nil && x.LightProxyEgressTlsProfile != nil {
+		return *x.LightProxyEgressTlsProfile
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyEgressQuicVersion() string {
+	if x != nil && x.LightProxyEgressQuicVersion != nil {
+		return *x.LightProxyEgressQuicVersion
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyIsTrusted() bool {
+	if x != nil && x.LightProxyIsTrusted != nil {
+		return *x.LightProxyIsTrusted
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightProxyRegion() string {
+	if x != nil && x.LightProxyRegion != nil {
+		return *x.LightProxyRegion
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyCity() string {
+	if x != nil && x.LightProxyCity != nil {
+		return *x.LightProxyCity
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyIsp() string {
+	if x != nil && x.LightProxyIsp != nil {
+		return *x.LightProxyIsp
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyAsn() string {
+	if x != nil && x.LightProxyAsn != nil {
+		return *x.LightProxyAsn
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightProxyAso() string {
+	if x != nil && x.LightProxyAso != nil {
+		return *x.LightProxyAso
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightEgressTlsSni() string {
+	if x != nil && x.LightEgressTlsSni != nil {
+		return *x.LightEgressTlsSni
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightEgressTlsFragmented() bool {
+	if x != nil && x.LightEgressTlsFragmented != nil {
+		return *x.LightEgressTlsFragmented
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightEgressTlsPadding() int64 {
+	if x != nil && x.LightEgressTlsPadding != nil {
+		return *x.LightEgressTlsPadding
+	}
+	return 0
+}
+
+func (x *ServerTunnel) GetLightEgressTlsDidResume() bool {
+	if x != nil && x.LightEgressTlsDidResume != nil {
+		return *x.LightEgressTlsDidResume
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightEgressQuicSni() string {
+	if x != nil && x.LightEgressQuicSni != nil {
+		return *x.LightEgressQuicSni
+	}
+	return ""
+}
+
+func (x *ServerTunnel) GetLightEgressQuicDidResume() bool {
+	if x != nil && x.LightEgressQuicDidResume != nil {
+		return *x.LightEgressQuicDidResume
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightMatchedPersonalCompartments() bool {
+	if x != nil && x.LightMatchedPersonalCompartments != nil {
+		return *x.LightMatchedPersonalCompartments
+	}
+	return false
+}
+
+func (x *ServerTunnel) GetLightProxyId() string {
+	if x != nil && x.LightProxyId != nil {
+		return *x.LightProxyId
+	}
+	return ""
 }
 
 var File_ca_psiphon_psiphond_server_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe4J\n" +
+	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xee]\n" +
 	"\fServerTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
@@ -924,16 +1132,42 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x1bssh_protocol_bytes_overhead\x18\xbb\x01 \x01(\x03HSR\x18sshProtocolBytesOverhead\x88\x01\x01\x12C\n" +
 	"\x1bproxy_protocol_header_added\x18\xbc\x01 \x01(\x03HTR\x18proxyProtocolHeaderAdded\x88\x01\x01\x12I\n" +
 	"\x1eproxy_protocol_header_replaced\x18\xbd\x01 \x01(\x03HUR\x1bproxyProtocolHeaderReplaced\x88\x01\x01\x12E\n" +
-	"\x1cproxy_protocol_header_failed\x18\xbe\x01 \x01(\x03HVR\x19proxyProtocolHeaderFailed\x88\x01\x01\x12*\n" +
-	"\x0elight_proxy_id\x18\xbf\x01 \x01(\tHWR\flightProxyId\x88\x01\x01\x12?\n" +
-	"\x19light_proxy_entry_tracker\x18\xc0\x01 \x01(\x03HXR\x16lightProxyEntryTracker\x88\x01\x01\x127\n" +
-	"\x15light_proxy_dial_IPv4\x18\xc1\x01 \x01(\x03HYR\x12lightProxyDialIPv4\x88\x01\x01\x127\n" +
-	"\x15light_proxy_dial_IPv6\x18\xc2\x01 \x01(\x03HZR\x12lightProxyDialIPv6\x88\x01\x01\x12;\n" +
-	"\x17light_proxy_dial_failed\x18\xc3\x01 \x01(\x03H[R\x14lightProxyDialFailed\x88\x01\x01\x12Q\n" +
-	"#total_domain_port_forward_count_tcp\x18\xc4\x01 \x01(\x03H\\R\x1etotalDomainPortForwardCountTcp\x88\x01\x01\x12?\n" +
-	"\x19light_proxy_dial_canceled\x18\xc5\x01 \x01(\x03H]R\x16lightProxyDialCanceled\x88\x01\x01\x12$\n" +
-	"\rclient_events\x18\xc6\x01 \x03(\tR\fclientEvents\x12:\n" +
-	"\x19light_proxy_client_events\x18\xc7\x01 \x03(\tR\x16lightProxyClientEventsB\x0e\n" +
+	"\x1cproxy_protocol_header_failed\x18\xbe\x01 \x01(\x03HVR\x19proxyProtocolHeaderFailed\x88\x01\x01\x12;\n" +
+	"\x17light_fallback_proxy_id\x18\xbf\x01 \x01(\tHWR\x14lightFallbackProxyId\x88\x01\x01\x12P\n" +
+	"\"light_fallback_proxy_entry_tracker\x18\xc0\x01 \x01(\x03HXR\x1elightFallbackProxyEntryTracker\x88\x01\x01\x12H\n" +
+	"\x1elight_fallback_proxy_dial_IPv4\x18\xc1\x01 \x01(\x03HYR\x1alightFallbackProxyDialIPv4\x88\x01\x01\x12H\n" +
+	"\x1elight_fallback_proxy_dial_IPv6\x18\xc2\x01 \x01(\x03HZR\x1alightFallbackProxyDialIPv6\x88\x01\x01\x12L\n" +
+	" light_fallback_proxy_dial_failed\x18\xc3\x01 \x01(\x03H[R\x1clightFallbackProxyDialFailed\x88\x01\x01\x12Q\n" +
+	"#total_domain_port_forward_count_tcp\x18\xc4\x01 \x01(\x03H\\R\x1etotalDomainPortForwardCountTcp\x88\x01\x01\x12P\n" +
+	"\"light_fallback_proxy_dial_canceled\x18\xc5\x01 \x01(\x03H]R\x1elightFallbackProxyDialCanceled\x88\x01\x01\x12$\n" +
+	"\rclient_events\x18\xc6\x01 \x03(\tR\fclientEvents\x12K\n" +
+	"\"light_fallback_proxy_client_events\x18\xc7\x01 \x03(\tR\x1elightFallbackProxyClientEvents\x126\n" +
+	"\x14light_proxy_platform\x18\xc8\x01 \x01(\tH^R\x12lightProxyPlatform\x88\x01\x01\x124\n" +
+	"\x13light_proxy_version\x18\xc9\x01 \x01(\x03H_R\x11lightProxyVersion\x88\x01\x01\x127\n" +
+	"\x15light_proxy_build_rev\x18\xca\x01 \x01(\tH`R\x12lightProxyBuildRev\x88\x01\x01\x12,\n" +
+	"\x0flight_proxy_sni\x18\xcb\x01 \x01(\tHaR\rlightProxySni\x88\x01\x01\x12;\n" +
+	"\x17light_proxy_tls_profile\x18\xcc\x01 \x01(\tHbR\x14lightProxyTlsProfile\x88\x01\x01\x12A\n" +
+	"\x1alight_proxy_tls_fragmented\x18\xcd\x01 \x01(\bHcR\x17lightProxyTlsFragmented\x88\x01\x01\x12;\n" +
+	"\x17light_proxy_tls_padding\x18\xce\x01 \x01(\x03HdR\x14lightProxyTlsPadding\x88\x01\x01\x12@\n" +
+	"\x1alight_proxy_tls_did_resume\x18\xcf\x01 \x01(\bHeR\x16lightProxyTlsDidResume\x88\x01\x01\x12=\n" +
+	"\x18light_proxy_quic_version\x18\xd0\x01 \x01(\tHfR\x15lightProxyQuicVersion\x88\x01\x01\x12B\n" +
+	"\x1blight_proxy_quic_did_resume\x18\xd1\x01 \x01(\bHgR\x17lightProxyQuicDidResume\x88\x01\x01\x12H\n" +
+	"\x1elight_proxy_egress_tls_profile\x18\xd2\x01 \x01(\tHhR\x1alightProxyEgressTlsProfile\x88\x01\x01\x12J\n" +
+	"\x1flight_proxy_egress_quic_version\x18\xd3\x01 \x01(\tHiR\x1blightProxyEgressQuicVersion\x88\x01\x01\x129\n" +
+	"\x16light_proxy_is_trusted\x18\xd4\x01 \x01(\bHjR\x13lightProxyIsTrusted\x88\x01\x01\x122\n" +
+	"\x12light_proxy_region\x18\xd5\x01 \x01(\tHkR\x10lightProxyRegion\x88\x01\x01\x12.\n" +
+	"\x10light_proxy_city\x18\xd6\x01 \x01(\tHlR\x0elightProxyCity\x88\x01\x01\x12,\n" +
+	"\x0flight_proxy_isp\x18\xd7\x01 \x01(\tHmR\rlightProxyIsp\x88\x01\x01\x12,\n" +
+	"\x0flight_proxy_asn\x18\xd8\x01 \x01(\tHnR\rlightProxyAsn\x88\x01\x01\x12,\n" +
+	"\x0flight_proxy_aso\x18\xd9\x01 \x01(\tHoR\rlightProxyAso\x88\x01\x01\x125\n" +
+	"\x14light_egress_tls_sni\x18\xdf\x01 \x01(\tHpR\x11lightEgressTlsSni\x88\x01\x01\x12C\n" +
+	"\x1blight_egress_tls_fragmented\x18\xe0\x01 \x01(\bHqR\x18lightEgressTlsFragmented\x88\x01\x01\x12=\n" +
+	"\x18light_egress_tls_padding\x18\xe1\x01 \x01(\x03HrR\x15lightEgressTlsPadding\x88\x01\x01\x12B\n" +
+	"\x1blight_egress_tls_did_resume\x18\xe2\x01 \x01(\bHsR\x17lightEgressTlsDidResume\x88\x01\x01\x127\n" +
+	"\x15light_egress_quic_sni\x18\xe3\x01 \x01(\tHtR\x12lightEgressQuicSni\x88\x01\x01\x12D\n" +
+	"\x1clight_egress_quic_did_resume\x18\xe4\x01 \x01(\bHuR\x18lightEgressQuicDidResume\x88\x01\x01\x12S\n" +
+	"#light_matched_personal_compartments\x18\xe5\x01 \x01(\bHvR lightMatchedPersonalCompartments\x88\x01\x01\x12*\n" +
+	"\x0elight_proxy_id\x18\xe6\x01 \x01(\tHwR\flightProxyId\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
 	"\x14_inproxy_dial_paramsB\x1f\n" +
@@ -1020,14 +1254,40 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x1c_ssh_protocol_bytes_overheadB\x1e\n" +
 	"\x1c_proxy_protocol_header_addedB!\n" +
 	"\x1f_proxy_protocol_header_replacedB\x1f\n" +
-	"\x1d_proxy_protocol_header_failedB\x11\n" +
-	"\x0f_light_proxy_idB\x1c\n" +
-	"\x1a_light_proxy_entry_trackerB\x18\n" +
-	"\x16_light_proxy_dial_IPv4B\x18\n" +
-	"\x16_light_proxy_dial_IPv6B\x1a\n" +
-	"\x18_light_proxy_dial_failedB&\n" +
-	"$_total_domain_port_forward_count_tcpB\x1c\n" +
-	"\x1a_light_proxy_dial_canceledJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x1d_proxy_protocol_header_failedB\x1a\n" +
+	"\x18_light_fallback_proxy_idB%\n" +
+	"#_light_fallback_proxy_entry_trackerB!\n" +
+	"\x1f_light_fallback_proxy_dial_IPv4B!\n" +
+	"\x1f_light_fallback_proxy_dial_IPv6B#\n" +
+	"!_light_fallback_proxy_dial_failedB&\n" +
+	"$_total_domain_port_forward_count_tcpB%\n" +
+	"#_light_fallback_proxy_dial_canceledB\x17\n" +
+	"\x15_light_proxy_platformB\x16\n" +
+	"\x14_light_proxy_versionB\x18\n" +
+	"\x16_light_proxy_build_revB\x12\n" +
+	"\x10_light_proxy_sniB\x1a\n" +
+	"\x18_light_proxy_tls_profileB\x1d\n" +
+	"\x1b_light_proxy_tls_fragmentedB\x1a\n" +
+	"\x18_light_proxy_tls_paddingB\x1d\n" +
+	"\x1b_light_proxy_tls_did_resumeB\x1b\n" +
+	"\x19_light_proxy_quic_versionB\x1e\n" +
+	"\x1c_light_proxy_quic_did_resumeB!\n" +
+	"\x1f_light_proxy_egress_tls_profileB\"\n" +
+	" _light_proxy_egress_quic_versionB\x19\n" +
+	"\x17_light_proxy_is_trustedB\x15\n" +
+	"\x13_light_proxy_regionB\x13\n" +
+	"\x11_light_proxy_cityB\x12\n" +
+	"\x10_light_proxy_ispB\x12\n" +
+	"\x10_light_proxy_asnB\x12\n" +
+	"\x10_light_proxy_asoB\x17\n" +
+	"\x15_light_egress_tls_sniB\x1e\n" +
+	"\x1c_light_egress_tls_fragmentedB\x1b\n" +
+	"\x19_light_egress_tls_paddingB\x1e\n" +
+	"\x1c_light_egress_tls_did_resumeB\x18\n" +
+	"\x16_light_egress_quic_sniB\x1f\n" +
+	"\x1d_light_egress_quic_did_resumeB&\n" +
+	"$_light_matched_personal_compartmentsB\x11\n" +
+	"\x0f_light_proxy_idJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_tunnel_proto_rawDescOnce sync.Once

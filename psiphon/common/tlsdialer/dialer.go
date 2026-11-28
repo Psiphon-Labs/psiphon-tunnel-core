@@ -58,6 +58,7 @@ import (
 	"encoding/hex"
 	std_errors "errors"
 	"io/ioutil"
+	"math"
 	"net"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
@@ -68,6 +69,16 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	utls "github.com/Psiphon-Labs/utls"
 )
+
+// randomizedTLSProfileTLS13Weight is the utls weight for selecting TLS 1.3
+// in a randomized ClientHello. Dial, selectTLSProfile and
+// TLSProfileSupportsTLS13 must all use it, so that they agree on the TLS
+// version for a given seed.
+const randomizedTLSProfileTLS13Weight = 0.5
+
+// MaxTLSPadding limits the padding extension length used by Dial.
+// Maximum padding size per RFC 7685
+const MaxTLSPadding = math.MaxUint16
 
 // Config specifies the parameters for a Dial, supporting
 // many TLS-related network obfuscation mechanisms.
@@ -309,6 +320,8 @@ func Dial(
 	}
 	if config.VerifyPinsOnly {
 		tlsConfigInsecureSkipVerify = true
+		// Clear verifyServerName to skip server name verification by default.
+		verifyServerName = ""
 	}
 
 	if config.UseDialAddrSNI {
@@ -348,26 +361,12 @@ func Dial(
 	// verification; and abort the handshake at the same point, if custom
 	// verification fails.
 	var tlsConfigVerifyPeerCertificate func([][]byte, [][]*x509.Certificate) error
-	if !skipVerify {
+	if !skipVerify && !config.VerifyPinsOnly {
 		tlsConfigVerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 
 			if config.VerifyLegacyCertificate != nil {
 				return verifyLegacyCertificate(
 					rawCerts, config.VerifyLegacyCertificate)
-			}
-
-			if config.VerifyPinsOnly {
-				if len(verifiedChains) > 0 {
-					return errors.TraceNew("unexpected verified chains")
-				}
-
-				err := common.VerifyServerCertificatePinsOnly(
-					rawCerts, verifyServerName, config.VerifyPins)
-				if err != nil {
-					return errors.Trace(err)
-				}
-
-				return nil
 			}
 
 			if tlsConfigInsecureSkipVerify {
@@ -407,6 +406,18 @@ func Dial(
 		OmitEmptyPsk:           true,
 		AlwaysIncludePSK:       true,
 	}
+	if config.VerifyPinsOnly {
+		// VerifyConnection also runs for resumed sessions.
+		tlsConfig.VerifyConnection = func(state utls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 {
+				return errors.TraceNew("missing certificates")
+			}
+			return common.VerifyServerCertificatePinsOnly(
+				[][]byte{state.PeerCertificates[0].Raw},
+				verifyServerName,
+				config.VerifyPins)
+		}
+	}
 	if config.FragmentClientHello {
 		tlsConfig.FragmentClientHello = sniFragmentOffset
 	}
@@ -415,7 +426,7 @@ func Dial(
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", "", p)
+		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", "", nil, nil, false, p)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -448,7 +459,7 @@ func Dial(
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
 
 		weights := utls.DefaultWeights
-		weights.TLSVersMax_Set_VersionTLS13 = 0.5
+		weights.TLSVersMax_Set_VersionTLS13 = randomizedTLSProfileTLS13Weight
 		utlsClientHelloID.Weights = &weights
 	}
 
@@ -643,12 +654,7 @@ func Dial(
 
 	if config.TLSPadding > 0 {
 
-		tlsPadding := config.TLSPadding
-
-		// Maximum padding size per RFC 7685
-		if tlsPadding > 65535 {
-			tlsPadding = 65535
-		}
+		tlsPadding := min(config.TLSPadding, MaxTLSPadding)
 
 		// Assumes only one PaddingExtension.
 		deleteIndex := -1
@@ -699,10 +705,18 @@ func Dial(
 		return nil, errors.Trace(err)
 	}
 
+	connectionState := conn.ConnectionState()
+	if connectionState.Version == utls.VersionTLS13 {
+		// TLS 1.3 has no renegotiation. Disable it in the config so uTLS permits
+		// ExportKeyingMaterial. Changing the config after the handshake preserves
+		// the ClientHello.
+		tlsConfig.Renegotiation = utls.RenegotiateNever
+	}
+
 	connectionMetrics := conn.ConnectionMetrics()
 	clientSentTicket := connectionMetrics.ClientSentTicket
 	clientHelloFragmented := connectionMetrics.ClientHelloFragmented
-	didResume := conn.ConnectionState().DidResume
+	didResume := connectionState.DidResume
 
 	return &tlsConn{
 		Conn:           conn,
@@ -764,29 +778,58 @@ func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certif
 	return nil
 }
 
-func IsConnUsingHTTP2(conn net.Conn) bool {
-	if t, ok := conn.(*tlsConn); ok {
-		if u, ok := t.Conn.(*utls.UConn); ok {
-			state := u.ConnectionState()
-			return state.NegotiatedProtocolIsMutual &&
-				state.NegotiatedProtocol == "h2"
-		}
+// ExportKeyingMaterial returns exported key material for a connection
+// returned by Dial.
+func ExportKeyingMaterial(
+	conn net.Conn,
+	label string,
+	context []byte,
+	length int) ([]byte, error) {
+
+	uTLSConn, ok := getUTLSConn(conn)
+	if !ok {
+		return nil, errors.TraceNew("invalid TLS connection")
 	}
-	return false
+
+	state := uTLSConn.ConnectionState()
+	exporter, err := state.ExportKeyingMaterial(label, context, length)
+	return exporter, errors.Trace(err)
+}
+
+func IsConnUsingHTTP2(conn net.Conn) bool {
+	uTLSConn, ok := getUTLSConn(conn)
+	if !ok {
+		return false
+	}
+
+	state := uTLSConn.ConnectionState()
+	return state.NegotiatedProtocolIsMutual &&
+		state.NegotiatedProtocol == "h2"
+}
+
+func getUTLSConn(conn net.Conn) (*utls.UConn, bool) {
+	tlsConn, ok := conn.(*tlsConn)
+	if !ok {
+		return nil, false
+	}
+	uTLSConn, ok := tlsConn.Conn.(*utls.UConn)
+	return uTLSConn, ok
 }
 
 // TLSProfileSupportsTLS13 indicates whether the specified TLS profile is
 // supported and capable of negotiating TLS 1.3.
 //
-// TLS_PROFILE_RANDOMIZED, which generates a ClientHello that may negotiate
-// either TLS 1.2 or TLS 1.3, is reported as capable.
-func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
+// For TLS_PROFILE_RANDOMIZED, a nil randomizedTLSProfileSeed reports potential
+// support; otherwise the seeded ClientHello is checked.
+func TLSProfileSupportsTLS13(
+	tlsProfile string, randomizedTLSProfileSeed *prng.Seed) (bool, error) {
 
 	if !common.Contains(protocol.SupportedTLSProfiles, tlsProfile) {
 		return false, errors.TraceNew("unsupported TLS profile")
 	}
 
-	if protocol.TLSProfileIsRandomized(tlsProfile) {
+	isRandomized := protocol.TLSProfileIsRandomized(tlsProfile)
+	if isRandomized && randomizedTLSProfileSeed == nil {
 		return true, nil
 	}
 
@@ -794,6 +837,16 @@ func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
 		parameters.MakeNilParametersAccessor(), tlsProfile)
 	if err != nil {
 		return false, errors.Trace(err)
+	}
+
+	if isRandomized {
+		utlsClientHelloID.Seed = new(utls.PRNGSeed)
+		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		// Match Dial's randomized TLS version selection.
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = randomizedTLSProfileTLS13Weight
+		utlsClientHelloID.Weights = &weights
 	}
 
 	tlsVersion, err := getClientHelloVersion(
@@ -814,6 +867,10 @@ func TLSProfileSupportsTLS13(tlsProfile string) (bool, error) {
 // profile is unknown, disabled, incompatible with the requested constraints,
 // or fails the TLS version requirement, random selection is used as fallback.
 //
+// Empty parameter-name lists use LimitTLSProfiles and
+// SelectRandomizedTLSProfileProbability. Names are ordered by preference.
+// excludeCustomTLSProfiles restricts selection to stock profiles.
+//
 // If SelectTLSProfile can't find a TLS profile that matches the input
 // constraints, including tactics parameters such as LimitTLSProfiles and
 // DisableFrontingProviderTLSProfiles, it returns an error.
@@ -823,7 +880,18 @@ func SelectTLSProfile(
 	isFronted bool,
 	frontingProviderID string,
 	preferredTLSProfile string,
+	limitTLSProfilesParameters []string,
+	randomizedTLSProfileProbabilityParameters []string,
+	excludeCustomTLSProfiles bool,
 	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
+
+	if len(limitTLSProfilesParameters) == 0 {
+		limitTLSProfilesParameters = []string{parameters.LimitTLSProfiles}
+	}
+	if len(randomizedTLSProfileProbabilityParameters) == 0 {
+		randomizedTLSProfileProbabilityParameters =
+			[]string{parameters.SelectRandomizedTLSProfileProbability}
+	}
 
 	preferred := preferredTLSProfile
 
@@ -835,6 +903,9 @@ func SelectTLSProfile(
 				isFronted,
 				frontingProviderID,
 				preferred,
+				limitTLSProfilesParameters,
+				randomizedTLSProfileProbabilityParameters,
+				excludeCustomTLSProfiles,
 				p)
 		if err != nil {
 			return "", "", nil, errors.Trace(err)
@@ -883,6 +954,9 @@ func selectTLSProfile(
 	isFronted bool,
 	frontingProviderID string,
 	preferredTLSProfile string,
+	limitTLSProfilesParameters []string,
+	randomizedTLSProfileProbabilityParameters []string,
+	excludeCustomTLSProfiles bool,
 	p parameters.ParametersAccessor) (string, string, *prng.Seed, error) {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
@@ -905,7 +979,7 @@ func selectTLSProfile(
 	// of the capabilities in the ClientHello. Unlike the LimitTLSProfiles case,
 	// DisableFrontingProviderTLSProfiles may disable CustomTLSProfiles.
 
-	limitTLSProfiles := p.TLSProfiles(parameters.LimitTLSProfiles)
+	limitTLSProfiles := p.TLSProfiles(limitTLSProfilesParameters...)
 	var disableTLSProfiles protocol.TLSProfiles
 
 	if isFronted && frontingProviderID != "" {
@@ -916,9 +990,11 @@ func selectTLSProfile(
 	randomizedTLSProfiles := make([]string, 0)
 	parrotTLSProfiles := make([]string, 0)
 
-	for _, tlsProfile := range p.CustomTLSProfileNames() {
-		if !common.Contains(disableTLSProfiles, tlsProfile) {
-			parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+	if !excludeCustomTLSProfiles {
+		for _, tlsProfile := range p.CustomTLSProfileNames() {
+			if !common.Contains(disableTLSProfiles, tlsProfile) {
+				parrotTLSProfiles = append(parrotTLSProfiles, tlsProfile)
+			}
 		}
 	}
 
@@ -971,7 +1047,7 @@ func selectTLSProfile(
 		}
 	} else if len(randomizedTLSProfiles) > 0 &&
 		(len(parrotTLSProfiles) == 0 ||
-			p.WeightedCoinFlip(parameters.SelectRandomizedTLSProfileProbability)) {
+			p.WeightedCoinFlip(randomizedTLSProfileProbabilityParameters...)) {
 
 		tlsProfile = randomizedTLSProfiles[prng.Intn(len(randomizedTLSProfiles))]
 	}
@@ -997,6 +1073,10 @@ func selectTLSProfile(
 		}
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = randomizedTLSProfileTLS13Weight
+		utlsClientHelloID.Weights = &weights
 	}
 
 	tlsVersion, err = getClientHelloVersion(

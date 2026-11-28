@@ -125,7 +125,10 @@ func TestStreamingServerEntryDecoder(t *testing.T) {
 // Directly call DecodeServerEntryFields and ValidateServerEntry with invalid inputs
 func TestInvalidServerEntries(t *testing.T) {
 
-	testCases := [2]string{_INVALID_WINDOWS_REGISTRY_LEGACY_SERVER_ENTRY, _INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY}
+	testCases := []string{
+		_INVALID_WINDOWS_REGISTRY_LEGACY_SERVER_ENTRY,
+		_INVALID_MALFORMED_IP_ADDRESS_SERVER_ENTRY,
+	}
 
 	for _, testCase := range testCases {
 		encodedServerEntry := hex.EncodeToString([]byte(testCase))

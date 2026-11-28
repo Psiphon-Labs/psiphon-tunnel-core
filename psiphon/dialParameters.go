@@ -37,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -141,6 +142,22 @@ type DialParameters struct {
 	RandomizedTLSProfileSeed *prng.Seed `json:",omitempty"`
 	TLSFragmentClientHello   bool       `json:",omitempty"`
 
+	LightTLSProfile                               string                                          `json:",omitempty"`
+	LightRandomizedTLSProfileSeed                 *prng.Seed                                      `json:",omitempty"`
+	LightSNI                                      string                                          `json:",omitempty"`
+	LightTLSFragmentClientHello                   bool                                            `json:",omitempty"`
+	LightTLSPadding                               int                                             `json:",omitempty"`
+	LightQUICVersion                              string                                          `json:",omitempty"`
+	LightQUICDialRootObfuscationSeed              *prng.Seed                                      `json:",omitempty"`
+	LightObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters `json:",omitempty"`
+	LightQUICDisablePathMTUDiscovery              bool                                            `json:",omitempty"`
+	LightEgressTLSProfile                         string                                          `json:",omitempty"`
+	LightEgressRandomizedTLSProfileSeed           *prng.Seed                                      `json:",omitempty"`
+	LightEgressQUICVersion                        string                                          `json:",omitempty"`
+	LightEgressQUICDialRootObfuscationSeed        *prng.Seed                                      `json:",omitempty"`
+	LightEgressSNI                                string                                          `json:",omitempty"`
+	ProxyEntryHash                                []byte                                          `json:",omitempty"`
+
 	QUICVersion                              string                                          `json:",omitempty"`
 	QUICDialSNIAddress                       string                                          `json:",omitempty"`
 	QUICClientHelloSeed                      *prng.Seed                                      `json:",omitempty"`
@@ -203,7 +220,12 @@ type DialParameters struct {
 	// a meek http.Transport dial goroutine concurrently with metrics reads.
 	inproxyBrokerDialParameters atomic.Pointer[InproxyBrokerDialParameters] `json:"-"`
 
-	TunnelLightProxyID string `json:"-"`
+	LightProxyID           string        `json:"-"`
+	LightProxyEntryTracker int64         `json:"-"`
+	lightProxyClient       *light.Client `json:"-"`
+
+	lightQUICTLSClientSessionCache tls.ClientSessionCache  `json:"-"`
+	lightTLSClientSessionCache     utls.ClientSessionCache `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
@@ -238,6 +260,7 @@ func MakeDialParameters(
 		serverEntry *protocol.ServerEntry,
 		isPrioritized bool,
 		prioritizeTunnelProtocol string) (string, bool),
+	lightTunnelProxyEntryIterator lightTunnelProxyEntryIterator,
 	serverEntry *protocol.ServerEntry,
 	inproxyClientBrokerClientManager *InproxyBrokerClientManager,
 	inproxyClientNATStateManager *InproxyNATStateManager,
@@ -415,9 +438,24 @@ func MakeDialParameters(
 
 			(dialParams.TLSProfile != "" &&
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
+			(dialParams.LightTLSProfile != "" &&
+				!common.Contains(
+					protocol.SupportedTLSProfiles,
+					dialParams.LightTLSProfile)) ||
+			(dialParams.LightEgressTLSProfile != "" &&
+				!common.Contains(
+					protocol.SupportedTLSProfiles,
+					dialParams.LightEgressTLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
 				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion)) ||
-
+			(dialParams.LightQUICVersion != "" &&
+				!common.Contains(
+					protocol.SupportedQUICv1Versions,
+					dialParams.LightQUICVersion)) ||
+			(dialParams.LightEgressQUICVersion != "" &&
+				!common.Contains(
+					protocol.SupportedQUICv1Versions,
+					dialParams.LightEgressQUICVersion)) ||
 			// Prioritize adjusting use of 3rd party infrastructure -- public
 			// STUN servers -- over replay, even with IgnoreChangedConfigState set.
 			(dialParams.ConjureSTUNServerAddress != "" &&
@@ -447,6 +485,29 @@ func MakeDialParameters(
 
 		// Reselect new dial parameters.
 		dialParams = nil
+	}
+
+	var lightProxy *StoredLightProxyEntry
+	if dialParams != nil &&
+		protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) &&
+		lightTunnelProxyEntryIterator != nil {
+
+		// Replay reloads the proxy entry identified by ProxyEntryHash. Personal
+		// and common replay records are not interchangeable.
+		if len(dialParams.ProxyEntryHash) > 0 {
+			lightProxy, err = lightTunnelProxyEntryIterator.Load(
+				dialParams.ProxyEntryHash, getLightTunnelIngressProtocol(dialParams.TunnelProtocol))
+			if err != nil {
+				NoticeWarning("load Light proxy entry failed: %s", err)
+			}
+		}
+		if lightProxy == nil {
+			err = DeleteDialParameters(serverEntry.IpAddress, networkID)
+			if err != nil {
+				NoticeWarning("DeleteDialParameters failed: %s", err)
+			}
+			dialParams = nil
+		}
 	}
 
 	// beginProtocolSelection facilitates lazy locking of
@@ -622,6 +683,13 @@ func MakeDialParameters(
 		dialParams.TunnelProtocol = selectedProtocol
 	}
 
+	// A Light dial requires a proxy entry.
+	if protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) &&
+		lightTunnelProxyEntryIterator == nil {
+
+		return nil, nil
+	}
+
 	if isTactics && !protocol.TunnelProtocolSupportsTactics(dialParams.TunnelProtocol) {
 
 		NoticeSkipServerEntry(
@@ -658,7 +726,12 @@ func MakeDialParameters(
 	// Skip this candidate when the clients tactics restrict usage of the
 	// provider ID. See the corresponding server-side enforcement comments in
 	// server.sshClient.setHandshakeState.
-	if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+	//
+	// Also apply RestrictInproxyProviderRegions to Light protocols. The
+	// parameter predates Light and is named for in-proxy, but its purpose is
+	// to restrict a provider as the 2nd hop of a 2-hop protocol.
+	if (protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) ||
+		protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol)) &&
 		common.ContainsAny(
 			p.KeyStrings(
 				parameters.RestrictInproxyProviderRegions,
@@ -704,11 +777,7 @@ func MakeDialParameters(
 		}
 	}
 
-	if config.TunnelDialsUseUpstreamProxy() &&
-
-		// Tactics requests use UpstreamProxyURL when configured, but do not
-		// use the light proxy in personal light proxy tunnel mode.
-		(!isTactics || config.UpstreamProxyURL != "") {
+	if config.TunnelDialsUseUpstreamProxy() {
 
 		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
 		// called via selectProtocol, will filter out protocols such that will not
@@ -953,13 +1022,210 @@ func MakeDialParameters(
 			dialParams.TLSVersion,
 			dialParams.RandomizedTLSProfileSeed,
 			err = tlsdialer.SelectTLSProfile(
-			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, "", p)
+			requireTLS12SessionTickets, requireTLS13Support, isFronted,
+			serverEntry.FrontingProviderID, "", nil, nil, false, p)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 			parameters.NoDefaultTLSSessionIDProbability)
+	}
+
+	if protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
+
+		ingressProtocol := getLightTunnelIngressProtocol(dialParams.TunnelProtocol)
+		if !isReplay {
+			// TODO: move Light entry reads outside concurrentEstablishTunnelsMutex.
+			dialParams.ProxyEntryHash, lightProxy, err =
+				lightTunnelProxyEntryIterator.Next(ingressProtocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+		if lightProxy == nil {
+			return nil, nil
+		}
+
+		if !isReplay || !replayTLSProfile {
+
+			// Select ingress and egress TLS profiles independently.
+			//
+			// Limitation: Light TLS entirely ignores CustomTLSProfiles and
+			// UseOnlyCustomTLSProfiles, since the Light header can encode
+			// only the standard TLS profiles.
+
+			if protocol.TunnelProtocolUsesLightTLSIngress(
+				dialParams.TunnelProtocol) {
+
+				ingressTLSProfile, _, ingressRandomizedTLSProfileSeed, err :=
+					tlsdialer.SelectTLSProfile(
+						false, true, false, "", "",
+						[]string{
+							parameters.LightTunnelIngressLimitTLSProfiles,
+							parameters.LimitTLSProfiles,
+						},
+						[]string{
+							parameters.LightTunnelIngressSelectRandomizedTLSProfileProbability,
+							parameters.SelectRandomizedTLSProfileProbability,
+						},
+						true, p)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+
+				dialParams.LightTLSProfile = ingressTLSProfile
+				dialParams.LightRandomizedTLSProfileSeed =
+					ingressRandomizedTLSProfileSeed
+			}
+
+			if protocol.TunnelProtocolUsesLightTLSEgress(
+				dialParams.TunnelProtocol) {
+
+				egressTLSProfile, _, egressRandomizedTLSProfileSeed, err :=
+					tlsdialer.SelectTLSProfile(
+						false, true, false, "", "",
+						[]string{parameters.LightTunnelEgressLimitTLSProfiles},
+						[]string{parameters.LightTunnelEgressSelectRandomizedTLSProfileProbability},
+						true, p)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+
+				dialParams.LightEgressTLSProfile = egressTLSProfile
+				dialParams.LightEgressRandomizedTLSProfileSeed =
+					egressRandomizedTLSProfileSeed
+			}
+		}
+
+		if (!isReplay || !replayQUICVersion) &&
+			protocol.TunnelProtocolUsesLightQUICIngress(
+				dialParams.TunnelProtocol) {
+
+			// Server-entry QUIC limits apply to egress, not ingress.
+			dialParams.LightQUICVersion = selectLightQUICVersion(
+				nil,
+				p.QUICVersions(
+					parameters.LightTunnelIngressLimitQUICVersions,
+					parameters.LimitQUICVersions))
+			if dialParams.LightQUICVersion == "" {
+				return nil, nil
+			}
+
+			// Future enhancement: additional Light-specific ingress QUIC tactics parameters.
+			dialParams.LightQUICDisablePathMTUDiscovery =
+				protocol.QUICVersionUsesPathMTUDiscovery(dialParams.LightQUICVersion) &&
+					p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
+		}
+
+		if (!isReplay || !replayQUICVersion || !replayObfuscatedQUICNonceTransformer) &&
+			protocol.TunnelProtocolUsesLightQUICIngress(dialParams.TunnelProtocol) {
+
+			dialParams.LightObfuscatedQUICNonceTransformerParameters, err =
+				makeLightQUICNonceTransformerParameters(dialParams.LightQUICVersion, p)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		if (!isReplay || !replayQUICVersion ||
+			(!replayObfuscatedQUIC && protocol.QUICVersionIsObfuscated(dialParams.LightQUICVersion))) &&
+			protocol.TunnelProtocolUsesLightQUICIngress(dialParams.TunnelProtocol) {
+
+			dialParams.LightQUICDialRootObfuscationSeed, err =
+				makeLightQUICDialRootObfuscationSeed(
+					dialParams.LightQUICVersion)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		if (!isReplay || !replayQUICVersion) &&
+			protocol.TunnelProtocolUsesLightQUICEgress(
+				dialParams.TunnelProtocol) {
+
+			dialParams.LightEgressQUICVersion = selectLightQUICVersion(
+				serverEntry,
+				p.QUICVersions(parameters.LightTunnelEgressLimitQUICVersions))
+			if dialParams.LightEgressQUICVersion == "" {
+				return nil, nil
+			}
+		}
+
+		if (!isReplay || !replayQUICVersion ||
+			(!replayObfuscatedQUIC && protocol.QUICVersionIsObfuscated(dialParams.LightEgressQUICVersion))) &&
+			protocol.TunnelProtocolUsesLightQUICEgress(dialParams.TunnelProtocol) {
+
+			dialParams.LightEgressQUICDialRootObfuscationSeed, err =
+				makeLightQUICDialRootObfuscationSeed(
+					dialParams.LightEgressQUICVersion)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		if !isReplay || !replayHostname {
+
+			dialParams.LightSNI = values.GetHostName()
+			limitProtocols := p.TunnelProtocols(parameters.CustomHostNameLimitProtocols)
+			if len(p.RegexStrings(parameters.LightTunnelIngressCustomHostNameRegexes)) > 0 ||
+				len(limitProtocols) == 0 ||
+				common.Contains(limitProtocols, dialParams.TunnelProtocol) {
+
+				dialParams.LightSNI = selectLightCustomSNI(
+					p,
+					[]string{
+						parameters.LightTunnelIngressCustomHostNameRegexes,
+						parameters.CustomHostNameRegexes,
+					},
+					[]string{
+						parameters.LightTunnelIngressCustomHostNameProbability,
+						parameters.CustomHostNameProbability,
+					})
+			}
+			// Prefer distinct SNIs for both hops when tactics allow. Occasional matches
+			// are acceptable, but the two hops may be correlated if their SNIs
+			// consistently match.
+			const maxEgressSNISelectionAttempts = 10
+			for attempt := 0; attempt < maxEgressSNISelectionAttempts; attempt++ {
+
+				dialParams.LightEgressSNI = selectLightCustomSNI(
+					p,
+					[]string{parameters.LightTunnelEgressCustomHostNameRegexes},
+					[]string{parameters.LightTunnelEgressCustomHostNameProbability})
+				if dialParams.LightEgressSNI != dialParams.LightSNI {
+					break
+				}
+			}
+		}
+
+		if protocol.TunnelProtocolUsesLightTLSIngress(dialParams.TunnelProtocol) {
+
+			if !isReplay || !replayTLSFragmentClientHello {
+				names := []string{parameters.LightTunnelTLSFragmentClientHelloProbability}
+				limitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+				if len(limitProtocols) == 0 ||
+					common.Contains(limitProtocols, dialParams.TunnelProtocol) {
+					names = append(names, parameters.TLSFragmentClientHelloProbability)
+				}
+				dialParams.LightTLSFragmentClientHello = p.WeightedCoinFlip(names...)
+			}
+
+			// Fragmentation splits at the SNI hostname. Hostname selection can change
+			// independently of the replayed fragmentation setting.
+			if dialParams.LightSNI == "" || net.ParseIP(dialParams.LightSNI) != nil {
+				dialParams.LightTLSFragmentClientHello = false
+			}
+
+			if !isReplay || !replayObfuscatorPadding {
+				dialParams.LightTLSPadding = 0
+				if p.WeightedCoinFlip(parameters.LightTunnelTLSPaddingProbability) {
+					dialParams.LightTLSPadding = prng.Range(
+						min(tlsdialer.MaxTLSPadding, p.Int(parameters.LightTunnelMinTLSPadding)),
+						min(tlsdialer.MaxTLSPadding, p.Int(parameters.LightTunnelMaxTLSPadding)))
+				}
+			}
+		}
 	}
 
 	if (!isReplay || !replayFronting) &&
@@ -1029,13 +1295,14 @@ func MakeDialParameters(
 				dialParams.MeekHostHeader = net.JoinHostPort(
 					hostname, strconv.Itoa(serverEntry.MeekServerPort))
 			}
-		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+		} else if protocol.TunnelProtocolUsesQUICOSSH(dialParams.TunnelProtocol) {
+
 			dialParams.QUICDialSNIAddress = selectHostName(dialParams.TunnelProtocol, p)
 		}
 	}
 
 	if (!isReplay || !replayQUICVersion) &&
-		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+		protocol.TunnelProtocolUsesQUICOSSH(dialParams.TunnelProtocol) {
 
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
 		isInproxy := protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol)
@@ -1069,7 +1336,8 @@ func MakeDialParameters(
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
 	}
 
-	if quicTLSClientSessionCache != nil && protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+	if quicTLSClientSessionCache != nil &&
+		protocol.TunnelProtocolUsesQUICOSSH(dialParams.TunnelProtocol) {
 
 		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
 		if err != nil {
@@ -1490,7 +1758,7 @@ func MakeDialParameters(
 		}
 
 		if (!isReplay || !replayInproxyWebRTC) &&
-			protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) &&
+			protocol.TunnelProtocolClientUsesQUIC(dialParams.TunnelProtocol) &&
 			dialParams.InproxyWebRTCDialParameters.UseMediaStreams {
 
 			// In the in-proxy WebRTC media stream mode, QUIC packets are
@@ -1553,7 +1821,7 @@ func MakeDialParameters(
 		// prune case is enforced in the server's status request
 		// failed_tunnel processing; see server.statusAPIRequestHandler.
 
-		PruneServerEntry(config, serverEntry.IpAddress)
+		PruneServerEntry(config, serverEntry.GetTag())
 		return nil, errors.TraceNew("invalid dial port number")
 	}
 
@@ -1567,7 +1835,11 @@ func MakeDialParameters(
 		protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
-		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
+		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH,
+		protocol.TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+		protocol.TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+		protocol.TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH,
+		protocol.TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH:
 
 		dialParams.DirectDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
 
@@ -1816,6 +2088,12 @@ func MakeDialParameters(
 	// Limitation: when replaying and with replayIgnoreChangedConfigState set,
 	// fragmentor.NewUpstreamConfig may select a config using newer tactics
 	// parameters.
+	//
+	// TODO: add common/fragmentor support for LIGHT TLS ingress and egress
+	// at the outermost TCP layer, with parameter selection and replay driven by
+	// the client, including the proxy's upstream and downstream fragmentation.
+	// The Light header arrives after the ingress TLS handshake, so using it to
+	// send proxy settings would leave that handshake unfragmented.
 	fragmentorConfig := fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed)
 	if !p.Bool(parameters.OSSHPrefixEnableFragmentor) && dialParams.OSSHPrefixSpec != nil {
 		fragmentorConfig = nil
@@ -1909,7 +2187,7 @@ func MakeDialParameters(
 
 	if !isTactics &&
 		protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
-		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+		protocol.TunnelProtocolClientUsesTCP(dialParams.TunnelProtocol) {
 
 		// Set DialConfig.CustomDialer to redirect all underlying TCP dials to use
 		// in-proxy as a 1st hop. Since QUIC doesn't use DialConfig or have its
@@ -1920,29 +2198,30 @@ func MakeDialParameters(
 	}
 
 	if !isTactics &&
-		config.EnablePersonalLightProxyTunnels &&
-		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+		protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
 
-		// Future enhancements:
-		//
-		// - Unlike in-proxy, the light proxy may be used to proxy non-tunnel
-		//   connections including tactics (excluded here for now), RSL/OSL,
-		//   and untunneled DSL. Consider wiring up these cases.
-		//
-		// - Persist lightDialParameters in DialParameters for tunnel light
-		//   proxy dials. Will need to clear if LightProxyEntry changes.
-
-		lightProxyClient := config.GetLightProxyClient()
-		if lightProxyClient != nil {
-			dialParams.TunnelLightProxyID = lightProxyClient.GetMetrics(false).ProxyID
+		// Future enhancement: allow tactics, RSL/OSL, and untunneled DSL requests
+		// to use Light proxies.
+		dialParams.lightProxyClient, err = makeLightProxyClient(
+			config,
+			dialParams.dialConfig,
+			quicTLSClientSessionCache,
+			tlsClientSessionCache,
+			true,
+			lightProxy.LightProxyEntry,
+			lightProxy.LightProxyEntryTracker)
+		if err != nil {
+			return nil, errors.Trace(err)
 		}
+		metrics := dialParams.lightProxyClient.GetMetrics(false)
+		dialParams.LightProxyID = metrics.ProxyID
+		dialParams.LightProxyEntryTracker = metrics.ProxyEntryTracker
 
-		// When CustomDialer is set, other dialConfig parameters such as
-		// UpstreamProxyURL are ignored. However, initLightProxy/dialLightProxy
-		// use controller.untunneledDialConfig, and UpstreamProxyURL is wired
-		// up that way, indirectly.
-
-		dialParams.dialConfig.CustomDialer = makeLightProxyTunnelTCPDialer(config, dialParams)
+		dialParams.lightQUICTLSClientSessionCache = quicTLSClientSessionCache
+		dialParams.lightTLSClientSessionCache = tlsClientSessionCache
+		if !isReplay {
+			removeLightTunnelSessionCacheEntries(dialParams)
+		}
 	}
 
 	return dialParams, nil
@@ -2031,6 +2310,50 @@ func (dialParams *DialParameters) GetInproxyMetrics() common.LogFields {
 	return inproxyMetrics
 }
 
+// GetLightTunnelMetrics returns client-selected Light tunnel dial parameters.
+func (dialParams *DialParameters) GetLightTunnelMetrics() common.LogFields {
+	logFields := common.LogFields{
+		"light_proxy_entry_tracker": dialParams.LightProxyEntryTracker,
+	}
+
+	if dialParams.LightSNI != "" {
+		logFields["light_sni"] = dialParams.LightSNI
+	}
+	if dialParams.LightEgressSNI != "" {
+		logFields["light_egress_sni"] = dialParams.LightEgressSNI
+	}
+
+	if protocol.TunnelProtocolUsesLightTLSIngress(dialParams.TunnelProtocol) {
+		logFields["light_tls_profile"] = dialParams.LightTLSProfile
+		fragmented := "0"
+		if dialParams.LightTLSFragmentClientHello {
+			fragmented = "1"
+		}
+		logFields["light_tls_fragmented"] = fragmented
+		logFields["light_tls_padding"] = dialParams.LightTLSPadding
+	}
+	if protocol.TunnelProtocolUsesLightQUICIngress(dialParams.TunnelProtocol) {
+		logFields["light_quic_version"] = dialParams.LightQUICVersion
+		if dialParams.LightQUICDisablePathMTUDiscovery {
+			logFields["light_quic_disable_client_path_mtu_discovery"] = "1"
+		}
+		if dialParams.LightObfuscatedQUICNonceTransformerParameters != nil &&
+			dialParams.LightObfuscatedQUICNonceTransformerParameters.TransformSpec != nil {
+
+			logFields["light_seed_transform"] =
+				dialParams.LightObfuscatedQUICNonceTransformerParameters.TransformName
+		}
+	}
+	if protocol.TunnelProtocolUsesLightTLSEgress(dialParams.TunnelProtocol) {
+		logFields["light_egress_tls_profile"] = dialParams.LightEgressTLSProfile
+	}
+	if protocol.TunnelProtocolUsesLightQUICEgress(dialParams.TunnelProtocol) {
+		logFields["light_egress_quic_version"] = dialParams.LightEgressQUICVersion
+	}
+
+	return logFields
+}
+
 func (dialParams *DialParameters) Succeeded() {
 
 	// When TTL is 0, don't store dial parameters.
@@ -2115,7 +2438,7 @@ func (dialParams *DialParameters) Failed(config *Config, dialErr error) {
 	}
 
 	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions for
-	// Meek, TLS-OSSH and QUIC connections.
+	// Meek, TLS-OSSH, QUIC, and Light ingress connections.
 
 	if dialParams.quicTLSClientSessionCache != nil {
 		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
@@ -2125,6 +2448,9 @@ func (dialParams *DialParameters) Failed(config *Config, dialErr error) {
 		dialParams.tlsClientSessionCache.RemoveCacheEntry()
 	}
 
+	if dialParams.lightProxyClient != nil {
+		removeLightTunnelSessionCacheEntries(dialParams)
+	}
 }
 
 // ExchangedDialParameters represents the subset of DialParameters that is
@@ -2378,6 +2704,56 @@ func selectQUICVersion(
 	choice := prng.Intn(len(quicVersions))
 
 	return quicVersions[choice]
+}
+
+func selectLightQUICVersion(
+	serverEntry *protocol.ServerEntry,
+	limitQUICVersions protocol.QUICVersions) string {
+
+	quicVersions := getLightQUICVersions(serverEntry, limitQUICVersions)
+	if len(quicVersions) == 0 {
+		return ""
+	}
+	return quicVersions[prng.Intn(len(quicVersions))]
+}
+
+func getLightQUICVersions(
+	serverEntry *protocol.ServerEntry,
+	limitQUICVersions protocol.QUICVersions) protocol.QUICVersions {
+
+	quicVersions := make(protocol.QUICVersions, 0, len(protocol.SupportedQUICv1Versions))
+
+	for _, quicVersion := range protocol.SupportedQUICv1Versions {
+		if len(limitQUICVersions) > 0 &&
+			!common.Contains(limitQUICVersions, quicVersion) {
+
+			continue
+		}
+		if serverEntry != nil &&
+			len(serverEntry.LimitQUICVersions) > 0 &&
+			!common.Contains(serverEntry.LimitQUICVersions, quicVersion) {
+
+			continue
+		}
+		quicVersions = append(quicVersions, quicVersion)
+	}
+
+	return quicVersions
+}
+
+func makeLightQUICDialRootObfuscationSeed(
+	quicVersion string) (*prng.Seed, error) {
+
+	if !protocol.QUICVersionHasRandomizedClientHello(quicVersion) &&
+		!protocol.QUICVersionIsObfuscated(quicVersion) {
+
+		return nil, nil
+	}
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return seed, nil
 }
 
 func selectWebRTCMediaStreamQUICVersion(

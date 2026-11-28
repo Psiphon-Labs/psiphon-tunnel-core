@@ -210,6 +210,7 @@ func TestDuplicateSessionID(t *testing.T) {
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
 			func(_ *protocol.ServerEntry, _ bool, _ string) (string, bool) { return "OSSH", true },
+			nil,
 			serverEntry,
 			nil,
 			nil,

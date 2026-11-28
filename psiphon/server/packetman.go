@@ -125,6 +125,9 @@ func selectPacketManipulationSpec(
 	// tunnel protocol name, which is used to lookup first replay and then
 	// enabled packet manipulation specs in ServerProtocolPacketManipulations.
 	//
+	// Light protocols use the configured listener name for both ingress
+	// variants; the ingress transport is not observable at this layer.
+	//
 	// This assumes that all TunnelProtocolMayUseServerPacketManipulation
 	// protocols run on distinct ports, which is true when all such protocols run
 	// over TCP.
@@ -180,9 +183,12 @@ func selectPacketManipulationSpec(
 		parameters.ServerProtocolPacketManipulations)
 
 	// TODO: cache merged per-protocol + "All" lists?
-	specNames, ok := protocolSpecs[targetTunnelProtocol]
-	if !ok {
-		specNames = []string{}
+	//
+	// Light listeners apply specs keyed by either ingress variant, with
+	// duplicates retained.
+	specNames := []string{}
+	for _, tunnelProtocol := range getLightTunnelProtocolIngressVariants(targetTunnelProtocol) {
+		specNames = append(specNames, protocolSpecs[tunnelProtocol]...)
 	}
 
 	allProtocolsSpecNames, ok := protocolSpecs[protocol.TUNNEL_PROTOCOLS_ALL]

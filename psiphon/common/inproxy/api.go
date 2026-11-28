@@ -975,7 +975,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 		// candidates and the broker-observed peer address, geoIPData. The
 		// personal paired proxy is trusted to not misdirect the client to an
 		// arbitrary destination. This exception allows for modes such as
-		// InproxyProxySplitUpstreamInterfaceName.
+		// ProxySplitUpstreamInterfaceName.
 		allowGeoIPMismatchCandidates := proxyAnnouncementHasPersonalCompartmentIDs
 
 		// Proxy answer SDP candidate addresses must match the country and ASN of

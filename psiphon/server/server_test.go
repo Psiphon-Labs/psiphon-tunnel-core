@@ -22,6 +22,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -173,15 +175,115 @@ func TestSSH(t *testing.T) {
 		})
 }
 
-func TestPersonalLightProxySSH(t *testing.T) {
+func TestPersonalLightProxyTLSTLSSSH(t *testing.T) {
+
+	for _, testCase := range []struct {
+		name                    string
+		doPersonalPairing       bool
+		trustedProxy            bool
+		prependUnreachableEntry bool
+	}{
+		{"LightOnly", false, false, false},
+		{"InproxyBrokerUnavailable", true, false, false},
+		{"TrustedLightOnly", false, true, false},
+		{"SecondPersonalEntry", false, false, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runServer(t,
+				&runServerConfig{
+					tunnelProtocol:                            protocol.TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+					passthrough:                               true,
+					requireAuthorization:                      true,
+					doTunneledWebRequest:                      true,
+					doLogHostProvider:                         true,
+					doLogProtobuf:                             useProtobufLogging,
+					usePersonalLightProxyTunnel:               true,
+					doPersonalPairing:                         testCase.doPersonalPairing,
+					trustedLightProxy:                         testCase.trustedProxy,
+					prependUnreachablePersonalLightProxyEntry: testCase.prependUnreachableEntry,
+				})
+		})
+	}
+}
+
+func TestPersonalLightProxyTLSQUICSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:              "SSH",
+			tunnelProtocol:              protocol.TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
 			requireAuthorization:        true,
 			doTunneledWebRequest:        true,
 			doLogHostProvider:           true,
-			doLogProtobuf:               false,
+			doLogProtobuf:               useProtobufLogging,
 			usePersonalLightProxyTunnel: true,
+		})
+}
+
+func TestPersonalLightProxyQUICTLSSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:              protocol.TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+			clientTunnelProtocol:        protocol.TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH,
+			passthrough:                 true,
+			requireAuthorization:        true,
+			doTunneledWebRequest:        true,
+			doLogHostProvider:           true,
+			doLogProtobuf:               useProtobufLogging,
+			usePersonalLightProxyTunnel: true,
+		})
+}
+
+func TestPersonalLightProxyQUICQUICSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:              protocol.TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+			clientTunnelProtocol:        protocol.TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH,
+			requireAuthorization:        true,
+			doTunneledWebRequest:        true,
+			doLogHostProvider:           true,
+			doLogProtobuf:               useProtobufLogging,
+			usePersonalLightProxyTunnel: true,
+		})
+}
+
+func TestCommonLightProxyTunnel(t *testing.T) {
+	for _, tunnelProtocol := range protocol.LightTunnelProtocols {
+		t.Run(tunnelProtocol, func(t *testing.T) {
+			if (protocol.TunnelProtocolUsesLightQUICIngress(tunnelProtocol) ||
+				protocol.TunnelProtocolUsesLightQUICEgress(tunnelProtocol)) && !quic.Enabled() {
+
+				t.Skip("QUIC is not enabled")
+			}
+			runServer(t, &runServerConfig{
+				tunnelProtocol:            tunnelProtocol,
+				passthrough:               protocol.TunnelProtocolUsesLightTLSEgress(tunnelProtocol),
+				requireAuthorization:      true,
+				doTunneledWebRequest:      true,
+				doLogHostProvider:         true,
+				doLogProtobuf:             useProtobufLogging,
+				useCommonLightProxyTunnel: true,
+			})
+		})
+	}
+}
+
+func TestLightProxyFallback(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:        "OSSH",
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			useLightProxyFallback: true,
 		})
 }
 
@@ -255,6 +357,7 @@ func TestTLSOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "TLS-OSSH",
 			passthrough:          true,
+			forceFragmenting:     true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -267,6 +370,7 @@ func TestShadowsocks(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "SHADOWSOCKS-OSSH",
+			forceFragmenting:     true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -521,18 +625,30 @@ func TestInproxyPersonalPairing(t *testing.T) {
 	if !inproxy.Enabled() {
 		t.Skip("inproxy is not enabled")
 	}
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "INPROXY-WEBRTC-OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
-			doTargetBrokerSpecs:  true,
-			doPersonalPairing:    true,
-			doLogProtobuf:        useProtobufLogging,
+
+	for _, testCase := range []struct {
+		name                        string
+		usePersonalLightProxyTunnel bool
+	}{
+		{"InproxyOnly", false},
+		{"LightConfigured", true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			runServer(t,
+				&runServerConfig{
+					tunnelProtocol:              "INPROXY-WEBRTC-OSSH",
+					requireAuthorization:        true,
+					doTunneledWebRequest:        true,
+					doTunneledNTPRequest:        true,
+					doDanglingTCPConn:           true,
+					doLogHostProvider:           true,
+					doTargetBrokerSpecs:         true,
+					doPersonalPairing:           true,
+					doLogProtobuf:               useProtobufLogging,
+					usePersonalLightProxyTunnel: testCase.usePersonalLightProxyTunnel,
+				})
 		})
+	}
 }
 
 func TestInproxyOSSHMediaStreams(t *testing.T) {
@@ -931,7 +1047,12 @@ type runServerConfig struct {
 	doProxyProtocolHeader        bool
 	doReplaceProxyProtocolHeader bool
 	usePersonalLightProxyTunnel  bool
+	useCommonLightProxyTunnel    bool
+	trustedLightProxy            bool
+	useLightProxyFallback        bool
 	testDSLAccessToken           bool
+
+	prependUnreachablePersonalLightProxyEntry bool
 }
 
 var (
@@ -987,6 +1108,44 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverEntrySignaturePrivateKey, err := protocol.NewServerEntrySignatureKeyPair()
 	if err != nil {
 		t.Fatalf("error generating server entry signature key pair: %s", err)
+	}
+
+	useLightProxyTunnel := runConfig.usePersonalLightProxyTunnel || runConfig.useCommonLightProxyTunnel
+	var lightProxyPrivateKey inproxy.SessionPrivateKey
+	var lightProxyID, lightTrustedProxyPublicKey string
+	var lightTrustedProxyAuthorization []byte
+	if useLightProxyTunnel {
+		lightProxyPrivateKey, err = inproxy.GenerateSessionPrivateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicKey, err := lightProxyPrivateKey.GetPublicKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		curvePublicKey, err := publicKey.ToCurve25519()
+		if err != nil {
+			t.Fatal(err)
+		}
+		lightProxyID = inproxy.ID(curvePublicKey).String()
+		if runConfig.trustedLightProxy {
+			issuerPublicKey, issuerPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lightTrustedProxyPublicKey = base64.StdEncoding.EncodeToString(issuerPublicKey)
+			lightTrustedProxyAuthorization, err = light.SignTunnelTrustedProxyAuthorization(
+				issuerPrivateKey,
+				&light.TunnelTrustedProxyAuthorization{
+					Version:        light.TunnelTrustedProxyAuthorizationVersion,
+					ProxyPublicKey: publicKey[:],
+					NotBeforeUnix:  time.Now().Add(-time.Hour).Unix(),
+					NotAfterUnix:   time.Now().Add(time.Hour).Unix(),
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	// generate inproxy configuration
@@ -1100,6 +1259,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		doInproxy
 
 	doServerTactics := doClientTactics ||
+		useLightProxyTunnel ||
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
@@ -1270,6 +1430,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 
 	serverConfig["HostID"] = testHostID
+	serverConfig["LightTrustedProxyAuthorizationPublicKey"] = lightTrustedProxyPublicKey
 
 	// The test GeoIP databases map all IPs to a single, non-"None" country
 	// and ASN.
@@ -1329,7 +1490,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfig["RunPacketManipulator"] = runConfig.doPacketManipulation
 
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) &&
+	if protocol.TunnelProtocolUsesQUICOSSH(runConfig.tunnelProtocol) &&
 		!runConfig.limitQUICVersions &&
 		quic.GQUICEnabled() {
 
@@ -1431,7 +1592,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// log components.
 
 	expectedServerLoadProtocolLogs := len(tunnelProtocolPorts)
-	if runConfig.clientTunnelProtocol != "" {
+	if protocol.TunnelProtocolUsesLight(runConfig.tunnelProtocol) {
+		expectedServerLoadProtocolLogs += 1 // One listener produces two protocol logs.
+	} else if runConfig.clientTunnelProtocol != "" {
 		expectedServerLoadProtocolLogs += 1 // Demux case
 	}
 	if runConfig.denyTrafficRules || runConfig.omitAuthorization {
@@ -1852,19 +2015,62 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var lightProxyEntry []byte
 	const lightProxyEntryTracker = 0x0102030405060708
-	var tunnelPersonalLightProxyID string
+	expectLightProxyEntryTracker := int64(lightProxyEntryTracker)
 	if runConfig.usePersonalLightProxyTunnel {
-		lightProxyCtx, lightProxyCancel :=
-			context.WithTimeout(context.Background(), 30*time.Second)
-		defer lightProxyCancel()
-
+		expectLightProxyEntryTracker = psiphon.LightProxyEntryTrackerPersonalPairing
+	}
+	var tunnelLightProxyID string
+	if useLightProxyTunnel {
 		var stopLightProxy func()
-		lightProxyEntry, tunnelPersonalLightProxyID, stopLightProxy, err =
-			startLightProxy(lightProxyCtx, psiphonServerAddress)
+		lightProxyEntry, tunnelLightProxyID, stopLightProxy, err =
+			startLightProxy(
+				t.TempDir(),
+				psiphonServerAddress,
+				serverEntrySignaturePublicKey,
+				clientTunnelProtocol,
+				runConfig.usePersonalLightProxyTunnel,
+				lightProxyPrivateKey,
+				lightTrustedProxyAuthorization)
 		if err != nil {
 			t.Fatalf("error starting light proxy: %s", err)
 		}
 		defer stopLightProxy()
+		if tunnelLightProxyID != lightProxyID {
+			t.Fatal("entry proxy ID does not match report signing key")
+		}
+	}
+
+	if runConfig.useLightProxyFallback {
+		// The fallback entry is configured but never dialed; only the
+		// connected request metrics are exercised.
+		proxyConfig, entry, err := light.Generate(
+			prng.HexString(8),
+			nil,
+			[]light.ProxyAddress{
+				{IPAddress: "127.0.0.1", Port: 443, Protocol: light.LIGHT_PROTOCOL_TLS},
+			},
+			"example.org",
+			"",
+			0.5,
+			protocol.TLS_PROFILE_CHROME_133,
+			0.5,
+			0,
+			0,
+			0,
+			0,
+			time.Hour,
+			nil,
+			nil,
+			nil,
+			nil,
+			psiphonServerAddress,
+			"",
+			"")
+		if err != nil {
+			t.Fatalf("error generating light proxy entry: %s", err)
+		}
+		lightProxyEntry = entry
+		lightProxyID = proxyConfig.ProxyID
 	}
 
 	// reset client datastore
@@ -1963,14 +2169,64 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.TargetServerEntry = string(encodedServerEntry)
 	}
 
-	if runConfig.usePersonalLightProxyTunnel {
-		clientConfig.EnablePersonalLightProxyTunnels = true
-		clientConfig.LightProxyEntry = lightProxyEntry
-		clientConfig.LightProxyEntryTracker = lightProxyEntryTracker
+	if runConfig.useLightProxyFallback {
+		clientConfig.EnableLightProxyFallback = true
+		clientConfig.FallbackLightProxyEntry = lightProxyEntry
+		clientConfig.FallbackLightProxyEntryTracker = lightProxyEntryTracker
+	}
 
-		allowAllServerEntrySources := true
-		clientConfig.UpstreamProxyAllowAllServerEntrySources =
-			&allowAllServerEntrySources
+	var lightIngressQUICVersion, lightEgressQUICVersion string
+	if useLightProxyTunnel {
+		if runConfig.usePersonalLightProxyTunnel {
+			clientConfig.EnablePersonalLightProxyTunnels = true
+			if runConfig.prependUnreachablePersonalLightProxyEntry {
+				// Round robin must reach the second entry.
+				clientConfig.PersonalLightProxyEntries = append(
+					clientConfig.PersonalLightProxyEntries,
+					generateUnreachablePersonalLightProxyEntry(t, psiphonServerAddress))
+			}
+			clientConfig.PersonalLightProxyEntries = append(
+				clientConfig.PersonalLightProxyEntries, lightProxyEntry)
+		}
+		one, zero := 1.0, 0.0
+		padding := 64
+		clientConfig.LightTunnelIngressLimitTLSProfiles = []string{protocol.TLS_PROFILE_CHROME_133}
+		clientConfig.LightTunnelEgressLimitTLSProfiles = []string{protocol.TLS_PROFILE_CHROME_133}
+		clientConfig.LightTunnelIngressSelectRandomizedTLSProfileProbability = &zero
+		clientConfig.LightTunnelEgressSelectRandomizedTLSProfileProbability = &zero
+		quicVersions := []string{
+			protocol.QUIC_VERSION_V1,
+			protocol.QUIC_VERSION_RANDOMIZED_V1,
+			protocol.QUIC_VERSION_OBFUSCATED_V1,
+		}
+		if protocol.TunnelProtocolUsesLightQUICIngress(clientTunnelProtocol) {
+			lightIngressQUICVersion = quicVersions[prng.Intn(len(quicVersions))]
+			clientConfig.LightTunnelIngressLimitQUICVersions = []string{lightIngressQUICVersion}
+			t.Logf("Light ingress QUIC version: %s", lightIngressQUICVersion)
+
+			// Exercise the Light ingress QUIC metrics.
+			clientConfig.QUICDisablePathMTUDiscoveryProbability = &one
+			clientConfig.ObfuscatedQUICNonceTransformSpecs = transforms.Specs{
+				"TEST": {{"", ""}},
+			}
+			clientConfig.ObfuscatedQUICNonceTransformScopedSpecNames = transforms.ScopedSpecNames{
+				"": {"TEST"},
+			}
+			clientConfig.ObfuscatedQUICNonceTransformProbability = &one
+		}
+		if protocol.TunnelProtocolUsesLightQUICEgress(clientTunnelProtocol) {
+			lightEgressQUICVersion = quicVersions[prng.Intn(len(quicVersions))]
+			clientConfig.LightTunnelEgressLimitQUICVersions = []string{lightEgressQUICVersion}
+			t.Logf("Light egress QUIC version: %s", lightEgressQUICVersion)
+		}
+		clientConfig.LightTunnelIngressCustomHostNameRegexes = []string{`light-ingress\.example\.org`}
+		clientConfig.LightTunnelEgressCustomHostNameRegexes = []string{`light-egress\.example\.org`}
+		clientConfig.LightTunnelIngressCustomHostNameProbability = &one
+		clientConfig.LightTunnelEgressCustomHostNameProbability = &one
+		clientConfig.LightTunnelTLSFragmentClientHelloProbability = &one
+		clientConfig.LightTunnelTLSPaddingProbability = &one
+		clientConfig.LightTunnelMinTLSPadding = &padding
+		clientConfig.LightTunnelMaxTLSPadding = &padding
 	}
 
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
@@ -2081,6 +2337,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if err != nil {
 			t.Fatalf("WriteFile failed: %s", err)
 		}
+	} else if runConfig.doPersonalPairing {
+		personalCompartmentID, err := inproxy.MakeID()
+		if err != nil {
+			t.Fatalf("inproxy.MakeID failed: %s", err)
+		}
+		clientConfig.InproxyClientPersonalCompartmentID =
+			personalCompartmentID.String()
 	}
 
 	if runConfig.doRestrictInproxy {
@@ -2226,6 +2489,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	defer psiphon.CloseDataStore()
 
+	if runConfig.useCommonLightProxyTunnel {
+		if err := psiphon.StoreCommonLightTunnelProxyEntry(lightProxyEntry, lightProxyEntryTracker); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// Test unique user counting cases.
 	var expectUniqueUser bool
 	switch lastConnectedUpdateCount % 3 {
@@ -2279,6 +2548,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	inproxyActivity := make(chan struct{}, 1)
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
+	var clientRegionReceived atomic.Bool
 	slokSeeded := make(chan struct{}, 1)
 	numPruneNotices := 0
 	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
@@ -2315,6 +2585,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if count >= numTunnels {
 					sendNotificationReceived(tunnelsEstablished)
 				}
+
+			case "ClientRegion":
+				clientRegionReceived.Store(true)
 
 			case "Homepage":
 				homepageURL := payload["url"].(string)
@@ -2451,6 +2724,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+		if protocol.TunnelProtocolUsesLight(clientTunnelProtocol) && !doInproxy {
+			p := clientConfig.GetParameters().Get()
+			tacticsTag := p.Tag()
+			p.Close()
+			if (tacticsTag != "") != runConfig.trustedLightProxy {
+				t.Fatal("unexpected Light handshake tactics update")
+			}
+			if clientRegionReceived.Load() != runConfig.trustedLightProxy {
+				t.Fatal("unexpected Light client region notice")
+			}
+		}
 		if doDSL {
 			waitOnNotification(t, tunneledDSLFetched, timeoutSignal, "tunneled DSL timeout exceeded")
 		}
@@ -2675,7 +2959,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if !expectTrafficFailure {
 
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
-
 		expected := expectedNumSLOKs
 		if doDSL {
 			expected += len(dslTestConfig.clientSLOKs)
@@ -2827,7 +3110,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectAddedProxyProtocolHeader,
 			expectReplacedProxyProtocolHeader,
 			inproxyTestConfig,
-			tunnelPersonalLightProxyID,
+			lightProxyID,
+			expectLightProxyEntryTracker,
+			lightIngressQUICVersion,
+			lightEgressQUICVersion,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -3142,7 +3428,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	err = checkExpectedDiscoveredServer(clientConfig, discoveryServers)
+	expectDiscovery := !protocol.TunnelProtocolUsesLight(clientTunnelProtocol) ||
+		runConfig.trustedLightProxy
+	err = checkExpectedDiscoveredServer(
+		clientConfig, discoveryServers, expectDiscovery)
 	if err != nil {
 		t.Fatalf("error checking client discovered server: %v", err)
 	}
@@ -3387,7 +3676,10 @@ func checkExpectedServerTunnelLogFields(
 	expectAddedProxyProtocolHeader bool,
 	expectReplacedProxyProtocolHeader bool,
 	inproxyTestConfig *inproxyTestConfig,
-	expectTunnelPersonalLightProxyID string,
+	expectLightProxyID string,
+	expectLightProxyEntryTracker int64,
+	expectLightIngressQUICVersion string,
+	expectLightEgressQUICVersion string,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -3437,7 +3729,6 @@ func checkExpectedServerTunnelLogFields(
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
 		"peak_concurrent_proximate_accepted_clients",
-		"peak_concurrent_proximate_established_clients",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -3488,8 +3779,8 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected client_events '%s'", fields["client_events"])
 		}
 	}
-	if fields["light_proxy_client_events"] != nil {
-		return fmt.Errorf("unexpected field 'light_proxy_client_events'")
+	if fields["light_fallback_proxy_client_events"] != nil {
+		return fmt.Errorf("unexpected field 'light_fallback_proxy_client_events'")
 	}
 
 	clientTunnelProtocol := runConfig.tunnelProtocol
@@ -3525,17 +3816,145 @@ func checkExpectedServerTunnelLogFields(
 			int(fields["server_entry_count"].(float64)))
 	}
 
-	if runConfig.usePersonalLightProxyTunnel {
-		if fields["tunnel_personal_light_proxy_id"] == nil {
-			return fmt.Errorf("missing expected field 'tunnel_personal_light_proxy_id'")
+	if runConfig.useLightProxyFallback {
+		expected := map[string]interface{}{
+			"light_fallback_proxy_id":            expectLightProxyID,
+			"light_fallback_proxy_entry_tracker": float64(expectLightProxyEntryTracker),
+			"light_fallback_proxy_dial_IPv4":     float64(0),
+			"light_fallback_proxy_dial_failed":   float64(0),
+			"light_fallback_proxy_dial_canceled": float64(0),
 		}
-		if fields["tunnel_personal_light_proxy_id"].(string) != expectTunnelPersonalLightProxyID {
-			return fmt.Errorf(
-				"unexpected tunnel_personal_light_proxy_id '%s'",
-				fields["tunnel_personal_light_proxy_id"])
+		for name, want := range expected {
+			if fields[name] != want {
+				return fmt.Errorf("%s: got %v, expected %v", name, fields[name], want)
+			}
 		}
-	} else if fields["tunnel_personal_light_proxy_id"] != nil {
-		return fmt.Errorf("unexpected field 'tunnel_personal_light_proxy_id'")
+		if _, ok := fields["light_fallback_proxy_dial_IPv6"]; ok {
+			return fmt.Errorf("unexpected field 'light_fallback_proxy_dial_IPv6'")
+		}
+	} else if _, ok := fields["light_fallback_proxy_id"]; ok {
+		return fmt.Errorf("unexpected field 'light_fallback_proxy_id'")
+	}
+
+	if (runConfig.usePersonalLightProxyTunnel || runConfig.useCommonLightProxyTunnel) &&
+		protocol.TunnelProtocolUsesLight(clientTunnelProtocol) {
+
+		expected := map[string]interface{}{
+			"light_proxy_id":                      expectLightProxyID,
+			"light_proxy_entry_tracker":           float64(expectLightProxyEntryTracker),
+			"light_proxy_platform":                "Windows",
+			"light_proxy_version":                 float64(testClientVersion),
+			"light_proxy_is_trusted":              runConfig.trustedLightProxy,
+			"light_matched_personal_compartments": runConfig.usePersonalLightProxyTunnel,
+			"light_sni":                           "light-ingress.example.org",
+			"light_proxy_sni":                     "light-ingress.example.org",
+			"light_egress_sni":                    "light-egress.example.org",
+		}
+		booleanFields := []string{"light_dial_is_IPv6"}
+		var durationFields, absentFields []string
+		var resumeField, proxyResumeField string
+		if protocol.TunnelProtocolUsesLightTLSIngress(clientTunnelProtocol) {
+			expected["light_tls_profile"] = protocol.TLS_PROFILE_CHROME_133
+			expected["light_proxy_tls_profile"] = protocol.TLS_PROFILE_CHROME_133
+			expected["light_tls_fragmented"] = true
+			expected["light_proxy_tls_fragmented"] = true
+			expected["light_tls_padding"] = float64(64)
+			expected["light_proxy_tls_padding"] = float64(64)
+			booleanFields = append(booleanFields, "light_tls_sent_ticket")
+			resumeField, proxyResumeField = "light_tls_did_resume", "light_proxy_tls_did_resume"
+			durationFields = []string{"light_tcp_duration", "light_tls_duration"}
+			absentFields = []string{
+				"light_quic_version", "light_proxy_quic_version", "light_quic_duration",
+				"light_quic_disable_client_path_mtu_discovery", "light_seed_transform",
+			}
+		} else {
+			expected["light_quic_version"] = expectLightIngressQUICVersion
+			expected["light_proxy_quic_version"] = expectLightIngressQUICVersion
+			booleanFields = append(booleanFields, "light_quic_sent_ticket")
+			resumeField, proxyResumeField = "light_quic_did_resume", "light_proxy_quic_did_resume"
+			durationFields = []string{"light_quic_duration"}
+			absentFields = []string{
+				"light_tls_profile", "light_proxy_tls_profile", "light_tcp_duration",
+				"light_tls_duration", "light_tls_fragmented", "light_tls_padding",
+			}
+			expected["light_quic_disable_client_path_mtu_discovery"] = true
+			if protocol.QUICVersionIsObfuscated(expectLightIngressQUICVersion) {
+				expected["light_seed_transform"] = "TEST"
+			} else {
+				absentFields = append(absentFields, "light_seed_transform")
+			}
+		}
+		booleanFields = append(booleanFields, resumeField, proxyResumeField)
+		if fields[resumeField] != fields[proxyResumeField] {
+			return fmt.Errorf("client/proxy Light resumption metrics disagree")
+		}
+		if protocol.TunnelProtocolUsesLightTLSEgress(clientTunnelProtocol) {
+			expected["light_egress_tls_profile"] = protocol.TLS_PROFILE_CHROME_133
+			expected["light_proxy_egress_tls_profile"] = protocol.TLS_PROFILE_CHROME_133
+			expected["light_egress_tls_sni"] = "light-egress.example.org"
+			expected["light_egress_tls_fragmented"] = false
+			if padding, ok := fields["light_egress_tls_padding"].(float64); !ok || padding < 0 {
+				return fmt.Errorf("missing or invalid light_egress_tls_padding")
+			}
+			booleanFields = append(booleanFields, "light_egress_tls_did_resume")
+			absentFields = append(absentFields,
+				"light_egress_quic_version", "light_proxy_egress_quic_version",
+				"light_egress_quic_sni", "light_egress_quic_did_resume")
+		} else {
+			expected["light_egress_quic_version"] = expectLightEgressQUICVersion
+			expected["light_proxy_egress_quic_version"] = expectLightEgressQUICVersion
+			expected["light_egress_quic_sni"] = "light-egress.example.org"
+			booleanFields = append(booleanFields, "light_egress_quic_did_resume")
+			absentFields = append(absentFields,
+				"light_egress_tls_profile", "light_proxy_egress_tls_profile",
+				"light_egress_tls_sni", "light_egress_tls_did_resume")
+		}
+		// The proxy's GeoIP is from its 127.0.0.1 peer address, and the
+		// client's is from the ::1 address the proxy reports; see
+		// startLightProxy.
+		expected["light_proxy_region"] = testGeoIPCountry
+		expected["light_proxy_asn"] = testGeoIPASN
+		expected["client_region"] = testGeoIPIPv6LoopbackCountry
+		expected["client_asn"] = testGeoIPIPv6LoopbackASN
+		for _, suffix := range []string{"region", "city", "isp", "asn", "aso"} {
+			_, ok := fields["light_proxy_"+suffix].(string)
+			if !ok {
+				return fmt.Errorf("missing Light proxy GeoIP field %s", suffix)
+			}
+		}
+		if runConfig.trustedLightProxy {
+			absentFields = append(absentFields, "is_untrusted_client_geoip")
+		} else {
+			expected["is_untrusted_client_geoip"] = true
+		}
+		for name, want := range expected {
+			if fields[name] != want {
+				return fmt.Errorf("%s: got %v, expected %v", name, fields[name], want)
+			}
+		}
+		for _, name := range booleanFields {
+			if _, ok := fields[name].(bool); !ok {
+				return fmt.Errorf("missing or invalid boolean %s", name)
+			}
+		}
+		for _, name := range durationFields {
+			if value, ok := fields[name].(float64); !ok || value < 0 {
+				return fmt.Errorf("missing or invalid duration %s", name)
+			}
+		}
+		if port, ok := fields["light_dial_port_number"].(float64); !ok || port <= 0 || port > 65535 {
+			return fmt.Errorf("missing or invalid light_dial_port_number")
+		}
+		absentFields = append(absentFields,
+			"light_fallback_proxy_id",
+			"light_fallback_proxy_entry_tracker",
+			"light_fallback_proxy_dial_IPv4", "light_fallback_proxy_dial_IPv6",
+			"light_fallback_proxy_dial_failed", "light_fallback_proxy_dial_canceled")
+		for _, name := range absentFields {
+			if _, ok := fields[name]; ok {
+				return fmt.Errorf("unexpected Light field %s", name)
+			}
+		}
 	}
 
 	// With interruptions, timeouts, and retries in some tests, there may be
@@ -3550,9 +3969,15 @@ func checkExpectedServerTunnelLogFields(
 			fields["peak_concurrent_proximate_accepted_clients"])
 	}
 
-	peakConcurrentProximateEstablishedClients :=
-		int(fields["peak_concurrent_proximate_established_clients"].(float64))
-	if peakConcurrentProximateEstablishedClients != 0 {
+	// Light omits the peak same-region established-client count when the
+	// original client IP reported by the proxy is untrusted.
+	peakConcurrentProximateEstablishedClients, present :=
+		fields["peak_concurrent_proximate_established_clients"]
+	if protocol.TunnelProtocolUsesLight(clientTunnelProtocol) && !runConfig.trustedLightProxy {
+		if present {
+			return fmt.Errorf("unexpected field 'peak_concurrent_proximate_established_clients'")
+		}
+	} else if peakConcurrentProximateEstablishedClients != float64(0) {
 		return fmt.Errorf(
 			"unexpected peak_concurrent_proximate_established_clients '%v'",
 			fields["peak_concurrent_proximate_established_clients"])
@@ -3784,7 +4209,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(clientTunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUICOSSH(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"quic_version",
@@ -4335,7 +4760,8 @@ func checkExpectedDSLPendingPrioritizeDial(
 
 func checkExpectedDiscoveredServer(
 	clientConfig *psiphon.Config,
-	discoveryServers []*psinet.DiscoveryServer) error {
+	discoveryServers []*psinet.DiscoveryServer,
+	expectDiscovery bool) error {
 
 	discoveredServers := make(map[string]*protocol.ServerEntry)
 	ctx := context.Background()
@@ -4375,8 +4801,10 @@ func checkExpectedDiscoveredServer(
 			}
 		}
 	}
-	if !foundOne {
-		return errors.TraceNew("expected client to discover at least one server")
+	if foundOne != expectDiscovery {
+		return errors.Tracef(
+			"unexpected server discovery: found %t, expected %t",
+			foundOne, expectDiscovery)
 	}
 
 	return nil
@@ -5730,6 +6158,7 @@ func storePruneServerEntriesTest(
 			func(serverEntry *protocol.ServerEntry, _ bool, _ string) (string, bool) {
 				return runConfig.tunnelProtocol, true
 			},
+			nil,
 			serverEntry,
 			nil,
 			nil,
@@ -6117,8 +6546,9 @@ func newDiscoveryServers(ipAddresses []string) ([]*psinet.DiscoveryServer, error
 	for i, ipAddress := range ipAddresses {
 
 		encodedServer, err := protocol.EncodeServerEntry(&protocol.ServerEntry{
-			IpAddress: ipAddress,
-			Tag:       prng.HexString(16),
+			IpAddress:        ipAddress,
+			Tag:              prng.HexString(16),
+			SshObfuscatedKey: prng.HexString(32),
 		})
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -6227,14 +6657,18 @@ func configureDSLTestServerEntries(
 }
 
 func startLightProxy(
-	ctx context.Context,
-	allowedDestination string) ([]byte, string, func(), error) {
+	dataRootDirectory string,
+	allowedDestination string,
+	tunnelDialAuthorizationPublicKey string,
+	tunnelProtocol string,
+	personalPairing bool,
+	proxyPrivateKey inproxy.SessionPrivateKey,
+	trustedProxyAuthorization []byte) ([]byte, string, func(), error) {
 
 	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, "", nil, errors.Trace(err)
 	}
-	proxyAddress := proxyListener.Addr().String()
 	proxyPort := proxyListener.Addr().(*net.TCPAddr).Port
 
 	err = proxyListener.Close()
@@ -6242,13 +6676,31 @@ func startLightProxy(
 		return nil, "", nil, errors.Trace(err)
 	}
 
-	proxyIPv6Address := net.JoinHostPort("::1", strconv.Itoa(proxyPort))
+	ingressProtocol := light.LIGHT_PROTOCOL_TLS
+	if protocol.TunnelProtocolUsesLightQUICIngress(tunnelProtocol) {
+		ingressProtocol = light.LIGHT_PROTOCOL_QUIC
+	}
 
+	proxyID, err := light.GetTunnelProxyID(proxyPrivateKey)
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+	personalCompartmentID := ""
+	if personalPairing {
+		personalCompartmentID = base64.RawStdEncoding.EncodeToString(prng.Bytes(32))
+	}
 	proxyConfig, proxyEntry, err := light.Generate(
 		prng.HexString(8),
-		[]string{proxyAddress, proxyIPv6Address},
-		proxyAddress,
-		proxyIPv6Address,
+		nil,
+		// The client reaches the proxy only at ::1, while the proxy reaches
+		// the server from 127.0.0.1. The test GeoIP database resolves these
+		// differently, so the server tunnel log checks can tell the client's
+		// GeoIP from the proxy's; see testGeoIPIPv6LoopbackCountry. Dials to
+		// a proxy with both IPv4 and IPv6 addresses are covered by
+		// TestLightProxy in the light package.
+		[]light.ProxyAddress{
+			{IPAddress: "::1", Port: proxyPort, Protocol: ingressProtocol},
+		},
 		"example.org",
 		"",
 		0.5,
@@ -6258,63 +6710,148 @@ func startLightProxy(
 		0,
 		0,
 		0,
-		0,
+		time.Hour,
 		[]string{allowedDestination},
 		nil,
 		nil,
 		nil,
-		allowedDestination)
+		allowedDestination,
+		personalCompartmentID,
+		proxyID)
 	if err != nil {
 		return nil, "", nil, errors.Trace(err)
 	}
 
-	proxyConfig.AllowBogons = true
-
-	receiver := &lightProxyEventReceiver{
-		listening: make(chan struct{}),
+	maxClients := 10
+	config := &psiphon.Config{
+		DataRootDirectory:                    dataRootDirectory,
+		PropagationChannelId:                 "0000000000000000",
+		SponsorId:                            "0000000000000000",
+		ClientPlatform:                       "Windows",
+		ClientVersion:                        strconv.Itoa(testClientVersion),
+		DisableTunnels:                       true,
+		DisableTactics:                       true,
+		DisableRemoteServerListFetcher:       true,
+		DisableDSLFetcher:                    true,
+		EnableRunningLightProxy:              true,
+		ProxyMaxCommonClients:                &maxClients,
+		ProxyMaxPersonalClients:              &maxClients,
+		ProxySessionPrivateKey:               proxyPrivateKey.String(),
+		ProxyPersonalCompartmentID:           proxyConfig.PersonalCompartmentID,
+		LightProxyTrustedProxyAuthorization:  base64.StdEncoding.EncodeToString(trustedProxyAuthorization),
+		LightProxyDialAddresses:              proxyConfig.DialAddresses,
+		LightProxyListenAddresses:            proxyConfig.ListenAddresses,
+		LightProxyObfuscationKey:             proxyConfig.ObfuscationKey,
+		LightProxyTLSCertificate:             string(proxyConfig.TLSCertificate),
+		LightProxyTLSPrivateKey:              string(proxyConfig.TLSPrivateKey),
+		LightProxyPassthroughAddress:         proxyConfig.PassthroughAddress,
+		LightProxyDialAuthorizationPublicKey: tunnelDialAuthorizationPublicKey,
+		LightProxyAllowBogons:                true,
 	}
-	proxy, err := light.NewProxy(
-		proxyConfig,
-		func(string) common.GeoIPData { return common.GeoIPData{} },
-		receiver)
+	if err := config.Commit(false); err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+	controller, err := psiphon.NewController(config)
 	if err != nil {
 		return nil, "", nil, errors.Trace(err)
 	}
+	controllerProxyID, err := controller.GetLightProxyID()
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+	if controllerProxyID != proxyID {
+		return nil, "", nil, errors.TraceNew("Controller proxy ID does not match entry")
+	}
 
-	proxyCtx, stopProxy := context.WithCancel(ctx)
+	// StartLightProxy requires Controller.Run; the LightProxyAllowed notice
+	// reports when it may be called.
+	//
+	// Limitation: this Controller runs alongside the client Controller and
+	// shares process-wide state with it, such as the notice writer and the
+	// datastore. It runs with tunnels, tactics and fetchers disabled, and
+	// its distinct client platform lets the server logs for the proxy and
+	// the client be told apart.
+
+	allowed := make(chan struct{}, 1)
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			noticeType, _, err := psiphon.GetNotice(notice)
+			if err == nil && noticeType == "LightProxyAllowed" {
+				select {
+				case allowed <- struct{}{}:
+				default:
+				}
+			}
+		}))
+	if err != nil {
+		return nil, "", nil, errors.Trace(err)
+	}
+	defer psiphon.ResetNoticeWriter()
+
+	runCtx, stopRunning := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
 	go func() {
-		_ = proxy.Run(proxyCtx)
+		defer close(runDone)
+		controller.Run(runCtx)
 	}()
 
-	select {
-	case <-receiver.listening:
-	case <-ctx.Done():
-		stopProxy()
-		return nil, "", nil, errors.Trace(ctx.Err())
+	// Controller.Run stops the Light proxy when it exits.
+	stopProxy := func() {
+		stopRunning()
+		<-runDone
 	}
 
-	return proxyEntry, proxy.ID, stopProxy, nil
+	select {
+	case <-allowed:
+	case <-runDone:
+		stopProxy()
+		return nil, "", nil, errors.TraceNew("unexpected Controller.Run exit")
+	case <-time.After(5 * time.Second):
+		stopProxy()
+		return nil, "", nil, errors.TraceNew("timeout awaiting LightProxyAllowed")
+	}
+
+	if err := controller.StartLightProxy(nil); err != nil {
+		stopProxy()
+		return nil, "", nil, errors.Trace(err)
+	}
+
+	return proxyEntry, proxyID, stopProxy, nil
 }
 
-type lightProxyEventReceiver struct {
-	listening     chan struct{}
-	listeningOnce sync.Once
-}
+// generateUnreachablePersonalLightProxyEntry generates a personal tunnel
+// entry for a TLS proxy that is not running.
+func generateUnreachablePersonalLightProxyEntry(
+	t *testing.T, passthroughAddress string) []byte {
 
-func (r *lightProxyEventReceiver) Listening(string) {
-	r.listeningOnce.Do(func() { close(r.listening) })
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	proxyPrivateKey, err := inproxy.GenerateSessionPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyID, err := light.GetTunnelProxyID(proxyPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, proxyEntry, err := light.Generate(
+		prng.HexString(8),
+		nil,
+		[]light.ProxyAddress{
+			{IPAddress: "127.0.0.1", Port: port, Protocol: light.LIGHT_PROTOCOL_TLS},
+		},
+		"example.org", "", 0.5, protocol.TLS_PROFILE_CHROME_133, 0.5, 0, 0, 0, 0,
+		time.Hour, nil, nil, nil, nil,
+		passthroughAddress,
+		base64.RawStdEncoding.EncodeToString(prng.Bytes(32)),
+		proxyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proxyEntry
 }
-
-func (r *lightProxyEventReceiver) Paused()                           {}
-func (r *lightProxyEventReceiver) Resumed()                          {}
-func (r *lightProxyEventReceiver) Accepted()                         {}
-func (r *lightProxyEventReceiver) Rejected()                         {}
-func (r *lightProxyEventReceiver) Activity(*light.ActivityStats)     {}
-func (r *lightProxyEventReceiver) Connection(*light.ConnectionStats) {}
-func (r *lightProxyEventReceiver) IrregularConnection(
-	string, common.GeoIPData, string) {
-}
-func (r *lightProxyEventReceiver) DebugLog(string, string)   {}
-func (r *lightProxyEventReceiver) InfoLog(string, string)    {}
-func (r *lightProxyEventReceiver) WarningLog(string, string) {}
-func (r *lightProxyEventReceiver) ErrorLog(string, string)   {}

@@ -58,7 +58,7 @@ github.com/Psiphon-Labs/pion-webrtc/v4/internal/mux
 github.com/Psiphon-Labs/pion-webrtc/v4/internal/util
 github.com/Psiphon-Labs/pion-webrtc/v4/pkg/media
 github.com/Psiphon-Labs/pion-webrtc/v4/pkg/rtcerr
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261123190542-d9f99c3443cf
 ## explicit; go 1.26
 github.com/Psiphon-Labs/psiphon-tls
 github.com/Psiphon-Labs/psiphon-tls/internal/boring
@@ -85,7 +85,7 @@ github.com/Psiphon-Labs/psiphon-tls/internal/fips140deps/godebug
 github.com/Psiphon-Labs/psiphon-tls/internal/fips140tls
 github.com/Psiphon-Labs/psiphon-tls/internal/impl
 github.com/Psiphon-Labs/psiphon-tls/internal/sysrand
-# github.com/Psiphon-Labs/quic-go v0.0.0-20261103172121-ba3c8406711b
+# github.com/Psiphon-Labs/quic-go v0.0.0-20261123191126-dd96c1dca9f8
 ## explicit; go 1.23
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3

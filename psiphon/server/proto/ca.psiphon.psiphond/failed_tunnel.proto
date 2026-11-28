@@ -25,4 +25,5 @@ message FailedTunnel {
     optional int64 liveness_test_upstream_bytes = 106;
     optional double record_probability = 107;
     optional string tunnel_error = 108;
+    optional string light_proxy_id = 109;
 }

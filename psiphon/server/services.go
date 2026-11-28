@@ -152,6 +152,9 @@ func RunServices(configJSON []byte) (retErr error) {
 	}
 
 	if config.DSLRelayServiceAddress != "" {
+		// Limitation: untrusted Light clients use 0.0.0.0 and None GeoIP
+		// for DSL. The log formatter has no sshClient context, so DSL logs
+		// omit reported GeoIP and is_untrusted_client_geoip.
 		support.dslRelay, err = dsl.NewRelay(&dsl.RelayConfig{
 			Logger:                        CommonLogger(log),
 			CACertificatesFilename:        config.DSLRelayCACertificatesFilename,

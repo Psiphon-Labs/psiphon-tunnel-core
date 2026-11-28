@@ -139,6 +139,7 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			0,
 			false,
 			false, // Disable obfuscated PSK
+			"",
 			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "test"),
 		)
 

@@ -120,6 +120,12 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 			conn := c.conn
 			c.conn = newClosedConn(conn)
 
+			// Stop any downstream fragmentation, which must not apply to the
+			// passthrough relay.
+			if fragmentor, ok := conn.(*recorderConn).Conn.(interface{ StopFragmenting() }); ok {
+				fragmentor.StopFragmenting()
+			}
+
 			go func() {
 
 				// Perform the passthrough relay.

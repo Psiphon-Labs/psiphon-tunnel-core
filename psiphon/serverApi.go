@@ -243,7 +243,9 @@ func (serverContext *ServerContext) doHandshakeRequest() error {
 		NoticeClientAddress(handshakeResponse.ClientAddress)
 	}
 
-	NoticeClientRegion(handshakeResponse.ClientRegion)
+	if handshakeResponse.ClientRegion != "" {
+		NoticeClientRegion(handshakeResponse.ClientRegion)
+	}
 
 	// Emit a SplitTunnelRegions notice indicating active split tunnel region.
 	// For SplitTunnelOwnRegion, the handshake ClientRegion is the split
@@ -450,31 +452,30 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 
 	params["last_connected"] = lastConnected
 
-	// Report accumulated pre-tunnel light proxy client events in the
-	// connected request. This avoids an extra round trip traffic shape if we
+	// Report accumulated pre-tunnel Light fallback proxy client events in
+	// the connected request. This avoids an extra round trip traffic shape if we
 	// instead immediately triggered a status request.
 	//
-	// Light proxy events reported by this connected request are dropped on
+	// Light fallback proxy events reported by this connected request are dropped on
 	// failure and not carried forward to a later tunnel. The intention is
-	// for server_tunnel.light_proxy_client_events to reflect light proxy
-	// fallback events that occur before a tunnel connects or during that
-	// tunnel.
-	_, lightProxyClientEvents, _ := takeClientEvents(controller, serverContext.tunnel, false)
+	// for server_tunnel.light_fallback_proxy_client_events to reflect fallback
+	// events that occur before a tunnel connects or during that tunnel.
+	_, lightFallbackProxyClientEvents, _ := takeClientEvents(controller, serverContext.tunnel, false)
 
-	if len(lightProxyClientEvents) > 0 {
-		params["light_proxy_client_events"] = lightProxyClientEvents
+	if len(lightFallbackProxyClientEvents) > 0 {
+		params["light_fallback_proxy_client_events"] = lightFallbackProxyClientEvents
 	}
 
 	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
 		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
 
-	lightProxyClient := controller.config.GetLightProxyClient()
-	if lightProxyClient != nil {
+	lightProxyClient := controller.config.GetLightFallbackProxyClient()
+	if controller.config.EnableLightProxyFallback && lightProxyClient != nil {
 
 		// Specify reset counters true. Each connected tunnel will report
-		// light proxy dial count metrics for the period between the last
-		// tunnel report and now.
+		// fallback light proxy dial count metrics for the period between the
+		// last tunnel report and now.
 		//
 		// Limitation: if the connected request goes on to fail, the counts
 		// are lost. This is a tradeoff; simply delaying the reset until
@@ -482,14 +483,14 @@ func (serverContext *ServerContext) DoConnectedRequest(controller *Controller) e
 		// are currently in-flight.
 
 		metrics := lightProxyClient.GetMetrics(true)
-		params["light_proxy_id"] = metrics.ProxyID
-		params["light_proxy_entry_tracker"] = strconv.FormatInt(metrics.ProxyEntryTracker, 10)
-		params["light_proxy_dial_IPv4"] = strconv.Itoa(metrics.DialIPv4Count)
+		params["light_fallback_proxy_id"] = metrics.ProxyID
+		params["light_fallback_proxy_entry_tracker"] = strconv.FormatInt(metrics.ProxyEntryTracker, 10)
+		params["light_fallback_proxy_dial_IPv4"] = strconv.Itoa(metrics.DialIPv4Count)
 		if metrics.HasIPv6 {
-			params["light_proxy_dial_IPv6"] = strconv.Itoa(metrics.DialIPv6Count)
+			params["light_fallback_proxy_dial_IPv6"] = strconv.Itoa(metrics.DialIPv6Count)
 		}
-		params["light_proxy_dial_failed"] = strconv.Itoa(metrics.DialFailedCount)
-		params["light_proxy_dial_canceled"] = strconv.Itoa(metrics.DialCanceledCount)
+		params["light_fallback_proxy_dial_failed"] = strconv.Itoa(metrics.DialFailedCount)
+		params["light_fallback_proxy_dial_canceled"] = strconv.Itoa(metrics.DialCanceledCount)
 	}
 
 	request, err := serverContext.makeSSHAPIRequestPayload(params)
@@ -649,7 +650,7 @@ func makeStatusRequestPayload(
 	// report events twice if the original server processed the request but
 	// its response was lost.
 
-	clientEvents, lightProxyClientEvents, eventsSize := takeClientEvents(controller, tunnel, true)
+	clientEvents, lightFallbackProxyClientEvents, eventsSize := takeClientEvents(controller, tunnel, true)
 
 	// GetCheckServerEntryTags returns a randomly selected set of server entry
 	// tags to be checked for pruning, or an empty list if a check is not yet
@@ -674,7 +675,7 @@ func makeStatusRequestPayload(
 		// Proceed without persistent stats.
 	}
 
-	if len(clientEvents) == 0 && len(lightProxyClientEvents) == 0 &&
+	if len(clientEvents) == 0 && len(lightFallbackProxyClientEvents) == 0 &&
 		len(checkServerEntryTags) == 0 && len(persistentStats) == 0 {
 		// There is no payload to send.
 		return nil, nil, nil
@@ -690,8 +691,8 @@ func makeStatusRequestPayload(
 	if len(clientEvents) > 0 {
 		payload["client_events"] = clientEvents
 	}
-	if len(lightProxyClientEvents) > 0 {
-		payload["light_proxy_client_events"] = lightProxyClientEvents
+	if len(lightFallbackProxyClientEvents) > 0 {
+		payload["light_fallback_proxy_client_events"] = lightFallbackProxyClientEvents
 	}
 
 	persistentStatPayloadNames := make(map[string]string)
@@ -786,13 +787,13 @@ func takeClientEvents(
 	// Connected requests may report only the first light proxy events for
 	// a tunnel. This allows the server to prepend that batch if a later
 	// status request reaches it first.
-	var lightProxyClientEvents []string
-	if includeTunnelEvents || tunnel.lightProxyClientEventReportedCount == 0 {
-		lightProxyClientEvents = takeEvents(
-			&controller.lightProxyClientEvents, &tunnel.lightProxyClientEventReportedCount)
+	var lightFallbackProxyClientEvents []string
+	if includeTunnelEvents || tunnel.lightFallbackProxyClientEventReportedCount == 0 {
+		lightFallbackProxyClientEvents = takeEvents(
+			&controller.lightFallbackProxyClientEvents, &tunnel.lightFallbackProxyClientEventReportedCount)
 	}
 
-	if len(controller.lightProxyClientEvents) > 0 ||
+	if len(controller.lightFallbackProxyClientEvents) > 0 ||
 		(includeTunnelEvents && len(tunnel.clientEvents) > 0) {
 		select {
 		case tunnel.signalClientEvents <- struct{}{}:
@@ -800,7 +801,7 @@ func takeClientEvents(
 		}
 	}
 
-	return clientEvents, lightProxyClientEvents, eventsSize
+	return clientEvents, lightFallbackProxyClientEvents, eventsSize
 }
 
 func putBackStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
@@ -1398,13 +1399,19 @@ func getBaseAPIParameters(
 			}
 		}
 
+		if protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
+			if dialParams.LightProxyID != "" {
+				params["light_proxy_id"] = dialParams.LightProxyID
+			}
+			metrics := dialParams.GetLightTunnelMetrics()
+			for name, value := range metrics {
+				params[name] = fmt.Sprintf("%v", value)
+			}
+		}
+
 		serverEntryCount := GetLastServerEntryCount()
 		if serverEntryCount >= 0 {
 			params["server_entry_count"] = strconv.Itoa(serverEntryCount)
-		}
-
-		if dialParams.TunnelLightProxyID != "" {
-			params["tunnel_personal_light_proxy_id"] = dialParams.TunnelLightProxyID
 		}
 
 	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {

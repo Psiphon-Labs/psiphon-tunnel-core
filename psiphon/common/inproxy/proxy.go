@@ -383,6 +383,7 @@ func (p *Proxy) Run(ctx context.Context) {
 	// for PeakUp/DownstreamBytesPerSecond. This is also a reasonable
 	// frequency for invoking the ActivityUpdater and updating UI widgets.
 
+	lastActivityUpdate := time.Now()
 	proxyWaitGroup.Add(1)
 	go func() {
 		defer proxyWaitGroup.Done()
@@ -399,7 +400,8 @@ func (p *Proxy) Run(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				p.activityUpdate(activityUpdatePeriod)
+				lastActivityUpdate = time.Now()
+				p.activityUpdate(activityUpdatePeriod, true)
 			case <-ctx.Done():
 				break loop
 			}
@@ -408,6 +410,9 @@ func (p *Proxy) Run(ctx context.Context) {
 
 	p.runProxySupervisor(ctx)
 	proxyWaitGroup.Wait()
+
+	// Flush activity after all workers stop; this is not a one-second peak sample.
+	p.activityUpdate(time.Since(lastActivityUpdate), false)
 }
 
 // proxyKindState tracks the announcement state for each kind of proxy client:
@@ -527,7 +532,7 @@ func (p *Proxy) runProxySupervisor(ctx context.Context) {
 	// released slots.
 	//
 	// Limit transitions are soft: in-flight announcements and ongoing
-	// client connections are not interrupted or rethrottled.
+	// client connections are not interrupted.
 	//
 	// A polling approach is used, since it's simpler than signalling on the
 	// above change cases, and limit transitions are already soft.
@@ -987,10 +992,10 @@ func (p *Proxy) endBackOffTimer(limits proxyLimitsSnapshot) *time.Timer {
 	return time.NewTimer(delay)
 }
 
-func (p *Proxy) activityUpdate(period time.Duration) {
+func (p *Proxy) activityUpdate(period time.Duration, updatePeak bool) {
 
-	// Concurrency: activityUpdate is called by only the single goroutine
-	// created in Run.
+	// Concurrency: Run calls this serially, with a final call after joining
+	// the activity goroutine and all proxy workers.
 
 	announcing := p.announcing.Load()
 	connectingClients := p.connectingClients.Load()
@@ -998,8 +1003,10 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 	bytesUp := p.bytesUp.Swap(0)
 	bytesDown := p.bytesDown.Swap(0)
 
-	greaterThanSwapInt64(&p.peakBytesUp, bytesUp)
-	greaterThanSwapInt64(&p.peakBytesDown, bytesDown)
+	if updatePeak {
+		greaterThanSwapInt64(&p.peakBytesUp, bytesUp)
+		greaterThanSwapInt64(&p.peakBytesDown, bytesDown)
+	}
 
 	personalRegionActivity := p.snapshotAndResetRegionActivity(
 		&p.personalStatsMutex, p.personalRegionActivity)
@@ -1070,11 +1077,13 @@ func (p *Proxy) snapshotAndResetRegionActivity(
 	result := make(map[string]RegionActivitySnapshot, len(statsMap))
 	regionsToDelete := []string{}
 	for region, stats := range statsMap {
+		// Read counts first so a concurrent disconnect cannot cause an entry
+		// with unreported bytes to be pruned.
 		snapshot := RegionActivitySnapshot{
-			BytesUp:           stats.bytesUp.Swap(0),
-			BytesDown:         stats.bytesDown.Swap(0),
 			ConnectingClients: stats.connectingClients.Load(),
 			ConnectedClients:  stats.connectedClients.Load(),
+			BytesUp:           stats.bytesUp.Swap(0),
+			BytesDown:         stats.bytesDown.Swap(0),
 		}
 		if snapshot.BytesUp > 0 || snapshot.BytesDown > 0 ||
 			snapshot.ConnectingClients > 0 || snapshot.ConnectedClients > 0 {
@@ -1698,7 +1707,9 @@ func (p *Proxy) proxyOneClient(
 	p.connectingClients.Add(-1)
 	if regionActivity != nil {
 		// Increment connectedClients first, to avoid a premature prune in
-		// snapshotAndResetRegionActivity with all-zero values.
+		// snapshotAndResetRegionActivity with all-zero values. A concurrent
+		// snapshot may briefly count the client as both connecting and
+		// connected; this is accepted to keep updates lock-free.
 		regionActivity.connectedClients.Add(1)
 		regionActivity.connectingClients.Add(-1)
 	}

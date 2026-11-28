@@ -179,6 +179,7 @@ var handshakeRequestParams = append(
 			{"missing_server_entry_signature", isBase64String, requestParamOptional},
 			{"missing_server_entry_provider_id", isBase64String, requestParamOptional},
 			{"enable_proxy_protocol_headers", isBooleanFlag, requestParamOptional | requestParamNotLogged},
+			{"light_proxy_id", isUnpaddedBase64String, requestParamOptional | requestParamNotLogged},
 		},
 		baseAndDialParams...),
 	tacticsParams...)
@@ -269,6 +270,32 @@ func handshakeAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	// Check the client's expected proxy ID against the verified proxy report.
+	if protocol.TunnelProtocolUsesLight(sshClient.tunnelProtocol) {
+		expectedProxyIDString, err := getStringRequestParam(params, "light_proxy_id")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		expectedProxyID, err := inproxy.IDFromString(expectedProxyIDString)
+		if err != nil {
+			return nil, errors.TraceMsg(err, "invalid Light proxy ID")
+		}
+		if !expectedProxyID.Equal(sshClient.lightProxyID) {
+			return nil, errors.TraceNew("Light proxy ID mismatch")
+		}
+	} else {
+		// Reject a Light client that reaches a non-Light listener. A Light
+		// proxy could relay the client's SSH stream there to skip the proxy
+		// report check and have the server use the proxy's GeoIP data.
+		relayProtocol, err := getStringRequestParam(params, "relay_protocol")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if protocol.TunnelProtocolUsesLight(relayProtocol) {
+			return nil, errors.TraceNew("unexpected Light relay protocol")
+		}
+	}
+
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
@@ -311,6 +338,15 @@ func handshakeAPIRequestHandler(
 	splitTunnelOwnRegion, _ := getBoolStringRequestParam(params, "split_tunnel")
 	splitTunnelOtherRegions, _ := getStringArrayRequestParam(params, "split_tunnel_regions")
 
+	// Limitation: split tunneling is disabled for Light tunnels. See the
+	// split-tunnel TODO in protocolSelectionConstraints.serverSupportedProtocols
+	// in psiphon/controller.go.
+	if protocol.TunnelProtocolUsesLight(sshClient.tunnelProtocol) &&
+		(splitTunnelOwnRegion || len(splitTunnelOtherRegions) > 0) {
+
+		return nil, errors.TraceNew("split tunnel is not supported with Light tunnels")
+	}
+
 	ownRegion := ""
 	if splitTunnelOwnRegion {
 		ownRegion = clientGeoIPData.Country
@@ -337,10 +373,20 @@ func handshakeAPIRequestHandler(
 		responseMarshaler = protocol.CBOREncoding.Marshal
 	}
 
-	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
-		common.GeoIPData(clientGeoIPData), params, compressTactics)
-	if err != nil {
-		return nil, errors.Trace(err)
+	// Omit client region and tactics updates when the original client IP
+	// reported by the Light proxy is untrusted. Tactics are selected by client
+	// GeoIP, and the server has no trusted GeoIP for this client.
+	//
+	// As a result, these handshakes do not extend the TTL of the client's
+	// stored tactics, and a client that connects only through untrusted Light
+	// proxies relies on untunneled tactics requests.
+	var tacticsPayload *tactics.Payload
+	if !sshClient.isUntrustedClientGeoIP {
+		tacticsPayload, err = support.TacticsServer.GetTacticsPayload(
+			common.GeoIPData(clientGeoIPData), params, compressTactics)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	var newTacticsTag string
@@ -385,14 +431,14 @@ func handshakeAPIRequestHandler(
 	// log is mostly redundant and set to debug level.
 
 	if IsLogLevelDebug() {
-		logFields := getRequestLogFields(
+		logFields := sshClient.addUntrustedClientGeoIPLogFields(getRequestLogFields(
 			"",
 			"",
 			sshClient.sessionID,
 			clientGeoIPData,
 			handshakeStateInfo.authorizedAccessTypes,
 			params,
-			handshakeRequestParams)
+			handshakeRequestParams))
 		log.WithTraceFields(logFields).Debug("handshake")
 	}
 
@@ -401,10 +447,11 @@ func handshakeAPIRequestHandler(
 	// TODO: as a future enhancement, use the packed, CBOR encoding --
 	// protocol.EncodePackedServerEntryFields -- for server entries.
 
-	// Discover new servers
+	// Discover new servers. Skip IP-based discovery when the original client IP
+	// reported by the Light proxy is untrusted.
 
 	var encodedServerList []string
-	if !sshClient.getDisableDiscovery() {
+	if !sshClient.isUntrustedClientGeoIP && !sshClient.getDisableDiscovery() {
 
 		encodedServerList = support.discovery.DiscoverServers(
 			net.ParseIP(sshClient.getClientIP()))
@@ -471,6 +518,12 @@ func handshakeAPIRequestHandler(
 		clientAddress = net.JoinHostPort(sshClient.getClientIP(), "0")
 	}
 
+	clientRegion := clientGeoIPData.Country
+	if sshClient.isUntrustedClientGeoIP {
+		clientRegion = ""
+		clientAddress = ""
+	}
+
 	var marshaledTacticsPayload []byte
 	if tacticsPayload != nil {
 		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
@@ -483,7 +536,7 @@ func handshakeAPIRequestHandler(
 		Homepages:                homepages,
 		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		EncodedServerList:        encodedServerList,
-		ClientRegion:             clientGeoIPData.Country,
+		ClientRegion:             clientRegion,
 		ClientAddress:            clientAddress,
 		ServerTimestamp:          common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
@@ -571,7 +624,7 @@ func getProxyProtocolHeaderConfig(
 	for _, target := range targets {
 		normalizedTargets = append(
 			normalizedTargets,
-			normalizeHostAddress(target))
+			common.NormalizeHostAddress(target))
 	}
 
 	return &proxyProtocolHeaderConfig{
@@ -579,20 +632,6 @@ func getProxyProtocolHeaderConfig(
 		customTLV:                  customTLV,
 		targetDestinationAddresses: common.NewStringLookup(normalizedTargets),
 	}
-}
-
-func normalizeHostAddress(target string) string {
-
-	// Normalize IP address representation.
-	ip := net.ParseIP(target)
-	if ip != nil {
-		return ip.String()
-	}
-
-	// Normalize domain case and remove any trailing .
-	target = strings.TrimSuffix(target, ".")
-	target = strings.ToLower(target)
-	return target
 }
 
 func doHandshakeInproxyBrokerRelay(
@@ -715,13 +754,13 @@ var connectedRequestParams = append(
 		{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_id", isAnyString, requestParamOptional},
-		{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"light_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged}},
+		{"light_fallback_proxy_id", isAnyString, requestParamOptional},
+		{"light_fallback_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_fallback_proxy_dial_IPv4", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_fallback_proxy_dial_IPv6", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_fallback_proxy_dial_failed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_fallback_proxy_dial_canceled", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"light_fallback_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged}},
 	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
@@ -734,12 +773,12 @@ var updateOnConnectedParamNames = append(
 	[]string{
 		"last_connected",
 		"establishment_duration",
-		"light_proxy_id",
-		"light_proxy_entry_tracker",
-		"light_proxy_dial_IPv4",
-		"light_proxy_dial_IPv6",
-		"light_proxy_dial_failed",
-		"light_proxy_dial_canceled",
+		"light_fallback_proxy_id",
+		"light_fallback_proxy_entry_tracker",
+		"light_fallback_proxy_dial_IPv4",
+		"light_fallback_proxy_dial_IPv6",
+		"light_fallback_proxy_dial_failed",
+		"light_fallback_proxy_dial_canceled",
 	},
 	fragmentor.GetUpstreamMetricsNames()...)
 
@@ -754,12 +793,14 @@ func connectedAPIRequestHandler(
 	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
+	renameLegacyLightFallbackParams(params)
+
 	err := validateRequestParams(params, connectedRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	lightProxyClientEvents, _ := getStringArrayRequestParam(params, "light_proxy_client_events")
+	lightFallbackProxyClientEvents, _ := getStringArrayRequestParam(params, "light_fallback_proxy_client_events")
 
 	connectedRequestTime := time.Now().UTC()
 	connectedTime := connectedRequestTime.Truncate(time.Hour)
@@ -779,12 +820,12 @@ func connectedAPIRequestHandler(
 	// tunnel. Prepend the events in case a later status batch arrived first,
 	// keeping both the event order and the earliest events when the report
 	// limit is reached.
-	if len(lightProxyClientEvents) > 0 {
-		count := min(len(lightProxyClientEvents), CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL)
+	if len(lightFallbackProxyClientEvents) > 0 {
+		count := min(len(lightFallbackProxyClientEvents), CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL)
 		remaining := CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL - count
-		sshClient.lightProxyClientEvents = append(
-			lightProxyClientEvents[:count:count],
-			sshClient.lightProxyClientEvents[:min(len(sshClient.lightProxyClientEvents), remaining)]...)
+		sshClient.lightFallbackProxyClientEvents = append(
+			lightFallbackProxyClientEvents[:count:count],
+			sshClient.lightFallbackProxyClientEvents[:min(len(sshClient.lightFallbackProxyClientEvents), remaining)]...)
 	}
 
 	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
@@ -867,14 +908,14 @@ func connectedAPIRequestHandler(
 
 	if logUniqueUser {
 		log.LogRawFieldsWithTimestamp(
-			getRequestLogFields(
+			sshClient.addUntrustedClientGeoIPLogFields(getRequestLogFields(
 				"unique_user",
 				"",
 				sshClient.sessionID,
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				params,
-				uniqueUserParams))
+				uniqueUserParams)))
 	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
@@ -892,11 +933,31 @@ func connectedAPIRequestHandler(
 	return responsePayload, nil
 }
 
+// renameLegacyLightFallbackParams renames legacy light_proxy_* parameters to
+// light_fallback_proxy_* in connected requests and status payloads.
+// Do not apply it to failed-tunnel records, where light_proxy_id identifies
+// a Light tunnel proxy.
+func renameLegacyLightFallbackParams(params common.APIParameters) {
+	for _, suffix := range []string{
+		"id", "entry_tracker", "dial_IPv4", "dial_IPv6",
+		"dial_failed", "dial_canceled", "client_events",
+	} {
+		oldName := "light_proxy_" + suffix
+		newName := "light_fallback_proxy_" + suffix
+		if value, ok := params[oldName]; ok {
+			if _, ok := params[newName]; !ok {
+				params[newName] = value
+			}
+			delete(params, oldName)
+		}
+	}
+}
+
 var statusRequestParams = baseParams
 
 var statusRequestPayloadParams = []requestParamSpec{
 	{"client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged},
-	{"light_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged},
+	{"light_fallback_proxy_client_events", isClientEvent, requestParamOptional | requestParamArray | requestParamNotLogged},
 }
 
 var remoteServerListStatParams = append(
@@ -913,7 +974,7 @@ var remoteServerListStatParams = append(
 		{"fronting_provider_id", isAnyString, requestParamOptional},
 		{"meek_dial_address", isDialAddress, requestParamOptional},
 		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
-		{"meek_sni_server_name", isDomain, requestParamOptional},
+		{"meek_sni_server_name", isAnyString, requestParamOptional},
 		{"meek_host_header", isHostHeader, requestParamOptional},
 		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
@@ -953,7 +1014,8 @@ var failedTunnelStatParams = append(
 		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"bytes_up", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"bytes_down", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"tunnel_error", isAnyString, 0}},
+		{"tunnel_error", isAnyString, 0},
+		{"light_proxy_id", isUnpaddedBase64String, requestParamOptional}},
 	baseAndDialParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
@@ -981,13 +1043,15 @@ func statusAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	renameLegacyLightFallbackParams(statusData)
+
 	err = validateRequestParams(statusData, statusRequestPayloadParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	clientEvents, _ := getStringArrayRequestParam(statusData, "client_events")
-	lightProxyClientEvents, _ := getStringArrayRequestParam(statusData, "light_proxy_client_events")
+	lightFallbackProxyClientEvents, _ := getStringArrayRequestParam(statusData, "light_fallback_proxy_client_events")
 
 	// Logs are queued until the input is fully validated. Otherwise, stats
 	// could be double counted if the client has a bug in its request
@@ -1042,14 +1106,14 @@ func statusAPIRequestHandler(
 				continue
 			}
 
-			remoteServerListFields := getRequestLogFields(
+			remoteServerListFields := sshClient.addUntrustedClientGeoIPLogFields(getRequestLogFields(
 				"remote_server_list",
 				"",
 				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				remoteServerListStat,
-				remoteServerListStatParams)
+				remoteServerListStatParams))
 
 			logQueue = append(logQueue, remoteServerListFields)
 		}
@@ -1094,14 +1158,14 @@ func statusAPIRequestHandler(
 				continue
 			}
 
-			failedTunnelFields := getRequestLogFields(
+			failedTunnelFields := sshClient.addUntrustedClientGeoIPLogFields(getRequestLogFields(
 				"failed_tunnel",
 				"",
 				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				failedTunnelStat,
-				failedTunnelStatParams)
+				failedTunnelStatParams))
 
 			// Return a list of servers, identified by server entry tag, that are
 			// invalid and presumed to be deleted. This information is used by clients
@@ -1185,16 +1249,16 @@ func statusAPIRequestHandler(
 		sshClient.Unlock()
 	}
 
-	if droppedLogCount > 0 || len(clientEvents) > 0 || len(lightProxyClientEvents) > 0 {
+	if droppedLogCount > 0 || len(clientEvents) > 0 || len(lightFallbackProxyClientEvents) > 0 {
 		sshClient.Lock()
 		sshClient.persistentStatsDroppedLogCount += droppedLogCount
 		remaining := max(0, CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL-len(sshClient.clientEvents))
 		sshClient.clientEvents = append(
 			sshClient.clientEvents, clientEvents[:min(len(clientEvents), remaining)]...)
-		remaining = max(0, CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL-len(sshClient.lightProxyClientEvents))
-		sshClient.lightProxyClientEvents = append(
-			sshClient.lightProxyClientEvents,
-			lightProxyClientEvents[:min(len(lightProxyClientEvents), remaining)]...)
+		remaining = max(0, CLIENT_EVENTS_MAX_COUNT_PER_TUNNEL-len(sshClient.lightFallbackProxyClientEvents))
+		sshClient.lightFallbackProxyClientEvents = append(
+			sshClient.lightFallbackProxyClientEvents,
+			lightFallbackProxyClientEvents[:min(len(lightFallbackProxyClientEvents), remaining)]...)
 		sshClient.Unlock()
 	}
 
@@ -1287,11 +1351,17 @@ func dslAPIRequestHandler(
 		return nil, errors.TraceNew("too many DSL requests")
 	}
 
+	clientIP := sshClient.getClientIP()
+	if sshClient.isUntrustedClientGeoIP {
+		// The original client IP is untrusted.
+		clientIP = "0.0.0.0"
+	}
+
 	responsePayload, err := dslHandleRequest(
 		sshClient.runCtx,
 		support,
 		nil, // no extendTimeout
-		sshClient.getClientIP(),
+		clientIP,
 		common.GeoIPData(sshClient.getClientGeoIPData()),
 		true, // client request is tunneled
 		requestPayload)
@@ -1522,7 +1592,7 @@ var baseDialParams = []requestParamSpec{
 	{"fronting_provider_id", isAnyString, requestParamOptional},
 	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
-	{"meek_sni_server_name", isDomain, requestParamOptional},
+	{"meek_sni_server_name", isAnyString, requestParamOptional},
 	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
 	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"user_agent", isAnyString, requestParamOptional},
@@ -1580,7 +1650,7 @@ var baseDialParams = []requestParamSpec{
 	{"shadowsocks_prefix", isAnyString, requestParamOptional},
 	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
+	{"tls_ossh_sni_server_name", isAnyString, requestParamOptional},
 	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 	{"tls_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
@@ -1593,7 +1663,26 @@ var baseDialParams = []requestParamSpec{
 	{"unique_candidate_estimate", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidates_moved_to_front", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"first_fronted_meek_candidate", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"tunnel_personal_light_proxy_id", isAnyString, requestParamOptional},
+	{"light_sni", isAnyString, requestParamOptional},
+	{"light_tls_profile", isAnyString, requestParamOptional},
+	{"light_tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"light_quic_version", isAnyString, requestParamOptional},
+	{"light_quic_disable_client_path_mtu_discovery", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_seed_transform", isAnyString, requestParamOptional},
+	{"light_egress_sni", isAnyString, requestParamOptional},
+	{"light_egress_tls_profile", isAnyString, requestParamOptional},
+	{"light_egress_quic_version", isAnyString, requestParamOptional},
+	{"light_tcp_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"light_tls_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"light_quic_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"light_dial_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"light_tls_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_tls_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_quic_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"light_proxy_entry_tracker", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 var inproxyDialParams = []requestParamSpec{
@@ -1628,7 +1717,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_dns_preresolved", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_dns_preferred", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_dns_transform", isAnyString, requestParamOptional},
-	{"inproxy_broker_dns_qname_random_casing", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_dns_qname_random_casing", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"inproxy_webrtc_dns_qname_must_match", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"inproxy_webrtc_dns_qname_mismatches", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},

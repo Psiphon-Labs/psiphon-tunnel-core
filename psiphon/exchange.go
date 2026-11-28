@@ -82,17 +82,21 @@ func ExportExchangePayload(config *Config) string {
 	// If running in proxy-only mode, no payload is exported, since there is
 	// not necessarily any recently successful server entry.
 	//
-	// If running in personal pairing tunnel, no payload is exported, since
-	// the receiving outer client needs to be aware of and configure personal
-	// pairing mode, but the payload is currently opaque to the outer client.
+	// Exchange shares a fully working dial: a server entry, the endpoint,
+	// and a tunnel protocol, the wire shape, where the 1st hop is most often
+	// the critical part. In personal pairing modes, no payload is exported
+	// or imported: the 1st hop is a personally shared proxy, and the 2nd hop
+	// is capacity commonly available to all clients. The payload is also
+	// opaque to the outer client, which would need to configure personal
+	// pairing mode.
 	if config.DisableTunnels {
 		NoticeWarning(
 			"ExportExchangePayload skipped due to DisableTunnels")
 		return ""
 	}
-	if config.IsInproxyClientPersonalPairingMode() {
+	if config.IsPersonalPairingMode() {
 		NoticeWarning(
-			"ExportExchangePayload skipped due to IsInproxyClientPersonalPairingMode")
+			"ExportExchangePayload skipped due to IsPersonalPairingMode")
 		return ""
 	}
 
@@ -122,6 +126,12 @@ func ExportExchangePayload(config *Config) string {
 // The return value indicates a successful import. If the import failed, a
 // a diagnostic notice has been logged.
 func ImportExchangePayload(config *Config, encodedPayload string) bool {
+	// See ExportExchangePayload for personal pairing mode.
+	if config.IsPersonalPairingMode() {
+		NoticeWarning(
+			"ImportExchangePayload skipped due to IsPersonalPairingMode")
+		return false
+	}
 	err := importExchangePayload(config, encodedPayload)
 	if err != nil {
 		NoticeWarning("ImportExchangePayload failed: %s", errors.Trace(err))
@@ -148,6 +158,15 @@ func exportExchangePayload(config *Config) (string, error) {
 		GetAffinityServerEntryAndDialParameters(networkID)
 	if err != nil {
 		return "", errors.Trace(err)
+	}
+
+	// Limitation: Light tunnel dial parameters are not exchanged, as the
+	// peer's working Light proxy entry is not part of the payload. A server
+	// entry without its 1st hop protocol is an incomplete exchange, so export
+	// fails rather than omitting the dial parameters.
+	if dialParams != nil &&
+		protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
+		return "", errors.TraceNew("Light dial parameters not supported")
 	}
 
 	// Fail if the server entry has no signature, as the exchange would be
@@ -239,6 +258,13 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 		config.ServerEntrySignaturePublicKey)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	// Limitation: see exportExchangePayload. The entire payload is rejected.
+	if payload.ExchangedDialParameters != nil &&
+		protocol.TunnelProtocolUsesLight(
+			payload.ExchangedDialParameters.TunnelProtocol) {
+		return errors.TraceNew("Light dial parameters not supported")
 	}
 
 	payload.ServerEntryFields.SetLocalSource(

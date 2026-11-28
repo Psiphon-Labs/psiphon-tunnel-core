@@ -91,9 +91,9 @@ func makeTestPackValue(t *testing.T, spec packSpec) interface{} {
 	case nil:
 		return prng.HexString(prng.Range(1, 1000))
 	case intConverter:
-		return fmt.Sprintf("%d", prng.Intn(1>>32))
+		return fmt.Sprintf("%d", prng.Int63n(1<<32))
 	case floatConverter:
-		return fmt.Sprintf("%f", float64(prng.Intn(1>>32)))
+		return fmt.Sprintf("%f", float64(prng.Int63n(1<<32)))
 	case lowerHexConverter:
 		return prng.HexString(prng.Range(1, 1000))
 	case upperHexConverter:

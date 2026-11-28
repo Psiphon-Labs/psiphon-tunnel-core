@@ -151,9 +151,10 @@ type BrokerDialCoordinator interface {
 	// BrokerClientPrivateKey is the client or proxy's private key to be used
 	// in the secure session established with a broker. Clients should
 	// generate ephemeral keys; this is done automatically when a zero-value
-	// SessionPrivateKey is returned. Proxies may generate, persist, and
-	// long-lived keys to enable traffic attribution to a proxy, identified
-	// by a proxy ID, the corresponding public key.
+	// SessionPrivateKey is returned. Proxies should supply the same key for
+	// concurrent and replacement broker clients to present one proxy ID,
+	// derived from the public key. Persisting this key also enables traffic
+	// attribution across runs.
 	BrokerClientPrivateKey() SessionPrivateKey
 
 	// BrokerPublicKey is the public key for the broker selected by the

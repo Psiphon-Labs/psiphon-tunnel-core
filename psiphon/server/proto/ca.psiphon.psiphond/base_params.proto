@@ -26,4 +26,5 @@ message BaseParams {
     optional google.protobuf.Timestamp last_connected = 17;
     repeated string authorized_access_types = 18;
     optional string network_type = 19;
+    optional bool is_untrusted_client_geoip = 20;
 }

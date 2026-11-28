@@ -92,6 +92,7 @@ func runTestDatastoreKeyOnlyBuckets() error {
 		fields["sshUsername"] = prng.HexString(n)
 		fields["sshPassword"] = prng.HexString(n)
 		fields["sshHostKey"] = prng.HexString(n)
+		fields["sshObfuscatedKey"] = prng.HexString(32)
 		fields["capabilities"] = []string{"SSH", "ssh-api-requests"}
 		fields["region"] = "US"
 		fields["configurationVersion"] = 1

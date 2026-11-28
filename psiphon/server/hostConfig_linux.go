@@ -98,7 +98,7 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 	// - In the "limit" rule case, value[0] specifies --limit N/sec and value[1] specifies
 	//   --limit-burst N (the --limit-burst argument is omitted when value[1] is zero).
 
-	inproxyAcceptRateLimitRules := func(networkProtocol string, portNumber int, rateLimit [2]int) ([]string, error) {
+	proxyAcceptRateLimitRules := func(networkProtocol string, portNumber int, rateLimit [2]int) ([]string, error) {
 		if rateLimit[0] == 0 {
 			rateLimit[0] = 1000
 		}
@@ -171,13 +171,15 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 			var protocolRules []string
 			var err error
 
-			if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+			if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) ||
+				protocol.TunnelProtocolUsesLight(tunnelProtocol) {
 
+				usesTCP := protocol.TunnelProtocolServerUsesTCP(tunnelProtocol)
 				networkProtocol := "tcp"
-				if !protocol.TunnelProtocolUsesTCP(tunnelProtocol) {
+				if !usesTCP {
 					networkProtocol = "udp"
 				}
-				protocolRules, err = inproxyAcceptRateLimitRules(networkProtocol, portNumber, rateLimit)
+				protocolRules, err = proxyAcceptRateLimitRules(networkProtocol, portNumber, rateLimit)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -205,7 +207,7 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 			} else {
 
 				networkProtocol := "tcp"
-				if !protocol.TunnelProtocolUsesTCP(tunnelProtocol) {
+				if !protocol.TunnelProtocolServerUsesTCP(tunnelProtocol) {
 					networkProtocol = "udp"
 				}
 				protocolRules, err = directAcceptRateLimitRules(networkProtocol, portNumber, rateLimit)

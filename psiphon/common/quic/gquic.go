@@ -115,6 +115,13 @@ func (c *gQUICConnection) getClientConnMetrics() quicClientConnMetrics {
 	return quicClientConnMetrics{}
 }
 
+func (c *gQUICConnection) exportKeyingMaterial(
+	_ string, _ []byte, _ int) ([]byte, error) {
+
+	return nil, errors.TraceNew(
+		"exported key material is not supported by gQUIC")
+}
+
 func gQUICDialContext(
 	ctx context.Context,
 	packetConn net.PacketConn,

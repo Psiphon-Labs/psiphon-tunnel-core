@@ -52,6 +52,14 @@ func (c *clientSessionCache) Get(key string) (*tls.ClientSessionState, bool) {
 		c.wrapped.Put(key, nil)
 		return nil, false
 	}
+
+	// [Psiphon]
+	// Mitigate a race condition where EarlyData updates and tls.NewResumptionState
+	// mutate the shared cache entry. Only a shallow copy is required.
+	stateCopy := *state
+	state = &stateCopy
+	// [Psiphon]
+
 	// restore QUIC transport parameters and RTT stored in state.Extra
 	if extra := findExtraData(state.Extra); extra != nil {
 		earlyData := c.setData(extra, state.EarlyData)

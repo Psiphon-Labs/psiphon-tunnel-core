@@ -115,9 +115,9 @@ type Tunnel struct {
 	// Synchronized using controller.clientEventMutex. Client events
 	// attributed to the tunnel and per-tunnel report limit counters are
 	// stored in Tunnel so they naturally share the Tunnel lifetime.
-	clientEvents                       []string
-	clientEventReportedCount           int
-	lightProxyClientEventReportedCount int
+	clientEvents                               []string
+	clientEventReportedCount                   int
+	lightFallbackProxyClientEventReportedCount int
 }
 
 // getCustomParameters helpers wrap the verbose function call chain required
@@ -963,7 +963,20 @@ func dialTunnel(
 			return nil, errors.Trace(err)
 		}
 
-	} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+	} else if protocol.TunnelProtocolUsesLight(dialParams.TunnelProtocol) {
+
+		lightProxyClient := dialParams.lightProxyClient
+		if lightProxyClient == nil {
+			return nil, errors.TraceNew("missing Light proxy client")
+		}
+
+		dialConn, err = dialLightProxyTunnel(
+			ctx, config, lightProxyClient, dialParams)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesQUICOSSH(dialParams.TunnelProtocol) {
 
 		var packetConn net.PacketConn
 		var remoteAddr *net.UDPAddr
@@ -1029,6 +1042,7 @@ func dialTunnel(
 			dialParams.QUICMaxPacketSizeAdjustment,
 			dialParams.QUICDialEarly,
 			dialParams.QUICUseObfuscatedPSK,
+			"",
 			dialParams.quicTLSClientSessionCache)
 		if err != nil {
 			// quic.Dial closes packetConn on its network dial
@@ -1221,15 +1235,12 @@ func dialTunnel(
 		// Ensure SSH algorithm selection conforms to the obfuscated SSH
 		// expectation that everything after the obfuscated KEX is fully
 		// random.
-		//
-		// TUNNEL_PROTOCOL_SSH is excepted since its KEX appears in
-		// plaintext, and the protocol is intended to look like SSH on the
-		// wire.
 		sshClientConfig.ObfuscatedSSHMode = true
-	} else {
-		// For TUNNEL_PROTOCOL_SSH only, the server is expected to randomize
-		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation
-		// between two randomized KEXes.
+	} else if protocol.TunnelProtocolUsesPlainSSH(dialParams.TunnelProtocol) {
+		// The plain SSH KEX appears in plaintext, and the protocol is
+		// intended to look like SSH on the wire, so the server randomizes
+		// its KEX; PeerKEXPRNGSeed ensures successful negotiation between
+		// two randomized KEXes.
 		if dialParams.ServerEntry.SshObfuscatedKey != "" {
 			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 				dialParams.ServerEntry.SshObfuscatedKey)
@@ -1238,6 +1249,8 @@ func dialTunnel(
 			}
 		}
 	}
+	// Otherwise, SSH runs within another secure transport and neither
+	// ObfuscatedSSHMode nor server KEX randomization is applied.
 
 	// The ssh session establishment (via ssh.NewClientConn) is wrapped
 	// in a timeout to ensure it won't hang. We've encountered firewalls
@@ -1703,7 +1716,7 @@ func dialInproxy(
 
 	networkProtocol := inproxy.NetworkProtocolUDP
 	reliableTransport := false
-	if protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolServerUsesTCP(dialParams.TunnelProtocol) {
 		networkProtocol = inproxy.NetworkProtocolTCP
 		reliableTransport = true
 	}

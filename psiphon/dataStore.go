@@ -22,12 +22,14 @@ package psiphon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/light"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -43,33 +46,40 @@ import (
 )
 
 var (
-	datastoreServerEntriesBucket                = []byte("serverEntries")
-	datastoreServerEntryKeysBucket              = []byte("serverEntryKeys")
-	datastoreServerEntryTagsBucket              = []byte("serverEntryTags")
-	datastoreServerEntryTombstoneTagsBucket     = []byte("serverEntryTombstoneTags")
-	datastoreUrlETagsBucket                     = []byte("urlETags")
-	datastoreKeyValueBucket                     = []byte("keyValues")
-	datastoreRemoteServerListStatsBucket        = []byte("remoteServerListStats")
-	datastoreFailedTunnelStatsBucket            = []byte("failedTunnelStats")
-	datastoreSLOKsBucket                        = []byte("SLOKs")
-	datastoreTacticsBucket                      = []byte("tactics")
-	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
-	datastoreDialParametersBucket               = []byte("dialParameters")
-	datastoreDialParameterKeysBucket            = []byte("dialParameterKeys")
-	datastoreNetworkReplayParametersBucket      = []byte("networkReplayParameters")
-	datastoreDSLOSLStatesBucket                 = []byte("dslOSLStates")
-	datastoreLastConnectedKey                   = "lastConnected"
-	datastoreLastServerEntryFilterKey           = []byte("lastServerEntryFilter")
-	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
-	datastoreInproxyCommonCompartmentIDsKey     = []byte("inproxyCommonCompartmentIDs")
-	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
-	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
-	datastoreCheckServerEntryTagsEndTimeKey     = "checkServerEntryTagsEndTime"
-	datastoreDSLLastUntunneledFetchTimeKey      = "dslLastUntunneledDiscoverTime"
-	datastoreDSLLastTunneledFetchTimeKey        = "dslLastTunneledDiscoverTime"
-	datastoreDSLLastActiveOSLsTimeKey           = "dslLastActiveOSLsTime"
-	datastoreDSLAccessTokenRegistrationKey      = []byte("dslAccessTokenRegistration")
-	datastoreStoredLightProxyKey                = "storedLightProxy"
+	datastoreServerEntriesBucket                 = []byte("serverEntries")
+	datastoreServerEntryKeysBucket               = []byte("serverEntryKeys")
+	datastoreServerEntryTagsBucket               = []byte("serverEntryTags")
+	datastoreServerEntryTombstoneTagsBucket      = []byte("serverEntryTombstoneTags")
+	datastoreUrlETagsBucket                      = []byte("urlETags")
+	datastoreKeyValueBucket                      = []byte("keyValues")
+	datastoreRemoteServerListStatsBucket         = []byte("remoteServerListStats")
+	datastoreFailedTunnelStatsBucket             = []byte("failedTunnelStats")
+	datastoreSLOKsBucket                         = []byte("SLOKs")
+	datastoreTacticsBucket                       = []byte("tactics")
+	datastoreSpeedTestSamplesBucket              = []byte("speedTestSamples")
+	datastoreDialParametersBucket                = []byte("dialParameters")
+	datastoreDialParameterKeysBucket             = []byte("dialParameterKeys")
+	datastoreNetworkReplayParametersBucket       = []byte("networkReplayParameters")
+	datastoreDSLOSLStatesBucket                  = []byte("dslOSLStates")
+	datastoreCommonLightTunnelProxyEntriesBucket = []byte("commonLightProxyEntries")
+	datastoreLastConnectedKey                    = "lastConnected"
+	datastoreLastServerEntryFilterKey            = []byte("lastServerEntryFilter")
+	datastoreAffinityServerEntryIDKey            = []byte("affinityServerEntryID")
+	datastoreInproxyCommonCompartmentIDsKey      = []byte("inproxyCommonCompartmentIDs")
+	datastorePersistentStatTypeRemoteServerList  = string(datastoreRemoteServerListStatsBucket)
+	datastorePersistentStatTypeFailedTunnel      = string(datastoreFailedTunnelStatsBucket)
+	datastoreCheckServerEntryTagsEndTimeKey      = "checkServerEntryTagsEndTime"
+	datastoreDSLLastUntunneledFetchTimeKey       = "dslLastUntunneledDiscoverTime"
+	datastoreDSLLastTunneledFetchTimeKey         = "dslLastTunneledDiscoverTime"
+	datastoreDSLLastActiveOSLsTimeKey            = "dslLastActiveOSLsTime"
+	datastoreDSLAccessTokenRegistrationKey       = []byte("dslAccessTokenRegistration")
+	datastoreStoredLightFallbackProxyKey         = "storedLightProxy"
+
+	datastoreCommonLightTunnelProxyEntryIndexBuckets = map[string][]byte{
+		light.LIGHT_PROTOCOL_TLS:  []byte("commonLightProxyTLSIndex"),
+		light.LIGHT_PROTOCOL_QUIC: []byte("commonLightProxyQUICIndex"),
+	}
+	datastoreCommonLightTunnelProxyEntriesImports atomic.Uint64
 
 	datastoreServerEntryFetchGCThreshold = 10
 
@@ -1497,7 +1507,7 @@ func (iterator *ServerEntryIterator) Next(ctx context.Context) (*protocol.Server
 			if err != nil {
 				// Do not stop.
 				NoticeWarning(
-					"ServerEntryIterator.Next: update server entry failed: %s",
+					"ServerEntryIterator.Next: update server entry failed: %v",
 					errors.Trace(err))
 			}
 		}
@@ -3509,26 +3519,26 @@ func DSLDeleteOSLState(ID dsl.OSLID) error {
 	return errors.Trace(err)
 }
 
-// StoredLightProxy is the light proxy entry and tracker that is stored after
-// import for use in future sessions.
-type StoredLightProxy struct {
+// StoredLightProxyEntry holds an encoded fallback or common tunnel entry,
+// its tracker, and expiry.
+type StoredLightProxyEntry struct {
 	LightProxyEntry        []byte
 	LightProxyEntryTracker int64
 	Expires                time.Time
 }
 
-// StoreLightProxy updates the latest stored light proxy.
-func StoreLightProxy(lightProxy *StoredLightProxy) bool {
+// StoreLightFallbackProxy updates the latest stored fallback light proxy.
+func StoreLightFallbackProxy(lightProxy *StoredLightProxyEntry) bool {
 
 	if lightProxy == nil {
-		NoticeWarning("StoreLightProxy failed: missing light proxy")
+		NoticeWarning("StoreLightFallbackProxy failed: missing light proxy")
 		return false
 	}
 
 	// Ensure the proxy entry is valid before storing.
 	proxyEntry, err := light.DecodeAndValidateProxyEntry(lightProxy.LightProxyEntry)
 	if err != nil {
-		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		NoticeWarning("StoreLightFallbackProxy failed: %v", errors.Trace(err))
 		return false
 	}
 
@@ -3540,26 +3550,26 @@ func StoreLightProxy(lightProxy *StoredLightProxy) bool {
 
 	jsonLightProxy, err := json.Marshal(lightProxy)
 	if err != nil {
-		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		NoticeWarning("StoreLightFallbackProxy failed: %v", errors.Trace(err))
 		return false
 	}
 
-	err = SetKeyValue(datastoreStoredLightProxyKey, string(jsonLightProxy))
+	err = SetKeyValue(datastoreStoredLightFallbackProxyKey, string(jsonLightProxy))
 	if err != nil {
-		NoticeWarning("StoreLightProxy failed: %v", errors.Trace(err))
+		NoticeWarning("StoreLightFallbackProxy failed: %v", errors.Trace(err))
 		return false
 	}
 
 	return true
 }
 
-// LoadLightProxy returns the latest stored light proxy, or nil if there is
-// none.
-func LoadLightProxy() *StoredLightProxy {
+// LoadLightFallbackProxy returns the latest stored fallback light proxy, or nil
+// if there is none.
+func LoadLightFallbackProxy() *StoredLightProxyEntry {
 
-	jsonLightProxy, err := GetKeyValue(datastoreStoredLightProxyKey)
+	jsonLightProxy, err := GetKeyValue(datastoreStoredLightFallbackProxyKey)
 	if err != nil {
-		NoticeWarning("LoadLightProxy failed: %v", errors.Trace(err))
+		NoticeWarning("LoadLightFallbackProxy failed: %v", errors.Trace(err))
 		return nil
 	}
 
@@ -3567,29 +3577,322 @@ func LoadLightProxy() *StoredLightProxy {
 		return nil
 	}
 
-	var lightProxy *StoredLightProxy
+	var lightProxy *StoredLightProxyEntry
 	err = json.Unmarshal([]byte(jsonLightProxy), &lightProxy)
 	if err != nil {
-		NoticeWarning("LoadLightProxy failed: %v", errors.Trace(err))
+		NoticeWarning("LoadLightFallbackProxy failed: %v", errors.Trace(err))
+		return nil
+	}
+
+	if lightProxy == nil {
 		return nil
 	}
 
 	if !lightProxy.Expires.IsZero() &&
 		time.Now().UTC().After(lightProxy.Expires) {
 
-		NoticeInfo("LoadLightProxy: stored light proxy expired")
+		NoticeInfo("LoadLightFallbackProxy: stored light proxy expired")
 
 		err := deleteIfBucketValue(
 			datastoreKeyValueBucket,
-			[]byte(datastoreStoredLightProxyKey),
+			[]byte(datastoreStoredLightFallbackProxyKey),
 			[]byte(jsonLightProxy))
 		if err != nil {
-			NoticeWarning("LoadLightProxy: %v", errors.Trace(err))
+			NoticeWarning("LoadLightFallbackProxy: %v", errors.Trace(err))
 		}
 		return nil
 	}
 
 	return lightProxy
+}
+
+// StoreCommonLightTunnelProxyEntry stores a common tunnel entry keyed by its
+// ProxyEntryHash (hash of encodedProxyEntry). A reimport extends expiry TTL.
+func StoreCommonLightTunnelProxyEntry(
+	encodedProxyEntry []byte, proxyEntryTracker int64) error {
+
+	proxyEntry, err := decodeCommonLightTunnelProxyEntry(encodedProxyEntry)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	storedLightProxy := &StoredLightProxyEntry{
+		LightProxyEntry:        encodedProxyEntry,
+		LightProxyEntryTracker: proxyEntryTracker,
+		Expires: time.Now().UTC().Add(
+			time.Duration(proxyEntry.TTLSeconds) * time.Second),
+	}
+	value, err := json.Marshal(storedLightProxy)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	proxyEntryHash := sha256.Sum256(encodedProxyEntry)
+	var expires [8]byte
+	// Microseconds cannot wrap for any valid TTL.
+	binary.LittleEndian.PutUint64(expires[:], uint64(storedLightProxy.Expires.UnixMicro()))
+
+	err = datastoreUpdate(func(tx *datastoreTx) error {
+		err := tx.bucket(datastoreCommonLightTunnelProxyEntriesBucket).put(
+			proxyEntryHash[:], value)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		for _, address := range proxyEntry.DialAddresses {
+			err := tx.bucket(datastoreCommonLightTunnelProxyEntryIndexBuckets[address.Protocol]).put(
+				proxyEntryHash[:], expires[:])
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	datastoreCommonLightTunnelProxyEntriesImports.Add(1)
+	return nil
+}
+
+// CommonLightTunnelProxyEntryIterator cycles through shuffled lists of proxy
+// entry hashes, with one list per ingress protocol. Safe for concurrent use.
+type CommonLightTunnelProxyEntryIterator struct {
+	mutex            sync.Mutex
+	imports          atomic.Uint64
+	proxyEntryHashes map[string][][]byte
+	indexes          map[string]int
+}
+
+// NewCommonLightTunnelProxyEntryIterator loads and shuffles the proxy entry
+// keys for each ingress protocol.
+func NewCommonLightTunnelProxyEntryIterator(
+	ctx context.Context) (*CommonLightTunnelProxyEntryIterator, error) {
+
+	iterator := &CommonLightTunnelProxyEntryIterator{}
+	if err := iterator.Reset(ctx); err != nil {
+		return nil, errors.Trace(err)
+	}
+	return iterator, nil
+}
+
+// Reset reloads and shuffles the proxy entry keys for each ingress protocol,
+// pruning expired entries and malformed index records.
+func (iterator *CommonLightTunnelProxyEntryIterator) Reset(ctx context.Context) error {
+
+	// Record the import counter before scanning so imports during Reset trigger another refresh.
+	imports := datastoreCommonLightTunnelProxyEntriesImports.Load()
+	now := time.Now().UnixMicro()
+	proxyEntryHashes := make(map[string][][]byte)
+	pruneKeys := make(map[string]struct{})
+
+	err := datastoreView(func(tx *datastoreTx) error {
+		for ingressProtocol, bucketName := range datastoreCommonLightTunnelProxyEntryIndexBuckets {
+			proxyEntryHashes[ingressProtocol] = nil
+			cursor := tx.bucket(bucketName).cursor()
+
+			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+				if ctx.Err() != nil {
+					cursor.close()
+					return errors.Trace(ctx.Err())
+				}
+				if len(key) != sha256.Size || len(value) != 8 {
+					NoticeWarning("CommonLightTunnelProxyEntryIterator.Reset: invalid index record")
+					pruneKeys[string(key)] = struct{}{}
+					continue
+				}
+				if int64(binary.LittleEndian.Uint64(value)) <= now {
+					pruneKeys[string(key)] = struct{}{}
+					continue
+				}
+				proxyEntryHashes[ingressProtocol] = append(
+					proxyEntryHashes[ingressProtocol], append([]byte(nil), key...))
+			}
+			cursor.close()
+		}
+		return nil
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(pruneKeys) > 0 {
+		// TODO: consider server-directed pruning of common Light proxy entries,
+		// as with server entries.
+		err = datastoreUpdate(func(tx *datastoreTx) error {
+			for hash := range pruneKeys {
+				if ctx.Err() != nil {
+					return errors.Trace(ctx.Err())
+				}
+				key := []byte(hash)
+				expired := true
+				for _, bucketName := range datastoreCommonLightTunnelProxyEntryIndexBuckets {
+					bucket := tx.bucket(bucketName)
+					value := bucket.get(key)
+					if len(key) != sha256.Size || len(value) != 8 {
+						if err := bucket.delete(key); err != nil {
+							return errors.Trace(err)
+						}
+					} else if int64(binary.LittleEndian.Uint64(value)) > now {
+						expired = false
+					}
+				}
+				// A concurrent import may have extended the entry TTL.
+				if !expired {
+					continue
+				}
+				if err := tx.bucket(datastoreCommonLightTunnelProxyEntriesBucket).delete(key); err != nil {
+					return errors.Trace(err)
+				}
+				for _, bucketName := range datastoreCommonLightTunnelProxyEntryIndexBuckets {
+					if err := tx.bucket(bucketName).delete(key); err != nil {
+						return errors.Trace(err)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil && ctx.Err() == nil {
+			// Do not stop.
+			NoticeWarning(
+				"CommonLightTunnelProxyEntryIterator.Reset: prune failed: %v",
+				errors.Trace(err))
+		}
+	}
+
+	if ctx.Err() != nil {
+		return errors.Trace(ctx.Err())
+	}
+	for _, hashes := range proxyEntryHashes {
+		prng.Shuffle(len(hashes), func(i, j int) {
+			hashes[i], hashes[j] = hashes[j], hashes[i]
+		})
+	}
+
+	iterator.mutex.Lock()
+	defer iterator.mutex.Unlock()
+
+	if imports < iterator.imports.Load() {
+		return nil
+	}
+	iterator.proxyEntryHashes = proxyEntryHashes
+	iterator.indexes = make(map[string]int)
+	iterator.imports.Store(imports)
+	return nil
+}
+
+// HasNext reports whether any proxy entry keys remain for ingressProtocol.
+// It does not advance the iterator or check whether those entries have expired.
+func (iterator *CommonLightTunnelProxyEntryIterator) HasNext(ingressProtocol string) bool {
+	iterator.mutex.Lock()
+	defer iterator.mutex.Unlock()
+
+	return len(iterator.proxyEntryHashes[ingressProtocol]) > 0
+}
+
+// Next returns an unexpired entry supporting ingressProtocol and its
+// ProxyEntryHash. TLS and QUIC independently cycle through the shuffled keys.
+// It returns nil values when no matching entry is found in one full pass.
+func (iterator *CommonLightTunnelProxyEntryIterator) Next(
+	ingressProtocol string) (
+	proxyEntryHash []byte, storedLightProxy *StoredLightProxyEntry, err error) {
+
+	iterator.mutex.Lock()
+	defer iterator.mutex.Unlock()
+
+	hashes, ok := iterator.proxyEntryHashes[ingressProtocol]
+	if !ok {
+		return nil, nil, errors.TraceNew("invalid ingress protocol")
+	}
+
+	for len(hashes) > 0 {
+		index := iterator.indexes[ingressProtocol] % len(hashes)
+		proxyEntryHash := hashes[index]
+		storedLightProxy, err := LoadCommonLightTunnelProxyEntry(proxyEntryHash, ingressProtocol)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		if storedLightProxy == nil {
+			hashes = slices.Delete(hashes, index, index+1)
+			iterator.proxyEntryHashes[ingressProtocol] = hashes
+			iterator.indexes[ingressProtocol] = index
+			continue
+		}
+		iterator.indexes[ingressProtocol] = (index + 1) % len(hashes)
+		return append([]byte(nil), proxyEntryHash...), storedLightProxy, nil
+	}
+	return nil, nil, nil
+}
+
+func (iterator *CommonLightTunnelProxyEntryIterator) Load(
+	proxyEntryHash []byte, ingressProtocol string) (*StoredLightProxyEntry, error) {
+
+	return LoadCommonLightTunnelProxyEntry(proxyEntryHash, ingressProtocol)
+}
+
+// LoadCommonLightTunnelProxyEntry loads an entry without extending its TTL.
+// Missing, expired, corrupt, or ingress-incompatible entries return nil, nil.
+func LoadCommonLightTunnelProxyEntry(
+	proxyEntryHash []byte, ingressProtocol string) (*StoredLightProxyEntry, error) {
+
+	if len(proxyEntryHash) != sha256.Size {
+		return nil, errors.TraceNew("invalid ProxyEntryHash")
+	}
+
+	value, err := copyBucketValue(datastoreCommonLightTunnelProxyEntriesBucket, proxyEntryHash)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if value == nil {
+		return nil, nil
+	}
+
+	var storedLightProxy StoredLightProxyEntry
+	var proxyEntry *light.ProxyEntry
+	err = json.Unmarshal(value, &storedLightProxy)
+	expired := !time.Now().Before(storedLightProxy.Expires)
+	if err == nil && !expired {
+		entryHash := sha256.Sum256(storedLightProxy.LightProxyEntry)
+		if !bytes.Equal(entryHash[:], proxyEntryHash) {
+			err = errors.TraceNew("mismatched ProxyEntryHash")
+		} else {
+			proxyEntry, err = decodeCommonLightTunnelProxyEntry(storedLightProxy.LightProxyEntry)
+		}
+	}
+
+	if err != nil || expired {
+		if err != nil {
+			NoticeWarning("LoadCommonLightTunnelProxyEntry: invalid entry: %s", errors.Trace(err))
+		}
+		// Do not delete corrupt entries here, to avoid acquiring a datastore
+		// write lock. Iterator Reset prunes them when their indexed expiry is reached.
+		return nil, nil
+	}
+
+	for _, address := range proxyEntry.DialAddresses {
+		if address.Protocol == ingressProtocol {
+			return &storedLightProxy, nil
+		}
+	}
+	return nil, nil
+}
+
+func decodeCommonLightTunnelProxyEntry(encodedProxyEntry []byte) (*light.ProxyEntry, error) {
+
+	proxyEntry, err := light.DecodeAndValidateProxyEntry(encodedProxyEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if len(proxyEntry.PersonalCompartmentID) != 0 {
+		return nil, errors.TraceNew("common Light proxy entry contains a personal compartment ID")
+	}
+	if proxyEntry.TTLSeconds <= 0 {
+		return nil, errors.TraceNew("common Light proxy entry requires a positive TTL")
+	}
+	_, err = inproxy.IDFromString(proxyEntry.ProxyID)
+	if err != nil {
+		return nil, errors.TraceNew("common Light proxy entry requires a tunnel proxy ID")
+	}
+	return proxyEntry, nil
 }
 
 func setTimeKeyValue(key string, timevalue time.Time) error {

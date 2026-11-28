@@ -20,11 +20,16 @@
 package psiphon
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -36,6 +41,7 @@ import (
 	"time"
 	"unicode"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/deviceregion"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -44,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/networkid"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -310,6 +317,11 @@ type Config struct {
 	// attempt in parallel. If omitted or when 0, a default is used; this is
 	// recommended.
 	ConnectionWorkerPoolSize int `json:",omitempty"`
+
+	// PersonalPairingConnectionWorkerPoolSize specifies the value for
+	// ConnectionWorkerPoolSize in in-proxy and Light personal pairing modes.
+	// If omitted or when 0, a default is used; this is recommended.
+	PersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
 
 	// ConnectionWorkerPoolMaxSize specifies a cap for ConnectionWorkerPoolSize
 	// that will not be exceeded by any tactics setting. This is intended for
@@ -657,29 +669,31 @@ type Config struct {
 	MigrateUpgradeDownloadFilename string `json:",omitempty"`
 
 	// DisableTunnels disables establishing a client tunnel. Set
-	// DisableTunnels when running a stand-alone in-proxy proxy.
+	// DisableTunnels when running a stand-alone proxy.
 	DisableTunnels bool `json:",omitempty"`
 
 	// InproxyEnableProxy enables running an in-proxy proxy.
 	InproxyEnableProxy bool `json:",omitempty"`
 
-	// InproxyProxySessionPrivateKey specifies a long-term in-proxy proxy
-	// private key and corresponding, derived proxy ID to use. If blank, an
-	// ephemeral key is generated and used for the lifetime of the
-	// controller, including across network changes and broker client
-	// resets, so that concurrent broker clients present one proxy ID.
-	InproxyProxySessionPrivateKey string `json:",omitempty"`
+	// ProxySessionPrivateKey specifies the base64-encoded private key shared
+	// by in-proxy and Light proxies. Their proxy ID is derived from this key.
+	// When blank, NewController generates an ephemeral key for its lifetime,
+	// including across network changes and broker client resets, so that
+	// concurrent broker clients and the Light proxy present one proxy ID.
+	// Controller.GetLightProxyID returns the ID to include in Light proxy
+	// entries.
+	ProxySessionPrivateKey string `json:",omitempty"`
 
-	// InproxyProxySplitUpstreamInterfaceName specifies a network interface
-	// that the in-proxy proxy will use for upstream destination dialing,
+	// ProxySplitUpstreamInterfaceName specifies a network interface
+	// that proxies will use for upstream destination dialing,
 	// including the broker connection, the proxy/server connection, and any
-	// other in-proxy proxy upstream traffic. The specified interface is
-	// also excluded from proxy ICE gathering. This is intended to support
+	// other proxy upstream traffic. The specified interface is
+	// also excluded from in-proxy ICE gathering. This is intended to support
 	// split interface setups with the proxy/client connection on one
 	// interface and the proxy/server connection on the other.
 	//
-	// Setting either InproxyProxySplitUpstreamInterfaceName or
-	// InproxyProxySplitDownstreamInterfaceName activates split-interface
+	// Setting either ProxySplitUpstreamInterfaceName or
+	// ProxySplitDownstreamInterfaceName activates split-interface
 	// mode. When only one is set, tunnel-core fills in the counterpart by
 	// selecting the first non-loopback, up interface that has at least one
 	// address and is not the set interface. This auto-detection is
@@ -687,8 +701,8 @@ type Config struct {
 	// more than two eligible interfaces; setting both fields explicitly is
 	// recommended.
 	//
-	// Limitation: Split-interface mode serves personal clients only:
-	// InproxyMaxCommonClients must be 0. The broker requires common client
+	// Limitation: in-proxy split-interface mode serves personal clients only:
+	// ProxyMaxCommonClients must be 0. The broker requires common client
 	// answer candidates to match the GeoIP of the proxy's broker connection,
 	// which the two interfaces cannot both satisfy; only personal pairing is
 	// exempt from that check.
@@ -698,99 +712,73 @@ type Config struct {
 	// exposes as net.Interface.Name. The Windows binding uses IP_UNICAST_IF
 	// / IPV6_UNICAST_IF, which is semantically "route via interface X"
 	// rather than the stronger Linux SO_BINDTODEVICE.
-	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
+	ProxySplitUpstreamInterfaceName string `json:",omitempty"`
 
-	// InproxyProxySplitDownstreamInterfaceName specifies the network
-	// interface that the in-proxy proxy will use for downstream
-	// proxy/client-facing dials, including ICE, STUN, and the WebRTC data
-	// channel. It is the complement of InproxyProxySplitUpstreamInterfaceName
-	// in a split-interface setup. See InproxyProxySplitUpstreamInterfaceName
+	// ProxySplitDownstreamInterfaceName specifies the network interface for
+	// proxy/client connections, including Light listeners, ICE, STUN, and
+	// WebRTC. It complements ProxySplitUpstreamInterfaceName
+	// in a split-interface setup. See ProxySplitUpstreamInterfaceName
 	// for the activation, auto-detection, and platform support rules that
 	// apply to both fields.
-	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
+	ProxySplitDownstreamInterfaceName string `json:",omitempty"`
 
-	// InproxyProxyLimits specifies an optional, dynamic shared limits state
-	// for the in-proxy proxy. When nil, InproxyMaxCommonClients,
-	// InproxyMaxPersonalClients, transfer rate limits, and reduced common
-	// limit parameters are used instead. When set, other proxy limit
-	// parameters, including the Reduced fields, are ignored.
-	InproxyProxyLimits *common.ProxyLimits `json:"-"`
+	// ProxyLimits specifies optional shared, dynamic limits for in-proxy
+	// and Light proxies. When set, other proxy limit fields are ignored.
+	// Otherwise, omitted Proxy* limits use their deprecated Inproxy*
+	// counterparts, and reduced schedule fields remain applicable.
+	ProxyLimits *common.ProxyLimits `json:"-"`
 
-	// InproxyMaxClients specifies the maximum number of common in-proxy
-	// clients to be proxied concurrently. When InproxyEnableProxy is set,
-	// it can only be 0 when InProxyMaxPersonalClients is > 0.
-	//
-	// Deprecated: Use InproxyMaxCommonClients. When InproxyMaxCommonClients
-	// is not nil, this parameter is ignored.
-	InproxyMaxClients int `json:",omitempty"`
+	// ProxyMaxCommonClients limits concurrent common clients.
+	// Zero disables common clients.
+	ProxyMaxCommonClients *int `json:",omitempty"`
 
-	// InproxyMaxCommonClients specifies the maximum number of common
-	// in-proxy clients to be proxied concurrently. When InproxyEnableProxy
-	// is set, it can only be 0 when InProxyMaxPersonalClients is > 0.
-	InproxyMaxCommonClients int `json:",omitempty"`
+	// ProxyCommonUpstreamBytesPerSecond limits each common client's upstream
+	// rate. Zero means unlimited.
+	ProxyCommonUpstreamBytesPerSecond *int `json:",omitempty"`
 
-	// InproxyMaxPersonalClients specifies the maximum number of personal
-	// in-proxy clients to be proxied concurrently. When InproxyEnableProxy
-	// is set, it can only be 0 when InProxyMaxCommonClients is > 0.
-	InproxyMaxPersonalClients int `json:",omitempty"`
+	// ProxyCommonDownstreamBytesPerSecond limits each common client's
+	// downstream rate. Zero means unlimited.
+	ProxyCommonDownstreamBytesPerSecond *int `json:",omitempty"`
 
-	// InproxyLimitUpstreamBytesPerSecond specifies the upstream byte transfer
-	// rate limit for each proxied client. When 0, there is no limit.
-	InproxyLimitUpstreamBytesPerSecond int `json:",omitempty"`
+	// ProxyMaxPersonalClients limits concurrent personal clients.
+	// Zero disables personal clients.
+	ProxyMaxPersonalClients *int `json:",omitempty"`
 
-	// InproxyLimitDownstreamBytesPerSecond specifies the downstream byte
-	// transfer rate limit for each proxied client. When 0, there is no limit.
-	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
+	// ProxyPersonalUpstreamBytesPerSecond limits each personal client's
+	// upstream rate. Zero means unlimited.
+	ProxyPersonalUpstreamBytesPerSecond *int `json:",omitempty"`
 
-	// InproxyReducedStartTime specifies the time of day(HH:MM, 24-hour, UTC)
-	// at which reduced in-proxy settings begin.
-	InproxyReducedStartTime string `json:",omitempty"`
+	// ProxyPersonalDownstreamBytesPerSecond limits each personal client's
+	// downstream rate. Zero means unlimited.
+	ProxyPersonalDownstreamBytesPerSecond *int `json:",omitempty"`
 
-	// InproxyReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC)
-	// at which reduced in-proxy settings end.
-	InproxyReducedEndTime string `json:",omitempty"`
+	// ProxyPersonalCompartmentID specifies the unpadded base64 personal pairing
+	// secret shared by in-proxy and Light proxies and distributed out-of-band.
+	ProxyPersonalCompartmentID string `json:",omitempty"`
 
-	// InproxyReducedMaxClients specifies the maximum number of common
-	// in-proxy clients to be proxied concurrently during the reduced
-	// time range. When set, must be > 0 and <= InproxyMaxCommonClients.
-	//
-	// Clients connected when the reduced settings begin will not be
-	// disconnected, so InproxyReducedMaxClients is a soft limit.
-	//
-	// Deprecated: Use InproxyReducedMaxCommon Clients. When
-	// InproxyMaxCommonClients is not nil, this parameter is ignored.
-	InproxyReducedMaxClients int `json:",omitempty"`
+	// ProxyReducedStartTime specifies the time of day (HH:MM, 24-hour, UTC)
+	// at which reduced proxy limits begin.
+	ProxyReducedStartTime *string `json:",omitempty"`
 
-	// InproxyReducedMaxCommonClients specifies the maximum number of
-	// common in-proxy clients to be proxied concurrently during the
-	// reduced time range. When set, must be > 0 and
-	// <= InproxyMaxCommonClients.
-	//
-	// Clients connected when the reduced settings begin will not be
-	// disconnected, so InproxyReducedMaxCommonClients is a soft limit.
-	InproxyReducedMaxCommonClients int `json:",omitempty"`
+	// ProxyReducedEndTime specifies the time of day (HH:MM, 24-hour, UTC)
+	// at which reduced proxy limits end.
+	ProxyReducedEndTime *string `json:",omitempty"`
 
-	// InproxyReducedLimitUpstreamBytesPerSecond specifies the upstream byte
-	// transfer rate limit for each proxied client during the reduced time
-	// range. When 0, InproxyLimitUpstreamBytesPerSecond is the limit.
-	//
-	// Rates for clients already connected when the reduced settings begin or
-	// end will not change.
-	InproxyReducedLimitUpstreamBytesPerSecond int `json:",omitempty"`
+	// ProxyReducedMaxCommonClients limits concurrent common clients during the
+	// reduced time range. Zero uses the configured common client limit.
+	// A nonzero value must be positive and no greater than that limit.
+	// Connected clients are not disconnected when the limit decreases.
+	ProxyReducedMaxCommonClients *int `json:",omitempty"`
 
-	// InproxyReducedLimitDownstreamBytesPerSecond specifies the downstream byte
-	// transfer rate limit for each proxied client during the reduced time
-	// range. When 0, InproxyLimitDownstreamBytesPerSecond is the limit.
-	//
-	// Rates for clients already connected when the reduced settings begin or
-	// end will not change.
-	InproxyReducedLimitDownstreamBytesPerSecond int `json:",omitempty"`
+	// ProxyReducedUpstreamBytesPerSecond limits each proxied client's upstream
+	// rate during the reduced time range. Zero uses the configured base rates.
+	// Rates for connected clients change when the reduced settings begin or end.
+	ProxyReducedUpstreamBytesPerSecond *int `json:",omitempty"`
 
-	// InproxyProxyPersonalCompartmentID specifies the personal compartment
-	// ID used by an in-proxy proxy. Personal compartment IDs are
-	// distributed from proxy operators to client users out-of-band and
-	// provide a mechanism to allow only certain clients to use a proxy.
-	InproxyProxyPersonalCompartmentID string `json:",omitempty"`
+	// ProxyReducedDownstreamBytesPerSecond limits each proxied client's downstream
+	// rate during the reduced time range. Zero uses the configured base rates.
+	// Rates for connected clients change when the reduced settings begin or end.
+	ProxyReducedDownstreamBytesPerSecond *int `json:",omitempty"`
 
 	// InproxyClientPersonalCompartmentID specifies the personal compartment
 	// ID used by an in-proxy client. Personal compartment IDs are
@@ -799,14 +787,9 @@ type Config struct {
 	// all tunnels connections.
 	//
 	// When an InproxyClientPersonalCompartmentID is set, the client will use
-	// only in-proxy protocols, ensuring that all connections go through the
-	// proxy or proxies with the same personal compartment ID.
+	// only in-proxy protocols, unless EnablePersonalLightProxyTunnels is also
+	// set, in which case the client races in-proxy and Light protocols.
 	InproxyClientPersonalCompartmentID string `json:",omitempty"`
-
-	// InproxyPersonalPairingConnectionWorkerPoolSize specifies the value for
-	// ConnectionWorkerPoolSize in personal pairing mode. If omitted or when
-	// 0, a default is used; this is recommended.
-	InproxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
 
 	// EmitInproxyProxyActivity indicates whether to emit frequent notices
 	// showing proxy connection information and bytes transferred.
@@ -874,35 +857,150 @@ type Config struct {
 	// neither EgressRegion nor any SplitTunnel configuration is applied.
 	EnableLightProxyFallback bool `json:",omitempty"`
 
-	// EnablePersonalLightProxyTunnels enables using LightProxyEntry as a
-	// first hop for Psiphon tunnel establishment. This mode is similar to
-	// in-proxy personal pairing with the LightProxyEntry taking the place of
-	// InproxyClientPersonalCompartmentID as the "access token". This mode
-	// uses only the configured LightProxyEntry and does not use
-	// push-imported or stored light proxies.
+	// EnablePersonalLightProxyTunnels enables using PersonalLightProxyEntries
+	// as first hops for Psiphon tunnel establishment in personal pairing mode.
+	// Each entry must contain a personal compartment ID. When
+	// InproxyClientPersonalCompartmentID is also configured, the client races
+	// Light and in-proxy protocols. This mode does not use push-imported or
+	// stored light proxies.
 	EnablePersonalLightProxyTunnels bool `json:",omitempty"`
 
-	// LightProxyPersonalPairingConnectionWorkerPoolSize specifies the value for
-	// ConnectionWorkerPoolSize in personal light proxy tunnel mode. If omitted
-	// or when 0, a default is used; this is recommended.
-	LightProxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
+	// PersonalLightProxyEntries are the encoded light proxy entries.
+	PersonalLightProxyEntries [][]byte `json:",omitempty"`
 
-	// LightProxyEntry is an optional encoded light proxy entry. When
-	// specified, the light proxy entry is always chosen; any TTL in the entry
-	// is ignored and any previously stored light proxy entry is ignored.
-	LightProxyEntry []byte `json:",omitempty"`
+	// FallbackLightProxyEntry is an optional encoded light proxy entry for
+	// EnableLightProxyFallback. When specified, the light proxy entry is
+	// always chosen; any TTL in the entry is ignored and any previously
+	// stored light proxy entry is ignored.
+	FallbackLightProxyEntry []byte `json:",omitempty"`
 
-	// LightProxyEntryTracker is the light proxy entry tracker value to report.
-	LightProxyEntryTracker int64 `json:",omitempty"`
+	// FallbackLightProxyEntryTracker is the light proxy entry tracker value
+	// to report.
+	FallbackLightProxyEntryTracker int64 `json:",omitempty"`
 
 	// LightProxyLimitDestinationAddresses limits light proxy dial attempts to
 	// the specified destination addresses, in host:port form. When empty,
 	// light proxy dials are not limited by destination address.
 	LightProxyLimitDestinationAddresses []string `json:",omitempty"`
 
+	// EnableRunningLightProxy enables Controller.StartLightProxy and
+	// StopLightProxy and validates the proxy inputs in Commit.
+	// It does not start the proxy. UpstreamProxyURL must be empty.
+	EnableRunningLightProxy bool `json:",omitempty"`
+
+	// EmitLightProxyActivity enables LightProxyActivity notices for app activity monitoring.
+	EmitLightProxyActivity bool `json:",omitempty"`
+
+	// LightProxyDialAddresses specifies the proxy's public endpoints.
+	// It may be omitted until port mapping discovers them, provided local
+	// LightProxyListenAddresses are configured. Proxy entries still need addresses.
+	LightProxyDialAddresses []light.ProxyAddress `json:",omitempty"`
+
+	// LightProxyListenAddresses specifies local endpoints paired by index
+	// with LightProxyDialAddresses. When omitted, the dial addresses are used.
+	LightProxyListenAddresses []light.ProxyAddress `json:",omitempty"`
+
+	// LightProxyObfuscationKey is the hex ingress obfuscation key.
+	LightProxyObfuscationKey string `json:",omitempty"`
+
+	// LightProxyTLSCertificate is the PEM-encoded TLS/QUIC certificate.
+	LightProxyTLSCertificate string `json:",omitempty"`
+
+	// LightProxyTLSPrivateKey is the PEM-encoded certificate private key.
+	LightProxyTLSPrivateKey string `json:",omitempty"`
+
+	// LightProxyPassthroughAddress is the passthrough target for TLS connections.
+	// It is required when a TLS listener is configured.
+	LightProxyPassthroughAddress string `json:",omitempty"`
+
+	// LightProxyDialAuthorizationPublicKey is the base64-encoded Ed25519 key
+	// used to verify tunnel destination authorizations.
+	LightProxyDialAuthorizationPublicKey string `json:",omitempty"`
+
+	// LightProxyTrustedProxyAuthorization is an optional base64-encoded
+	// trusted proxy authorization, verified by the Psiphon server.
+	// It requires a configured ProxySessionPrivateKey.
+	LightProxyTrustedProxyAuthorization string `json:",omitempty"`
+
+	// LightProxyAllowBogons permits upstream connections to bogon addresses
+	// and configured proxy IPs.
+	LightProxyAllowBogons bool `json:",omitempty"`
+
+	// LightProxyLookupGeoIP is an optional callback providing GeoIP lookup for
+	// the hosted Light proxy. When nil, proxy activity is reported in the
+	// None region bucket.
+	LightProxyLookupGeoIP func(IP string) common.GeoIPData `json:"-"`
+
 	//
 	// The following parameters are deprecated.
 	//
+
+	// Deprecated: Use PersonalPairingConnectionWorkerPoolSize.
+	// Ignored when that field is nonzero.
+	InproxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
+
+	// Deprecated: Use FallbackLightProxyEntry.
+	// Ignored when that field is set.
+	LightProxyEntry []byte `json:",omitempty"`
+
+	// Deprecated: Use FallbackLightProxyEntryTracker.
+	LightProxyEntryTracker int64 `json:",omitempty"`
+
+	// Deprecated: Use ProxySessionPrivateKey. Ignored when that field is set.
+	InproxyProxySessionPrivateKey string `json:",omitempty"`
+
+	// Deprecated: Use ProxySplitUpstreamInterfaceName.
+	// Ignored when that field is set.
+	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
+
+	// Deprecated: Use ProxySplitDownstreamInterfaceName.
+	// Ignored when that field is set.
+	InproxyProxySplitDownstreamInterfaceName string `json:",omitempty"`
+
+	// Deprecated: Use ProxyLimits. Ignored when that field is set.
+	InproxyProxyLimits *common.ProxyLimits `json:"-"`
+
+	// Deprecated: Use ProxyMaxCommonClients. Used only when that field is
+	// omitted and InproxyMaxCommonClients is zero.
+	InproxyMaxClients int `json:",omitempty"`
+
+	// Deprecated: Use ProxyMaxCommonClients. Ignored when that field is set.
+	InproxyMaxCommonClients int `json:",omitempty"`
+
+	// Deprecated: Use ProxyMaxPersonalClients. Ignored when that field is set.
+	InproxyMaxPersonalClients int `json:",omitempty"`
+
+	// Deprecated: Use ProxyCommonUpstreamBytesPerSecond and
+	// ProxyPersonalUpstreamBytesPerSecond. Supplies either omitted value.
+	InproxyLimitUpstreamBytesPerSecond int `json:",omitempty"`
+
+	// Deprecated: Use ProxyCommonDownstreamBytesPerSecond and
+	// ProxyPersonalDownstreamBytesPerSecond. Supplies either omitted value.
+	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedStartTime. Ignored when that field is set.
+	InproxyReducedStartTime string `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedEndTime. Ignored when that field is set.
+	InproxyReducedEndTime string `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedMaxCommonClients. Ignored when that field is set.
+	InproxyReducedMaxCommonClients int `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedUpstreamBytesPerSecond.
+	// Ignored when that field is set.
+	InproxyReducedLimitUpstreamBytesPerSecond int `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedDownstreamBytesPerSecond.
+	// Ignored when that field is set.
+	InproxyReducedLimitDownstreamBytesPerSecond int `json:",omitempty"`
+
+	// Deprecated: Use ProxyReducedMaxCommonClients. Used only when that field
+	// is omitted and InproxyReducedMaxCommonClients is zero.
+	InproxyReducedMaxClients int `json:",omitempty"`
+
+	// Deprecated: Use ProxyPersonalCompartmentID. Ignored when that field is set.
+	InproxyProxyPersonalCompartmentID string `json:",omitempty"`
 
 	// Deprecated: ignored. Use DataRootDirectory.
 	DataStoreDirectory string `json:",omitempty"`
@@ -1333,10 +1431,43 @@ type Config struct {
 	LightProxyDialTimeoutMilliseconds             *int     `json:",omitempty"`
 	LightProxyInactivityTimeoutMilliseconds       *int     `json:",omitempty"`
 
-	TacticsWaitPeriodMilliseconds  *int     `json:",omitempty"`
-	TacticsRetryPeriodMilliseconds *int     `json:",omitempty"`
-	TacticsRetryPeriodJitter       *float64 `json:",omitempty"`
-	TacticsTimeoutMilliseconds     *int     `json:",omitempty"`
+	LightTunnelAllowProxy                                 *bool `json:",omitempty"`
+	LightTunnelProxyPreHeaderDeadlineMinMilliseconds      *int  `json:",omitempty"`
+	LightTunnelProxyPreHeaderDeadlineMaxMilliseconds      *int  `json:",omitempty"`
+	LightTunnelProxyUpstreamDialTimeoutMilliseconds       *int  `json:",omitempty"`
+	LightTunnelProxyRelayInactivityTimeoutMilliseconds    *int  `json:",omitempty"`
+	LightTunnelProxyPerIPRateLimitQuantity                *int  `json:",omitempty"`
+	LightTunnelProxyPerIPRateLimitIntervalMilliseconds    *int  `json:",omitempty"`
+	LightTunnelProxyPerIPMaxConcurrent                    *int  `json:",omitempty"`
+	LightTunnelProxyTotalActivityNoticePeriodMilliseconds *int  `json:",omitempty"`
+	LightTunnelProxyReportPaddingMinBytes                 *int  `json:",omitempty"`
+	LightTunnelProxyReportPaddingMaxBytes                 *int  `json:",omitempty"`
+
+	LightTunnelPersonalPairingDialRateLimitQuantity             *int `json:",omitempty"`
+	LightTunnelPersonalPairingDialRateLimitIntervalMilliseconds *int `json:",omitempty"`
+
+	LightTunnelIngressLimitTLSProfiles                      []string `json:",omitempty"`
+	LightTunnelIngressLimitTLSProfilesProbability           *float64 `json:",omitempty"`
+	LightTunnelIngressSelectRandomizedTLSProfileProbability *float64 `json:",omitempty"`
+	LightTunnelIngressLimitQUICVersions                     []string `json:",omitempty"`
+	LightTunnelIngressLimitQUICVersionsProbability          *float64 `json:",omitempty"`
+	LightTunnelIngressCustomHostNameRegexes                 []string `json:",omitempty"`
+	LightTunnelIngressCustomHostNameProbability             *float64 `json:",omitempty"`
+	LightTunnelTLSFragmentClientHelloProbability            *float64 `json:",omitempty"`
+	LightTunnelTLSPaddingProbability                        *float64 `json:",omitempty"`
+	LightTunnelMinTLSPadding                                *int     `json:",omitempty"`
+	LightTunnelMaxTLSPadding                                *int     `json:",omitempty"`
+	LightTunnelEgressLimitTLSProfiles                       []string `json:",omitempty"`
+	LightTunnelEgressSelectRandomizedTLSProfileProbability  *float64 `json:",omitempty"`
+	LightTunnelEgressLimitQUICVersions                      []string `json:",omitempty"`
+	LightTunnelEgressCustomHostNameRegexes                  []string `json:",omitempty"`
+	LightTunnelEgressCustomHostNameProbability              *float64 `json:",omitempty"`
+
+	TacticsWaitPeriodMilliseconds     *int     `json:",omitempty"`
+	TacticsRetryPeriodMilliseconds    *int     `json:",omitempty"`
+	TacticsRetryPeriodMaxMilliseconds *int     `json:",omitempty"`
+	TacticsRetryPeriodJitter          *float64 `json:",omitempty"`
+	TacticsTimeoutMilliseconds        *int     `json:",omitempty"`
 
 	LightProxyTestFetchAddress string `json:",omitempty"`
 
@@ -1377,11 +1508,13 @@ type Config struct {
 
 	serverEntryIterationMetricsUpdater atomic.Value
 
-	lightProxyClient                    atomic.Pointer[light.Client]
-	lightProxyDialParams                atomic.Value
-	lightProxyTunnelInactiveThreshold   atomic.Int64
-	lightProxyDialTimeout               atomic.Int64
-	lightProxyLimitDestinationAddresses atomic.Value
+	lightFallbackProxyClient               atomic.Pointer[light.Client]
+	lightFallbackDialParams                atomic.Value
+	lightFallbackTunnelInactiveThreshold   atomic.Int64
+	lightFallbackDialTimeout               atomic.Int64
+	lightFallbackLimitDestinationAddresses atomic.Value
+
+	personalLightProxyEntries []personalLightProxyEntry
 }
 
 // TacticsAppliedReceiver specifies the interface for a component that is
@@ -1524,12 +1657,36 @@ func (config *Config) Commit(_ bool) error {
 		config.InproxyMaxCommonClients = config.InproxyMaxClients
 	}
 
+	if config.ProxySessionPrivateKey == "" {
+		config.ProxySessionPrivateKey = config.InproxyProxySessionPrivateKey
+	}
+	if config.ProxySplitUpstreamInterfaceName == "" {
+		config.ProxySplitUpstreamInterfaceName =
+			config.InproxyProxySplitUpstreamInterfaceName
+	}
+	if config.ProxySplitDownstreamInterfaceName == "" {
+		config.ProxySplitDownstreamInterfaceName =
+			config.InproxyProxySplitDownstreamInterfaceName
+	}
+	if config.ProxyLimits == nil {
+		config.ProxyLimits = config.InproxyProxyLimits
+	}
+	if config.ProxyPersonalCompartmentID == "" {
+		config.ProxyPersonalCompartmentID = config.InproxyProxyPersonalCompartmentID
+	}
+
 	if config.InproxyReducedMaxClients != 0 && config.InproxyReducedMaxCommonClients == 0 {
 		config.InproxyReducedMaxCommonClients = config.InproxyReducedMaxClients
 	}
 
 	if config.EnableLightProxy {
 		config.EnableLightProxyFallback = true
+	}
+	if len(config.FallbackLightProxyEntry) == 0 {
+		config.FallbackLightProxyEntry = config.LightProxyEntry
+	}
+	if config.FallbackLightProxyEntryTracker == 0 {
+		config.FallbackLightProxyEntryTracker = config.LightProxyEntryTracker
 	}
 
 	// Supply default values.
@@ -1592,9 +1749,12 @@ func (config *Config) Commit(_ bool) error {
 		return errors.TraceNew("sponsor ID is missing from the configuration file")
 	}
 
-	_, err = strconv.Atoi(config.ClientVersion)
+	clientVersion, err := strconv.Atoi(config.ClientVersion)
 	if err != nil {
 		return errors.Tracef("invalid client version: %s", err)
+	}
+	if clientVersion < 0 {
+		return errors.TraceNew("client version must be non-negative")
 	}
 
 	if config.DisableApi {
@@ -1646,17 +1806,17 @@ func (config *Config) Commit(_ bool) error {
 		}
 	}
 
-	splitInterfaceMode := config.InproxyProxySplitUpstreamInterfaceName != "" ||
-		config.InproxyProxySplitDownstreamInterfaceName != ""
+	splitInterfaceMode := config.ProxySplitUpstreamInterfaceName != "" ||
+		config.ProxySplitDownstreamInterfaceName != ""
 	if splitInterfaceMode && !tun.IsBindToDeviceSupported() {
 		return errors.TraceNew("split interface is not supported")
 	}
 	if splitInterfaceMode && config.DeviceBinder != nil {
-		return errors.TraceNew("InproxyProxySplit{Upstream,Downstream}InterfaceName cannot be used with DeviceBinder")
+		return errors.TraceNew("ProxySplit{Upstream,Downstream}InterfaceName cannot be used with DeviceBinder")
 	}
-	if config.InproxyProxySplitUpstreamInterfaceName != "" &&
-		config.InproxyProxySplitDownstreamInterfaceName == config.InproxyProxySplitUpstreamInterfaceName {
-		return errors.TraceNew("InproxyProxySplitDownstreamInterfaceName must differ from InproxyProxySplitUpstreamInterfaceName")
+	if config.ProxySplitUpstreamInterfaceName != "" &&
+		config.ProxySplitDownstreamInterfaceName == config.ProxySplitUpstreamInterfaceName {
+		return errors.TraceNew("ProxySplitDownstreamInterfaceName must differ from ProxySplitUpstreamInterfaceName")
 	}
 
 	if config.UseUnixDomainSockets {
@@ -1720,41 +1880,74 @@ func (config *Config) Commit(_ bool) error {
 		}
 	}
 
-	if config.InproxyEnableProxy {
+	if config.InproxyEnableProxy || config.EnableRunningLightProxy {
 
-		if config.InproxyProxyLimits == nil {
+		if config.ProxyPersonalCompartmentID != "" {
+			if _, err := inproxy.IDFromString(config.ProxyPersonalCompartmentID); err != nil {
+				return errors.TraceNew("invalid ProxyPersonalCompartmentID")
+			}
+		}
 
-			if config.InproxyMaxCommonClients < 0 {
-				return errors.TraceNew("invalid InproxyMaxCommonClients")
+		if config.ProxySessionPrivateKey != "" {
+			privateKey, err := inproxy.SessionPrivateKeyFromString(
+				config.ProxySessionPrivateKey)
+			if err != nil || privateKey.IsZero() {
+				return errors.TraceNew("invalid ProxySessionPrivateKey")
+			}
+		}
+
+		limitsConfig := config.getProxyLimitsConfig()
+		if config.ProxyLimits == nil {
+
+			if limitsConfig.MaxCommonClients < 0 {
+				return errors.TraceNew("invalid ProxyMaxCommonClients")
 			}
 
-			if config.InproxyMaxPersonalClients < 0 {
-				return errors.TraceNew("invalid InproxyMaxPersonalClients")
+			if limitsConfig.MaxPersonalClients < 0 {
+				return errors.TraceNew("invalid ProxyMaxPersonalClients")
 			}
 
-			if config.InproxyMaxCommonClients <= 0 &&
-				config.InproxyMaxPersonalClients <= 0 {
+			if limitsConfig.MaxCommonClients <= 0 &&
+				limitsConfig.MaxPersonalClients <= 0 {
 				return errors.TraceNew(
-					"invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+					"invalid ProxyMaxCommonClients and ProxyMaxPersonalClients")
 			}
 
-			if config.InproxyLimitUpstreamBytesPerSecond < 0 {
-				return errors.TraceNew("invalid InproxyLimitUpstreamBytesPerSecond")
+			if limitsConfig.CommonUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyCommonUpstreamBytesPerSecond")
 			}
 
-			if config.InproxyLimitDownstreamBytesPerSecond < 0 {
-				return errors.TraceNew("invalid InproxyLimitDownstreamBytesPerSecond")
+			if limitsConfig.CommonDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyCommonDownstreamBytesPerSecond")
+			}
+
+			if limitsConfig.PersonalUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyPersonalUpstreamBytesPerSecond")
+			}
+
+			if limitsConfig.PersonalDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyPersonalDownstreamBytesPerSecond")
 			}
 		}
 
-		maxCommonClients := config.InproxyMaxCommonClients
-		maxPersonalClients := config.InproxyMaxPersonalClients
-		if config.InproxyProxyLimits != nil {
-			_, maxCommonClients, _, _, _ = config.InproxyProxyLimits.GetCommonLimits()
-			_, maxPersonalClients, _, _, _ = config.InproxyProxyLimits.GetPersonalLimits()
+		maxCommonClients := limitsConfig.MaxCommonClients
+		maxPersonalClients := limitsConfig.MaxPersonalClients
+		if config.ProxyLimits != nil {
+			_, maxCommonClients, _, _, _ = config.ProxyLimits.GetCommonLimits()
+			_, maxPersonalClients, _, _, _ = config.ProxyLimits.GetPersonalLimits()
 		}
-		if len(config.InproxyProxyPersonalCompartmentID) > 0 && maxPersonalClients <= 0 {
-			return errors.TraceNew("invalid InproxyMaxPersonalClients when personal compartment IDs are provided")
+		if len(config.ProxyPersonalCompartmentID) > 0 &&
+			maxPersonalClients <= 0 {
+
+			return errors.TraceNew(
+				"invalid ProxyMaxPersonalClients when personal compartment IDs are provided")
+		}
+		if config.EnableRunningLightProxy &&
+			config.ProxyPersonalCompartmentID == "" &&
+			maxCommonClients <= 0 {
+
+			return errors.TraceNew(
+				"EnableRunningLightProxy requires ProxyPersonalCompartmentID or common client capacity")
 		}
 
 		// In split-interface mode, the broker connection egresses via the
@@ -1763,65 +1956,74 @@ func (config *Config) Commit(_ bool) error {
 		// candidates to match the GeoIP country and ASN of the proxy's broker
 		// connection, so, common connection cannot establish as is in split
 		// interface mode.
-		if splitInterfaceMode && maxCommonClients > 0 {
+		if config.InproxyEnableProxy && splitInterfaceMode && maxCommonClients > 0 {
 			return errors.TraceNew(
-				"InproxyMaxCommonClients must be 0 in split interface mode")
+				"ProxyMaxCommonClients must be 0 for in-proxy split interface mode")
 		}
 
-		if config.InproxyProxyLimits == nil &&
-			(config.InproxyReducedStartTime != "" ||
-				config.InproxyReducedEndTime != "" ||
-				config.InproxyReducedMaxCommonClients != 0 ||
-				config.InproxyReducedLimitUpstreamBytesPerSecond != 0 ||
-				config.InproxyReducedLimitDownstreamBytesPerSecond != 0) {
+		if config.ProxyLimits == nil &&
+			(limitsConfig.ReducedStartTime != "" ||
+				limitsConfig.ReducedEndTime != "" ||
+				limitsConfig.ReducedMaxCommonClients != 0 ||
+				limitsConfig.ReducedUpstreamBytesPerSecond != 0 ||
+				limitsConfig.ReducedDownstreamBytesPerSecond != 0) {
 
-			if config.InproxyReducedMaxCommonClients < 0 {
-				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
+			if limitsConfig.ReducedMaxCommonClients < 0 {
+				return errors.TraceNew("invalid ProxyReducedMaxCommonClients")
 			}
 
-			if config.InproxyReducedLimitUpstreamBytesPerSecond < 0 {
-				return errors.TraceNew("invalid InproxyReducedLimitUpstreamBytesPerSecond")
+			if limitsConfig.ReducedUpstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyReducedUpstreamBytesPerSecond")
 			}
 
-			if config.InproxyReducedLimitDownstreamBytesPerSecond < 0 {
-				return errors.TraceNew("invalid InproxyReducedLimitDownstreamBytesPerSecond")
+			if limitsConfig.ReducedDownstreamBytesPerSecond < 0 {
+				return errors.TraceNew("invalid ProxyReducedDownstreamBytesPerSecond")
 			}
 
-			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)
+			startMinute, err := common.ParseTimeOfDayMinutes(limitsConfig.ReducedStartTime)
 			if err != nil {
-				return errors.Tracef("invalid InproxyReducedStartTime: %v", err)
+				return errors.Tracef("invalid ProxyReducedStartTime: %v", err)
 			}
 
-			endMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedEndTime)
+			endMinute, err := common.ParseTimeOfDayMinutes(limitsConfig.ReducedEndTime)
 			if err != nil {
-				return errors.Tracef("invalid InproxyReducedEndTime: %v", err)
+				return errors.Tracef("invalid ProxyReducedEndTime: %v", err)
 			}
 
 			// Reduced all day is not a valid configuration.
 			if startMinute == endMinute {
-				return errors.TraceNew("invalid InproxyReducedStartTime/InproxyReducedEndTime")
+				return errors.TraceNew("invalid ProxyReducedStartTime/ProxyReducedEndTime")
 			}
 
-			// An InproxyReducedMaxCommonClients value of 0 means max common
+			// A ProxyReducedMaxCommonClients value of 0 means max common
 			// clients are not reduced.
-			if config.InproxyReducedMaxCommonClients > config.InproxyMaxCommonClients {
-				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
+			if limitsConfig.ReducedMaxCommonClients > limitsConfig.MaxCommonClients {
+				return errors.TraceNew("invalid ProxyReducedMaxCommonClients")
 			}
 		}
 	}
 
 	if !config.DisableTunnels &&
+		config.UpstreamProxyURL != "" &&
+		config.IsPersonalPairingMode() {
+
+		return errors.TraceNew(
+			"UpstreamProxyURL is incompatible with personal pairing")
+	}
+
+	if !config.DisableTunnels &&
 		config.InproxyEnableProxy &&
 		!GetAllowOverlappingPersonalCompartmentIDs() &&
-		len(config.InproxyProxyPersonalCompartmentID) > 0 &&
-		config.InproxyProxyPersonalCompartmentID ==
+		len(config.ProxyPersonalCompartmentID) > 0 &&
+		config.ProxyPersonalCompartmentID ==
 			config.InproxyClientPersonalCompartmentID {
 
 		// Don't allow an in-proxy client and proxy run in the same app to match.
 		return errors.TraceNew("invalid overlapping personal compartment IDs")
 	}
 
-	if len(config.InproxyProxyPersonalCompartmentID) > 0 &&
+	if config.InproxyEnableProxy &&
+		len(config.ProxyPersonalCompartmentID) > 0 &&
 		!inproxy.Enabled() {
 
 		// When in-proxy personal pairing mode is on, fail if the build was
@@ -1831,6 +2033,12 @@ func (config *Config) Commit(_ bool) error {
 		// LimitTunnelProtocols.IsOnlyInproxyTunnelProtocols configuration,
 		// but that can be overridden by tactics so we allow it.
 		return errors.TraceNew("build does not enable required in-proxy functionality")
+	}
+
+	if config.EnableRunningLightProxy {
+		if err := config.validateRunningLightProxyConfig(); err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	if config.EnableLightProxyFallback && config.EnablePersonalLightProxyTunnels {
@@ -1867,14 +2075,84 @@ func (config *Config) Commit(_ bool) error {
 				"EnablePersonalLightProxyTunnels is incompatible with DisableTunnels")
 		}
 
-		if len(config.InproxyClientPersonalCompartmentID) > 0 {
+		if len(config.FallbackLightProxyEntry) > 0 {
 			return errors.TraceNew(
-				"EnablePersonalLightProxyTunnels is incompatible with in-proxy personal pairing")
+				"EnablePersonalLightProxyTunnels is incompatible with FallbackLightProxyEntry")
 		}
 
-		if len(config.LightProxyEntry) == 0 {
+		if len(config.PersonalLightProxyEntries) == 0 {
 			return errors.TraceNew(
-				"EnablePersonalLightProxyTunnels requires LightProxyEntry")
+				"EnablePersonalLightProxyTunnels requires PersonalLightProxyEntries")
+		}
+
+		// Split tunnel requires the server to know the client's region. A
+		// Light proxy's reported client IP is trusted only for trusted
+		// proxies, which aren't guaranteed here, and an untrusted proxy could
+		// misreport it to control which traffic is sent untunneled.
+		//
+		// This applies even when in-proxy personal pairing is also configured,
+		// since, with split tunnel enabled, every Light candidate is skipped.
+		if config.IsSplitTunnelEnabled() {
+
+			return errors.TraceNew(
+				"EnablePersonalLightProxyTunnels is incompatible with split tunnel")
+		}
+
+		config.personalLightProxyEntries = nil
+		for _, entry := range config.PersonalLightProxyEntries {
+
+			lightProxyEntry, err := light.DecodeAndValidateProxyEntry(entry)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			if len(lightProxyEntry.PersonalCompartmentID) == 0 {
+				return errors.TraceNew(
+					"PersonalLightProxyEntries requires a personal compartment ID in each entry")
+			}
+
+			_, err = inproxy.IDFromString(lightProxyEntry.ProxyID)
+			if err != nil {
+				return errors.TraceNew(
+					"PersonalLightProxyEntries requires a tunnel proxy ID in each entry")
+			}
+
+			if config.EnableRunningLightProxy &&
+				!GetAllowOverlappingPersonalCompartmentIDs() &&
+				config.ProxyPersonalCompartmentID ==
+					base64.RawStdEncoding.EncodeToString(lightProxyEntry.PersonalCompartmentID) {
+
+				return errors.TraceNew("invalid overlapping personal compartment IDs")
+			}
+
+			proxyEntryHash := sha256.Sum256(entry)
+			for _, existing := range config.personalLightProxyEntries {
+				if bytes.Equal(existing.proxyEntryHash, proxyEntryHash[:]) {
+					return errors.TraceNew("duplicate PersonalLightProxyEntries entry")
+				}
+			}
+
+			var protocols []string
+			for _, address := range lightProxyEntry.DialAddresses {
+				if address.Protocol == light.LIGHT_PROTOCOL_QUIC && !quic.Enabled() {
+					continue
+				}
+				if !common.Contains(protocols, address.Protocol) {
+					protocols = append(protocols, address.Protocol)
+				}
+			}
+			if len(protocols) == 0 {
+				return errors.TraceNew("PersonalLightProxyEntries entry has no supported proxy protocols")
+			}
+
+			// config.personalLightProxyEntries supports protocol-specific Light
+			// entry iteration and replay based on the Light entry hash.
+			config.personalLightProxyEntries = append(
+				config.personalLightProxyEntries,
+				personalLightProxyEntry{
+					proxyEntry:     entry,
+					proxyEntryHash: proxyEntryHash[:],
+					protocols:      protocols,
+				})
 		}
 
 		if config.LightProxyLimitDestinationAddresses != nil {
@@ -1977,8 +2255,8 @@ func (config *Config) Commit(_ bool) error {
 		// leave sockets unbound, both of which defeat the split-interface
 		// configuration.
 
-		upstreamInterfaceName := config.InproxyProxySplitUpstreamInterfaceName
-		downstreamInterfaceName := config.InproxyProxySplitDownstreamInterfaceName
+		upstreamInterfaceName := config.ProxySplitUpstreamInterfaceName
+		downstreamInterfaceName := config.ProxySplitDownstreamInterfaceName
 		if upstreamInterfaceName == "" {
 			upstreamInterfaceName = common.FindInterfaceExcluding(downstreamInterfaceName)
 		}
@@ -1987,11 +2265,11 @@ func (config *Config) Commit(_ bool) error {
 		}
 		if upstreamInterfaceName == "" {
 			return errors.TraceNew(
-				"unable to determine upstream interface; set InproxyProxySplitUpstreamInterfaceName")
+				"unable to determine upstream interface; set ProxySplitUpstreamInterfaceName")
 		}
 		if downstreamInterfaceName == "" {
 			return errors.TraceNew(
-				"unable to determine downstream interface; set InproxyProxySplitDownstreamInterfaceName")
+				"unable to determine downstream interface; set ProxySplitDownstreamInterfaceName")
 		}
 
 		config.splitInterface = &splitInterfaceState{
@@ -2045,6 +2323,160 @@ func (config *Config) Commit(_ bool) error {
 	config.committed = true
 
 	return nil
+}
+
+func (config *Config) getProxyLimitsConfig() *common.ProxyLimitsConfig {
+	limitsConfig := &common.ProxyLimitsConfig{
+		MaxCommonClients:                 config.InproxyMaxCommonClients,
+		CommonUpstreamBytesPerSecond:     config.InproxyLimitUpstreamBytesPerSecond,
+		CommonDownstreamBytesPerSecond:   config.InproxyLimitDownstreamBytesPerSecond,
+		MaxPersonalClients:               config.InproxyMaxPersonalClients,
+		PersonalUpstreamBytesPerSecond:   config.InproxyLimitUpstreamBytesPerSecond,
+		PersonalDownstreamBytesPerSecond: config.InproxyLimitDownstreamBytesPerSecond,
+		ReducedStartTime:                 config.InproxyReducedStartTime,
+		ReducedEndTime:                   config.InproxyReducedEndTime,
+		ReducedMaxCommonClients:          config.InproxyReducedMaxCommonClients,
+		ReducedUpstreamBytesPerSecond:    config.InproxyReducedLimitUpstreamBytesPerSecond,
+		ReducedDownstreamBytesPerSecond:  config.InproxyReducedLimitDownstreamBytesPerSecond,
+	}
+
+	if config.ProxyMaxCommonClients != nil {
+		limitsConfig.MaxCommonClients = *config.ProxyMaxCommonClients
+	}
+	if config.ProxyCommonUpstreamBytesPerSecond != nil {
+		limitsConfig.CommonUpstreamBytesPerSecond =
+			*config.ProxyCommonUpstreamBytesPerSecond
+	}
+	if config.ProxyCommonDownstreamBytesPerSecond != nil {
+		limitsConfig.CommonDownstreamBytesPerSecond =
+			*config.ProxyCommonDownstreamBytesPerSecond
+	}
+	if config.ProxyMaxPersonalClients != nil {
+		limitsConfig.MaxPersonalClients = *config.ProxyMaxPersonalClients
+	}
+	if config.ProxyPersonalUpstreamBytesPerSecond != nil {
+		limitsConfig.PersonalUpstreamBytesPerSecond =
+			*config.ProxyPersonalUpstreamBytesPerSecond
+	}
+	if config.ProxyPersonalDownstreamBytesPerSecond != nil {
+		limitsConfig.PersonalDownstreamBytesPerSecond =
+			*config.ProxyPersonalDownstreamBytesPerSecond
+	}
+
+	if config.ProxyReducedStartTime != nil {
+		limitsConfig.ReducedStartTime = *config.ProxyReducedStartTime
+	}
+	if config.ProxyReducedEndTime != nil {
+		limitsConfig.ReducedEndTime = *config.ProxyReducedEndTime
+	}
+	if config.ProxyReducedMaxCommonClients != nil {
+		limitsConfig.ReducedMaxCommonClients = *config.ProxyReducedMaxCommonClients
+	}
+	if config.ProxyReducedUpstreamBytesPerSecond != nil {
+		limitsConfig.ReducedUpstreamBytesPerSecond =
+			*config.ProxyReducedUpstreamBytesPerSecond
+	}
+	if config.ProxyReducedDownstreamBytesPerSecond != nil {
+		limitsConfig.ReducedDownstreamBytesPerSecond =
+			*config.ProxyReducedDownstreamBytesPerSecond
+	}
+
+	return limitsConfig
+}
+
+func (config *Config) validateRunningLightProxyConfig() error {
+	if config.UpstreamProxyURL != "" {
+		return errors.TraceNew(
+			"EnableRunningLightProxy is incompatible with UpstreamProxyURL")
+	}
+
+	addresses, err := light.ValidateProxyConfigAddresses(
+		config.LightProxyDialAddresses, config.LightProxyListenAddresses, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	hasTLS := false
+	for _, address := range addresses {
+		switch address.Protocol {
+		case light.LIGHT_PROTOCOL_TLS:
+			hasTLS = true
+		case light.LIGHT_PROTOCOL_QUIC:
+			if !quic.Enabled() {
+				return errors.TraceNew("build does not enable required QUIC functionality")
+			}
+		}
+	}
+
+	obfuscationKey, err := hex.DecodeString(config.LightProxyObfuscationKey)
+	if err != nil || len(obfuscationKey) != 32 {
+		return errors.TraceNew("invalid LightProxyObfuscationKey")
+	}
+
+	_, err = tls.X509KeyPair(
+		[]byte(config.LightProxyTLSCertificate),
+		[]byte(config.LightProxyTLSPrivateKey))
+	if err != nil {
+		return errors.Tracef(
+			"invalid LightProxyTLSCertificate/LightProxyTLSPrivateKey: %v", err)
+	}
+
+	if hasTLS || config.LightProxyPassthroughAddress != "" {
+		host, portString, err := net.SplitHostPort(
+			config.LightProxyPassthroughAddress)
+		if err != nil || host == "" {
+			return errors.TraceNew("invalid LightProxyPassthroughAddress")
+		}
+		port, err := strconv.Atoi(portString)
+		if err != nil || port <= 0 || port > 65535 {
+			return errors.TraceNew("invalid LightProxyPassthroughAddress")
+		}
+	}
+
+	_, err = config.getLightProxyDialAuthorizationPublicKey()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	trustedProxyAuthorization, err :=
+		config.getLightProxyTrustedProxyAuthorization()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(trustedProxyAuthorization) > 0 && config.ProxySessionPrivateKey == "" {
+		return errors.TraceNew(
+			"LightProxyTrustedProxyAuthorization requires ProxySessionPrivateKey")
+	}
+
+	return nil
+}
+
+func (config *Config) getLightProxyDialAuthorizationPublicKey() (
+	ed25519.PublicKey, error) {
+
+	publicKey, err := base64.StdEncoding.DecodeString(
+		config.LightProxyDialAuthorizationPublicKey)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return nil, errors.TraceNew("invalid LightProxyDialAuthorizationPublicKey")
+	}
+	return ed25519.PublicKey(publicKey), nil
+}
+
+// The authorization is not validated against the proxy key or its validity
+// period. An invalid or expired authorization is presented to the server,
+// which fails the tunnel, and irregular tunnel events may be monitored for
+// this case.
+func (config *Config) getLightProxyTrustedProxyAuthorization() ([]byte, error) {
+	if config.LightProxyTrustedProxyAuthorization == "" {
+		return nil, nil
+	}
+
+	authorization, err := base64.StdEncoding.DecodeString(
+		config.LightProxyTrustedProxyAuthorization)
+	if err != nil || len(authorization) == 0 ||
+		len(authorization) > light.TunnelTrustedProxyAuthorizationMaxSize {
+
+		return nil, errors.TraceNew("invalid LightProxyTrustedProxyAuthorization")
+	}
+	return authorization, nil
 }
 
 // GetParameters returns the current parameters.Parameters.
@@ -2283,12 +2715,9 @@ func (config *Config) GetUpgradeDownloadFilename() string {
 }
 
 // TunnelDialsUseUpstreamProxy indicates if tunnel establishment uses an
-// upstream proxy or personal light proxy tunnel first hop.
-//
-// Other network operations use UpstreamProxyURL directly and do not use
-// personal light proxy tunnel mode.
+// upstream proxy.
 func (config *Config) TunnelDialsUseUpstreamProxy() bool {
-	return config.UpstreamProxyURL != "" || config.EnablePersonalLightProxyTunnels
+	return config.UpstreamProxyURL != ""
 }
 
 // GetNetworkID returns the current network ID. When NetworkIDGetter
@@ -2302,38 +2731,53 @@ func (config *Config) SetSignalComponentFailure(signalComponentFailure func()) {
 	config.signalComponentFailure.Store(signalComponentFailure)
 }
 
-// IsInproxyClientPersonalPairingMode indicates that the client is in in-proxy
-// personal pairing mode, where connections are made only through in-proxy
-// proxies with the corresponding personal compartment ID.
+// IsInproxyClientPersonalPairingMode indicates that the client uses in-proxy
+// personal pairing.
 func (config *Config) IsInproxyClientPersonalPairingMode() bool {
 	return len(config.InproxyClientPersonalCompartmentID) > 0
+}
+
+// IsPersonalPairingMode indicates that the client uses Light or in-proxy
+// personal pairing.
+func (config *Config) IsPersonalPairingMode() bool {
+	return config.EnablePersonalLightProxyTunnels ||
+		config.IsInproxyClientPersonalPairingMode()
 }
 
 // IsInproxyProxyPersonalPairingMode indicates that the proxy is in in-proxy
 // personal pairing mode, where connections are made only with in-proxy
 // clients with the corresponding personal compartment ID.
 func (config *Config) IsInproxyProxyPersonalPairingMode() bool {
-	return len(config.InproxyProxyPersonalCompartmentID) > 0
+	return len(config.ProxyPersonalCompartmentID) > 0
 }
 
-// OnInproxyMustUpgrade is invoked when the in-proxy broker returns the
-// MustUpgrade response. When either running a proxy, or when running a
-// client in personal-pairing mode -- two states that require in-proxy
-// functionality -- onInproxyMustUpgrade initiates a shutdown after emitting
-// the InproxyMustUpgrade notice.
+// OnInproxyMustUpgrade handles a broker's MustUpgrade response. When either
+// proxy type is enabled, or the client uses in-proxy personal pairing, it
+// emits InproxyMustUpgrade once and initiates controller shutdown. Shutdown
+// stops both hosted proxy types: this compatibility signal also applies to
+// Light, regardless of which broker request received it.
 //
-// Otherwise, the client logs a diagnostic warning, stops selecting in-proxy
-// tunnel protocols for the remainder of the controller run, and continues
-// with other tunnel protocols; see protocolSelectionConstraints.selectProtocol,
-// which instead shuts down when the protocol limits allow only in-proxy
-// tunnel protocols. The InproxyMustUpgrade notice indicates an impending
-// shutdown and is not emitted. A client limited to in-proxy tunnel protocols
-// also shuts down without it, as common pairing clients are not expected to
-// be limited that way.
+// MustUpgrade is a fallback measure for apps that are too old to keep
+// proxying. A Controller with either proxy type enabled shuts down entirely,
+// including its own tunnels, and EnableRunningLightProxy alone causes
+// shutdown whether or not the Light proxy has been started.
+//
+// Limitation: a Light-only host making no broker requests cannot receive
+// MustUpgrade. Light has no broker exchange of its own. Use
+// LightTunnelAllowProxy tactics to stop those hosts.
+//
+// Other clients stop selecting in-proxy tunnel protocols without emitting
+// InproxyMustUpgrade. An initial limit phase already in progress may still
+// select in-proxy when no alternative remains for a candidate, bounded by
+// its candidate count; see protocolSelectionConstraints.selectProtocol.
+// A hard limit allowing only in-proxy instead causes shutdown without
+// the notice.
 func (config *Config) OnInproxyMustUpgrade() {
 	first := atomic.CompareAndSwapInt32(&config.inproxyMustUpgrade, 0, 1)
 
-	if config.InproxyEnableProxy || config.IsInproxyClientPersonalPairingMode() {
+	if config.InproxyEnableProxy ||
+		config.EnableRunningLightProxy ||
+		config.IsInproxyClientPersonalPairingMode() {
 		if first {
 			NoticeInproxyMustUpgrade()
 		}
@@ -2365,57 +2809,57 @@ func (config *Config) GetServerEntryIterationMetricsUpdater() func(movedToFront 
 	return nil
 }
 
-func (config *Config) SetLightProxy(
+func (config *Config) SetLightFallbackProxyClient(
 	client *light.Client,
-	dialParams *lightDialParameters,
+	dialParams *lightFallbackDialParameters,
 	tunnelInactiveThreshold time.Duration,
 	dialTimeout time.Duration,
 	limitDestinationAddresses *common.StringLookup) {
 
-	config.lightProxyClient.Store(client)
-	config.lightProxyDialParams.Store(dialParams)
-	config.lightProxyTunnelInactiveThreshold.Store(int64(tunnelInactiveThreshold))
-	config.lightProxyDialTimeout.Store(int64(dialTimeout))
+	config.lightFallbackProxyClient.Store(client)
+	config.lightFallbackDialParams.Store(dialParams)
+	config.lightFallbackTunnelInactiveThreshold.Store(int64(tunnelInactiveThreshold))
+	config.lightFallbackDialTimeout.Store(int64(dialTimeout))
 	// Caller must not pass nil or else atomic.Value.Store will panic.
-	config.lightProxyLimitDestinationAddresses.Store(limitDestinationAddresses)
+	config.lightFallbackLimitDestinationAddresses.Store(limitDestinationAddresses)
 }
 
-func (config *Config) ClearLightProxy() {
-	config.lightProxyClient.Store(nil)
-	config.lightProxyDialParams.Store(&lightDialParameters{})
-	config.lightProxyTunnelInactiveThreshold.Store(0)
-	config.lightProxyDialTimeout.Store(0)
+func (config *Config) ClearLightFallbackProxyClient() {
+	config.lightFallbackProxyClient.Store(nil)
+	config.lightFallbackDialParams.Store(&lightFallbackDialParameters{})
+	config.lightFallbackTunnelInactiveThreshold.Store(0)
+	config.lightFallbackDialTimeout.Store(0)
 	limitDestinationAddresses := common.NewStringLookup(nil)
-	config.lightProxyLimitDestinationAddresses.Store(&limitDestinationAddresses)
+	config.lightFallbackLimitDestinationAddresses.Store(&limitDestinationAddresses)
 }
 
-func (config *Config) GetLightProxyClient() *light.Client {
-	return config.lightProxyClient.Load()
+func (config *Config) GetLightFallbackProxyClient() *light.Client {
+	return config.lightFallbackProxyClient.Load()
 }
 
-func (config *Config) GetLightProxyDialParameters() *lightDialParameters {
-	dialParams, _ := config.lightProxyDialParams.Load().(*lightDialParameters)
+func (config *Config) GetLightFallbackDialParameters() *lightFallbackDialParameters {
+	dialParams, _ := config.lightFallbackDialParams.Load().(*lightFallbackDialParameters)
 	if dialParams == nil {
-		return &lightDialParameters{}
+		return &lightFallbackDialParameters{}
 	}
 	return dialParams
 }
 
-func (config *Config) SetLightProxyDialParameters(dialParams *lightDialParameters) {
-	config.lightProxyDialParams.Store(dialParams)
+func (config *Config) SetLightFallbackDialParameters(dialParams *lightFallbackDialParameters) {
+	config.lightFallbackDialParams.Store(dialParams)
 }
 
-func (config *Config) GetLightProxyTunnelInactiveThreshold() time.Duration {
-	return time.Duration(config.lightProxyTunnelInactiveThreshold.Load())
+func (config *Config) GetLightFallbackTunnelInactiveThreshold() time.Duration {
+	return time.Duration(config.lightFallbackTunnelInactiveThreshold.Load())
 }
 
-func (config *Config) GetLightProxyDialTimeout() time.Duration {
-	return time.Duration(config.lightProxyDialTimeout.Load())
+func (config *Config) GetLightFallbackDialTimeout() time.Duration {
+	return time.Duration(config.lightFallbackDialTimeout.Load())
 }
 
-func (config *Config) GetLightProxyLimitDestinationAddresses() *common.StringLookup {
+func (config *Config) GetLightFallbackLimitDestinationAddresses() *common.StringLookup {
 	limitDestinationAddresses, _ :=
-		config.lightProxyLimitDestinationAddresses.Load().(*common.StringLookup)
+		config.lightFallbackLimitDestinationAddresses.Load().(*common.StringLookup)
 	return limitDestinationAddresses
 }
 
@@ -2483,6 +2927,12 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ConnectionWorkerPoolSize != 0 {
 		applyParameters[parameters.ConnectionWorkerPoolSize] = config.ConnectionWorkerPoolSize
+	}
+
+	if config.PersonalPairingConnectionWorkerPoolSize != 0 {
+		applyParameters[parameters.PersonalPairingConnectionWorkerPoolSize] = config.PersonalPairingConnectionWorkerPoolSize
+	} else if config.InproxyPersonalPairingConnectionWorkerPoolSize != 0 {
+		applyParameters[parameters.PersonalPairingConnectionWorkerPoolSize] = config.InproxyPersonalPairingConnectionWorkerPoolSize
 	}
 
 	if config.TunnelPoolSize != 0 {
@@ -3163,10 +3613,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FrontedHTTPClientReplayRetainFailedProbability] = *config.FrontedHTTPClientReplayRetainFailedProbability
 	}
 
-	if config.InproxyPersonalPairingConnectionWorkerPoolSize != 0 {
-		applyParameters[parameters.InproxyPersonalPairingConnectionWorkerPoolSize] = config.InproxyPersonalPairingConnectionWorkerPoolSize
-	}
-
 	if config.InproxyAllowProxy != nil {
 		applyParameters[parameters.InproxyAllowProxy] = *config.InproxyAllowProxy
 	}
@@ -3543,6 +3989,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.TacticsRetryPeriod] = fmt.Sprintf("%dms", *config.TacticsRetryPeriodMilliseconds)
 	}
 
+	if config.TacticsRetryPeriodMaxMilliseconds != nil {
+		applyParameters[parameters.TacticsRetryPeriodMax] = fmt.Sprintf("%dms", *config.TacticsRetryPeriodMaxMilliseconds)
+	}
+
 	if config.TacticsRetryPeriodJitter != nil {
 		applyParameters[parameters.TacticsRetryPeriodJitter] = *config.TacticsRetryPeriodJitter
 	}
@@ -3594,8 +4044,146 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.LightProxyInactivityTimeout] = fmt.Sprintf("%dms", *config.LightProxyInactivityTimeoutMilliseconds)
 	}
 
-	if config.LightProxyPersonalPairingConnectionWorkerPoolSize != 0 {
-		applyParameters[parameters.LightProxyPersonalPairingConnectionWorkerPoolSize] = config.LightProxyPersonalPairingConnectionWorkerPoolSize
+	if config.LightTunnelAllowProxy != nil {
+		applyParameters[parameters.LightTunnelAllowProxy] = *config.LightTunnelAllowProxy
+	}
+
+	if config.LightTunnelProxyPreHeaderDeadlineMinMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyPreHeaderDeadlineMin] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyPreHeaderDeadlineMinMilliseconds)
+	}
+
+	if config.LightTunnelProxyPreHeaderDeadlineMaxMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyPreHeaderDeadlineMax] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyPreHeaderDeadlineMaxMilliseconds)
+	}
+
+	if config.LightTunnelProxyUpstreamDialTimeoutMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyUpstreamDialTimeout] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyUpstreamDialTimeoutMilliseconds)
+	}
+
+	if config.LightTunnelProxyRelayInactivityTimeoutMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyRelayInactivityTimeout] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyRelayInactivityTimeoutMilliseconds)
+	}
+
+	if config.LightTunnelProxyPerIPRateLimitQuantity != nil {
+		applyParameters[parameters.LightTunnelProxyPerIPRateLimitQuantity] =
+			*config.LightTunnelProxyPerIPRateLimitQuantity
+	}
+
+	if config.LightTunnelProxyPerIPRateLimitIntervalMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyPerIPRateLimitInterval] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyPerIPRateLimitIntervalMilliseconds)
+	}
+
+	if config.LightTunnelProxyPerIPMaxConcurrent != nil {
+		applyParameters[parameters.LightTunnelProxyPerIPMaxConcurrent] =
+			*config.LightTunnelProxyPerIPMaxConcurrent
+	}
+
+	if config.LightTunnelProxyTotalActivityNoticePeriodMilliseconds != nil {
+		applyParameters[parameters.LightTunnelProxyTotalActivityNoticePeriod] =
+			fmt.Sprintf("%dms", *config.LightTunnelProxyTotalActivityNoticePeriodMilliseconds)
+	}
+
+	if config.LightTunnelProxyReportPaddingMinBytes != nil {
+		applyParameters[parameters.LightTunnelProxyReportPaddingMinBytes] =
+			*config.LightTunnelProxyReportPaddingMinBytes
+	}
+
+	if config.LightTunnelProxyReportPaddingMaxBytes != nil {
+		applyParameters[parameters.LightTunnelProxyReportPaddingMaxBytes] =
+			*config.LightTunnelProxyReportPaddingMaxBytes
+	}
+
+	if config.LightTunnelPersonalPairingDialRateLimitQuantity != nil {
+		applyParameters[parameters.LightTunnelPersonalPairingDialRateLimitQuantity] =
+			*config.LightTunnelPersonalPairingDialRateLimitQuantity
+	}
+
+	if config.LightTunnelPersonalPairingDialRateLimitIntervalMilliseconds != nil {
+		applyParameters[parameters.LightTunnelPersonalPairingDialRateLimitInterval] =
+			fmt.Sprintf("%dms", *config.LightTunnelPersonalPairingDialRateLimitIntervalMilliseconds)
+	}
+
+	if config.LightTunnelIngressLimitTLSProfiles != nil {
+		applyParameters[parameters.LightTunnelIngressLimitTLSProfiles] =
+			protocol.TLSProfiles(config.LightTunnelIngressLimitTLSProfiles)
+	}
+
+	if config.LightTunnelIngressLimitTLSProfilesProbability != nil {
+		applyParameters[parameters.LightTunnelIngressLimitTLSProfilesProbability] =
+			*config.LightTunnelIngressLimitTLSProfilesProbability
+	}
+
+	if config.LightTunnelIngressSelectRandomizedTLSProfileProbability != nil {
+		applyParameters[parameters.LightTunnelIngressSelectRandomizedTLSProfileProbability] =
+			*config.LightTunnelIngressSelectRandomizedTLSProfileProbability
+	}
+
+	if config.LightTunnelIngressLimitQUICVersions != nil {
+		applyParameters[parameters.LightTunnelIngressLimitQUICVersions] =
+			protocol.QUICVersions(config.LightTunnelIngressLimitQUICVersions)
+	}
+
+	if config.LightTunnelIngressLimitQUICVersionsProbability != nil {
+		applyParameters[parameters.LightTunnelIngressLimitQUICVersionsProbability] =
+			*config.LightTunnelIngressLimitQUICVersionsProbability
+	}
+
+	if config.LightTunnelIngressCustomHostNameRegexes != nil {
+		applyParameters[parameters.LightTunnelIngressCustomHostNameRegexes] =
+			parameters.RegexStrings(config.LightTunnelIngressCustomHostNameRegexes)
+	}
+
+	if config.LightTunnelIngressCustomHostNameProbability != nil {
+		applyParameters[parameters.LightTunnelIngressCustomHostNameProbability] =
+			*config.LightTunnelIngressCustomHostNameProbability
+	}
+
+	if config.LightTunnelTLSFragmentClientHelloProbability != nil {
+		applyParameters[parameters.LightTunnelTLSFragmentClientHelloProbability] =
+			*config.LightTunnelTLSFragmentClientHelloProbability
+	}
+
+	if config.LightTunnelTLSPaddingProbability != nil {
+		applyParameters[parameters.LightTunnelTLSPaddingProbability] =
+			*config.LightTunnelTLSPaddingProbability
+	}
+
+	if config.LightTunnelMinTLSPadding != nil {
+		applyParameters[parameters.LightTunnelMinTLSPadding] = *config.LightTunnelMinTLSPadding
+	}
+
+	if config.LightTunnelMaxTLSPadding != nil {
+		applyParameters[parameters.LightTunnelMaxTLSPadding] = *config.LightTunnelMaxTLSPadding
+	}
+
+	if config.LightTunnelEgressLimitTLSProfiles != nil {
+		applyParameters[parameters.LightTunnelEgressLimitTLSProfiles] =
+			protocol.TLSProfiles(config.LightTunnelEgressLimitTLSProfiles)
+	}
+
+	if config.LightTunnelEgressSelectRandomizedTLSProfileProbability != nil {
+		applyParameters[parameters.LightTunnelEgressSelectRandomizedTLSProfileProbability] =
+			*config.LightTunnelEgressSelectRandomizedTLSProfileProbability
+	}
+
+	if config.LightTunnelEgressLimitQUICVersions != nil {
+		applyParameters[parameters.LightTunnelEgressLimitQUICVersions] =
+			protocol.QUICVersions(config.LightTunnelEgressLimitQUICVersions)
+	}
+
+	if config.LightTunnelEgressCustomHostNameRegexes != nil {
+		applyParameters[parameters.LightTunnelEgressCustomHostNameRegexes] =
+			parameters.RegexStrings(config.LightTunnelEgressCustomHostNameRegexes)
+	}
+
+	if config.LightTunnelEgressCustomHostNameProbability != nil {
+		applyParameters[parameters.LightTunnelEgressCustomHostNameProbability] =
+			*config.LightTunnelEgressCustomHostNameProbability
 	}
 
 	// When adding new config dial parameters that may override tactics, also
@@ -4510,6 +5098,98 @@ func (config *Config) setDialParametersHash() error {
 		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableIPv6ICECandidates)
 	}
 
+	if len(config.LightTunnelIngressLimitTLSProfiles) > 0 {
+		hash.Write([]byte("LightTunnelIngressLimitTLSProfiles"))
+		for _, profile := range config.LightTunnelIngressLimitTLSProfiles {
+			hash.Write([]byte(profile))
+		}
+	}
+
+	if config.LightTunnelIngressLimitTLSProfilesProbability != nil {
+		hash.Write([]byte("LightTunnelIngressLimitTLSProfilesProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelIngressLimitTLSProfilesProbability)
+	}
+
+	if config.LightTunnelIngressSelectRandomizedTLSProfileProbability != nil {
+		hash.Write([]byte("LightTunnelIngressSelectRandomizedTLSProfileProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelIngressSelectRandomizedTLSProfileProbability)
+	}
+
+	if len(config.LightTunnelIngressLimitQUICVersions) > 0 {
+		hash.Write([]byte("LightTunnelIngressLimitQUICVersions"))
+		for _, version := range config.LightTunnelIngressLimitQUICVersions {
+			hash.Write([]byte(version))
+		}
+	}
+
+	if config.LightTunnelIngressLimitQUICVersionsProbability != nil {
+		hash.Write([]byte("LightTunnelIngressLimitQUICVersionsProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelIngressLimitQUICVersionsProbability)
+	}
+
+	if len(config.LightTunnelIngressCustomHostNameRegexes) > 0 {
+		hash.Write([]byte("LightTunnelIngressCustomHostNameRegexes"))
+		for _, regex := range config.LightTunnelIngressCustomHostNameRegexes {
+			hash.Write([]byte(regex))
+		}
+	}
+
+	if config.LightTunnelIngressCustomHostNameProbability != nil {
+		hash.Write([]byte("LightTunnelIngressCustomHostNameProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelIngressCustomHostNameProbability)
+	}
+
+	if config.LightTunnelTLSFragmentClientHelloProbability != nil {
+		hash.Write([]byte("LightTunnelTLSFragmentClientHelloProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelTLSFragmentClientHelloProbability)
+	}
+
+	if config.LightTunnelTLSPaddingProbability != nil {
+		hash.Write([]byte("LightTunnelTLSPaddingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelTLSPaddingProbability)
+	}
+
+	if config.LightTunnelMinTLSPadding != nil {
+		hash.Write([]byte("LightTunnelMinTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.LightTunnelMinTLSPadding))
+	}
+
+	if config.LightTunnelMaxTLSPadding != nil {
+		hash.Write([]byte("LightTunnelMaxTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.LightTunnelMaxTLSPadding))
+	}
+
+	if len(config.LightTunnelEgressLimitTLSProfiles) > 0 {
+		hash.Write([]byte("LightTunnelEgressLimitTLSProfiles"))
+		for _, profile := range config.LightTunnelEgressLimitTLSProfiles {
+			hash.Write([]byte(profile))
+		}
+	}
+
+	if config.LightTunnelEgressSelectRandomizedTLSProfileProbability != nil {
+		hash.Write([]byte("LightTunnelEgressSelectRandomizedTLSProfileProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelEgressSelectRandomizedTLSProfileProbability)
+	}
+
+	if len(config.LightTunnelEgressLimitQUICVersions) > 0 {
+		hash.Write([]byte("LightTunnelEgressLimitQUICVersions"))
+		for _, version := range config.LightTunnelEgressLimitQUICVersions {
+			hash.Write([]byte(version))
+		}
+	}
+
+	if len(config.LightTunnelEgressCustomHostNameRegexes) > 0 {
+		hash.Write([]byte("LightTunnelEgressCustomHostNameRegexes"))
+		for _, regex := range config.LightTunnelEgressCustomHostNameRegexes {
+			hash.Write([]byte(regex))
+		}
+	}
+
+	if config.LightTunnelEgressCustomHostNameProbability != nil {
+		hash.Write([]byte("LightTunnelEgressCustomHostNameProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.LightTunnelEgressCustomHostNameProbability)
+	}
+
 	config.dialParametersHash = hash.Sum(nil)
 	return nil
 }
@@ -4595,10 +5275,9 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 	return deviceInfo, err
 }
 
-// splitInterfaceState holds the resolved split-interface in-proxy proxy
+// splitInterfaceState holds the resolved split-interface proxy
 // configuration. It is nil unless split-interface mode is active. See
-// InproxyProxySplitUpstreamInterfaceName and
-// InproxyProxySplitDownstreamInterfaceName.
+// ProxySplitUpstreamInterfaceName and ProxySplitDownstreamInterfaceName.
 //
 // The upstream and downstream binders are logging-wrapped, ready to use at
 // bind sites. upstreamInterfaceName is the resolved name, exposed for call
@@ -4659,9 +5338,9 @@ func (config *Config) splitInterfaceDownstreamInterfaceName() string {
 
 // interfaceDeviceBinder implements DeviceBinder by binding sockets to a
 // named network interface via tun.BindToDevice. It is used to wire up the
-// upstream and downstream interfaces in a split-interface in-proxy proxy
-// configuration; see InproxyProxySplitUpstreamInterfaceName and
-// InproxyProxySplitDownstreamInterfaceName.
+// upstream and downstream interfaces in a split-interface proxy
+// configuration; see ProxySplitUpstreamInterfaceName and
+// ProxySplitDownstreamInterfaceName.
 type interfaceDeviceBinder struct {
 	interfaceName string
 }

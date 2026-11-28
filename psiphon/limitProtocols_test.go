@@ -197,14 +197,26 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		t.Fatalf("unexpected server entries")
 	}
 
+	signaturePublicKey, signaturePrivateKey, err := protocol.NewServerEntrySignatureKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	serverEntries := make([]map[string]interface{}, len(protocol.SupportedTunnelProtocols))
 
 	for i, tunnelProtocol := range protocol.SupportedTunnelProtocols {
+		var passthroughAddresses map[string]string
+		if protocol.TunnelProtocolUsesLightTLSEgress(tunnelProtocol) {
+			passthroughAddresses = map[string]string{tunnelProtocol: "127.0.0.1:443"}
+		}
 
 		_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 			&server.GenerateConfigParams{
-				ServerIPAddress:     fmt.Sprintf("0.1.0.0"),
-				TunnelProtocolPorts: map[string]int{tunnelProtocol: 4000},
+				ServerIPAddress:                    fmt.Sprintf("0.1.0.0"),
+				TunnelProtocolPorts:                map[string]int{tunnelProtocol: 4000},
+				ServerEntrySignaturePublicKey:      signaturePublicKey,
+				ServerEntrySignaturePrivateKey:     signaturePrivateKey,
+				TunnelProtocolPassthroughAddresses: passthroughAddresses,
 			})
 		if err != nil {
 			t.Fatalf("error generating server config: %s", err)
@@ -310,6 +322,7 @@ func runLimitTunnelProtocols(t *testing.T, replayCandidateCount int) {
 		dialParams, err := MakeDialParameters(
 			clientConfig, controller.steeringIPCache, nil, nil, nil, nil, nil,
 			func(*protocol.ServerEntry, bool, string) (string, bool) { return testCase.replayProtocol, true },
+			nil,
 			entry, nil, nil, false, 0)
 		if err != nil || dialParams == nil {
 			t.Fatalf("error creating replay parameters: %v", err)

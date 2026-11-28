@@ -284,15 +284,15 @@ func (pc *proxyConn) RemoteAddr() net.Addr {
 }
 
 func (pc *proxyConn) SetDeadline(t time.Time) error {
-	return proxyError(fmt.Errorf("not supported"))
+	return pc.hijackedConn.SetDeadline(t)
 }
 
 func (pc *proxyConn) SetReadDeadline(t time.Time) error {
-	return proxyError(fmt.Errorf("not supported"))
+	return pc.hijackedConn.SetReadDeadline(t)
 }
 
 func (pc *proxyConn) SetWriteDeadline(t time.Time) error {
-	return proxyError(fmt.Errorf("not supported"))
+	return pc.hijackedConn.SetWriteDeadline(t)
 }
 
 func init() {

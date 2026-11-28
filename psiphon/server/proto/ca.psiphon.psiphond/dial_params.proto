@@ -7,6 +7,8 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
 
 message DialParams {
+    reserved 92; // retired fields
+
     optional bool conjure_cached = 1;
     optional int64 conjure_delay = 2;
     optional bool conjure_empty_packet = 3;
@@ -98,5 +100,24 @@ message DialParams {
     optional bool meek_payload_padding = 89;
     optional string dsl_prioritized_reason = 90;
     optional string dsl_prioritized_tunnel_protocol = 91;
-    optional string tunnel_personal_light_proxy_id = 92;
+    optional string light_sni = 93;
+    optional string light_tls_profile = 94;
+    optional bool light_tls_fragmented = 95;
+    optional int64 light_tls_padding = 96;
+    optional string light_quic_version = 97;
+    optional string light_egress_sni = 98;
+    optional string light_egress_tls_profile = 99;
+    optional string light_egress_quic_version = 100;
+    optional int64 light_tcp_duration = 101;
+    optional int64 light_tls_duration = 102;
+    optional int64 light_quic_duration = 103;
+    optional bool light_dial_is_IPv6 = 104;
+    optional int64 light_dial_port_number = 105;
+    optional bool light_tls_sent_ticket = 106;
+    optional bool light_tls_did_resume = 107;
+    optional bool light_quic_sent_ticket = 108;
+    optional bool light_quic_did_resume = 109;
+    optional int64 light_proxy_entry_tracker = 110;
+    optional bool light_quic_disable_client_path_mtu_discovery = 111;
+    optional string light_seed_transform = 112;
 }

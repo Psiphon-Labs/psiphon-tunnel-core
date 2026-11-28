@@ -21,8 +21,8 @@ require (
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/pion-ice/v4 v4.0.0-20261026204224-ea8b9a9ff059
 	github.com/Psiphon-Labs/pion-webrtc/v4 v4.0.0-20261026144143-b3b8f4477c88
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261019151451-3e697502354d
-	github.com/Psiphon-Labs/quic-go v0.0.0-20261103172121-ba3c8406711b
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20261123190542-d9f99c3443cf
+	github.com/Psiphon-Labs/quic-go v0.0.0-20261123191126-dd96c1dca9f8
 	github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/axiomhq/hyperloglog v0.2.6

@@ -47,6 +47,8 @@ func runServerReplayTests(t *testing.T, runPacketManipulation bool) {
 	testCases := protocol.TunnelProtocols{
 		protocol.TUNNEL_PROTOCOL_SSH,
 		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
+		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH,
 	}
 
 	for _, tunnelProtocol := range testCases {

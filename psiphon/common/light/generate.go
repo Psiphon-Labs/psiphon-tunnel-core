@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"math/big"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tlsdialer"
@@ -45,9 +47,15 @@ import (
 // running a proxy and corresponding, encoded SignedProxyEntry for
 // distribution to clients.
 //
-// listenAddresses specifies the network addresses the proxy is to listen on.
-// dialAddressIPv4 and an optional dialAddressIPv6 are the values,
-// distributed in the proxy entry, which the client will connect to.
+// listenAddresses specifies local endpoints paired by index with the public
+// dialAddresses distributed in the proxy entry. When omitted, dialAddresses
+// is used for listening.
+//
+// Fallback entries without a personal compartment ID include legacy TLS fields
+// when a TLS IPv4 endpoint is available, using the first TLS endpoint per IP
+// address family and the legacy-derived proxy ID. All entries include the full
+// endpoint list.
+//
 // recommendedSNI, recommendedSNIRegex, and recommendedSNIProbability are
 // optional SNI selection hints distributed in the proxy entry.
 //
@@ -61,21 +69,29 @@ import (
 // indicates how long to store and use the proxy entry. The zero value means
 // no TTL/no expiry. The TTL is encoded at second granularity.
 //
-// allowedDestinations is a list of network addresses, host and post, that the
-// proxy will connect to. Only destinations on this list are allowed; when
-// empty, any destination is allowed. This list is not distributed in the proxy
-// entry.
+// allowedDestinations lists permitted fallback destinations as host:port
+// addresses. An empty list imposes no destination-list restriction. This
+// list is not distributed in the proxy entry.
 //
 // proxyProtocolHeaderMACKeys/proxyProtocolHeaderCustomTLVs/
 // proxyProtocolHeaderTargetDestinationAddresses enable adding PROXY protocol
-// headers to upstream connections. All values are selected by sponsor ID.
+// headers to fallback upstream connections. Targets are hosts without ports,
+// matching psiphond tactics. All values are selected by sponsor ID.
 //
-// passthroughAddress is a psiphon-tls PassthroughAddress and is required.
+// passthroughAddress is a psiphon-tls PassthroughAddress and is required for TLS.
+//
+// personalCompartmentID optionally sets the personal pairing secret in the
+// config and entry, using the same unpadded base64 encoding as INPROXY.
+// When set, the caller must configure ProxyLimits before calling NewProxy.
+//
+// A non-empty tunnelProxyID enables tunnel mode and must be the value returned
+// by GetTunnelProxyID for the proxy report signing key. The caller must also
+// configure TunnelProxyPrivateKey, TunnelDialAuthorizationPublicKey, and at
+// least one of ProxyTLSDialer or ProxyQUICDialer before calling NewProxy.
 func Generate(
 	providerID string,
-	listenAddresses []string,
-	dialAddressIPv4 string,
-	dialAddressIPv6 string,
+	listenAddresses []ProxyAddress,
+	dialAddresses []ProxyAddress,
 	recommendedSNI string,
 	recommendedSNIRegex string,
 	recommendedSNIProbability float64,
@@ -90,31 +106,43 @@ func Generate(
 	proxyProtocolHeaderMACKeys map[string]string,
 	proxyProtocolHeaderCustomTLVs map[string]string,
 	proxyProtocolHeaderTargetDestinationAddresses map[string][]string,
-	passthroughAddress string) (*ProxyConfig, []byte, error) {
+	passthroughAddress string,
+	personalCompartmentID string,
+	tunnelProxyID string) (*ProxyConfig, []byte, error) {
 
-	if len(listenAddresses) == 0 {
-		return nil, nil, errors.TraceNew("missing listen addresses")
-	}
-
-	for _, listenAddress := range listenAddresses {
-		if listenAddress == "" {
-			return nil, nil, errors.TraceNew("missing listen address")
-		}
-	}
-
-	if dialAddressIPv4 == "" {
-		return nil, nil, errors.TraceNew("missing IPv4 dial address")
-	}
-
-	err := validateIPAddressFamily(dialAddressIPv4, false)
+	err := ValidateProxyAddresses(dialAddresses, listenAddresses)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 
-	if dialAddressIPv6 != "" {
-		err := validateIPAddressFamily(dialAddressIPv6, true)
-		if err != nil {
+	if tunnelProxyID != "" {
+		if _, err := inproxy.IDFromString(tunnelProxyID); err != nil {
 			return nil, nil, errors.Trace(err)
+		}
+	}
+
+	var personalCompartmentIDBytes []byte
+	if personalCompartmentID != "" {
+		id, err := inproxy.IDFromString(personalCompartmentID)
+		if err != nil {
+			return nil, nil, errors.TraceNew("invalid personal compartment ID")
+		}
+		personalCompartmentIDBytes = id[:]
+	}
+
+	var dialAddressIPv4, dialAddressIPv6 string
+	if tunnelProxyID == "" && personalCompartmentID == "" {
+		for _, address := range dialAddresses {
+			if address.Protocol != LIGHT_PROTOCOL_TLS {
+				continue
+			}
+			if net.ParseIP(address.IPAddress).To4() != nil {
+				if dialAddressIPv4 == "" {
+					dialAddressIPv4 = address.String()
+				}
+			} else if dialAddressIPv6 == "" {
+				dialAddressIPv6 = address.String()
+			}
 		}
 	}
 
@@ -148,7 +176,7 @@ func Generate(
 
 		// Light protocol requires TLS 1.3.
 		supportsTLS13, err := tlsdialer.TLSProfileSupportsTLS13(
-			recommendedTLSProfile)
+			recommendedTLSProfile, nil)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -156,6 +184,14 @@ func Generate(
 			return nil, nil, errors.TraceNew(
 				"recommended TLS profile does not support TLS 1.3")
 		}
+	}
+
+	if tunnelProxyID != "" &&
+		(len(proxyProtocolHeaderMACKeys) != 0 ||
+			len(proxyProtocolHeaderCustomTLVs) != 0 ||
+			len(proxyProtocolHeaderTargetDestinationAddresses) != 0) {
+
+		return nil, nil, errors.TraceNew("PROXY protocol headers are unsupported in tunnel mode")
 	}
 
 	_, err = prepareProxyProtocolHeaderConfigs(
@@ -167,7 +203,9 @@ func Generate(
 	}
 
 	// Required: see comment in NewProxy.
-	if passthroughAddress == "" {
+	if common.Contains(getLightProtocols(dialAddresses), LIGHT_PROTOCOL_TLS) &&
+		passthroughAddress == "" {
+
 		return nil, nil, errors.TraceNew("missing passthrough address")
 	}
 
@@ -182,29 +220,10 @@ func Generate(
 		return nil, nil, errors.Trace(err)
 	}
 
-	config := &ProxyConfig{
-		Protocol:                      LIGHT_PROTOCOL_TLS,
-		ProviderID:                    providerID,
-		ListenAddresses:               append([]string(nil), listenAddresses...),
-		DialAddressIPv4:               dialAddressIPv4,
-		DialAddressIPv6:               dialAddressIPv6,
-		ObfuscationKey:                obfuscationKey,
-		TLSCertificate:                cert,
-		TLSPrivateKey:                 privateKey,
-		PassthroughAddress:            passthroughAddress,
-		AllowedDestinations:           allowedDestinations,
-		ProxyProtocolHeaderMACKeys:    proxyProtocolHeaderMACKeys,
-		ProxyProtocolHeaderCustomTLVs: proxyProtocolHeaderCustomTLVs,
-		ProxyProtocolHeaderTargetDestinationAddresses: proxyProtocolHeaderTargetDestinationAddresses,
-	}
-
 	// To minimize size, the entry uses the more compact byte representation
 	// of the obfuscation key.
 
 	entry := ProxyEntry{
-		Protocol:                                  LIGHT_PROTOCOL_TLS,
-		DialAddressIPv4:                           dialAddressIPv4,
-		DialAddressIPv6:                           dialAddressIPv6,
 		RecommendedSNI:                            recommendedSNI,
 		RecommendedSNIRegex:                       recommendedSNIRegex,
 		RecommendedSNIProbability:                 recommendedSNIProbability,
@@ -218,6 +237,45 @@ func Generate(
 		ObfuscationKey:                            obfuscationKeyBytes,
 		VerifyPin:                                 verifyPin,
 		VerifyServerName:                          verifyServerName,
+		PersonalCompartmentID:                     personalCompartmentIDBytes,
+	}
+
+	var proxyID string
+	switch {
+	case tunnelProxyID != "":
+		proxyID = tunnelProxyID
+	case dialAddressIPv4 != "":
+		entry.Protocol = LIGHT_PROTOCOL_TLS
+		entry.DialAddressIPv4 = dialAddressIPv4
+		entry.DialAddressIPv6 = dialAddressIPv6
+		proxyID = makeLegacyProxyID(dialAddressIPv4, obfuscationKey)
+	default:
+		proxyIDBytes, err := common.MakeSecureRandomBytes(proxyIDSize)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		proxyID = base64.RawStdEncoding.EncodeToString(proxyIDBytes)
+	}
+	entry.ProxyID = proxyID
+	entry.DialAddresses = append([]ProxyAddress(nil), dialAddresses...)
+
+	config := &ProxyConfig{
+		ProviderID:                    providerID,
+		DialAddresses:                 append([]ProxyAddress(nil), dialAddresses...),
+		ListenAddresses:               append([]ProxyAddress(nil), listenAddresses...),
+		ObfuscationKey:                obfuscationKey,
+		TLSCertificate:                cert,
+		TLSPrivateKey:                 privateKey,
+		PassthroughAddress:            passthroughAddress,
+		AllowedDestinations:           allowedDestinations,
+		ProxyProtocolHeaderMACKeys:    proxyProtocolHeaderMACKeys,
+		ProxyProtocolHeaderCustomTLVs: proxyProtocolHeaderCustomTLVs,
+		ProxyProtocolHeaderTargetDestinationAddresses: proxyProtocolHeaderTargetDestinationAddresses,
+		PersonalCompartmentID:                         personalCompartmentID,
+		TunnelMode:                                    tunnelProxyID != "",
+	}
+	if !config.TunnelMode {
+		config.ProxyID = proxyID
 	}
 
 	// There is currently no signature. See SignedProxyEntry comment.
@@ -232,21 +290,6 @@ func Generate(
 	}
 
 	return config, cborEntry, nil
-}
-
-func validateIPAddressFamily(addr string, isIPv6 bool) error {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	IP := net.ParseIP(host)
-	if IP == nil {
-		return errors.TraceNew("invalid IP address")
-	}
-	if (IP.To4() == nil) != isIPv6 {
-		return errors.TraceNew("unexpected IP address family")
-	}
-	return nil
 }
 
 func generateCert() ([]byte, string, []byte, []byte, error) {

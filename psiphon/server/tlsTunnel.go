@@ -20,6 +20,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	std_errors "errors"
@@ -47,8 +48,10 @@ type TLSTunnelServer struct {
 }
 
 // ListenTLSTunnel returns the listener of a new TLSTunnelServer.
-// Note: the first Read or Write call on a connection returned by the listener
-// will trigger the underlying TLS handshake.
+// Returned connections defer the TLS handshake until Handshake, Read, or Write.
+//
+// TODO: move concurrent handshake dispatch into TLSTunnelServer so its
+// listener returns connections only after successful TLS handshakes.
 func ListenTLSTunnel(
 	support *SupportServices,
 	listener net.Listener,
@@ -60,8 +63,6 @@ func ListenTLSTunnel(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	listener = tls.NewListener(server.listener, server.tlsConfig)
 
 	return NewTLSTunnelListener(listener, server), nil
 }
@@ -253,18 +254,32 @@ func (l *TLSTunnelListener) Accept() (net.Conn, error) {
 	return NewTLSTunnelConn(conn, l.server), nil
 }
 
-// TLSTunnelConn implements the net.Conn and common.MetricsSource interfaces.
+// TLSTunnelConn implements net.Conn, common.MetricsSource, and
+// common.FragmentorAccessor.
 type TLSTunnelConn struct {
 	net.Conn
 	server *TLSTunnelServer
+
+	// Keep the TCP connection accessible when TLS adds a passthrough recorder.
+	underlyingConn net.Conn
 }
 
-// NewTLSTunnelConn initializes a new TLSTunnelConn.
+// NewTLSTunnelConn wraps conn with TLS.
 func NewTLSTunnelConn(conn net.Conn, server *TLSTunnelServer) *TLSTunnelConn {
 	return &TLSTunnelConn{
-		Conn:   conn,
-		server: server,
+		Conn:           tls.Server(conn, server.tlsConfig),
+		server:         server,
+		underlyingConn: conn,
 	}
+}
+
+// Handshake completes the TLS handshake or dispatches TLS passthrough.
+func (conn *TLSTunnelConn) Handshake(ctx context.Context) error {
+	tlsConn, ok := conn.Conn.(*tls.Conn)
+	if !ok {
+		return errors.TraceNew("invalid TLS connection")
+	}
+	return errors.Trace(tlsConn.HandshakeContext(ctx))
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -273,7 +288,7 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 	var logFields common.LogFields
 
 	// Relay any metrics from the underlying conn.
-	if m, ok := conn.Conn.(common.MetricsSource); ok {
+	if m, ok := conn.underlyingConn.(common.MetricsSource); ok {
 		logFields = m.GetMetrics()
 	} else {
 		logFields = make(common.LogFields)
@@ -284,4 +299,26 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 	}
 
 	return logFields
+}
+
+// SetReplay implements common.FragmentorAccessor.
+func (conn *TLSTunnelConn) SetReplay(PRNG *prng.PRNG) {
+	if fragmentor, ok := conn.underlyingConn.(common.FragmentorAccessor); ok {
+		fragmentor.SetReplay(PRNG)
+	}
+}
+
+// GetReplay implements common.FragmentorAccessor.
+func (conn *TLSTunnelConn) GetReplay() (*prng.Seed, bool) {
+	if fragmentor, ok := conn.underlyingConn.(common.FragmentorAccessor); ok {
+		return fragmentor.GetReplay()
+	}
+	return nil, false
+}
+
+// StopFragmenting implements common.FragmentorAccessor.
+func (conn *TLSTunnelConn) StopFragmenting() {
+	if fragmentor, ok := conn.underlyingConn.(common.FragmentorAccessor); ok {
+		fragmentor.StopFragmenting()
+	}
 }

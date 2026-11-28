@@ -36,6 +36,7 @@ type FailedTunnel struct {
 	LivenessTestUpstreamBytes           *int64                 `protobuf:"varint,106,opt,name=liveness_test_upstream_bytes,json=livenessTestUpstreamBytes,proto3,oneof" json:"liveness_test_upstream_bytes,omitempty"`
 	RecordProbability                   *float64               `protobuf:"fixed64,107,opt,name=record_probability,json=recordProbability,proto3,oneof" json:"record_probability,omitempty"`
 	TunnelError                         *string                `protobuf:"bytes,108,opt,name=tunnel_error,json=tunnelError,proto3,oneof" json:"tunnel_error,omitempty"`
+	LightProxyId                        *string                `protobuf:"bytes,109,opt,name=light_proxy_id,json=lightProxyId,proto3,oneof" json:"light_proxy_id,omitempty"`
 	unknownFields                       protoimpl.UnknownFields
 	sizeCache                           protoimpl.SizeCache
 }
@@ -154,11 +155,18 @@ func (x *FailedTunnel) GetTunnelError() string {
 	return ""
 }
 
+func (x *FailedTunnel) GetLightProxyId() string {
+	if x != nil && x.LightProxyId != nil {
+		return *x.LightProxyId
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_failed_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_failed_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/failed_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xda\b\n" +
+	"'ca.psiphon.psiphond/failed_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x98\t\n" +
 	"\fFailedTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
@@ -175,7 +183,8 @@ const file_ca_psiphon_psiphond_failed_tunnel_proto_rawDesc = "" +
 	"\x1cliveness_test_upstream_bytes\x18j \x01(\x03H\tR\x19livenessTestUpstreamBytes\x88\x01\x01\x122\n" +
 	"\x12record_probability\x18k \x01(\x01H\n" +
 	"R\x11recordProbability\x88\x01\x01\x12&\n" +
-	"\ftunnel_error\x18l \x01(\tH\vR\vtunnelError\x88\x01\x01B\x0e\n" +
+	"\ftunnel_error\x18l \x01(\tH\vR\vtunnelError\x88\x01\x01\x12)\n" +
+	"\x0elight_proxy_id\x18m \x01(\tH\fR\flightProxyId\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
 	"\x14_inproxy_dial_paramsB\r\n" +
@@ -187,7 +196,8 @@ const file_ca_psiphon_psiphond_failed_tunnel_proto_rawDesc = "" +
 	"\"_liveness_test_sent_upstream_bytesB\x1f\n" +
 	"\x1d_liveness_test_upstream_bytesB\x15\n" +
 	"\x13_record_probabilityB\x0f\n" +
-	"\r_tunnel_errorBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\r_tunnel_errorB\x11\n" +
+	"\x0f_light_proxy_idBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_failed_tunnel_proto_rawDescOnce sync.Once

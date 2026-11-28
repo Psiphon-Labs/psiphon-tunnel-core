@@ -23,101 +23,120 @@ const (
 )
 
 type DialParams struct {
-	state                             protoimpl.MessageState `protogen:"open.v1"`
-	ConjureCached                     *bool                  `protobuf:"varint,1,opt,name=conjure_cached,json=conjureCached,proto3,oneof" json:"conjure_cached,omitempty"`
-	ConjureDelay                      *int64                 `protobuf:"varint,2,opt,name=conjure_delay,json=conjureDelay,proto3,oneof" json:"conjure_delay,omitempty"`
-	ConjureEmptyPacket                *bool                  `protobuf:"varint,3,opt,name=conjure_empty_packet,json=conjureEmptyPacket,proto3,oneof" json:"conjure_empty_packet,omitempty"`
-	ConjureNetwork                    *string                `protobuf:"bytes,4,opt,name=conjure_network,json=conjureNetwork,proto3,oneof" json:"conjure_network,omitempty"`
-	ConjurePortNumber                 *int64                 `protobuf:"varint,5,opt,name=conjure_port_number,json=conjurePortNumber,proto3,oneof" json:"conjure_port_number,omitempty"`
-	ConjurePrefix                     *string                `protobuf:"bytes,6,opt,name=conjure_prefix,json=conjurePrefix,proto3,oneof" json:"conjure_prefix,omitempty"`
-	ConjureStun                       *string                `protobuf:"bytes,7,opt,name=conjure_stun,json=conjureStun,proto3,oneof" json:"conjure_stun,omitempty"`
-	ConjureTransport                  *string                `protobuf:"bytes,8,opt,name=conjure_transport,json=conjureTransport,proto3,oneof" json:"conjure_transport,omitempty"`
-	MeekCookieSize                    *int64                 `protobuf:"varint,9,opt,name=meek_cookie_size,json=meekCookieSize,proto3,oneof" json:"meek_cookie_size,omitempty"`
-	MeekContentType                   *string                `protobuf:"bytes,10,opt,name=meek_content_type,json=meekContentType,proto3,oneof" json:"meek_content_type,omitempty"`
-	MeekCookieName                    *string                `protobuf:"bytes,11,opt,name=meek_cookie_name,json=meekCookieName,proto3,oneof" json:"meek_cookie_name,omitempty"`
-	MeekDialDomain                    *string                `protobuf:"bytes,12,opt,name=meek_dial_domain,json=meekDialDomain,proto3,oneof" json:"meek_dial_domain,omitempty"`
-	MeekDialIpAddress                 *string                `protobuf:"bytes,13,opt,name=meek_dial_ip_address,json=meekDialIpAddress,proto3,oneof" json:"meek_dial_ip_address,omitempty"`
-	MeekHostHeader                    *string                `protobuf:"bytes,14,opt,name=meek_host_header,json=meekHostHeader,proto3,oneof" json:"meek_host_header,omitempty"`
-	MeekLimitRequest                  *int64                 `protobuf:"varint,15,opt,name=meek_limit_request,json=meekLimitRequest,proto3,oneof" json:"meek_limit_request,omitempty"`
-	MeekRedialProbability             *float64               `protobuf:"fixed64,16,opt,name=meek_redial_probability,json=meekRedialProbability,proto3,oneof" json:"meek_redial_probability,omitempty"`
-	MeekResolvedIpAddress             *string                `protobuf:"bytes,17,opt,name=meek_resolved_ip_address,json=meekResolvedIpAddress,proto3,oneof" json:"meek_resolved_ip_address,omitempty"`
-	MeekSniServerName                 *string                `protobuf:"bytes,18,opt,name=meek_sni_server_name,json=meekSniServerName,proto3,oneof" json:"meek_sni_server_name,omitempty"`
-	MeekTlsPadding                    *int64                 `protobuf:"varint,19,opt,name=meek_tls_padding,json=meekTlsPadding,proto3,oneof" json:"meek_tls_padding,omitempty"`
-	MeekTransformedHostName           *bool                  `protobuf:"varint,20,opt,name=meek_transformed_host_name,json=meekTransformedHostName,proto3,oneof" json:"meek_transformed_host_name,omitempty"`
-	QuicDialEarly                     *bool                  `protobuf:"varint,21,opt,name=quic_dial_early,json=quicDialEarly,proto3,oneof" json:"quic_dial_early,omitempty"`
-	QuicDialSniAddress                *string                `protobuf:"bytes,22,opt,name=quic_dial_sni_address,json=quicDialSniAddress,proto3,oneof" json:"quic_dial_sni_address,omitempty"`
-	QuicDidResume                     *bool                  `protobuf:"varint,23,opt,name=quic_did_resume,json=quicDidResume,proto3,oneof" json:"quic_did_resume,omitempty"`
-	QuicDisableClientPathMtuDiscovery *bool                  `protobuf:"varint,24,opt,name=quic_disable_client_path_mtu_discovery,json=quicDisableClientPathMtuDiscovery,proto3,oneof" json:"quic_disable_client_path_mtu_discovery,omitempty"`
-	QuicObfuscatedPsk                 *bool                  `protobuf:"varint,25,opt,name=quic_obfuscated_psk,json=quicObfuscatedPsk,proto3,oneof" json:"quic_obfuscated_psk,omitempty"`
-	QuicSentTicket                    *bool                  `protobuf:"varint,26,opt,name=quic_sent_ticket,json=quicSentTicket,proto3,oneof" json:"quic_sent_ticket,omitempty"`
-	QuicVersion                       *string                `protobuf:"bytes,27,opt,name=quic_version,json=quicVersion,proto3,oneof" json:"quic_version,omitempty"`
-	ShadowsocksPrefix                 *string                `protobuf:"bytes,28,opt,name=shadowsocks_prefix,json=shadowsocksPrefix,proto3,oneof" json:"shadowsocks_prefix,omitempty"`
-	TlsDidResume                      *bool                  `protobuf:"varint,29,opt,name=tls_did_resume,json=tlsDidResume,proto3,oneof" json:"tls_did_resume,omitempty"`
-	TlsFragmented                     *bool                  `protobuf:"varint,30,opt,name=tls_fragmented,json=tlsFragmented,proto3,oneof" json:"tls_fragmented,omitempty"`
-	TlsOsshSniServerName              *string                `protobuf:"bytes,31,opt,name=tls_ossh_sni_server_name,json=tlsOsshSniServerName,proto3,oneof" json:"tls_ossh_sni_server_name,omitempty"`
-	TlsOsshTransformedHostName        *bool                  `protobuf:"varint,32,opt,name=tls_ossh_transformed_host_name,json=tlsOsshTransformedHostName,proto3,oneof" json:"tls_ossh_transformed_host_name,omitempty"`
-	TlsPadding                        *int64                 `protobuf:"varint,33,opt,name=tls_padding,json=tlsPadding,proto3,oneof" json:"tls_padding,omitempty"`
-	TlsProfile                        *string                `protobuf:"bytes,34,opt,name=tls_profile,json=tlsProfile,proto3,oneof" json:"tls_profile,omitempty"`
-	TlsSentTicket                     *bool                  `protobuf:"varint,35,opt,name=tls_sent_ticket,json=tlsSentTicket,proto3,oneof" json:"tls_sent_ticket,omitempty"`
-	TlsVersion                        *string                `protobuf:"bytes,36,opt,name=tls_version,json=tlsVersion,proto3,oneof" json:"tls_version,omitempty"`
-	ServerEntryRegion                 *string                `protobuf:"bytes,37,opt,name=server_entry_region,json=serverEntryRegion,proto3,oneof" json:"server_entry_region,omitempty"`
-	ServerEntrySource                 *string                `protobuf:"bytes,38,opt,name=server_entry_source,json=serverEntrySource,proto3,oneof" json:"server_entry_source,omitempty"`
-	ServerEntryTag                    *string                `protobuf:"bytes,39,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
-	ServerEntryTimestamp              *timestamppb.Timestamp `protobuf:"bytes,40,opt,name=server_entry_timestamp,json=serverEntryTimestamp,proto3,oneof" json:"server_entry_timestamp,omitempty"`
-	ServerPacketManipulation          *string                `protobuf:"bytes,41,opt,name=server_packet_manipulation,json=serverPacketManipulation,proto3,oneof" json:"server_packet_manipulation,omitempty"`
-	ServerReplayFragmentation         *bool                  `protobuf:"varint,42,opt,name=server_replay_fragmentation,json=serverReplayFragmentation,proto3,oneof" json:"server_replay_fragmentation,omitempty"`
-	ServerReplayPacketManipulation    *bool                  `protobuf:"varint,43,opt,name=server_replay_packet_manipulation,json=serverReplayPacketManipulation,proto3,oneof" json:"server_replay_packet_manipulation,omitempty"`
-	ServerEntryValid                  *bool                  `protobuf:"varint,44,opt,name=server_entry_valid,json=serverEntryValid,proto3,oneof" json:"server_entry_valid,omitempty"`
-	CandidateNumber                   *int64                 `protobuf:"varint,45,opt,name=candidate_number,json=candidateNumber,proto3,oneof" json:"candidate_number,omitempty"`
-	IsReplay                          *bool                  `protobuf:"varint,46,opt,name=is_replay,json=isReplay,proto3,oneof" json:"is_replay,omitempty"`
-	DialPortNumber                    *int64                 `protobuf:"varint,47,opt,name=dial_port_number,json=dialPortNumber,proto3,oneof" json:"dial_port_number,omitempty"`
-	DialDuration                      *int64                 `protobuf:"varint,48,opt,name=dial_duration,json=dialDuration,proto3,oneof" json:"dial_duration,omitempty"`
-	FrontingProviderId                *string                `protobuf:"bytes,49,opt,name=fronting_provider_id,json=frontingProviderId,proto3,oneof" json:"fronting_provider_id,omitempty"`
-	RelayProtocol                     *string                `protobuf:"bytes,50,opt,name=relay_protocol,json=relayProtocol,proto3,oneof" json:"relay_protocol,omitempty"`
-	SshClientVersion                  *string                `protobuf:"bytes,51,opt,name=ssh_client_version,json=sshClientVersion,proto3,oneof" json:"ssh_client_version,omitempty"`
-	OsshPrefix                        *string                `protobuf:"bytes,52,opt,name=ossh_prefix,json=osshPrefix,proto3,oneof" json:"ossh_prefix,omitempty"`
-	UserAgent                         *string                `protobuf:"bytes,53,opt,name=user_agent,json=userAgent,proto3,oneof" json:"user_agent,omitempty"`
-	HttpTransform                     *string                `protobuf:"bytes,54,opt,name=http_transform,json=httpTransform,proto3,oneof" json:"http_transform,omitempty"`
-	DnsAttempt                        *int64                 `protobuf:"varint,55,opt,name=dns_attempt,json=dnsAttempt,proto3,oneof" json:"dns_attempt,omitempty"`
-	DnsPreferred                      *string                `protobuf:"bytes,56,opt,name=dns_preferred,json=dnsPreferred,proto3,oneof" json:"dns_preferred,omitempty"`
-	DnsPreresolved                    *string                `protobuf:"bytes,57,opt,name=dns_preresolved,json=dnsPreresolved,proto3,oneof" json:"dns_preresolved,omitempty"`
-	DnsQnameMismatches                *int64                 `protobuf:"varint,58,opt,name=dns_qname_mismatches,json=dnsQnameMismatches,proto3,oneof" json:"dns_qname_mismatches,omitempty"`
-	DnsQnameRandomCasing              *bool                  `protobuf:"varint,59,opt,name=dns_qname_random_casing,json=dnsQnameRandomCasing,proto3,oneof" json:"dns_qname_random_casing,omitempty"`
-	DnsTransform                      *string                `protobuf:"bytes,60,opt,name=dns_transform,json=dnsTransform,proto3,oneof" json:"dns_transform,omitempty"`
-	DownstreamBytesFragmented         *int64                 `protobuf:"varint,61,opt,name=downstream_bytes_fragmented,json=downstreamBytesFragmented,proto3,oneof" json:"downstream_bytes_fragmented,omitempty"`
-	DownstreamMaxBytesWritten         *int64                 `protobuf:"varint,62,opt,name=downstream_max_bytes_written,json=downstreamMaxBytesWritten,proto3,oneof" json:"downstream_max_bytes_written,omitempty"`
-	DownstreamMaxDelayed              *int64                 `protobuf:"varint,63,opt,name=downstream_max_delayed,json=downstreamMaxDelayed,proto3,oneof" json:"downstream_max_delayed,omitempty"`
-	DownstreamMinBytesWritten         *int64                 `protobuf:"varint,64,opt,name=downstream_min_bytes_written,json=downstreamMinBytesWritten,proto3,oneof" json:"downstream_min_bytes_written,omitempty"`
-	DownstreamMinDelayed              *int64                 `protobuf:"varint,65,opt,name=downstream_min_delayed,json=downstreamMinDelayed,proto3,oneof" json:"downstream_min_delayed,omitempty"`
-	DownstreamOsshPadding             *int64                 `protobuf:"varint,66,opt,name=downstream_ossh_padding,json=downstreamOsshPadding,proto3,oneof" json:"downstream_ossh_padding,omitempty"`
-	UpstreamBytesFragmented           *int64                 `protobuf:"varint,67,opt,name=upstream_bytes_fragmented,json=upstreamBytesFragmented,proto3,oneof" json:"upstream_bytes_fragmented,omitempty"`
-	UpstreamMaxBytesWritten           *int64                 `protobuf:"varint,68,opt,name=upstream_max_bytes_written,json=upstreamMaxBytesWritten,proto3,oneof" json:"upstream_max_bytes_written,omitempty"`
-	UpstreamMaxDelayed                *int64                 `protobuf:"varint,69,opt,name=upstream_max_delayed,json=upstreamMaxDelayed,proto3,oneof" json:"upstream_max_delayed,omitempty"`
-	UpstreamMinBytesWritten           *int64                 `protobuf:"varint,70,opt,name=upstream_min_bytes_written,json=upstreamMinBytesWritten,proto3,oneof" json:"upstream_min_bytes_written,omitempty"`
-	UpstreamMinDelayed                *int64                 `protobuf:"varint,71,opt,name=upstream_min_delayed,json=upstreamMinDelayed,proto3,oneof" json:"upstream_min_delayed,omitempty"`
-	UpstreamOsshPadding               *int64                 `protobuf:"varint,72,opt,name=upstream_ossh_padding,json=upstreamOsshPadding,proto3,oneof" json:"upstream_ossh_padding,omitempty"`
-	UpstreamProxyCustomHeaderNames    []string               `protobuf:"bytes,73,rep,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3" json:"upstream_proxy_custom_header_names,omitempty"`
-	UpstreamProxyType                 *string                `protobuf:"bytes,74,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`
-	PassthroughAddress                *string                `protobuf:"bytes,75,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`
-	PadResponse                       *int64                 `protobuf:"varint,76,opt,name=pad_response,json=padResponse,proto3,oneof" json:"pad_response,omitempty"`
-	Padding                           *int64                 `protobuf:"varint,77,opt,name=padding,proto3,oneof" json:"padding,omitempty"`
-	ClientBpf                         *string                `protobuf:"bytes,78,opt,name=client_bpf,json=clientBpf,proto3,oneof" json:"client_bpf,omitempty"`
-	ServerBpf                         *string                `protobuf:"bytes,79,opt,name=server_bpf,json=serverBpf,proto3,oneof" json:"server_bpf,omitempty"`
-	EstablishedTunnelsCount           *int64                 `protobuf:"varint,80,opt,name=established_tunnels_count,json=establishedTunnelsCount,proto3,oneof" json:"established_tunnels_count,omitempty"`
-	NetworkLatencyMultiplier          *float64               `protobuf:"fixed64,81,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
-	SeedTransform                     *string                `protobuf:"bytes,82,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
-	ServerEntryCount                  *int64                 `protobuf:"varint,83,opt,name=server_entry_count,json=serverEntryCount,proto3,oneof" json:"server_entry_count,omitempty"`
-	ReplayIgnoredChange               *bool                  `protobuf:"varint,84,opt,name=replay_ignored_change,json=replayIgnoredChange,proto3,oneof" json:"replay_ignored_change,omitempty"`
-	DslPrioritized                    *bool                  `protobuf:"varint,85,opt,name=dsl_prioritized,json=dslPrioritized,proto3,oneof" json:"dsl_prioritized,omitempty"`
-	UniqueCandidateEstimate           *int64                 `protobuf:"varint,86,opt,name=unique_candidate_estimate,json=uniqueCandidateEstimate,proto3,oneof" json:"unique_candidate_estimate,omitempty"`
-	CandidatesMovedToFront            *int64                 `protobuf:"varint,87,opt,name=candidates_moved_to_front,json=candidatesMovedToFront,proto3,oneof" json:"candidates_moved_to_front,omitempty"`
-	FirstFrontedMeekCandidate         *int64                 `protobuf:"varint,88,opt,name=first_fronted_meek_candidate,json=firstFrontedMeekCandidate,proto3,oneof" json:"first_fronted_meek_candidate,omitempty"`
-	MeekPayloadPadding                *bool                  `protobuf:"varint,89,opt,name=meek_payload_padding,json=meekPayloadPadding,proto3,oneof" json:"meek_payload_padding,omitempty"`
-	DslPrioritizedReason              *string                `protobuf:"bytes,90,opt,name=dsl_prioritized_reason,json=dslPrioritizedReason,proto3,oneof" json:"dsl_prioritized_reason,omitempty"`
-	DslPrioritizedTunnelProtocol      *string                `protobuf:"bytes,91,opt,name=dsl_prioritized_tunnel_protocol,json=dslPrioritizedTunnelProtocol,proto3,oneof" json:"dsl_prioritized_tunnel_protocol,omitempty"`
-	TunnelPersonalLightProxyId        *string                `protobuf:"bytes,92,opt,name=tunnel_personal_light_proxy_id,json=tunnelPersonalLightProxyId,proto3,oneof" json:"tunnel_personal_light_proxy_id,omitempty"`
-	unknownFields                     protoimpl.UnknownFields
-	sizeCache                         protoimpl.SizeCache
+	state                                  protoimpl.MessageState `protogen:"open.v1"`
+	ConjureCached                          *bool                  `protobuf:"varint,1,opt,name=conjure_cached,json=conjureCached,proto3,oneof" json:"conjure_cached,omitempty"`
+	ConjureDelay                           *int64                 `protobuf:"varint,2,opt,name=conjure_delay,json=conjureDelay,proto3,oneof" json:"conjure_delay,omitempty"`
+	ConjureEmptyPacket                     *bool                  `protobuf:"varint,3,opt,name=conjure_empty_packet,json=conjureEmptyPacket,proto3,oneof" json:"conjure_empty_packet,omitempty"`
+	ConjureNetwork                         *string                `protobuf:"bytes,4,opt,name=conjure_network,json=conjureNetwork,proto3,oneof" json:"conjure_network,omitempty"`
+	ConjurePortNumber                      *int64                 `protobuf:"varint,5,opt,name=conjure_port_number,json=conjurePortNumber,proto3,oneof" json:"conjure_port_number,omitempty"`
+	ConjurePrefix                          *string                `protobuf:"bytes,6,opt,name=conjure_prefix,json=conjurePrefix,proto3,oneof" json:"conjure_prefix,omitempty"`
+	ConjureStun                            *string                `protobuf:"bytes,7,opt,name=conjure_stun,json=conjureStun,proto3,oneof" json:"conjure_stun,omitempty"`
+	ConjureTransport                       *string                `protobuf:"bytes,8,opt,name=conjure_transport,json=conjureTransport,proto3,oneof" json:"conjure_transport,omitempty"`
+	MeekCookieSize                         *int64                 `protobuf:"varint,9,opt,name=meek_cookie_size,json=meekCookieSize,proto3,oneof" json:"meek_cookie_size,omitempty"`
+	MeekContentType                        *string                `protobuf:"bytes,10,opt,name=meek_content_type,json=meekContentType,proto3,oneof" json:"meek_content_type,omitempty"`
+	MeekCookieName                         *string                `protobuf:"bytes,11,opt,name=meek_cookie_name,json=meekCookieName,proto3,oneof" json:"meek_cookie_name,omitempty"`
+	MeekDialDomain                         *string                `protobuf:"bytes,12,opt,name=meek_dial_domain,json=meekDialDomain,proto3,oneof" json:"meek_dial_domain,omitempty"`
+	MeekDialIpAddress                      *string                `protobuf:"bytes,13,opt,name=meek_dial_ip_address,json=meekDialIpAddress,proto3,oneof" json:"meek_dial_ip_address,omitempty"`
+	MeekHostHeader                         *string                `protobuf:"bytes,14,opt,name=meek_host_header,json=meekHostHeader,proto3,oneof" json:"meek_host_header,omitempty"`
+	MeekLimitRequest                       *int64                 `protobuf:"varint,15,opt,name=meek_limit_request,json=meekLimitRequest,proto3,oneof" json:"meek_limit_request,omitempty"`
+	MeekRedialProbability                  *float64               `protobuf:"fixed64,16,opt,name=meek_redial_probability,json=meekRedialProbability,proto3,oneof" json:"meek_redial_probability,omitempty"`
+	MeekResolvedIpAddress                  *string                `protobuf:"bytes,17,opt,name=meek_resolved_ip_address,json=meekResolvedIpAddress,proto3,oneof" json:"meek_resolved_ip_address,omitempty"`
+	MeekSniServerName                      *string                `protobuf:"bytes,18,opt,name=meek_sni_server_name,json=meekSniServerName,proto3,oneof" json:"meek_sni_server_name,omitempty"`
+	MeekTlsPadding                         *int64                 `protobuf:"varint,19,opt,name=meek_tls_padding,json=meekTlsPadding,proto3,oneof" json:"meek_tls_padding,omitempty"`
+	MeekTransformedHostName                *bool                  `protobuf:"varint,20,opt,name=meek_transformed_host_name,json=meekTransformedHostName,proto3,oneof" json:"meek_transformed_host_name,omitempty"`
+	QuicDialEarly                          *bool                  `protobuf:"varint,21,opt,name=quic_dial_early,json=quicDialEarly,proto3,oneof" json:"quic_dial_early,omitempty"`
+	QuicDialSniAddress                     *string                `protobuf:"bytes,22,opt,name=quic_dial_sni_address,json=quicDialSniAddress,proto3,oneof" json:"quic_dial_sni_address,omitempty"`
+	QuicDidResume                          *bool                  `protobuf:"varint,23,opt,name=quic_did_resume,json=quicDidResume,proto3,oneof" json:"quic_did_resume,omitempty"`
+	QuicDisableClientPathMtuDiscovery      *bool                  `protobuf:"varint,24,opt,name=quic_disable_client_path_mtu_discovery,json=quicDisableClientPathMtuDiscovery,proto3,oneof" json:"quic_disable_client_path_mtu_discovery,omitempty"`
+	QuicObfuscatedPsk                      *bool                  `protobuf:"varint,25,opt,name=quic_obfuscated_psk,json=quicObfuscatedPsk,proto3,oneof" json:"quic_obfuscated_psk,omitempty"`
+	QuicSentTicket                         *bool                  `protobuf:"varint,26,opt,name=quic_sent_ticket,json=quicSentTicket,proto3,oneof" json:"quic_sent_ticket,omitempty"`
+	QuicVersion                            *string                `protobuf:"bytes,27,opt,name=quic_version,json=quicVersion,proto3,oneof" json:"quic_version,omitempty"`
+	ShadowsocksPrefix                      *string                `protobuf:"bytes,28,opt,name=shadowsocks_prefix,json=shadowsocksPrefix,proto3,oneof" json:"shadowsocks_prefix,omitempty"`
+	TlsDidResume                           *bool                  `protobuf:"varint,29,opt,name=tls_did_resume,json=tlsDidResume,proto3,oneof" json:"tls_did_resume,omitempty"`
+	TlsFragmented                          *bool                  `protobuf:"varint,30,opt,name=tls_fragmented,json=tlsFragmented,proto3,oneof" json:"tls_fragmented,omitempty"`
+	TlsOsshSniServerName                   *string                `protobuf:"bytes,31,opt,name=tls_ossh_sni_server_name,json=tlsOsshSniServerName,proto3,oneof" json:"tls_ossh_sni_server_name,omitempty"`
+	TlsOsshTransformedHostName             *bool                  `protobuf:"varint,32,opt,name=tls_ossh_transformed_host_name,json=tlsOsshTransformedHostName,proto3,oneof" json:"tls_ossh_transformed_host_name,omitempty"`
+	TlsPadding                             *int64                 `protobuf:"varint,33,opt,name=tls_padding,json=tlsPadding,proto3,oneof" json:"tls_padding,omitempty"`
+	TlsProfile                             *string                `protobuf:"bytes,34,opt,name=tls_profile,json=tlsProfile,proto3,oneof" json:"tls_profile,omitempty"`
+	TlsSentTicket                          *bool                  `protobuf:"varint,35,opt,name=tls_sent_ticket,json=tlsSentTicket,proto3,oneof" json:"tls_sent_ticket,omitempty"`
+	TlsVersion                             *string                `protobuf:"bytes,36,opt,name=tls_version,json=tlsVersion,proto3,oneof" json:"tls_version,omitempty"`
+	ServerEntryRegion                      *string                `protobuf:"bytes,37,opt,name=server_entry_region,json=serverEntryRegion,proto3,oneof" json:"server_entry_region,omitempty"`
+	ServerEntrySource                      *string                `protobuf:"bytes,38,opt,name=server_entry_source,json=serverEntrySource,proto3,oneof" json:"server_entry_source,omitempty"`
+	ServerEntryTag                         *string                `protobuf:"bytes,39,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
+	ServerEntryTimestamp                   *timestamppb.Timestamp `protobuf:"bytes,40,opt,name=server_entry_timestamp,json=serverEntryTimestamp,proto3,oneof" json:"server_entry_timestamp,omitempty"`
+	ServerPacketManipulation               *string                `protobuf:"bytes,41,opt,name=server_packet_manipulation,json=serverPacketManipulation,proto3,oneof" json:"server_packet_manipulation,omitempty"`
+	ServerReplayFragmentation              *bool                  `protobuf:"varint,42,opt,name=server_replay_fragmentation,json=serverReplayFragmentation,proto3,oneof" json:"server_replay_fragmentation,omitempty"`
+	ServerReplayPacketManipulation         *bool                  `protobuf:"varint,43,opt,name=server_replay_packet_manipulation,json=serverReplayPacketManipulation,proto3,oneof" json:"server_replay_packet_manipulation,omitempty"`
+	ServerEntryValid                       *bool                  `protobuf:"varint,44,opt,name=server_entry_valid,json=serverEntryValid,proto3,oneof" json:"server_entry_valid,omitempty"`
+	CandidateNumber                        *int64                 `protobuf:"varint,45,opt,name=candidate_number,json=candidateNumber,proto3,oneof" json:"candidate_number,omitempty"`
+	IsReplay                               *bool                  `protobuf:"varint,46,opt,name=is_replay,json=isReplay,proto3,oneof" json:"is_replay,omitempty"`
+	DialPortNumber                         *int64                 `protobuf:"varint,47,opt,name=dial_port_number,json=dialPortNumber,proto3,oneof" json:"dial_port_number,omitempty"`
+	DialDuration                           *int64                 `protobuf:"varint,48,opt,name=dial_duration,json=dialDuration,proto3,oneof" json:"dial_duration,omitempty"`
+	FrontingProviderId                     *string                `protobuf:"bytes,49,opt,name=fronting_provider_id,json=frontingProviderId,proto3,oneof" json:"fronting_provider_id,omitempty"`
+	RelayProtocol                          *string                `protobuf:"bytes,50,opt,name=relay_protocol,json=relayProtocol,proto3,oneof" json:"relay_protocol,omitempty"`
+	SshClientVersion                       *string                `protobuf:"bytes,51,opt,name=ssh_client_version,json=sshClientVersion,proto3,oneof" json:"ssh_client_version,omitempty"`
+	OsshPrefix                             *string                `protobuf:"bytes,52,opt,name=ossh_prefix,json=osshPrefix,proto3,oneof" json:"ossh_prefix,omitempty"`
+	UserAgent                              *string                `protobuf:"bytes,53,opt,name=user_agent,json=userAgent,proto3,oneof" json:"user_agent,omitempty"`
+	HttpTransform                          *string                `protobuf:"bytes,54,opt,name=http_transform,json=httpTransform,proto3,oneof" json:"http_transform,omitempty"`
+	DnsAttempt                             *int64                 `protobuf:"varint,55,opt,name=dns_attempt,json=dnsAttempt,proto3,oneof" json:"dns_attempt,omitempty"`
+	DnsPreferred                           *string                `protobuf:"bytes,56,opt,name=dns_preferred,json=dnsPreferred,proto3,oneof" json:"dns_preferred,omitempty"`
+	DnsPreresolved                         *string                `protobuf:"bytes,57,opt,name=dns_preresolved,json=dnsPreresolved,proto3,oneof" json:"dns_preresolved,omitempty"`
+	DnsQnameMismatches                     *int64                 `protobuf:"varint,58,opt,name=dns_qname_mismatches,json=dnsQnameMismatches,proto3,oneof" json:"dns_qname_mismatches,omitempty"`
+	DnsQnameRandomCasing                   *bool                  `protobuf:"varint,59,opt,name=dns_qname_random_casing,json=dnsQnameRandomCasing,proto3,oneof" json:"dns_qname_random_casing,omitempty"`
+	DnsTransform                           *string                `protobuf:"bytes,60,opt,name=dns_transform,json=dnsTransform,proto3,oneof" json:"dns_transform,omitempty"`
+	DownstreamBytesFragmented              *int64                 `protobuf:"varint,61,opt,name=downstream_bytes_fragmented,json=downstreamBytesFragmented,proto3,oneof" json:"downstream_bytes_fragmented,omitempty"`
+	DownstreamMaxBytesWritten              *int64                 `protobuf:"varint,62,opt,name=downstream_max_bytes_written,json=downstreamMaxBytesWritten,proto3,oneof" json:"downstream_max_bytes_written,omitempty"`
+	DownstreamMaxDelayed                   *int64                 `protobuf:"varint,63,opt,name=downstream_max_delayed,json=downstreamMaxDelayed,proto3,oneof" json:"downstream_max_delayed,omitempty"`
+	DownstreamMinBytesWritten              *int64                 `protobuf:"varint,64,opt,name=downstream_min_bytes_written,json=downstreamMinBytesWritten,proto3,oneof" json:"downstream_min_bytes_written,omitempty"`
+	DownstreamMinDelayed                   *int64                 `protobuf:"varint,65,opt,name=downstream_min_delayed,json=downstreamMinDelayed,proto3,oneof" json:"downstream_min_delayed,omitempty"`
+	DownstreamOsshPadding                  *int64                 `protobuf:"varint,66,opt,name=downstream_ossh_padding,json=downstreamOsshPadding,proto3,oneof" json:"downstream_ossh_padding,omitempty"`
+	UpstreamBytesFragmented                *int64                 `protobuf:"varint,67,opt,name=upstream_bytes_fragmented,json=upstreamBytesFragmented,proto3,oneof" json:"upstream_bytes_fragmented,omitempty"`
+	UpstreamMaxBytesWritten                *int64                 `protobuf:"varint,68,opt,name=upstream_max_bytes_written,json=upstreamMaxBytesWritten,proto3,oneof" json:"upstream_max_bytes_written,omitempty"`
+	UpstreamMaxDelayed                     *int64                 `protobuf:"varint,69,opt,name=upstream_max_delayed,json=upstreamMaxDelayed,proto3,oneof" json:"upstream_max_delayed,omitempty"`
+	UpstreamMinBytesWritten                *int64                 `protobuf:"varint,70,opt,name=upstream_min_bytes_written,json=upstreamMinBytesWritten,proto3,oneof" json:"upstream_min_bytes_written,omitempty"`
+	UpstreamMinDelayed                     *int64                 `protobuf:"varint,71,opt,name=upstream_min_delayed,json=upstreamMinDelayed,proto3,oneof" json:"upstream_min_delayed,omitempty"`
+	UpstreamOsshPadding                    *int64                 `protobuf:"varint,72,opt,name=upstream_ossh_padding,json=upstreamOsshPadding,proto3,oneof" json:"upstream_ossh_padding,omitempty"`
+	UpstreamProxyCustomHeaderNames         []string               `protobuf:"bytes,73,rep,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3" json:"upstream_proxy_custom_header_names,omitempty"`
+	UpstreamProxyType                      *string                `protobuf:"bytes,74,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`
+	PassthroughAddress                     *string                `protobuf:"bytes,75,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`
+	PadResponse                            *int64                 `protobuf:"varint,76,opt,name=pad_response,json=padResponse,proto3,oneof" json:"pad_response,omitempty"`
+	Padding                                *int64                 `protobuf:"varint,77,opt,name=padding,proto3,oneof" json:"padding,omitempty"`
+	ClientBpf                              *string                `protobuf:"bytes,78,opt,name=client_bpf,json=clientBpf,proto3,oneof" json:"client_bpf,omitempty"`
+	ServerBpf                              *string                `protobuf:"bytes,79,opt,name=server_bpf,json=serverBpf,proto3,oneof" json:"server_bpf,omitempty"`
+	EstablishedTunnelsCount                *int64                 `protobuf:"varint,80,opt,name=established_tunnels_count,json=establishedTunnelsCount,proto3,oneof" json:"established_tunnels_count,omitempty"`
+	NetworkLatencyMultiplier               *float64               `protobuf:"fixed64,81,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
+	SeedTransform                          *string                `protobuf:"bytes,82,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
+	ServerEntryCount                       *int64                 `protobuf:"varint,83,opt,name=server_entry_count,json=serverEntryCount,proto3,oneof" json:"server_entry_count,omitempty"`
+	ReplayIgnoredChange                    *bool                  `protobuf:"varint,84,opt,name=replay_ignored_change,json=replayIgnoredChange,proto3,oneof" json:"replay_ignored_change,omitempty"`
+	DslPrioritized                         *bool                  `protobuf:"varint,85,opt,name=dsl_prioritized,json=dslPrioritized,proto3,oneof" json:"dsl_prioritized,omitempty"`
+	UniqueCandidateEstimate                *int64                 `protobuf:"varint,86,opt,name=unique_candidate_estimate,json=uniqueCandidateEstimate,proto3,oneof" json:"unique_candidate_estimate,omitempty"`
+	CandidatesMovedToFront                 *int64                 `protobuf:"varint,87,opt,name=candidates_moved_to_front,json=candidatesMovedToFront,proto3,oneof" json:"candidates_moved_to_front,omitempty"`
+	FirstFrontedMeekCandidate              *int64                 `protobuf:"varint,88,opt,name=first_fronted_meek_candidate,json=firstFrontedMeekCandidate,proto3,oneof" json:"first_fronted_meek_candidate,omitempty"`
+	MeekPayloadPadding                     *bool                  `protobuf:"varint,89,opt,name=meek_payload_padding,json=meekPayloadPadding,proto3,oneof" json:"meek_payload_padding,omitempty"`
+	DslPrioritizedReason                   *string                `protobuf:"bytes,90,opt,name=dsl_prioritized_reason,json=dslPrioritizedReason,proto3,oneof" json:"dsl_prioritized_reason,omitempty"`
+	DslPrioritizedTunnelProtocol           *string                `protobuf:"bytes,91,opt,name=dsl_prioritized_tunnel_protocol,json=dslPrioritizedTunnelProtocol,proto3,oneof" json:"dsl_prioritized_tunnel_protocol,omitempty"`
+	LightSni                               *string                `protobuf:"bytes,93,opt,name=light_sni,json=lightSni,proto3,oneof" json:"light_sni,omitempty"`
+	LightTlsProfile                        *string                `protobuf:"bytes,94,opt,name=light_tls_profile,json=lightTlsProfile,proto3,oneof" json:"light_tls_profile,omitempty"`
+	LightTlsFragmented                     *bool                  `protobuf:"varint,95,opt,name=light_tls_fragmented,json=lightTlsFragmented,proto3,oneof" json:"light_tls_fragmented,omitempty"`
+	LightTlsPadding                        *int64                 `protobuf:"varint,96,opt,name=light_tls_padding,json=lightTlsPadding,proto3,oneof" json:"light_tls_padding,omitempty"`
+	LightQuicVersion                       *string                `protobuf:"bytes,97,opt,name=light_quic_version,json=lightQuicVersion,proto3,oneof" json:"light_quic_version,omitempty"`
+	LightEgressSni                         *string                `protobuf:"bytes,98,opt,name=light_egress_sni,json=lightEgressSni,proto3,oneof" json:"light_egress_sni,omitempty"`
+	LightEgressTlsProfile                  *string                `protobuf:"bytes,99,opt,name=light_egress_tls_profile,json=lightEgressTlsProfile,proto3,oneof" json:"light_egress_tls_profile,omitempty"`
+	LightEgressQuicVersion                 *string                `protobuf:"bytes,100,opt,name=light_egress_quic_version,json=lightEgressQuicVersion,proto3,oneof" json:"light_egress_quic_version,omitempty"`
+	LightTcpDuration                       *int64                 `protobuf:"varint,101,opt,name=light_tcp_duration,json=lightTcpDuration,proto3,oneof" json:"light_tcp_duration,omitempty"`
+	LightTlsDuration                       *int64                 `protobuf:"varint,102,opt,name=light_tls_duration,json=lightTlsDuration,proto3,oneof" json:"light_tls_duration,omitempty"`
+	LightQuicDuration                      *int64                 `protobuf:"varint,103,opt,name=light_quic_duration,json=lightQuicDuration,proto3,oneof" json:"light_quic_duration,omitempty"`
+	LightDialIs_IPv6                       *bool                  `protobuf:"varint,104,opt,name=light_dial_is_IPv6,json=lightDialIsIPv6,proto3,oneof" json:"light_dial_is_IPv6,omitempty"`
+	LightDialPortNumber                    *int64                 `protobuf:"varint,105,opt,name=light_dial_port_number,json=lightDialPortNumber,proto3,oneof" json:"light_dial_port_number,omitempty"`
+	LightTlsSentTicket                     *bool                  `protobuf:"varint,106,opt,name=light_tls_sent_ticket,json=lightTlsSentTicket,proto3,oneof" json:"light_tls_sent_ticket,omitempty"`
+	LightTlsDidResume                      *bool                  `protobuf:"varint,107,opt,name=light_tls_did_resume,json=lightTlsDidResume,proto3,oneof" json:"light_tls_did_resume,omitempty"`
+	LightQuicSentTicket                    *bool                  `protobuf:"varint,108,opt,name=light_quic_sent_ticket,json=lightQuicSentTicket,proto3,oneof" json:"light_quic_sent_ticket,omitempty"`
+	LightQuicDidResume                     *bool                  `protobuf:"varint,109,opt,name=light_quic_did_resume,json=lightQuicDidResume,proto3,oneof" json:"light_quic_did_resume,omitempty"`
+	LightProxyEntryTracker                 *int64                 `protobuf:"varint,110,opt,name=light_proxy_entry_tracker,json=lightProxyEntryTracker,proto3,oneof" json:"light_proxy_entry_tracker,omitempty"`
+	LightQuicDisableClientPathMtuDiscovery *bool                  `protobuf:"varint,111,opt,name=light_quic_disable_client_path_mtu_discovery,json=lightQuicDisableClientPathMtuDiscovery,proto3,oneof" json:"light_quic_disable_client_path_mtu_discovery,omitempty"`
+	LightSeedTransform                     *string                `protobuf:"bytes,112,opt,name=light_seed_transform,json=lightSeedTransform,proto3,oneof" json:"light_seed_transform,omitempty"`
+	unknownFields                          protoimpl.UnknownFields
+	sizeCache                              protoimpl.SizeCache
 }
 
 func (x *DialParams) Reset() {
@@ -787,9 +806,142 @@ func (x *DialParams) GetDslPrioritizedTunnelProtocol() string {
 	return ""
 }
 
-func (x *DialParams) GetTunnelPersonalLightProxyId() string {
-	if x != nil && x.TunnelPersonalLightProxyId != nil {
-		return *x.TunnelPersonalLightProxyId
+func (x *DialParams) GetLightSni() string {
+	if x != nil && x.LightSni != nil {
+		return *x.LightSni
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightTlsProfile() string {
+	if x != nil && x.LightTlsProfile != nil {
+		return *x.LightTlsProfile
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightTlsFragmented() bool {
+	if x != nil && x.LightTlsFragmented != nil {
+		return *x.LightTlsFragmented
+	}
+	return false
+}
+
+func (x *DialParams) GetLightTlsPadding() int64 {
+	if x != nil && x.LightTlsPadding != nil {
+		return *x.LightTlsPadding
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightQuicVersion() string {
+	if x != nil && x.LightQuicVersion != nil {
+		return *x.LightQuicVersion
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightEgressSni() string {
+	if x != nil && x.LightEgressSni != nil {
+		return *x.LightEgressSni
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightEgressTlsProfile() string {
+	if x != nil && x.LightEgressTlsProfile != nil {
+		return *x.LightEgressTlsProfile
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightEgressQuicVersion() string {
+	if x != nil && x.LightEgressQuicVersion != nil {
+		return *x.LightEgressQuicVersion
+	}
+	return ""
+}
+
+func (x *DialParams) GetLightTcpDuration() int64 {
+	if x != nil && x.LightTcpDuration != nil {
+		return *x.LightTcpDuration
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightTlsDuration() int64 {
+	if x != nil && x.LightTlsDuration != nil {
+		return *x.LightTlsDuration
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightQuicDuration() int64 {
+	if x != nil && x.LightQuicDuration != nil {
+		return *x.LightQuicDuration
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightDialIs_IPv6() bool {
+	if x != nil && x.LightDialIs_IPv6 != nil {
+		return *x.LightDialIs_IPv6
+	}
+	return false
+}
+
+func (x *DialParams) GetLightDialPortNumber() int64 {
+	if x != nil && x.LightDialPortNumber != nil {
+		return *x.LightDialPortNumber
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightTlsSentTicket() bool {
+	if x != nil && x.LightTlsSentTicket != nil {
+		return *x.LightTlsSentTicket
+	}
+	return false
+}
+
+func (x *DialParams) GetLightTlsDidResume() bool {
+	if x != nil && x.LightTlsDidResume != nil {
+		return *x.LightTlsDidResume
+	}
+	return false
+}
+
+func (x *DialParams) GetLightQuicSentTicket() bool {
+	if x != nil && x.LightQuicSentTicket != nil {
+		return *x.LightQuicSentTicket
+	}
+	return false
+}
+
+func (x *DialParams) GetLightQuicDidResume() bool {
+	if x != nil && x.LightQuicDidResume != nil {
+		return *x.LightQuicDidResume
+	}
+	return false
+}
+
+func (x *DialParams) GetLightProxyEntryTracker() int64 {
+	if x != nil && x.LightProxyEntryTracker != nil {
+		return *x.LightProxyEntryTracker
+	}
+	return 0
+}
+
+func (x *DialParams) GetLightQuicDisableClientPathMtuDiscovery() bool {
+	if x != nil && x.LightQuicDisableClientPathMtuDiscovery != nil {
+		return *x.LightQuicDisableClientPathMtuDiscovery
+	}
+	return false
+}
+
+func (x *DialParams) GetLightSeedTransform() string {
+	if x != nil && x.LightSeedTransform != nil {
+		return *x.LightSeedTransform
 	}
 	return ""
 }
@@ -798,7 +950,7 @@ var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb77\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xafC\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -901,8 +1053,27 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1cfirst_fronted_meek_candidate\x18X \x01(\x03HVR\x19firstFrontedMeekCandidate\x88\x01\x01\x125\n" +
 	"\x14meek_payload_padding\x18Y \x01(\bHWR\x12meekPayloadPadding\x88\x01\x01\x129\n" +
 	"\x16dsl_prioritized_reason\x18Z \x01(\tHXR\x14dslPrioritizedReason\x88\x01\x01\x12J\n" +
-	"\x1fdsl_prioritized_tunnel_protocol\x18[ \x01(\tHYR\x1cdslPrioritizedTunnelProtocol\x88\x01\x01\x12G\n" +
-	"\x1etunnel_personal_light_proxy_id\x18\\ \x01(\tHZR\x1atunnelPersonalLightProxyId\x88\x01\x01B\x11\n" +
+	"\x1fdsl_prioritized_tunnel_protocol\x18[ \x01(\tHYR\x1cdslPrioritizedTunnelProtocol\x88\x01\x01\x12 \n" +
+	"\tlight_sni\x18] \x01(\tHZR\blightSni\x88\x01\x01\x12/\n" +
+	"\x11light_tls_profile\x18^ \x01(\tH[R\x0flightTlsProfile\x88\x01\x01\x125\n" +
+	"\x14light_tls_fragmented\x18_ \x01(\bH\\R\x12lightTlsFragmented\x88\x01\x01\x12/\n" +
+	"\x11light_tls_padding\x18` \x01(\x03H]R\x0flightTlsPadding\x88\x01\x01\x121\n" +
+	"\x12light_quic_version\x18a \x01(\tH^R\x10lightQuicVersion\x88\x01\x01\x12-\n" +
+	"\x10light_egress_sni\x18b \x01(\tH_R\x0elightEgressSni\x88\x01\x01\x12<\n" +
+	"\x18light_egress_tls_profile\x18c \x01(\tH`R\x15lightEgressTlsProfile\x88\x01\x01\x12>\n" +
+	"\x19light_egress_quic_version\x18d \x01(\tHaR\x16lightEgressQuicVersion\x88\x01\x01\x121\n" +
+	"\x12light_tcp_duration\x18e \x01(\x03HbR\x10lightTcpDuration\x88\x01\x01\x121\n" +
+	"\x12light_tls_duration\x18f \x01(\x03HcR\x10lightTlsDuration\x88\x01\x01\x123\n" +
+	"\x13light_quic_duration\x18g \x01(\x03HdR\x11lightQuicDuration\x88\x01\x01\x120\n" +
+	"\x12light_dial_is_IPv6\x18h \x01(\bHeR\x0flightDialIsIPv6\x88\x01\x01\x128\n" +
+	"\x16light_dial_port_number\x18i \x01(\x03HfR\x13lightDialPortNumber\x88\x01\x01\x126\n" +
+	"\x15light_tls_sent_ticket\x18j \x01(\bHgR\x12lightTlsSentTicket\x88\x01\x01\x124\n" +
+	"\x14light_tls_did_resume\x18k \x01(\bHhR\x11lightTlsDidResume\x88\x01\x01\x128\n" +
+	"\x16light_quic_sent_ticket\x18l \x01(\bHiR\x13lightQuicSentTicket\x88\x01\x01\x126\n" +
+	"\x15light_quic_did_resume\x18m \x01(\bHjR\x12lightQuicDidResume\x88\x01\x01\x12>\n" +
+	"\x19light_proxy_entry_tracker\x18n \x01(\x03HkR\x16lightProxyEntryTracker\x88\x01\x01\x12a\n" +
+	",light_quic_disable_client_path_mtu_discovery\x18o \x01(\bHlR&lightQuicDisableClientPathMtuDiscovery\x88\x01\x01\x125\n" +
+	"\x14light_seed_transform\x18p \x01(\tHmR\x12lightSeedTransform\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -994,8 +1165,28 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1d_first_fronted_meek_candidateB\x17\n" +
 	"\x15_meek_payload_paddingB\x19\n" +
 	"\x17_dsl_prioritized_reasonB\"\n" +
-	" _dsl_prioritized_tunnel_protocolB!\n" +
-	"\x1f_tunnel_personal_light_proxy_idBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	" _dsl_prioritized_tunnel_protocolB\f\n" +
+	"\n" +
+	"_light_sniB\x14\n" +
+	"\x12_light_tls_profileB\x17\n" +
+	"\x15_light_tls_fragmentedB\x14\n" +
+	"\x12_light_tls_paddingB\x15\n" +
+	"\x13_light_quic_versionB\x13\n" +
+	"\x11_light_egress_sniB\x1b\n" +
+	"\x19_light_egress_tls_profileB\x1c\n" +
+	"\x1a_light_egress_quic_versionB\x15\n" +
+	"\x13_light_tcp_durationB\x15\n" +
+	"\x13_light_tls_durationB\x16\n" +
+	"\x14_light_quic_durationB\x15\n" +
+	"\x13_light_dial_is_IPv6B\x19\n" +
+	"\x17_light_dial_port_numberB\x18\n" +
+	"\x16_light_tls_sent_ticketB\x17\n" +
+	"\x15_light_tls_did_resumeB\x19\n" +
+	"\x17_light_quic_sent_ticketB\x18\n" +
+	"\x16_light_quic_did_resumeB\x1c\n" +
+	"\x1a_light_proxy_entry_trackerB/\n" +
+	"-_light_quic_disable_client_path_mtu_discoveryB\x17\n" +
+	"\x15_light_seed_transformJ\x04\b\\\x10]BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dial_params_proto_rawDescOnce sync.Once

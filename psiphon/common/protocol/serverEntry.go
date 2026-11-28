@@ -96,6 +96,9 @@ type ServerEntry struct {
 	InproxyTlsOSSHPort                  int      `json:"inproxyTlsOSSHPort,omitempty"`
 	InproxyShadowsocksPort              int      `json:"inproxyShadowsocksPort,omitempty"`
 	AllowUpstreamProxy                  bool     `json:"allowUpstreamProxy,omitempty"`
+	LightDialAuthorization              []byte   `json:"lightDialAuthorization,omitempty"`
+	LightTlsSSHPort                     int      `json:"lightTlsSSHPort,omitempty"`
+	LightQuicSSHPort                    int      `json:"lightQuicSSHPort,omitempty"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -498,7 +501,8 @@ func GetCapability(protocol string) string {
 	// of "INPROXY-WEBRTC-OSSH", where a truncated "INPROXY-WEBRTC" is
 	// ambiguous.
 
-	if TunnelProtocolUsesInproxy(protocol) {
+	if TunnelProtocolUsesInproxy(protocol) ||
+		TunnelProtocolUsesLight(protocol) {
 		return protocol
 	}
 
@@ -556,7 +560,8 @@ func (serverEntry *ServerEntry) GetServerEntryFields() (ServerEntryFields, error
 //
 // In-proxy tunnel protocols omit the "v1" and "PASSTHROUGH" suffixes. For
 // in-proxy QUIC, gQUIC is never used; and for in-proxy HTTPS/TLS, clients
-// always apply PASSTHROUGH-v2.
+// always apply PASSTHROUGH-v2. Light tunnel protocols also omit the
+// suffixes; Light clients always apply PASSTHROUGH-v2.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
 
@@ -686,8 +691,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if (TunnelProtocolUsesQUIC(tunnelProtocol) &&
-			!conditionallyEnabled.QUICEnabled()) ||
+		if (TunnelProtocolClientUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
 
 			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
 				!conditionallyEnabled.RefractionNetworkingEnabled()) ||
@@ -706,16 +710,24 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		// must be a common version in both limit lists for this server entry
 		// to support QUIC-OSSH.
 		//
+		// For Light, server-entry limits apply only to QUIC egress.
+		// Additional Light tactics limits are applied by the caller.
+		//
 		// Limitation: to avoid additional complexity, we do not consider
 		// DisableFrontingProviderQUICVersion here, as fronting providers are
 		// expected to support QUICv1 and gQUIC is expected to become
 		// obsolete in general.
 
-		if TunnelProtocolUsesQUIC(tunnelProtocol) && len(serverEntry.LimitQUICVersions) > 0 {
-			if !common.ContainsAny(serverEntry.LimitQUICVersions, SupportedQUICVersions) {
+		if TunnelProtocolServerUsesQUIC(tunnelProtocol) && len(serverEntry.LimitQUICVersions) > 0 {
+			supportedQUICVersions := SupportedQUICVersions
+			if TunnelProtocolUsesLight(tunnelProtocol) {
+				supportedQUICVersions = SupportedQUICv1Versions
+			}
+			if !common.ContainsAny(serverEntry.LimitQUICVersions, supportedQUICVersions) {
 				continue
 			}
-			if len(limitQUICVersions) > 0 &&
+			if !TunnelProtocolUsesLight(tunnelProtocol) &&
+				len(limitQUICVersions) > 0 &&
 				!common.ContainsAny(serverEntry.LimitQUICVersions, limitQUICVersions) {
 				continue
 			}
@@ -726,6 +738,18 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
+		if TunnelProtocolUsesLight(tunnelProtocol) &&
+			(len(serverEntry.LightDialAuthorization) == 0 ||
+				dialPortNumber <= 0 || dialPortNumber > 65535) {
+
+			continue
+		}
+
+		// For in-proxy, these limits apply to the proxy-to-server destination
+		// port; ingress ports are ephemeral.
+		//
+		// Limitation: for Light, these limits apply only to egress ports. As a future
+		// enhancement consider adding an ingress dial port limit for Light protocols.
 		if len(limitTunnelDialPortNumbers) > 0 {
 			if portList, ok := limitTunnelDialPortNumbers[tunnelProtocol]; ok {
 				if !portList.Lookup(dialPortNumber) {
@@ -778,6 +802,14 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 
 		case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 			return serverEntry.SshObfuscatedPort, nil
+
+		case TUNNEL_PROTOCOL_LIGHT_TLS_TLS_SSH,
+			TUNNEL_PROTOCOL_LIGHT_QUIC_TLS_SSH:
+			return serverEntry.LightTlsSSHPort, nil
+
+		case TUNNEL_PROTOCOL_LIGHT_TLS_QUIC_SSH,
+			TUNNEL_PROTOCOL_LIGHT_QUIC_QUIC_SSH:
+			return serverEntry.LightQuicSSHPort, nil
 
 		case TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
 			return serverEntry.SshObfuscatedTapDancePort, nil
@@ -898,7 +930,7 @@ func (serverEntry *ServerEntry) IsValidInproxyDialAddress(
 			continue
 		}
 
-		usesTCP := TunnelProtocolUsesTCP(tunnelProtocol)
+		usesTCP := TunnelProtocolServerUsesTCP(tunnelProtocol)
 		if (usesTCP && networkProtocol != "tcp") || (!usesTCP && networkProtocol != "udp") {
 			continue
 		}
